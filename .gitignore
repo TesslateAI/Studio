@@ -1,0 +1,132 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+*.cover
+.hypothesis/
+*.log
+.pytype/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Node.js / Frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm
+.yarn-integrity
+*.tsbuildinfo
+.eslintcache
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+*.local
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+.DS_Store
+Thumbs.db
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+
+# Docker
+*.pid
+docker-compose.override.yml
+.dockerignore.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+builder.db*
+
+# User-generated content
+builder/backend/users/
+builder/backend/template/node_modules/
+
+# Traefik
+traefik/acme.json
+traefik/dynamic/
+traefik/logs/
+
+# Test artifacts
+test-workspace/node_modules/
+test-workspace/dist/
+test-workspace/build/
+test-workspace/*.log
+coverage/
+*.lcov
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+~*
+_nul
+
+# Claude AI
+.claude/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Package manager locks (DO NOT IGNORE - needed for reproducible builds)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+# uv.lock
