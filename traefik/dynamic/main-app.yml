@@ -1,0 +1,14 @@
+http:
+  routers:
+    main-app:
+      rule: "Host(`localhost`, `your-domain.com`) && !PathPrefix(`/preview/`)"
+      service: main-app-service
+      entryPoints:
+        - web
+      priority: 1  # Lower priority than container routes
+
+  services:
+    main-app-service:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:5173"

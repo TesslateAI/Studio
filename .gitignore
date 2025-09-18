@@ -1,0 +1,58 @@
+# Environment files
+.env
+.env.local
+.env.production
+.env*.local
+
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+.venv/
+venv/
+.python-version
+uv.lock
+
+# Logs
+*.log
+logs/
+
+# User data
+builder/backend/users/
+
+# Local settings
+.claude/settings.local.json
+builder/.claude/settings.local.json
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Temporary files
+nul
