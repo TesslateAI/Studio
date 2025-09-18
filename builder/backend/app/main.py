@@ -5,10 +5,14 @@ from fastapi.responses import JSONResponse
 from .database import engine, Base
 from .routers import auth, projects, chat
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Application Builder API")
 
-# CORS middleware
+# CORS middleware - MUST be added first
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -38,6 +42,17 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     return response
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"Incoming request: {request.method} {request.url.path}")
+    try:
+        response = await call_next(request)
+        logger.info(f"Response status: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"Request failed: {str(e)}")
+        raise
 
 # Create tables
 @app.on_event("startup")

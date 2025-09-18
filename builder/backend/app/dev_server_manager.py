@@ -191,33 +191,39 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
     def _get_container_access_url(self, hostname: str) -> str:
         """Get the access URL for a container, considering proxy configuration."""
         settings = get_settings()
-        if settings.dev_server_base_url:
-            # Use path-based routing through the proxy
-            user_project = hostname.replace('.localhost', '')
-            return f"{settings.dev_server_base_url}/preview/{user_project}"
-        else:
-            # Use direct hostname access (local development)
-            return f"http://{hostname}"
+        # Always use production URL when configured (with trailing slash for Vite base path)
+        user_project = hostname.replace('.localhost', '')
+        return f"{settings.dev_server_base_url}/preview/{user_project}/"
     
     def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str) -> List[str]:
         """Generate Traefik labels for automatic service discovery and routing."""
         service_name = f"builder-dev-user{user_id}-project{project_id}"
         user_project = hostname.replace('.localhost', '')
         
-        return [
+        # Check if we need path-based routing for production
+        settings = get_settings()
+        labels = [
             "--label", "traefik.enable=true",
-            # Host-based routing (existing): user2-project15.localhost
+            # Host-based routing (local): user2-project15.localhost
             "--label", f"traefik.http.routers.{service_name}.rule=Host(`{hostname}`)",
             "--label", f"traefik.http.routers.{service_name}.entrypoints=web",
-            # Path-based routing (new): /preview/user2-project15
-            "--label", f"traefik.http.routers.{service_name}-path.rule=PathPrefix(`/preview/{user_project}`)",
-            "--label", f"traefik.http.routers.{service_name}-path.entrypoints=web",
-            "--label", f"traefik.http.routers.{service_name}-path.middlewares={service_name}-stripprefix",
-            "--label", f"traefik.http.middlewares.{service_name}-stripprefix.stripprefix.prefixes=/preview/{user_project}",
-            # Service configuration (shared by both routers)
+            "--label", f"traefik.http.routers.{service_name}.priority=100",  # High priority
+            # Service configuration
             "--label", f"traefik.http.services.{service_name}.loadbalancer.server.port=5173",
             "--label", "traefik.docker.network=builder-devserver-network",
         ]
+        
+        # Production path-based routing WITHOUT stripprefix
+        # Let Vite handle the full path with --base flag
+        labels.extend([
+            # Path-based routing: /preview/user2-project15
+            "--label", f"traefik.http.routers.{service_name}-path.rule=PathPrefix(`/preview/{user_project}`)",
+            "--label", f"traefik.http.routers.{service_name}-path.entrypoints=web",
+            "--label", f"traefik.http.routers.{service_name}-path.priority=100",  # High priority
+            # NO stripprefix - Vite needs to see the full path
+        ])
+        
+        return labels
     
     def _create_dockerfile(self, project_path: str) -> str:
         """Create optimized Dockerfile for development."""
@@ -441,10 +447,22 @@ docker-compose*
                 "-e", "VITE_HMR_PROTOCOL=ws",                           # WebSocket protocol
                 "-e", "CHOKIDAR_USEPOLLING=true",                       # Enable polling for file watching
                 "-e", "CHOKIDAR_INTERVAL=1000",                         # Polling interval (1 second)
-                # Working directory and detached mode
+            ]
+            
+            # Add environment variables for production path-based routing
+            settings = get_settings()
+            if settings.dev_server_base_url:
+                user_project = hostname.replace('.localhost', '')
+                run_cmd.extend([
+                    "-e", f"VITE_BASE_PATH=/preview/{user_project}/",
+                    "-e", f"PUBLIC_URL=/preview/{user_project}"
+                ])
+            
+            # Working directory and detached mode
+            run_cmd.extend([
                 "-w", "/app",                                           # Working directory
                 "-d",                                                   # Detached mode
-            ]
+            ])
             
             # Add Traefik labels for automatic service discovery
             run_cmd.extend(self._get_traefik_labels(user_id, project_id, hostname))
@@ -452,10 +470,11 @@ docker-compose*
             # Add network (required for Traefik)
             run_cmd.extend(["--network", self.network_name])
             
-            # Add image and startup command
+            # Add image and startup command with base path for production
+            user_project = hostname.replace('.localhost', '')
             run_cmd.extend([
-                self.base_image_name,                                   # Use base image
-                "sh", "-c", "npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173"  # Install deps then start
+                self.base_image_name,
+                "sh", "-c", f"npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173 --base /preview/{user_project}/"
             ])
             
             print(f"[DEBUG] Docker run command: {' '.join(run_cmd)}")

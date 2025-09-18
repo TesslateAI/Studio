@@ -5,11 +5,14 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: './', // Use relative paths for assets - enables access through any base path
+  // Base path is set via command line when needed (--base flag)
+  // This allows dynamic configuration without rebuilding
   server: {
     host: '0.0.0.0', // Allow external connections (required for Docker)
     port: 5173,
     strictPort: true,
+    // Allow requests from any host (needed for production access)
+    allowedHosts: ['.localhost', 'your-domain.com'],
     hmr: {
       // Use environment variables set by our container system
       host: process.env.VITE_HMR_HOST || 'localhost',

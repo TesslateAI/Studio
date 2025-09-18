@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     dev_server_base_url: str = ""  # Base URL for dev containers (e.g., https://your-domain.com)
     
     class Config:
-        env_file = "../.env"
+        env_file = ".env"
         extra = "ignore"  # Ignore extra fields from .env file
 
 @lru_cache()
