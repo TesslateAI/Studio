@@ -10,7 +10,7 @@ export default defineConfig({
     allowedHosts: ['your-domain.com', 'localhost'],
     proxy: {
       '/api': {
-        target: 'http://localhost:8005',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true,
       },
