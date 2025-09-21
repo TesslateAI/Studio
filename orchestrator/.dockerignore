@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+.pytest_cache/
+.coverage
+*.log
+
+# Backend legacy directory (contains huge .venv)
+backend/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# User content
+users/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.temp
+*.bak

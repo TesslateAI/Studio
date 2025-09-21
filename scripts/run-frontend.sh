@@ -1,3 +1,3 @@
 #!/bin/bash
-cd frontend
+cd app
 npm run dev

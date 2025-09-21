@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+.pytest_cache/
+.coverage
+*.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated templates
+app/templates/*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.temp
+*.bak

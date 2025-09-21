@@ -81,10 +81,13 @@ docker-compose.override.yml
 *.db-shm
 *.db-wal
 builder.db*
+orchestrator.db*
 
 # User-generated content
-builder/backend/users/
-builder/backend/template/node_modules/
+orchestrator/users/
+orchestrator/backend/users/
+orchestrator/template/node_modules/
+orchestrator/backend/template/node_modules/
 
 # Traefik
 traefik/acme.json
@@ -98,6 +101,15 @@ test-workspace/build/
 test-workspace/*.log
 coverage/
 *.lcov
+
+# Service-specific paths to ignore
+# Orchestrator backend nested structure (temporary until cleaned up)
+orchestrator/backend/.venv/
+orchestrator/backend/.env
+orchestrator/backend/*.db
+
+# AI service templates (auto-generated)
+ai-service/app/templates/*.json
 
 # OS files
 .DS_Store

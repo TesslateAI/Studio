@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   traefik:
     image: traefik:v3.1
-    container_name: builder-traefik
+    container_name: tesslate-traefik
     restart: unless-stopped
     ports:
       - "80:80"
@@ -13,7 +11,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik:/etc/traefik
     networks:
-      - builder-network
+      - tesslate-network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
@@ -23,7 +21,7 @@ services:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=builder-devserver-network"
+      - "--providers.docker.network=tesslate-network"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
@@ -32,7 +30,64 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
       - "--log.level=INFO"
 
+  orchestrator:
+    build: ./orchestrator
+    container_name: tesslate-orchestrator
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./orchestrator:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./orchestrator.db
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator.rule=Host(`api.localhost`)"
+      - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
+
+  app:
+    build: ./app
+    container_name: tesslate-app
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./app:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_AI_SERVICE_URL=http://localhost:8001
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`studio.localhost`)"
+      - "traefik.http.services.app.loadbalancer.server.port=5173"
+
+  ai-service:
+    build: ./ai-service
+    container_name: tesslate-ai-service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./ai-service:/app
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ORCHESTRATOR_URL=http://orchestrator:8000
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ai-service.rule=Host(`ai.localhost`)"
+      - "traefik.http.services.ai-service.loadbalancer.server.port=8001"
+
 networks:
-  builder-network:
-    name: builder-devserver-network
-    external: true
+  tesslate-network:
+    name: tesslate-network
+    driver: bridge
