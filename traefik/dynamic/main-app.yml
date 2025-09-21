@@ -1,7 +1,7 @@
 http:
   routers:
     main-app:
-      rule: "Host(`localhost`, `your-domain.com`) && !PathPrefix(`/preview/`)"
+      rule: "(Host(`localhost`) || Host(`your-domain.com`)) && !PathPrefix(`/preview/`)"
       service: main-app-service
       entryPoints:
         - web
