@@ -232,16 +232,16 @@ export default function Project() {
           )}
 
           {/* View toggle */}
-          <div className="relative bg-white/10 backdrop-blur-md p-1 rounded-xl border border-orange-200/20 shadow-lg">
-            <div className={`absolute top-1 h-8 bg-orange-500/90 backdrop-blur-sm rounded-lg shadow-xl transition-all duration-300 ease-in-out ${
-              activeView === 'preview' ? 'left-1 w-[84px]' : 'left-[89px] w-[68px]'
+          <div className="relative bg-gray-100 p-1 rounded-xl shadow-inner">
+            <div className={`absolute top-1 bottom-1 bg-orange-500 rounded-lg shadow-lg transition-all duration-300 ease-in-out ${
+              activeView === 'preview' ? 'left-1 right-[50%]' : 'left-[50%] right-1'
             }`}></div>
             
             <div className="relative flex">
               <button
                 onClick={() => handleViewChange('preview')}
-                className={`relative z-10 px-4 py-2 flex items-center gap-2 rounded-lg font-medium transition-all duration-300 text-sm ${
-                  activeView === 'preview' ? 'text-white drop-shadow-sm' : 'text-gray-600 hover:text-orange-600'
+                className={`relative z-10 px-4 py-2 flex items-center gap-2 rounded-lg font-medium transition-all duration-300 text-sm flex-1 ${
+                  activeView === 'preview' ? 'text-white' : 'text-gray-600 hover:text-gray-800'
                 }`}
               >
                 <Monitor size={14} />
@@ -249,8 +249,8 @@ export default function Project() {
               </button>
               <button
                 onClick={() => handleViewChange('files')}
-                className={`relative z-10 px-4 py-2 flex items-center gap-2 rounded-lg font-medium transition-all duration-300 text-sm ${
-                  activeView === 'files' ? 'text-white drop-shadow-sm' : 'text-gray-600 hover:text-orange-600'
+                className={`relative z-10 px-4 py-2 flex items-center gap-2 rounded-lg font-medium transition-all duration-300 text-sm flex-1 ${
+                  activeView === 'files' ? 'text-white' : 'text-gray-600 hover:text-gray-800'
                 }`}
               >
                 <FileText size={14} />

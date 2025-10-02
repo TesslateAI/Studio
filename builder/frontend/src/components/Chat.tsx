@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Code, File, Loader2 } from 'lucide-react';
+import { Send, Code, File, Loader2, FileCode } from 'lucide-react';
 import { createWebSocket, chatApi } from '../lib/api';
 import toast from 'react-hot-toast';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+}
+
+interface StreamingFile {
+  fileName: string;
+  isStreaming: boolean;
 }
 
 interface ChatProps {
@@ -18,6 +23,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
+  const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -86,17 +92,51 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
         
         if (data.type === 'stream') {
           setCurrentStream(prev => prev + data.content);
+          
+          // Extract file names from code blocks following system prompt format: ```javascript\n// File: path/to/file.js
+          const codeBlockPattern = /```\w+\s*\n\/\/\s*File:\s*([^\n]+)/g;
+          let match;
+          while ((match = codeBlockPattern.exec(data.content)) !== null) {
+            const fileName = match[1].trim();
+            setStreamingFiles(prev => new Map(prev).set(fileName, { fileName, isStreaming: true }));
+          }
         } else if (data.type === 'complete') {
           setMessages(prev => [...prev, { role: 'assistant', content: data.content }]);
           setCurrentStream('');
           setIsStreaming(false);
+          // Mark all files as completed
+          setStreamingFiles(prev => {
+            const newMap = new Map(prev);
+            newMap.forEach((file, key) => {
+              newMap.set(key, { ...file, isStreaming: false });
+            });
+            return newMap;
+          });
         } else if (data.type === 'file_ready') {
           onFileUpdate(data.file_path, data.content);
           toast.success(`Created ${data.file_path}`, { duration: 2000 });
+          
+          // Mark this specific file as completed
+          const fileName = data.file_path.replace(/^src\//, '');
+          setStreamingFiles(prev => {
+            const newMap = new Map(prev);
+            if (newMap.has(fileName)) {
+              newMap.set(fileName, { fileName, isStreaming: false });
+            }
+            return newMap;
+          });
         } else if (data.type === 'error') {
           toast.error(data.content);
           setIsStreaming(false);
           setCurrentStream('');
+          // Mark all files as completed on error
+          setStreamingFiles(prev => {
+            const newMap = new Map(prev);
+            newMap.forEach((file, key) => {
+              newMap.set(key, { ...file, isStreaming: false });
+            });
+            return newMap;
+          });
         }
       };
 
@@ -134,6 +174,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
     setMessages(prev => [...prev, userMessage]);
     setIsStreaming(true);
     setInput('');
+    setStreamingFiles(new Map()); // Clear previous streaming files
 
     wsRef.current.send(JSON.stringify({
       message: input,
@@ -142,32 +183,62 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
     }));
   };
 
-  const renderMessage = (content: string) => {
-    const parts = content.split(/(```[\s\S]*?```)/g);
+  const renderMessage = (content: string, isCurrentlyStreaming: boolean = false) => {
+    // Handle incomplete code blocks during streaming
+    let processedContent = content;
+    
+    // For streaming content, also handle incomplete code blocks
+    if (isCurrentlyStreaming) {
+      // Replace complete code blocks
+      processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*?```/g, (match, fileName) => {
+        return `[FILE: ${fileName.trim()}]`;
+      });
+      
+      // Handle incomplete code blocks (still streaming)
+      processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*$/g, (match, fileName) => {
+        return `[FILE: ${fileName.trim()}]`;
+      });
+    } else {
+      // For complete messages, just replace all code blocks
+      processedContent = processedContent.replace(/```[\s\S]*?```/g, (match) => {
+        const fileMatch = match.match(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)/);
+        if (fileMatch) {
+          const fileName = fileMatch[1].trim();
+          return `[FILE: ${fileName}]`;
+        }
+        return ''; // Remove code blocks without file names
+      });
+    }
+    
+    // Split by file placeholders
+    const parts = processedContent.split(/\[FILE: ([^\]]+)\]/g);
     
     return parts.map((part, index) => {
-      if (part.startsWith('```')) {
-        const match = part.match(/```(?:(\w+))?\s*(?:# )?(?:File: )?([^\n]+\.[\w]+)?\n([\s\S]*?)```/);
-        if (match) {
-          const [, language, fileName, code] = match;
-          return (
-            <div key={index} className="my-2">
-              {fileName && (
-                <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
-                  <File size={14} />
-                  <span>{fileName}</span>
+      // Even indices are text, odd indices are file names
+      if (index % 2 === 0) {
+        return <span key={index}>{part}</span>;
+      } else {
+        const fileName = part;
+        const fileInfo = streamingFiles.get(fileName);
+        const isFileStreaming = isCurrentlyStreaming && (!fileInfo || fileInfo.isStreaming !== false);
+        
+        return (
+          <div key={index} className="my-2">
+            <div className="flex items-center gap-2 p-3 bg-gray-100 rounded-lg border border-gray-200">
+              <FileCode size={18} className="text-orange-500" />
+              <span className="text-sm font-medium text-gray-700 flex-1">{fileName}</span>
+              {isFileStreaming && (
+                <Loader2 className="animate-spin text-orange-500" size={16} />
+              )}
+              {!isFileStreaming && (
+                <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                  <div className="w-2 h-2 bg-white rounded-full" />
                 </div>
               )}
-              <pre className="bg-gray-800 p-3 rounded-lg overflow-x-auto">
-                <code className={`language-${language || 'plaintext'}`}>
-                  {code.trim()}
-                </code>
-              </pre>
             </div>
-          );
-        }
+          </div>
+        );
       }
-      return <span key={index}>{part}</span>;
     });
   };
 
@@ -231,7 +302,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
               }`}
             >
               <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                {renderMessage(message.content)}
+                {renderMessage(message.content, false)}
               </div>
               <div className={`text-xs mt-2 opacity-70 ${
                 message.role === 'user' ? 'text-orange-100' : 'text-gray-500'
@@ -255,7 +326,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
             <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-white/80 text-gray-800 shadow-lg backdrop-blur-sm ring-1 ring-gray-200/50">
               {currentStream && (
                 <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {renderMessage(currentStream)}
+                  {renderMessage(currentStream, true)}
                 </div>
               )}
               <div className="flex items-center gap-2 mt-3 text-orange-600">
@@ -284,8 +355,8 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
             />
             <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
               {input.length > 0 && (
-                <span className={`${input.length > 500 ? 'text-orange-500' : 'text-gray-400'}`}>
-                  {input.length}/500
+                <span className="text-gray-400">
+                  {input.length}
                 </span>
               )}
             </div>

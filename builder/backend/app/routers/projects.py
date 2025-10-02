@@ -184,41 +184,6 @@ async def get_project(
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
-@router.delete("/{project_id}")
-async def delete_project(
-    project_id: int,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Stop any running dev container for this project first
-    await dev_container_manager.stop_container(str(project_id), current_user.id)
-    
-    # Delete project directory
-    project_dir = f"users/{current_user.id}/projects/{project_id}"
-    if os.path.exists(project_dir):
-        try:
-            shutil.rmtree(project_dir)
-        except PermissionError:
-            # On Windows, wait a moment and try again
-            await asyncio.sleep(1)
-            try:
-                shutil.rmtree(project_dir)
-            except PermissionError as e:
-                raise HTTPException(status_code=500, detail=f"Could not delete project directory: {str(e)}")
-    
-    await db.delete(project)
-    await db.commit()
-    return {"message": "Project deleted successfully"}
 
 @router.get("/{project_id}/files", response_model=List[ProjectFileSchema])
 async def get_project_files(
