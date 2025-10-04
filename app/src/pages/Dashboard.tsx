@@ -128,17 +128,39 @@ export default function Dashboard() {
       }
     });
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString) {
+      return '';
+    }
     
-    if (diffInHours < 24) {
-      return `${Math.floor(diffInHours)} hours ago`;
-    } else if (diffInHours < 48) {
-      return 'Yesterday';
-    } else {
-      return date.toLocaleDateString();
+    try {
+      const date = new Date(dateString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return 'Invalid date';
+      }
+      
+      const now = new Date();
+      const diffInMinutes = (now.getTime() - date.getTime()) / (1000 * 60);
+      const diffInHours = diffInMinutes / 60;
+      const diffInDays = diffInHours / 24;
+      
+      if (diffInMinutes < 1 && diffInMinutes > -1) {
+        return 'Just now';
+      } else if (diffInMinutes >= 1 && diffInMinutes < 60) {
+        return `${Math.floor(diffInMinutes)} minutes ago`;
+      } else if (diffInHours >= 1 && diffInHours < 24) {
+        return `${Math.floor(diffInHours)} hours ago`;
+      } else if (diffInDays >= 1 && diffInDays < 2) {
+        return 'Yesterday';
+      } else if (diffInDays >= 2 && diffInDays < 7) {
+        return `${Math.floor(diffInDays)} days ago`;
+      } else {
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+    } catch (error) {
+      return 'Error parsing date';
     }
   };
 
@@ -164,28 +186,28 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50/30">
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-lg border-b border-orange-200/30 shadow-sm sticky top-0 z-10">
-        <div className="container mx-auto px-6 py-4">
+        <div className="container mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-orange-500/90 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg ring-1 ring-orange-200/50">
-                <Code size={20} className="text-white" />
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-orange-500/90 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg ring-1 ring-orange-200/50">
+                <Code size={16} className="sm:size-5 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-800">Project Studio</h1>
-                <p className="text-sm text-gray-600">{projects.length} projects</p>
+                <h1 className="text-lg sm:text-2xl font-bold text-gray-800">Tesslate Studio</h1>
+                <p className="text-xs sm:text-sm text-gray-600 hidden sm:block">{projects.length} projects</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               {/* Search */}
-              <div className="relative">
+              <div className="relative hidden sm:block">
                 <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
                   placeholder="Search projects..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-2 bg-white/90 backdrop-blur-sm border border-orange-200/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 text-sm"
+                  className="pl-10 pr-4 py-2 bg-white/90 backdrop-blur-sm border border-orange-200/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 text-sm w-48 lg:w-64"
                 />
               </div>
 
@@ -193,7 +215,7 @@ export default function Dashboard() {
               <select 
                 value={filterBy} 
                 onChange={(e) => setFilterBy(e.target.value as any)}
-                className="px-3 py-2 bg-white/90 backdrop-blur-sm border border-orange-200/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 text-sm"
+                className="px-2 sm:px-3 py-2 bg-white/90 backdrop-blur-sm border border-orange-200/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 text-xs sm:text-sm hidden md:block"
               >
                 <option value="all">All Projects</option>
                 <option value="recent">Recent</option>
@@ -204,7 +226,7 @@ export default function Dashboard() {
               <select 
                 value={sortBy} 
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="px-3 py-2 bg-white/90 backdrop-blur-sm border border-orange-200/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 text-sm"
+                className="px-2 sm:px-3 py-2 bg-white/90 backdrop-blur-sm border border-orange-200/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 text-xs sm:text-sm hidden md:block"
               >
                 <option value="updated">Last Updated</option>
                 <option value="name">Name</option>
@@ -229,64 +251,78 @@ export default function Dashboard() {
 
               <button
                 onClick={logout}
-                className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm border border-orange-200/50 rounded-xl hover:bg-orange-50 text-gray-700 hover:text-orange-700 transition-all"
+                className="flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm border border-orange-200/50 rounded-xl hover:bg-orange-50 text-gray-700 hover:text-orange-700 transition-all"
               >
-                <LogOut size={18} />
-                <span className="text-sm font-medium">Logout</span>
+                <LogOut size={16} className="sm:size-4" />
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Logout</span>
               </button>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Mobile Search Bar */}
+      <div className="sm:hidden px-4 py-3 bg-white/60 backdrop-blur-sm border-b border-orange-200/20">
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search projects..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-white/90 backdrop-blur-sm border border-orange-200/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 text-sm"
+          />
+        </div>
+      </div>
+
       {/* Main Content */}
-      <div className="container mx-auto px-6 py-8">
+      <div className="container mx-auto px-4 sm:px-6 py-4 sm:py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg ring-1 ring-orange-200/30">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
+          <div className="bg-white/80 backdrop-blur-lg rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-lg ring-1 ring-orange-200/30">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Total Projects</p>
-                <p className="text-2xl font-bold text-gray-800">{projects.length}</p>
+                <p className="text-xs sm:text-sm text-gray-600">Total Projects</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-800">{projects.length}</p>
               </div>
-              <div className="w-12 h-12 bg-blue-100/80 rounded-xl flex items-center justify-center">
-                <Folder size={20} className="text-blue-600" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100/80 rounded-lg sm:rounded-xl flex items-center justify-center">
+                <Folder size={16} className="sm:size-5 text-blue-600" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg ring-1 ring-orange-200/30">
+          <div className="bg-white/80 backdrop-blur-lg rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-lg ring-1 ring-orange-200/30">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Active Today</p>
-                <p className="text-2xl font-bold text-gray-800">3</p>
+                <p className="text-xs sm:text-sm text-gray-600">Active Today</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-800">3</p>
               </div>
-              <div className="w-12 h-12 bg-green-100/80 rounded-xl flex items-center justify-center">
-                <Activity size={20} className="text-green-600" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100/80 rounded-lg sm:rounded-xl flex items-center justify-center">
+                <Activity size={16} className="sm:size-5 text-green-600" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg ring-1 ring-orange-200/30">
+          <div className="bg-white/80 backdrop-blur-lg rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-lg ring-1 ring-orange-200/30">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Lines of Code</p>
-                <p className="text-2xl font-bold text-gray-800">12.4k</p>
+                <p className="text-xs sm:text-sm text-gray-600">Lines of Code</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-800">12.4k</p>
               </div>
-              <div className="w-12 h-12 bg-purple-100/80 rounded-xl flex items-center justify-center">
-                <Code size={20} className="text-purple-600" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-100/80 rounded-lg sm:rounded-xl flex items-center justify-center">
+                <Code size={16} className="sm:size-5 text-purple-600" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg ring-1 ring-orange-200/30">
+          <div className="bg-white/80 backdrop-blur-lg rounded-xl sm:rounded-2xl p-3 sm:p-4 shadow-lg ring-1 ring-orange-200/30">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Deployed</p>
-                <p className="text-2xl font-bold text-gray-800">7</p>
+                <p className="text-xs sm:text-sm text-gray-600">Deployed</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-800">7</p>
               </div>
-              <div className="w-12 h-12 bg-orange-100/80 rounded-xl flex items-center justify-center">
-                <Zap size={20} className="text-orange-600" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-orange-100/80 rounded-lg sm:rounded-xl flex items-center justify-center">
+                <Zap size={16} className="sm:size-5 text-orange-600" />
               </div>
             </div>
           </div>
@@ -294,18 +330,18 @@ export default function Dashboard() {
 
         {/* Projects Grid/List */}
         {viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
             {/* Create New Project Card */}
             <button
               onClick={() => setShowCreateModal(true)}
-              className="group bg-white/60 backdrop-blur-lg p-6 rounded-2xl shadow-lg ring-1 ring-orange-200/30 hover:shadow-xl hover:scale-105 transition-all duration-300 border-2 border-dashed border-orange-300/50 hover:border-orange-400/70 min-h-[240px] flex flex-col items-center justify-center gap-4"
+              className="group bg-white/60 backdrop-blur-lg p-4 sm:p-6 rounded-xl sm:rounded-2xl shadow-lg ring-1 ring-orange-200/30 hover:shadow-xl hover:scale-105 transition-all duration-300 border-2 border-dashed border-orange-300/50 hover:border-orange-400/70 min-h-[180px] sm:min-h-[240px] flex flex-col items-center justify-center gap-3 sm:gap-4"
             >
-              <div className="w-16 h-16 bg-orange-100/80 backdrop-blur-sm rounded-2xl flex items-center justify-center group-hover:bg-orange-200/80 transition-colors">
-                <Plus size={24} className="text-orange-600" />
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-orange-100/80 backdrop-blur-sm rounded-xl sm:rounded-2xl flex items-center justify-center group-hover:bg-orange-200/80 transition-colors">
+                <Plus size={20} className="sm:size-6 text-orange-600" />
               </div>
               <div className="text-center">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">Create New Project</h3>
-                <p className="text-sm text-gray-600">Start building something amazing</p>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-1 sm:mb-2">Create New Project</h3>
+                <p className="text-xs sm:text-sm text-gray-600">Start building something amazing</p>
               </div>
             </button>
 
@@ -313,44 +349,48 @@ export default function Dashboard() {
             {filteredAndSortedProjects.map((project) => (
               <div
                 key={project.id}
-                className="group bg-white/80 backdrop-blur-lg p-6 rounded-2xl shadow-lg ring-1 ring-orange-200/30 hover:shadow-xl hover:scale-105 transition-all duration-300 relative min-h-[240px] flex flex-col"
+                className="group bg-white/80 backdrop-blur-lg p-4 sm:p-6 rounded-xl sm:rounded-2xl shadow-lg ring-1 ring-orange-200/30 hover:shadow-xl sm:hover:scale-105 transition-all duration-300 relative min-h-[180px] sm:min-h-[240px] flex flex-col"
               >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="w-12 h-12 bg-blue-100/80 backdrop-blur-sm rounded-xl flex items-center justify-center">
-                    <FolderOpen size={20} className="text-blue-600" />
+                <div className="flex items-start justify-between mb-3 sm:mb-4">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100/80 backdrop-blur-sm rounded-lg sm:rounded-xl flex items-center justify-center">
+                    <FolderOpen size={16} className="sm:size-5 text-blue-600" />
                   </div>
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => deleteProject(project.id)}
-                      className="p-2 hover:bg-red-100/80 rounded-lg text-red-500 hover:text-red-700 transition-colors"
+                      className="p-1.5 sm:p-2 hover:bg-red-100/80 rounded-lg text-red-500 hover:text-red-700 transition-colors"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={14} className="sm:size-4" />
                     </button>
                   </div>
                 </div>
 
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2 truncate">{project.name}</h3>
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-1 sm:mb-2 truncate">{project.name}</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 mb-3 sm:mb-4 line-clamp-2">
                     {project.description || 'No description provided'}
                   </p>
                 </div>
 
                 <div className="space-y-3">
                   <div className="flex items-center text-xs text-gray-500 gap-4">
-                    <div className="flex items-center gap-1">
-                      <Calendar size={12} />
-                      <span>{formatDate(project.created_at)}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Clock size={12} />
-                      <span>{formatDate(project.updated_at)}</span>
-                    </div>
+                    {project.created_at && (
+                      <div className="flex items-center gap-1">
+                        <Calendar size={12} />
+                        <span>{formatDate(project.created_at)}</span>
+                      </div>
+                    )}
+                    {project.updated_at && (
+                      <div className="flex items-center gap-1">
+                        <Clock size={12} />
+                        <span>{formatDate(project.updated_at)}</span>
+                      </div>
+                    )}
                   </div>
 
                   <button
                     onClick={() => navigate(`/project/${project.id}`)}
-                    className="w-full bg-orange-500/90 hover:bg-orange-600/90 text-white px-4 py-2.5 rounded-xl font-medium transition-all hover:shadow-lg hover:scale-105 backdrop-blur-sm"
+                    className="w-full bg-orange-500/90 hover:bg-orange-600/90 text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-sm sm:text-base font-medium transition-all hover:shadow-lg hover:scale-105 backdrop-blur-sm"
                   >
                     Open Project
                   </button>
@@ -381,8 +421,8 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-xs text-gray-500">
-                        <div>Created {formatDate(project.created_at)}</div>
-                        <div>Updated {formatDate(project.updated_at)}</div>
+                        {project.created_at && <div>Created {formatDate(project.created_at)}</div>}
+                        {project.updated_at && <div>Updated {formatDate(project.updated_at)}</div>}
                       </div>
                       <div className="flex items-center gap-2">
                         <button
@@ -420,52 +460,52 @@ export default function Dashboard() {
       {/* Create Project Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white/95 backdrop-blur-lg p-8 rounded-3xl w-full max-w-md shadow-2xl ring-1 ring-orange-200/50 relative">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-orange-100/80 backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Plus size={24} className="text-orange-600" />
+          <div className="bg-white/95 backdrop-blur-lg p-6 sm:p-8 rounded-2xl sm:rounded-3xl w-full max-w-md shadow-2xl ring-1 ring-orange-200/50 relative">
+            <div className="text-center mb-4 sm:mb-6">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-orange-100/80 backdrop-blur-sm rounded-xl sm:rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4">
+                <Plus size={20} className="sm:size-6 text-orange-600" />
               </div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">Create New Project</h2>
-              <p className="text-gray-600">Let's build something incredible together</p>
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-1 sm:mb-2">Create New Project</h2>
+              <p className="text-sm sm:text-base text-gray-600">Let's build something incredible together</p>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Project Name</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">Project Name</label>
                 <input
                   type="text"
                   value={newProject.name}
                   onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                  className="w-full bg-white/90 backdrop-blur-sm text-gray-800 px-4 py-3 rounded-xl border border-orange-200/50 focus:outline-none focus:ring-2 focus:ring-orange-400/50 placeholder-gray-500"
+                  className="w-full bg-white/90 backdrop-blur-sm text-gray-800 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg sm:rounded-xl border border-orange-200/50 focus:outline-none focus:ring-2 focus:ring-orange-400/50 placeholder-gray-500 text-sm sm:text-base"
                   placeholder="My Awesome App"
                   disabled={isCreating}
                 />
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">Description</label>
                 <textarea
                   value={newProject.description}
                   onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-                  className="w-full bg-white/90 backdrop-blur-sm text-gray-800 px-4 py-3 rounded-xl border border-orange-200/50 focus:outline-none focus:ring-2 focus:ring-orange-400/50 placeholder-gray-500 resize-none"
+                  className="w-full bg-white/90 backdrop-blur-sm text-gray-800 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg sm:rounded-xl border border-orange-200/50 focus:outline-none focus:ring-2 focus:ring-orange-400/50 placeholder-gray-500 resize-none text-sm sm:text-base"
                   rows={3}
                   placeholder="Describe your project..."
                   disabled={isCreating}
                 />
               </div>
 
-              <div className="flex gap-3 pt-4">
+              <div className="flex gap-2 sm:gap-3 pt-3 sm:pt-4">
                 <button
                   onClick={createProject}
                   disabled={isCreating || !newProject.name.trim()}
-                  className="flex-1 bg-orange-500/90 hover:bg-orange-600/90 disabled:bg-gray-300 disabled:cursor-not-allowed text-white py-3 rounded-xl font-medium transition-all hover:shadow-lg hover:scale-105 backdrop-blur-sm"
+                  className="flex-1 bg-orange-500/90 hover:bg-orange-600/90 disabled:bg-gray-300 disabled:cursor-not-allowed text-white py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-sm sm:text-base font-medium transition-all hover:shadow-lg hover:scale-105 backdrop-blur-sm"
                 >
                   {isCreating ? 'Creating...' : 'Create Project'}
                 </button>
                 <button
                   onClick={() => setShowCreateModal(false)}
                   disabled={isCreating}
-                  className="flex-1 bg-white/90 backdrop-blur-sm border border-orange-200/50 text-gray-700 py-3 rounded-xl font-medium hover:bg-orange-50 transition-all disabled:opacity-50"
+                  className="flex-1 bg-white/90 backdrop-blur-sm border border-orange-200/50 text-gray-700 py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-sm sm:text-base font-medium hover:bg-orange-50 transition-all disabled:opacity-50"
                 >
                   Cancel
                 </button>

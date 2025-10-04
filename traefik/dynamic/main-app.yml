@@ -1,14 +1,65 @@
 http:
   routers:
-    main-app:
-      rule: "(Host(`localhost`) || Host(`your-domain.com`)) && !PathPrefix(`/preview/`)"
+    # Main app router for HTTP
+    main-app-http:
+      rule: "(Host(`localhost`) || Host(`your-domain.com`)) && !PathPrefix(`/preview/`) && !PathPrefix(`/api`)"
       service: main-app-service
       entryPoints:
         - web
-      priority: 1  # Lower priority than container routes
+      priority: 1
+
+    # Main app router for HTTPS
+    main-app-https:
+      rule: "Host(`your-domain.com`) && !PathPrefix(`/preview/`) && !PathPrefix(`/api`)"
+      service: main-app-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      priority: 1
+
+    # API router for HTTP
+    api-http:
+      rule: "(Host(`localhost`) || Host(`your-domain.com`)) && PathPrefix(`/api`)"
+      service: api-service
+      entryPoints:
+        - web
+      priority: 10  # Higher priority for API routes
+
+    # API router for HTTPS
+    api-https:
+      rule: "Host(`your-domain.com`) && PathPrefix(`/api`)"
+      service: api-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      priority: 10  # Higher priority for API routes
+
+    # WebSocket support for chat
+    ws-http:
+      rule: "(Host(`localhost`) || Host(`your-domain.com`)) && PathPrefix(`/api/chat/ws`)"
+      service: api-service
+      entryPoints:
+        - web
+      priority: 20  # Highest priority for WebSocket
+
+    ws-https:
+      rule: "Host(`your-domain.com`) && PathPrefix(`/api/chat/ws`)"
+      service: api-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      priority: 20  # Highest priority for WebSocket
 
   services:
     main-app-service:
       loadBalancer:
         servers:
           - url: "http://host.docker.internal:5173"
+
+    api-service:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:8000"
