@@ -28,7 +28,15 @@ export default function Login() {
       toast.success('Logged in successfully!');
       navigate('/dashboard');
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Login failed');
+      // Handle validation errors (array format from FastAPI/Pydantic)
+      if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
+        const messages = error.response.data.detail.map((err: any) => err.msg).join(', ');
+        toast.error(messages);
+      } else if (typeof error.response?.data?.detail === 'string') {
+        toast.error(error.response.data.detail);
+      } else {
+        toast.error('Login failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

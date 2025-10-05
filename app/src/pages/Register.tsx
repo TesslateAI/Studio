@@ -29,7 +29,15 @@ export default function Register() {
       toast.success('Registration successful! Please login.');
       navigate('/login');
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Registration failed');
+      // Handle validation errors (array format from FastAPI/Pydantic)
+      if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
+        const messages = error.response.data.detail.map((err: any) => err.msg).join(', ');
+        toast.error(messages);
+      } else if (typeof error.response?.data?.detail === 'string') {
+        toast.error(error.response.data.detail);
+      } else {
+        toast.error('Registration failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
