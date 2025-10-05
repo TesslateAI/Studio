@@ -6,12 +6,10 @@ metadata:
   labels:
     app: postgres
 spec:
-  storageClassName: tesslate-local-storage
+  # Use DigitalOcean's default block storage for dynamic provisioning
+  storageClassName: do-block-storage
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 20Gi
-  selector:
-    matchLabels:
-      app: postgres

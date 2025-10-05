@@ -6,9 +6,6 @@ set -e
 
 echo "🚀 Deploying User Environments Namespace..."
 
-# Set kubeconfig
-export KUBECONFIG=~/.kube/configs/digitalocean.yaml
-
 # Check prerequisites
 echo "🔍 Checking prerequisites..."
 if ! kubectl get namespace tesslate > /dev/null 2>&1; then

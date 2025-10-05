@@ -1,6 +1,6 @@
 # RBAC Configuration for Development Environment Management
 # Grants the backend service the minimal required permissions to manage
-# Kubernetes resources for user development environments
+# Kubernetes resources for user development environments across all namespaces
 
 ---
 # Service Account for the backend pods
@@ -22,25 +22,35 @@ metadata:
     app: tesslate-backend
     component: rbac
 rules:
+# Namespace permissions - for discovery and validation (read-only)
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+
 # Deployment permissions - for managing dev environment containers
 - apiGroups: ["apps"]
   resources: ["deployments"]
-  verbs: ["create", "get", "list", "patch", "delete", "watch"]
+  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
 
 # Service permissions - for creating internal services
 - apiGroups: [""]
   resources: ["services"]
-  verbs: ["create", "get", "list", "patch", "delete", "watch"]
+  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
 
 # Ingress permissions - for creating external access routes
 - apiGroups: ["networking.k8s.io"]
   resources: ["ingresses"]
-  verbs: ["create", "get", "list", "patch", "delete", "watch"]
+  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
 
 # Pod permissions - for status checking and monitoring (read-only)
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list", "watch"]
+
+# Pod logs - for debugging (read-only)
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
 
 # ReplicaSet permissions - for deployment status checking (read-only)
 - apiGroups: ["apps"]
@@ -53,54 +63,12 @@ rules:
   verbs: ["get", "list", "watch"]
 
 ---
-# RoleBinding connecting the ServiceAccount to the ClusterRole
-# This binding is namespaced to the tesslate namespace for security
+# ClusterRoleBinding - grants cluster-wide permissions to the backend service account
+# This allows the backend to manage resources in any namespace
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: tesslate-backend-dev-environments
-  namespace: tesslate
-  labels:
-    app: tesslate-backend
-    component: rbac
-subjects:
-- kind: ServiceAccount
-  name: tesslate-backend-sa
-  namespace: tesslate
-roleRef:
-  kind: ClusterRole
-  name: tesslate-dev-environments-manager
-  apiGroup: rbac.authorization.k8s.io
-
----
-# RoleBinding for user environments namespace
-# This allows the backend to manage user development environments in the separate namespace
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: tesslate-backend-user-environments
-  namespace: tesslate-user-environments
-  labels:
-    app: tesslate-backend
-    component: rbac
-subjects:
-- kind: ServiceAccount
-  name: tesslate-backend-sa
-  namespace: tesslate
-roleRef:
-  kind: ClusterRole
-  name: tesslate-dev-environments-manager
-  apiGroup: rbac.authorization.k8s.io
-
----
-# Additional RoleBinding for cross-namespace ingress management if needed
-# This allows the backend to create ingresses in the ingress-nginx namespace
-# (Required if ingresses need to be created outside the tesslate namespace)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: tesslate-backend-ingress-access
-  namespace: ingress-nginx
+  name: tesslate-backend-cluster-access
   labels:
     app: tesslate-backend
     component: rbac

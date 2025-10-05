@@ -64,32 +64,12 @@ services:
       - /app/node_modules
     environment:
       - VITE_API_URL=http://localhost:8000
-      - VITE_AI_SERVICE_URL=http://localhost:8001
     networks:
       - tesslate-network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.app.rule=Host(`studio.localhost`)"
       - "traefik.http.services.app.loadbalancer.server.port=5173"
-
-  ai-service:
-    build: ./ai-service
-    container_name: tesslate-ai-service
-    restart: unless-stopped
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./ai-service:/app
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ORCHESTRATOR_URL=http://orchestrator:8000
-    networks:
-      - tesslate-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.ai-service.rule=Host(`ai.localhost`)"
-      - "traefik.http.services.ai-service.loadbalancer.server.port=8001"
 
 networks:
   tesslate-network:

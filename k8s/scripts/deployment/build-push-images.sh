@@ -18,7 +18,8 @@ fi
 
 REGISTRY="registry.digitalocean.com/finetune"
 BACKEND_IMAGE="${REGISTRY}/tesslate-backend:latest"
-FRONTEND_IMAGE="${REGISTRY}/test:production"
+FRONTEND_IMAGE="${REGISTRY}/tesslate-frontend:latest"
+DEV_SERVER_IMAGE="${REGISTRY}/tesslate-dev-server:latest"
 
 echo "Building and pushing Tesslate images to DigitalOcean Container Registry..."
 
@@ -51,6 +52,10 @@ docker build -t "${BACKEND_IMAGE}" -f orchestrator/Dockerfile orchestrator/
 echo "Building frontend image..."
 docker build -t "${FRONTEND_IMAGE}" -f app/Dockerfile.prod app/
 
+# Build dev server image (for user development environments)
+echo "Building dev server image..."
+docker build -t "${DEV_SERVER_IMAGE}" -f orchestrator/Dockerfile.devserver orchestrator/
+
 # Push images to registry
 echo "Pushing backend image to DOCR..."
 docker push "${BACKEND_IMAGE}"
@@ -58,6 +63,10 @@ docker push "${BACKEND_IMAGE}"
 echo "Pushing frontend image to DOCR..."
 docker push "${FRONTEND_IMAGE}"
 
+echo "Pushing dev server image to DOCR..."
+docker push "${DEV_SERVER_IMAGE}"
+
 echo "Successfully built and pushed images to DigitalOcean Container Registry!"
 echo "Backend: ${BACKEND_IMAGE}"
 echo "Frontend: ${FRONTEND_IMAGE}"
+echo "Dev Server: ${DEV_SERVER_IMAGE}"

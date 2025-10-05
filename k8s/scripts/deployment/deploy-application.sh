@@ -6,9 +6,6 @@ set -e
 
 echo "🚀 Deploying Tesslate Studio application..."
 
-# Set kubeconfig
-export KUBECONFIG=~/.kube/configs/digitalocean.yaml
-
 # Check if secrets exist
 echo "🔍 Checking prerequisites..."
 if ! kubectl get secret tesslate-app-secrets -n tesslate > /dev/null 2>&1; then
