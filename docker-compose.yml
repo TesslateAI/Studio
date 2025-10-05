@@ -46,6 +46,10 @@ services:
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./orchestrator.db
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DEPLOYMENT_MODE=docker
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      - OPENAI_MODEL=${OPENAI_MODEL}
     networks:
       - tesslate-network
     labels:

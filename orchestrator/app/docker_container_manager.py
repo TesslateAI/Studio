@@ -23,14 +23,87 @@ class DockerContainerManager:
     
     def __init__(self):
         self.containers: Dict[str, Dict] = {}  # project_key -> {container_name, hostname, user_id, project_id}
-        self.network_name = "builder-devserver-network"
+        self.network_name = "tesslate-network"  # Use same network as Traefik
         self.base_image_name = "builder-devserver:latest"
         self.container_label = "com.builder.devserver"
         self._docker_available = None  # Lazy check
         self._network_ready = False  # Lazy initialization
         self._base_image_ready = False  # Base image built once
-        
+
+        # For Docker-in-Docker: convert container paths to host paths
+        # The orchestrator runs in a container with ./orchestrator mounted at /app
+        # When creating child containers, we need to use host paths, not container paths
+        self._detect_host_mount_path()
+
         print("[INFO] DevContainerManager initialized - Traefik-powered zero-port-conflict architecture")
+
+    def _detect_host_mount_path(self):
+        """
+        Detect the host path that corresponds to /app in the container.
+        This is needed for Docker-in-Docker scenarios where the orchestrator
+        runs in a container but needs to mount volumes from the host.
+        """
+        # Check if we're running in a container
+        if os.path.exists('/.dockerenv'):
+            # We're in a container - need to convert /app to host path
+            # The orchestrator container has ./orchestrator:/app mounted
+            # So /app/users/1/1 should become /root/Tesslate-Studio/orchestrator/users/1/1 on the host
+
+            # Try to detect the host path by checking environment or using a fallback
+            settings = get_settings()
+            host_base = os.environ.get('HOST_ORCHESTRATOR_PATH')
+
+            if not host_base:
+                # Fallback: assume we're in the standard setup
+                # Try to get the actual path from docker inspect if available
+                try:
+                    result = subprocess.run(
+                        ["docker", "inspect", "-f", "{{ range .Mounts }}{{ if eq .Destination \"/app\" }}{{ .Source }}{{ end }}{{ end }}",
+                         socket.gethostname()],
+                        capture_output=True,
+                        text=True,
+                        timeout=3
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        host_base = result.stdout.strip()
+                        print(f"[INFO] Detected host mount path: {host_base}")
+                    else:
+                        # Final fallback
+                        host_base = "/root/Tesslate-Studio/orchestrator"
+                        print(f"[WARN] Could not detect host path, using fallback: {host_base}")
+                except Exception as e:
+                    host_base = "/root/Tesslate-Studio/orchestrator"
+                    print(f"[WARN] Error detecting host path: {e}, using fallback: {host_base}")
+
+            self.host_mount_base = host_base
+            print(f"[INFO] Host mount base path: {self.host_mount_base}")
+        else:
+            # Not in a container - paths are already host paths
+            self.host_mount_base = os.path.abspath(".")
+            print(f"[INFO] Running on host, base path: {self.host_mount_base}")
+
+    def _convert_to_host_path(self, container_path: str) -> str:
+        """
+        Convert a container path (/app/users/1/1) to the corresponding host path.
+        This is necessary for Docker-in-Docker scenarios.
+        """
+        if not hasattr(self, 'host_mount_base'):
+            return container_path
+
+        # If the path starts with /app, replace it with the host mount base
+        if container_path.startswith('/app/'):
+            relative_path = container_path[5:]  # Remove '/app/'
+            host_path = os.path.join(self.host_mount_base, relative_path)
+            print(f"[DEBUG] Converted path: {container_path} -> {host_path}")
+            return host_path
+        elif container_path.startswith('/app'):
+            relative_path = container_path[4:]  # Remove '/app'
+            host_path = os.path.join(self.host_mount_base, relative_path)
+            print(f"[DEBUG] Converted path: {container_path} -> {host_path}")
+            return host_path
+        else:
+            # Path doesn't start with /app, assume it's already a host path
+            return container_path
     
     def _check_docker_available(self) -> bool:
         """Check if Docker is available and working (lazy/cached)."""
@@ -407,9 +480,12 @@ docker-compose*
             print("[WARN] Docker network setup failed, proceeding without custom network")
         
         abs_project_path = os.path.abspath(project_path)
-        
+
         if not os.path.exists(abs_project_path):
             raise FileNotFoundError(f"Project directory not found: {abs_project_path}")
+
+        # Convert container path to host path for Docker-in-Docker
+        host_project_path = self._convert_to_host_path(abs_project_path)
         
         # Validate required files
         required_files = ["package.json", "vite.config.js", "index.html"]
@@ -424,10 +500,11 @@ docker-compose*
         # Generate hostname for Traefik routing
         hostname = self._generate_hostname(user_id, project_id)
         
-        print(f"[INFO] Project path: {abs_project_path}")
+        print(f"[INFO] Container path: {abs_project_path}")
+        print(f"[INFO] Host path: {host_project_path}")
         print(f"[INFO] Hostname: {hostname}")
         print(f"[INFO] Using base image: {self.base_image_name}")
-        
+
         try:
             # Start container with Traefik labels for automatic routing
             print(f"[RUN] Starting Traefik-enabled container with hostname routing...")
@@ -435,7 +512,7 @@ docker-compose*
                 "docker", "run",
                 "--rm",                                                  # Remove on exit
                 "--name", container_name,                                # Multi-user container name
-                "-v", f"{abs_project_path}:/app",                       # Source code volume (live sync!)
+                "-v", f"{host_project_path}:/app",                      # Source code volume (live sync!)
                 # Docker labels for organization and tracking
                 "--label", "com.builder.devserver=true",
                 "--label", f"com.builder.devserver.user_id={user_id}",

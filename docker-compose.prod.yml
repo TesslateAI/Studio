@@ -1,0 +1,93 @@
+# Production Docker Compose for Tesslate Studio
+# Domain: studio-demo.tesslate.com (via Cloudflare proxy)
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: tesslate-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard (disable in production or secure it)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.prod.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./traefik/acme.json:/etc/traefik/acme.json
+    networks:
+      - tesslate-network
+    environment:
+      - CLOUDFLARE_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    labels:
+      - "traefik.enable=true"
+      # Dashboard (secure this in production)
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`studio-demo.tesslate.com`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls=true"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: tesslate-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=tesslate
+      - POSTGRES_USER=tesslate_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - tesslate-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tesslate_user -d tesslate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: tesslate-orchestrator
+    restart: unless-stopped
+    volumes:
+      - ./users:/app/users
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./orchestrator/app:/app/app:ro
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://tesslate_user:${POSTGRES_PASSWORD}@postgres:5432/tesslate
+      - SECRET_KEY=${SECRET_KEY}
+      - DEPLOYMENT_MODE=docker
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      - DEV_SERVER_BASE_URL=https://studio-demo.tesslate.com
+    networks:
+      - tesslate-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=false"
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.prod
+    container_name: tesslate-app
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=false"
+
+networks:
+  tesslate-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: tesslate-postgres-data

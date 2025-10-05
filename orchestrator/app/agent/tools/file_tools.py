@@ -1,21 +1,26 @@
 """
 File Operation Tools
 
-Tools for reading, writing, listing, and deleting files in user development pods.
-Uses the existing Kubernetes client file operations.
+Tools for reading, writing, listing, and deleting files in user development environments.
+Deployment-aware: supports both Docker (local filesystem) and Kubernetes (pod API) modes.
 """
 
 import logging
+import os
 from typing import Dict, Any
 from .registry import Tool, ToolRegistry, ToolCategory
-from ...k8s_client import get_k8s_manager
+from ...config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
 async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Read a file from the user's development pod.
+    Read a file from the user's development environment.
+
+    Deployment-aware:
+    - Docker mode: Reads from local filesystem at users/{user_id}/{project_id}/
+    - Kubernetes mode: Reads from pod via K8s API
 
     Args:
         params: {file_path: str}
@@ -30,31 +35,65 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    settings = get_settings()
 
-    k8s_manager = get_k8s_manager()
-    content = await k8s_manager.read_file_from_pod(
-        user_id=user_id,
-        project_id=project_id,
-        file_path=file_path
-    )
+    if settings.deployment_mode == "kubernetes":
+        # Kubernetes mode: Read from pod
+        from ...k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+        content = await k8s_manager.read_file_from_pod(
+            user_id=user_id,
+            project_id=project_id,
+            file_path=file_path
+        )
 
-    if content is None:
+        if content is None:
+            return {
+                "exists": False,
+                "message": f"File not found: {file_path}"
+            }
+
         return {
-            "exists": False,
-            "message": f"File not found: {file_path}"
+            "exists": True,
+            "file_path": file_path,
+            "content": content,
+            "size": len(content)
         }
+    else:
+        # Docker mode: Read from local filesystem
+        project_dir = f"users/{user_id}/{project_id}"
+        full_path = os.path.join(project_dir, file_path)
 
-    return {
-        "exists": True,
-        "file_path": file_path,
-        "content": content,
-        "size": len(content)
-    }
+        if not os.path.exists(full_path):
+            return {
+                "exists": False,
+                "message": f"File not found: {file_path}"
+            }
+
+        try:
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            return {
+                "exists": True,
+                "file_path": file_path,
+                "content": content,
+                "size": len(content)
+            }
+        except Exception as e:
+            return {
+                "exists": False,
+                "message": f"Error reading file: {str(e)}"
+            }
 
 
 async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Write content to a file in the user's development pod.
+    Write content to a file in the user's development environment.
+
+    Deployment-aware:
+    - Docker mode: Writes to local filesystem at users/{user_id}/{project_id}/
+    - Kubernetes mode: Writes to pod via K8s API
 
     Args:
         params: {file_path: str, content: str}
@@ -73,26 +112,57 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    settings = get_settings()
 
-    k8s_manager = get_k8s_manager()
-    success = await k8s_manager.write_file_to_pod(
-        user_id=user_id,
-        project_id=project_id,
-        file_path=file_path,
-        content=content
-    )
+    if settings.deployment_mode == "kubernetes":
+        # Kubernetes mode: Write to pod
+        from ...k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+        success = await k8s_manager.write_file_to_pod(
+            user_id=user_id,
+            project_id=project_id,
+            file_path=file_path,
+            content=content
+        )
 
-    return {
-        "success": success,
-        "file_path": file_path,
-        "size": len(content),
-        "message": f"Successfully wrote {len(content)} bytes to {file_path}"
-    }
+        return {
+            "success": success,
+            "file_path": file_path,
+            "size": len(content),
+            "message": f"Successfully wrote {len(content)} bytes to {file_path}"
+        }
+    else:
+        # Docker mode: Write to local filesystem
+        project_dir = f"users/{user_id}/{project_id}"
+        full_path = os.path.join(project_dir, file_path)
+
+        try:
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            return {
+                "success": True,
+                "file_path": file_path,
+                "size": len(content),
+                "message": f"Successfully wrote {len(content)} bytes to {file_path}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "file_path": file_path,
+                "message": f"Error writing file: {str(e)}"
+            }
 
 
 async def list_files_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    List files in a directory in the user's development pod.
+    List files in a directory in the user's development environment.
+
+    Deployment-aware:
+    - Docker mode: Lists from local filesystem at users/{user_id}/{project_id}/
+    - Kubernetes mode: Lists from pod via K8s API
 
     Args:
         params: {directory: str (default: ".")}
@@ -105,19 +175,61 @@ async def list_files_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    settings = get_settings()
 
-    k8s_manager = get_k8s_manager()
-    files = await k8s_manager.list_files_in_pod(
-        user_id=user_id,
-        project_id=project_id,
-        directory=directory
-    )
+    if settings.deployment_mode == "kubernetes":
+        # Kubernetes mode: List from pod
+        from ...k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+        files = await k8s_manager.list_files_in_pod(
+            user_id=user_id,
+            project_id=project_id,
+            directory=directory
+        )
 
-    return {
-        "directory": directory,
-        "files": files,
-        "count": len(files)
-    }
+        return {
+            "directory": directory,
+            "files": files,
+            "count": len(files)
+        }
+    else:
+        # Docker mode: List from local filesystem
+        project_dir = f"users/{user_id}/{project_id}"
+        target_dir = os.path.join(project_dir, directory) if directory != "." else project_dir
+
+        if not os.path.exists(target_dir):
+            return {
+                "directory": directory,
+                "files": [],
+                "count": 0,
+                "message": "Directory not found"
+            }
+
+        try:
+            files = []
+            for item in os.listdir(target_dir):
+                item_path = os.path.join(target_dir, item)
+                relative_path = os.path.relpath(item_path, project_dir)
+
+                files.append({
+                    "name": item,
+                    "path": relative_path,
+                    "type": "directory" if os.path.isdir(item_path) else "file",
+                    "size": os.path.getsize(item_path) if os.path.isfile(item_path) else 0
+                })
+
+            return {
+                "directory": directory,
+                "files": files,
+                "count": len(files)
+            }
+        except Exception as e:
+            return {
+                "directory": directory,
+                "files": [],
+                "count": 0,
+                "message": f"Error listing directory: {str(e)}"
+            }
 
 
 async def delete_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:

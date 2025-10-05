@@ -23,7 +23,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",   # Explicit localhost IP
         "http://127.0.0.1:3000",   # Explicit localhost IP
         "https://your-domain.com",       # Legacy production domain
-        "https://studio-test.tesslate.com"   # Production domain
+        "https://studio-test.tesslate.com",  # Production domain
+        "https://studio-demo.tesslate.com"   # Demo production domain
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],  # Explicit methods only

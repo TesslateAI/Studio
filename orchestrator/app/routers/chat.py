@@ -454,8 +454,8 @@ You MUST follow these rules:
                     if i < len(code_blocks) - 1:  # Don't delay after the last file
                         await asyncio.sleep(0.2)
 
-            # Run npm install if package.json was modified
-            if package_json_modified:
+            # Run npm install if package.json was modified (K8s only - Docker handles this automatically)
+            if package_json_modified and settings.deployment_mode == "kubernetes":
                 print("[NPM] package.json was modified, running npm install...")
                 try:
                     from ..k8s_client import get_k8s_manager
@@ -609,8 +609,8 @@ async def save_file(file_path: str, code: str, project_id: int, user_id: int, db
         if settings.deployment_mode == "kubernetes":
             # Kubernetes: Write to pod via K8s API
             try:
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
+                from ..dev_server_manager import get_container_manager
+                k8s_manager = get_container_manager()
 
                 success = await k8s_manager.write_file_to_pod(
                     user_id=user_id,
@@ -632,7 +632,7 @@ async def save_file(file_path: str, code: str, project_id: int, user_id: int, db
         else:
             # Docker: Write to local filesystem
             try:
-                project_dir = f"users/{user_id}/projects/{project_id}"
+                project_dir = f"users/{user_id}/{project_id}"
                 full_path = os.path.join(project_dir, file_path)
                 os.makedirs(os.path.dirname(full_path), exist_ok=True)
 

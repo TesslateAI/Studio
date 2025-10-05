@@ -1,14 +1,16 @@
 """
 Shell Command Execution Tools
 
-Tools for executing shell commands in user development pods.
+Tools for executing shell commands in user development environments.
+Deployment-aware: supports both Docker and Kubernetes modes.
 Uses the command validator and agent API for secure execution.
 """
 
 import logging
+import subprocess
 from typing import Dict, Any
 from .registry import Tool, ToolRegistry, ToolCategory
-from ...k8s_client import get_k8s_manager
+from ...config import get_settings
 from ...services.command_validator import get_command_validator
 
 logger = logging.getLogger(__name__)
@@ -16,7 +18,11 @@ logger = logging.getLogger(__name__)
 
 async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Execute a shell command in the user's development pod.
+    Execute a shell command in the user's development environment.
+
+    Deployment-aware:
+    - Docker mode: Executes via docker exec in the dev container
+    - Kubernetes mode: Executes via K8s API in the pod
 
     Uses command validation for security.
 
@@ -40,6 +46,7 @@ async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) 
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    settings = get_settings()
 
     # Validate command
     validator = get_command_validator(allow_network=False)
@@ -52,25 +59,71 @@ async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) 
             "risk_level": validation.risk_level.value
         }
 
-    # Execute command
-    k8s_manager = get_k8s_manager()
-
     try:
-        output = await k8s_manager.execute_command_in_pod(
-            user_id=user_id,
-            project_id=project_id,
-            command=validation.sanitized_command,
-            timeout=timeout
-        )
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes mode: Execute in pod
+            from ...k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
 
+            output = await k8s_manager.execute_command_in_pod(
+                user_id=user_id,
+                project_id=project_id,
+                command=validation.sanitized_command,
+                timeout=timeout
+            )
+
+            return {
+                "success": True,
+                "command": command,
+                "stdout": output,
+                "risk_level": validation.risk_level.value,
+                "message": "Command executed successfully"
+            }
+        else:
+            # Docker mode: Execute via docker exec
+            container_name = f"builder-dev-user{user_id}-project{project_id}"
+
+            # Construct docker exec command
+            docker_cmd = [
+                "docker", "exec",
+                "-w", f"/app/{working_dir}" if working_dir != "." else "/app",
+                container_name,
+                "sh", "-c", validation.sanitized_command
+            ]
+
+            result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+
+            if result.returncode == 0:
+                return {
+                    "success": True,
+                    "command": command,
+                    "stdout": result.stdout,
+                    "risk_level": validation.risk_level.value,
+                    "message": "Command executed successfully"
+                }
+            else:
+                return {
+                    "success": False,
+                    "command": command,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "exit_code": result.returncode,
+                    "risk_level": validation.risk_level.value,
+                    "error": f"Command failed with exit code {result.returncode}"
+                }
+
+    except subprocess.TimeoutExpired:
         return {
-            "success": True,
+            "success": False,
             "command": command,
-            "stdout": output,
-            "risk_level": validation.risk_level.value,
-            "message": "Command executed successfully"
+            "error": f"Command timed out after {timeout} seconds",
+            "risk_level": validation.risk_level.value
         }
-
     except Exception as e:
         return {
             "success": False,

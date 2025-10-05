@@ -207,8 +207,9 @@ async def get_project_files(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # If from_pod requested, try to read from running container
-    if from_pod:
+    # If from_pod requested, try to read from running container (K8s only)
+    settings = get_settings()
+    if from_pod and settings.deployment_mode == "kubernetes":
         try:
             from ..k8s_client import get_k8s_manager
             k8s_manager = get_k8s_manager()
@@ -380,39 +381,84 @@ async def get_dev_server_url(
     logger.info(f"[DEV-URL] Checking dev environment for user {current_user.id}, project {project_id}")
 
     try:
-        # Import k8s_client here to avoid circular imports
-        from ..k8s_client import get_k8s_manager
+        settings = get_settings()
 
-        # Check health of existing environment
-        health = await get_k8s_manager().check_dev_environment_health(current_user.id, str(project_id))
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes mode - use K8s-specific health check
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+            health = await k8s_manager.check_dev_environment_health(current_user.id, str(project_id))
 
-        if health["exists"] and health["ready"]:
-            logger.info(f"[DEV-URL] ✅ Environment exists and is ready: {health['url']}")
+            if health["exists"] and health["ready"]:
+                logger.info(f"[DEV-URL] ✅ Environment exists and is ready: {health['url']}")
+                k8s_manager.track_activity(current_user.id, str(project_id))
+                return {
+                    "url": health["url"],
+                    "status": "ready",
+                    "message": "Development environment is ready"
+                }
 
-            # Track activity when user accesses preview
-            dev_container_manager.track_activity(current_user.id, str(project_id))
+            if health["exists"] and not health["ready"]:
+                logger.info(f"[DEV-URL] ⏳ Environment exists but not ready yet")
+                return {
+                    "url": None,
+                    "status": "starting",
+                    "message": health["message"],
+                    "replicas": health.get("replicas"),
+                    "hint": "Please wait a moment and try again"
+                }
+        else:
+            # Docker mode - use Docker-specific status check
+            from ..dev_server_manager import get_container_manager
+            docker_manager = get_container_manager()
+            status = docker_manager.get_container_status(str(project_id), current_user.id)
 
-            return {
-                "url": health["url"],
-                "status": "ready",
-                "message": "Development environment is ready"
-            }
-
-        if health["exists"] and not health["ready"]:
-            logger.info(f"[DEV-URL] ⏳ Environment exists but not ready yet")
-            return {
-                "url": None,
-                "status": "starting",
-                "message": health["message"],
-                "replicas": health.get("replicas"),
-                "hint": "Please wait a moment and try again"
-            }
+            if status.get("running"):
+                url = docker_manager.get_container_url(str(project_id), current_user.id)
+                logger.info(f"[DEV-URL] ✅ Container exists and is running: {url}")
+                return {
+                    "url": url,
+                    "status": "ready",
+                    "message": "Development environment is ready"
+                }
 
         # Container doesn't exist - create it
         logger.info(f"[DEV-URL] Container does not exist, creating new environment...")
         project_path = f"users/{current_user.id}/{project_id}"
 
-        url = await dev_container_manager.start_container(project_path, str(project_id), current_user.id)
+        # In Docker mode, create project directory from database files if it doesn't exist
+        if settings.deployment_mode == "docker" and not os.path.exists(project_path):
+            logger.info(f"[DEV-URL] Creating project directory from database files: {project_path}")
+            os.makedirs(project_path, exist_ok=True)
+
+            # Get all files from database
+            files_result = await db.execute(
+                select(ProjectFile).where(ProjectFile.project_id == project_id)
+            )
+            project_files = files_result.scalars().all()
+
+            if not project_files:
+                logger.error(f"[DEV-URL] No files found in database for project {project_id}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Project has no files. Please recreate the project."
+                )
+
+            # Write each file to filesystem
+            for db_file in project_files:
+                file_full_path = os.path.join(project_path, db_file.file_path)
+                os.makedirs(os.path.dirname(file_full_path), exist_ok=True)
+
+                with open(file_full_path, 'w', encoding='utf-8') as f:
+                    f.write(db_file.content)
+
+                logger.debug(f"[DEV-URL] Created file: {db_file.file_path}")
+
+            logger.info(f"[DEV-URL] Created {len(project_files)} files from database")
+
+        from ..dev_server_manager import get_container_manager
+        container_manager = get_container_manager()
+        url = await container_manager.start_container(project_path, str(project_id), current_user.id)
         logger.info(f"[DEV-URL] ✅ Dev container started successfully: {url}")
 
         return {
@@ -459,36 +505,55 @@ async def get_container_status(
         raise HTTPException(status_code=404, detail="Project not found")
 
     try:
-        # Get pod readiness status from K8s
-        from ..k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
+        settings = get_settings()
 
-        readiness = await k8s_manager.is_pod_ready(
-            current_user.id,
-            str(project_id),
-            check_responsive=True
-        )
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes mode
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
 
-        # Get full environment status
-        env_status = await k8s_manager.get_dev_environment_status(
-            current_user.id,
-            str(project_id)
-        )
+            readiness = await k8s_manager.is_pod_ready(
+                current_user.id,
+                str(project_id),
+                check_responsive=True
+            )
 
-        return {
-            "status": "ready" if readiness["ready"] else "starting",
-            "ready": readiness["ready"],
-            "phase": readiness["phase"],
-            "message": readiness["message"],
-            "responsive": readiness.get("responsive"),
-            "conditions": readiness.get("conditions", []),
-            "pod_name": readiness.get("pod_name"),
-            "url": env_status.get("url"),
-            "deployment": env_status.get("deployment_ready"),
-            "replicas": env_status.get("replicas"),
-            "project_id": project_id,
-            "user_id": current_user.id
-        }
+            # Get full environment status
+            env_status = await k8s_manager.get_dev_environment_status(
+                current_user.id,
+                str(project_id)
+            )
+
+            return {
+                "status": "ready" if readiness["ready"] else "starting",
+                "ready": readiness["ready"],
+                "phase": readiness["phase"],
+                "message": readiness["message"],
+                "responsive": readiness.get("responsive"),
+                "conditions": readiness.get("conditions", []),
+                "pod_name": readiness.get("pod_name"),
+                "url": env_status.get("url"),
+                "deployment": env_status.get("deployment_ready"),
+                "replicas": env_status.get("replicas"),
+                "project_id": project_id,
+                "user_id": current_user.id
+            }
+        else:
+            # Docker mode
+            from ..dev_server_manager import get_container_manager
+            docker_manager = get_container_manager()
+            status = docker_manager.get_container_status(str(project_id), current_user.id)
+            url = docker_manager.get_container_url(str(project_id), current_user.id)
+
+            return {
+                "status": "ready" if status.get("running") else "stopped",
+                "ready": status.get("running", False),
+                "phase": status.get("status", "Unknown"),
+                "message": "Container is running" if status.get("running") else "Container is not running",
+                "url": url,
+                "project_id": project_id,
+                "user_id": current_user.id
+            }
 
     except Exception as e:
         logger.error(f"[STATUS] Failed to get container status: {e}", exc_info=True)
@@ -532,30 +597,46 @@ async def save_project_file(
         raise HTTPException(status_code=400, detail="file_path and content are required")
 
     try:
-        # 1. Write file directly to dev container via Kubernetes API
-        from ..k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
+        settings = get_settings()
 
-        try:
-            success = await k8s_manager.write_file_to_pod(
-                user_id=current_user.id,
-                project_id=str(project_id),
-                file_path=file_path,
-                content=content
-            )
+        # 1. Write file to container/filesystem
+        if settings.deployment_mode == "kubernetes":
+            # K8s mode: Write directly to pod via K8s API
+            try:
+                from ..k8s_client import get_k8s_manager
+                k8s_manager = get_k8s_manager()
 
-            if not success:
-                raise RuntimeError("Failed to write file to pod")
+                success = await k8s_manager.write_file_to_pod(
+                    user_id=current_user.id,
+                    project_id=str(project_id),
+                    file_path=file_path,
+                    content=content
+                )
 
-            logger.info(f"[FILE] ✅ Wrote {file_path} to dev container for user {current_user.id}, project {project_id}")
+                if not success:
+                    raise RuntimeError("Failed to write file to pod")
 
-            # Track activity to prevent idle timeout
-            dev_container_manager.track_activity(current_user.id, str(project_id))
+                logger.info(f"[FILE] ✅ Wrote {file_path} to pod for user {current_user.id}, project {project_id}")
+                k8s_manager.track_activity(current_user.id, str(project_id))
 
-        except Exception as k8s_error:
-            logger.warning(f"[FILE] ⚠️ Failed to write to pod: {k8s_error}")
-            # Continue to save in DB even if pod write fails
-            # This ensures data isn't lost if pod is temporarily unavailable
+            except Exception as k8s_error:
+                logger.warning(f"[FILE] ⚠️ Failed to write to pod: {k8s_error}")
+                # Continue to save in DB even if pod write fails
+        else:
+            # Docker mode: Write to filesystem (volume-mounted to container)
+            try:
+                project_path = f"users/{current_user.id}/{project_id}"
+                os.makedirs(project_path, exist_ok=True)
+
+                full_file_path = os.path.join(project_path, file_path)
+                os.makedirs(os.path.dirname(full_file_path), exist_ok=True)
+
+                with open(full_file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+
+                logger.info(f"[FILE] ✅ Wrote {file_path} to filesystem for user {current_user.id}, project {project_id}")
+            except Exception as docker_error:
+                logger.warning(f"[FILE] ⚠️ Failed to write to filesystem: {docker_error}")
 
         # 2. Update database record (for version history / backup)
         result = await db.execute(
