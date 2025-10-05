@@ -1347,6 +1347,21 @@ VITECONFIG
             logger.error(f"[LIST] Failed to list files in {directory}: {e}", exc_info=True)
             raise RuntimeError(f"Failed to list files in pod: {str(e)}") from e
 
+    def track_activity(self, user_id: int, project_id: str) -> None:
+        """
+        Track activity for a development environment.
+
+        This is a compatibility method for the Docker-based implementation.
+        In Kubernetes mode, we don't need to track activity for cleanup purposes
+        as resources are managed declaratively.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+        """
+        # No-op in Kubernetes mode - resources are managed declaratively
+        logger.debug(f"[TRACK] Activity tracked for user {user_id}, project {project_id}")
+
 
 # Global instance - lazily initialized
 _k8s_manager_instance = None

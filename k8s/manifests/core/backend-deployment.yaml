@@ -90,6 +90,8 @@ spec:
               key: DATABASE_URL
         - name: KUBERNETES_NAMESPACE
           value: "tesslate"
+        - name: DEPLOYMENT_MODE
+          value: "kubernetes"
         resources:
           requests:
             memory: "512Mi"

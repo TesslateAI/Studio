@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
 from typing import Optional, List
 
@@ -9,7 +9,8 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
         if len(v.encode('utf-8')) > 72:
             raise ValueError('Password cannot exceed 72 bytes')
@@ -113,7 +114,8 @@ class AgentCommandRequest(BaseModel):
     timeout: int = 60  # seconds
     dry_run: bool = False
 
-    @validator('command')
+    @field_validator('command')
+    @classmethod
     def validate_command(cls, v):
         if not v or not v.strip():
             raise ValueError('Command cannot be empty')
@@ -121,7 +123,8 @@ class AgentCommandRequest(BaseModel):
             raise ValueError('Command cannot exceed 1000 characters')
         return v.strip()
 
-    @validator('timeout')
+    @field_validator('timeout')
+    @classmethod
     def validate_timeout(cls, v):
         if v < 1:
             raise ValueError('Timeout must be at least 1 second')
@@ -181,7 +184,8 @@ class AgentChatRequest(BaseModel):
     max_iterations: Optional[int] = 20
     minimal_prompts: Optional[bool] = False
 
-    @validator('message')
+    @field_validator('message')
+    @classmethod
     def validate_message(cls, v):
         if not v or not v.strip():
             raise ValueError('Message cannot be empty')
