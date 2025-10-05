@@ -67,6 +67,7 @@ Thumbs.db
 .env.development
 .env.test
 .env.production
+.env.prod
 
 # Docker
 *.pid

@@ -21,58 +21,48 @@ tesslate-studio/
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Docker & Docker Compose
-- Node.js 20+
-- Python 3.11+
-- uv (Python package manager)
+Choose your deployment method based on your needs:
 
-### Local Development (Docker Mode)
+### Option 1: Full Docker (Simplest - Recommended for Beginners)
 
-1. **Configure environment:**
 ```bash
-# Copy and configure root .env for Docker Compose
+# 1. Configure environment
 cp .env.example .env
 # Edit .env and set SECRET_KEY and OPENAI_API_KEY
-```
 
-2. **Start all services:**
-```bash
+# 2. Start all services
 docker compose up -d
+
+# 3. Access at http://studio.localhost
 ```
 
-3. **Access services:**
+**Access:**
 - Frontend: http://studio.localhost
 - Orchestrator API: http://api.localhost
-- AI Service: http://ai.localhost
 - Traefik Dashboard: http://traefik.localhost:8080
 
-### Individual Service Development
+### Option 2: Hybrid Mode (Fastest - Recommended for Development)
 
-For development without Docker Compose:
-
-**Orchestrator Service:**
 ```bash
-cd orchestrator
-cp .env.example .env  # Configure SECRET_KEY, DATABASE_URL, OPENAI_API_KEY
-uv sync
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Windows
+scripts\start-all-with-traefik.bat
+
+# Linux/Mac - coming soon (use Full Docker for now)
 ```
 
-**Frontend Application:**
-```bash
-cd app
-cp .env.example .env  # Configure VITE_API_URL (usually empty for proxy)
-npm install
-npm run dev
-```
+**Access:**
+- Frontend: http://localhost:5173
+- Orchestrator API: http://localhost:8000
+- User Projects: http://user{id}-project{id}.localhost
 
-**AI Service:**
-```bash
-cd ai-service
-uv sync
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
-```
+### 📚 Need More Options?
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for:
+- ✅ Detailed setup instructions
+- ✅ Production deployment (Docker Compose & Kubernetes)
+- ✅ Networking architecture explained
+- ✅ Troubleshooting guide
+- ✅ Decision flowchart for choosing deployment method
 
 ## 🏛️ Architecture
 
@@ -151,52 +141,23 @@ See `.env.example` files in each directory for complete documentation.
 
 ## 📦 Deployment
 
-### Docker Compose (Local Development)
+For detailed deployment instructions, see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 
-```bash
-# 1. Configure environment
-cp .env.example .env
-# Edit .env and set SECRET_KEY and OPENAI_API_KEY
+Quick links:
+- **[Local Development](DEPLOYMENT.md#option-1-hybrid-mode-native--traefik-recommended-for-development)** - Fast iteration with hot reload
+- **[Docker Compose](DEPLOYMENT.md#option-2-full-docker-compose-simplest-setup)** - Simple containerized setup
+- **[Production (Single Server)](DEPLOYMENT.md#option-3-docker-compose-production-single-server)** - Docker Compose production
+- **[Production (Scalable)](DEPLOYMENT.md#option-4-kubernetes-production-scalable)** - Kubernetes with auto-scaling
 
-# 2. Start all services
-docker compose up -d
+### Quick Production Deploy (Kubernetes)
 
-# 3. Access at http://studio.localhost
-```
-
-### Kubernetes (Production)
-
-**Prerequisites:**
-- Kubernetes cluster (kubeadm or k3s)
-- kubectl configured
-- Domain with DNS pointing to cluster
-- DigitalOcean Container Registry (or alternative)
-
-**Quick Deploy:**
 ```bash
 cd k8s
-
-# 1. Configure secrets
-cp .env.example .env
-# Edit .env and set DOCR_TOKEN
-
-cp manifests/security/app-secrets.yaml.example manifests/security/app-secrets.yaml
-# Edit app-secrets.yaml with your SECRET_KEY, OPENAI_API_KEY, etc.
-
-# 2. Deploy all resources
+cp .env.example .env  # Add DOCR_TOKEN
 ./scripts/deployment/deploy-all.sh
 ```
 
-**Alternative - Deploy to new single server:**
-```bash
-# k3s (recommended - faster and lighter)
-sudo ./k8s/scripts/local-deployment/k3s-setup-all.sh <SERVER_IP>
-
-# OR kubeadm (full Kubernetes)
-sudo ./k8s/scripts/local-deployment/setup-all.sh <SERVER_IP>
-```
-
-See [k8s/README.md](k8s/README.md) and [k8s/docs/](k8s/docs/) for detailed deployment guides.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete setup instructions.
 
 ## 🧪 Testing
 
