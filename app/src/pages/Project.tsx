@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Monitor, FileText, RefreshCw, ExternalLink, RotateCcw } from 'lucide-react';
 import Chat from '../components/Chat';
-import Preview from '../components/Preview';
 import CodeEditor from '../components/CodeEditor';
 import { projectsApi } from '../lib/api';
 import toast from 'react-hot-toast';
@@ -18,10 +17,11 @@ export default function Project() {
     return (saved as 'preview' | 'files') || 'preview';
   });
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
+  const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const projectId = parseInt(id!);
-  
+
   // Debounced refresh for preview
-  const refreshTimeoutRef = React.useRef<NodeJS.Timeout>();
+  const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Save active view to localStorage whenever it changes
   const handleViewChange = (view: 'preview' | 'files') => {
@@ -43,20 +43,9 @@ export default function Project() {
     };
   }, []);
 
-  // Auto-stop container when user navigates away
-  useEffect(() => {
-    return () => {
-      // Stop container when component unmounts (user navigates away)
-      if (projectId && devServerUrl) {
-        fetch(`/api/projects/${projectId}/stop-dev-container`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        }).catch(err => console.log('Container stop cleanup:', err));
-      }
-    };
-  }, [projectId, devServerUrl]);
+  // Note: Dev containers are now managed by backend inactivity timeout
+  // They will auto-cleanup after 30 minutes of inactivity
+  // No need to stop immediately on navigation - pods will persist for quick resume
 
   const loadProject = async () => {
     try {
@@ -67,7 +56,7 @@ export default function Project() {
       setProject(projectData);
       setFiles(filesData);
       
-      console.log(`📂 Loaded project with ${filesData.length} files:`, filesData.map(f => f.file_path));
+      console.log(`📂 Loaded project with ${filesData.length} files:`, filesData.map((f: any) => f.file_path));
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
@@ -126,33 +115,81 @@ export default function Project() {
   const loadDevServerUrl = async () => {
     try {
       const response = await projectsApi.getDevServerUrl(projectId);
-      setDevServerUrl(response.url);
-      console.log('Dev server URL loaded:', response.url);
-    } catch (error) {
+
+      // Get auth token from localStorage
+      const token = localStorage.getItem('token');
+
+      // Handle different response statuses
+      if (response.status === 'ready' && response.url) {
+        // Dismiss loading toast when ready
+        toast.dismiss('dev-server');
+        toast.success('Development server ready!', { id: 'dev-server', duration: 2000 });
+
+        setDevServerUrl(response.url);
+        // Append auth token to URL for iframe authentication
+        if (token) {
+          const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
+          setDevServerUrlWithAuth(urlWithAuth);
+        } else {
+          setDevServerUrlWithAuth(response.url);
+        }
+        console.log('✅ Dev server ready:', response.url);
+      } else if (response.status === 'starting') {
+        console.log('⏳ Dev server is starting...', response.message);
+        toast.loading('Development server is starting up...', { id: 'dev-server' });
+
+        // Retry after 3 seconds when container is starting
+        setTimeout(() => {
+          console.log('Checking dev server status again...');
+          loadDevServerUrl();
+        }, 3000);
+      } else if (response.url) {
+        // Legacy response format (just URL)
+        setDevServerUrl(response.url);
+        // Append auth token to URL for iframe authentication
+        if (token) {
+          const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
+          setDevServerUrlWithAuth(urlWithAuth);
+        } else {
+          setDevServerUrlWithAuth(response.url);
+        }
+        console.log('Dev server URL loaded:', response.url);
+      } else {
+        console.warn('Unexpected response format:', response);
+        toast.error('Failed to start development server');
+      }
+    } catch (error: any) {
       console.error('Failed to get dev server URL:', error);
-      // Retry after 3 seconds if failed
+
+      // Dismiss any loading toast before showing error
+      toast.dismiss('dev-server');
+
+      const errorMessage = error.response?.data?.detail?.message || error.response?.data?.detail || 'Failed to start dev server';
+      toast.error(errorMessage, { id: 'dev-server' });
+
+      // Retry after 5 seconds if failed
       setTimeout(() => {
         console.log('Retrying dev server URL load...');
         loadDevServerUrl();
-      }, 3000);
+      }, 5000);
     }
   };
 
   const refreshPreview = () => {
-    if (devServerUrl) {
+    if (devServerUrlWithAuth) {
       const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
       if (iframe) {
-        // Force a refresh by adding a timestamp parameter
-        const currentSrc = iframe.src;
-        const separator = currentSrc.includes('?') ? '&' : '?';
-        iframe.src = currentSrc.split('?')[0] + separator + 't=' + Date.now();
+        // Force a refresh by adding/updating a timestamp parameter while preserving auth_token
+        const url = new URL(devServerUrlWithAuth);
+        url.searchParams.set('t', Date.now().toString());
+        iframe.src = url.toString();
       }
     }
   };
 
   const openInNewTab = () => {
-    if (devServerUrl) {
-      window.open(devServerUrl, '_blank');
+    if (devServerUrlWithAuth) {
+      window.open(devServerUrlWithAuth, '_blank');
     }
   };
 
@@ -168,9 +205,6 @@ export default function Project() {
     }
   };
 
-  // Get user ID from JWT token
-  const token = localStorage.getItem('token');
-  const userId = project ? project.owner_id : null;
 
   if (!project) {
     return (
@@ -304,7 +338,7 @@ export default function Project() {
                 <div className="flex-1 p-2 bg-gray-800/20">
                   <iframe
                     id="preview-iframe"
-                    src={devServerUrl}
+                    src={devServerUrlWithAuth || devServerUrl}
                     className="w-full h-full bg-white rounded-xl shadow-2xl border border-gray-700/30"
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                   ></iframe>

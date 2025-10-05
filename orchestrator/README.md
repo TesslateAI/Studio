@@ -1,59 +1,145 @@
-# AI Application Builder
+# Tesslate Studio - Orchestrator Service
 
-An amazing application builder with real-time AI chat assistance and live preview capabilities.
+Backend orchestration service for the Tesslate Studio platform. Handles user authentication, project management, and container lifecycle orchestration with support for both Docker and Kubernetes deployments.
 
-## Features
+## 🚀 Features
 
-- 🤖 Smart AI chat assistant powered by OpenAI-compatible APIs
-- 👥 Multi-user support with authentication
-- 📁 Project isolation for each user
-- 🔄 Real-time file streaming visualization
-- 👁️ Live preview of projects in iframe
-- 🎨 Beautiful dark theme UI
+- 🔐 **JWT Authentication** - Secure user authentication with access and refresh tokens
+- 👥 **Multi-user Support** - Isolated project environments per user
+- 🐳 **Dual Deployment Modes** - Support for both Docker and Kubernetes
+- 📁 **Project Management** - CRUD operations for user projects and files
+- 🤖 **AI Chat Integration** - WebSocket-based streaming chat with AI assistant
+- 🔄 **Real-time Updates** - File streaming and live project updates
+- 🛠️ **Agent System** - Tool-calling agents for advanced automation
 
-## Setup
+## 🏗️ Architecture
 
-1. Clone this repository
-2. Copy `.env.example` to `.env` and fill in your API keys
-3. Install dependencies:
+### Container Management Modes
+
+The orchestrator supports two deployment modes configured via `DEPLOYMENT_MODE`:
+
+**Docker Mode** (default - local development):
+- Uses Docker containers with Traefik routing
+- Local file storage in `users/{user_id}/projects/{project_id}/`
+- Container naming: `user{id}-project{id}`
+- Routing: `user{id}-project{id}.localhost`
+
+**Kubernetes Mode** (production):
+- Uses K8s Deployments, Services, and Ingresses
+- Shared PVC storage with subPath isolation
+- Pod naming: `dev-user{id}-project{id}`
+- HTTPS routing: `user{id}-project{id}.studio-test.tesslate.com`
+
+### API Endpoints
+
+- **Authentication** (`/api/auth`): Login, signup, token refresh
+- **Projects** (`/api/projects`): CRUD operations for projects and files
+- **Chat** (`/api/chat`): WebSocket streaming chat with AI
+- **Agent** (`/api/agent`): Tool-calling agent execution
+
+## 📦 Setup
+
+1. **Install dependencies:**
    ```bash
-   # Backend
-   cd backend
+   cd orchestrator
    uv sync
-   
-   # Frontend
-   cd ../frontend
-   npm install
    ```
 
-## Running the Application
+2. **Configure environment:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
 
-### Backend (Terminal 1):
+3. **Required environment variables:**
+   - `SECRET_KEY`: JWT secret key for authentication
+   - `DATABASE_URL`: Database connection (SQLite or PostgreSQL)
+   - `DEPLOYMENT_MODE`: `docker` or `kubernetes`
+   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `OPENAI_API_BASE`: API base URL (default: https://api.openai.com/v1)
+   - `OPENAI_MODEL`: Model to use (e.g., gpt-4, gpt-3.5-turbo)
+
+## 🏃 Running the Service
+
+### Standalone Development:
 ```bash
-cd backend
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Frontend (Terminal 2):
+### With Docker Compose:
 ```bash
-cd frontend
-npm run dev
+# From project root
+docker compose up orchestrator
 ```
 
-Visit http://localhost:5173 to use the application.
+API will be available at:
+- Standalone: http://localhost:8000
+- Docker Compose: http://api.localhost
 
-## Architecture
+## 🗄️ Database
 
-- **Backend**: FastAPI with SQLite database, JWT authentication
-- **Frontend**: React with TypeScript, Tailwind CSS, Monaco Editor
-- **Real-time**: WebSocket for chat streaming and file updates
-- **Storage**: User projects stored in `users/{user_id}/projects/{project_id}/`
+The orchestrator uses SQLAlchemy with async support:
 
-## Environment Variables
+- **Development**: SQLite (`sqlite+aiosqlite:///./builder.db`)
+- **Production**: PostgreSQL (`postgresql+asyncpg://...`)
 
-- `SECRET_KEY`: JWT secret key for authentication
-- `DATABASE_URL`: SQLite database connection string
-- `OPENAI_API_KEY`: Your OpenAI API key (or compatible API key)
-- `OPENAI_API_BASE`: OpenAI API base URL (default: https://api.openai.com/v1)
-- `OPENAI_MODEL`: Model to use (e.g., gpt-3.5-turbo, Llama-4-Maverick-17B-128E-Instruct-FP8)
-- `VITE_API_URL`: Backend API URL for frontend
+Database tables are automatically created on startup with retry logic for resilience.
+
+## 🔒 Security Features
+
+- JWT-based authentication with refresh tokens
+- CORS protection with explicit origin whitelisting
+- Security headers (CSP, X-Frame-Options, etc.)
+- Request/response logging
+- Environment-based configuration
+
+## 🐳 Container Orchestration
+
+### Docker Mode
+- Managed by `docker_container_manager.py`
+- Direct Docker API integration
+- Traefik routing configuration
+- Local filesystem storage
+
+### Kubernetes Mode
+- Managed by `k8s_container_manager.py`
+- K8s client for pod lifecycle
+- Ingress-based routing
+- PersistentVolumeClaim storage
+
+## 📚 Project Structure
+
+```
+orchestrator/
+├── app/
+│   ├── agent/              # Agent system with tools
+│   ├── routers/            # API route handlers
+│   ├── services/           # Business logic
+│   ├── auth.py             # Authentication utilities
+│   ├── config.py           # Configuration management
+│   ├── database.py         # Database setup
+│   ├── dev_server_manager.py        # Deployment facade
+│   ├── docker_container_manager.py  # Docker implementation
+│   ├── k8s_container_manager.py     # K8s implementation
+│   ├── k8s_client.py       # Kubernetes client
+│   ├── main.py             # FastAPI application
+│   ├── models.py           # Database models
+│   └── schemas.py          # Pydantic schemas
+├── backend/                # Legacy backend (deprecated)
+├── k8s/                    # Kubernetes configs for this service
+├── template/               # Dev server templates
+├── Dockerfile              # Production image
+├── Dockerfile.devserver    # Dev server image
+├── pyproject.toml          # Python dependencies
+└── README.md               # This file
+```
+
+## 🔗 Integration
+
+This service integrates with:
+- **app/** - Frontend React application
+- **ai-service/** - AI code generation service (optional)
+- **traefik/** - Reverse proxy and routing
+- **k8s/** - Kubernetes deployment manifests
+
+See the [main README](../README.md) for full architecture documentation.

@@ -1,3 +1,7 @@
+# LOCAL DEVELOPMENT ONLY - Traefik for *.localhost routing
+# Production uses NGINX Ingress Controller in Kubernetes
+# See k8s/manifests/app/08-ingress.yaml for production routing
+
 services:
   traefik:
     image: traefik:v3.1

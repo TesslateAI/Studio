@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { AgentChatRequest, AgentChatResponse } from '../types/agent';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -8,6 +9,53 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+/**
+ * Token refresh implementation following best practices:
+ * 1. Attempt to refresh token on 401 errors
+ * 2. Automatically refresh before token expires (proactive)
+ * 3. Only logout if refresh fails
+ */
+
+let isRefreshing = false;
+let refreshSubscribers: ((token: string) => void)[] = [];
+
+const subscribeTokenRefresh = (callback: (token: string) => void) => {
+  refreshSubscribers.push(callback);
+};
+
+const onTokenRefreshed = (token: string) => {
+  refreshSubscribers.forEach((callback) => callback(token));
+  refreshSubscribers = [];
+};
+
+const refreshAccessToken = async (): Promise<string | null> => {
+  const refreshToken = localStorage.getItem('refreshToken');
+  if (!refreshToken) {
+    return null;
+  }
+
+  try {
+    const response = await axios.post(`${API_URL}/api/auth/refresh`, {
+      refresh_token: refreshToken,
+    });
+
+    const { access_token, refresh_token: newRefreshToken } = response.data;
+
+    // Store new tokens
+    localStorage.setItem('token', access_token);
+    if (newRefreshToken) {
+      localStorage.setItem('refreshToken', newRefreshToken);
+    }
+
+    return access_token;
+  } catch (error) {
+    // Refresh failed - clear tokens and logout
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    return null;
+  }
+};
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
@@ -19,22 +67,56 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+  async (error) => {
+    const originalRequest = error.config;
+
+    // If error is 401 and we haven't tried to refresh yet
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        // Wait for the ongoing refresh to complete
+        return new Promise((resolve) => {
+          subscribeTokenRefresh((token: string) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            resolve(api(originalRequest));
+          });
+        });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const newToken = await refreshAccessToken();
+
+        if (newToken) {
+          isRefreshing = false;
+          onTokenRefreshed(newToken);
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        } else {
+          // Refresh failed - redirect to login
+          isRefreshing = false;
+          window.location.href = '/login';
+          return Promise.reject(error);
+        }
+      } catch (refreshError) {
+        isRefreshing = false;
+        window.location.href = '/login';
+        return Promise.reject(refreshError);
+      }
     }
+
     return Promise.reject(error);
   }
 );
 
 export const authApi = {
   login: async (username: string, password: string) => {
-    const formData = new FormData();
+    const formData = new URLSearchParams();
     formData.append('username', username);
     formData.append('password', password);
     const response = await api.post('/api/auth/token', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
     return response.data;
   },
@@ -97,6 +179,10 @@ export const chatApi = {
   },
   getProjectMessages: async (projectId: number) => {
     const response = await api.get(`/api/chat/${projectId}/messages`);
+    return response.data;
+  },
+  sendAgentMessage: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
+    const response = await api.post('/api/chat/agent', request);
     return response.data;
   },
 };

@@ -7,9 +7,13 @@ from ..models import Project, User, ProjectFile, Chat, Message
 from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema
 from ..auth import get_current_active_user
 from ..dev_server_manager import dev_container_manager
+from ..config import get_settings
 import os
 import shutil
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -30,85 +34,59 @@ async def create_project(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    db_project = Project(
-        name=project.name,
-        description=project.description,
-        owner_id=current_user.id
-    )
-    db.add(db_project)
-    await db.commit()
-    await db.refresh(db_project)
-    
-    # Create project directory with absolute paths for reliability
-    project_dir = os.path.abspath(f"users/{current_user.id}/projects/{db_project.id}")
-    
+    """
+    Create a new project. In Kubernetes, the project directory will be created
+    by the init container when the dev environment starts. Here we only save
+    template files to the database for the frontend to display.
+    """
     try:
-        # Ensure parent directories exist
-        os.makedirs(os.path.dirname(project_dir), exist_ok=True)
-        
-        # Get absolute template directory path
+        logger.info(f"[CREATE] Creating project for user {current_user.id}: {project.name}")
+
+        db_project = Project(
+            name=project.name,
+            description=project.description,
+            owner_id=current_user.id
+        )
+        db.add(db_project)
+        await db.commit()
+        await db.refresh(db_project)
+
+        logger.info(f"[CREATE] Project {db_project.id} created in database")
+
+        # Get template directory to read files
         template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "template"))
-        
-        print(f"Creating project {db_project.id} for user {current_user.id}")
-        print(f"Template directory: {template_dir}")
-        print(f"Project directory: {project_dir}")
-        print(f"Template exists: {os.path.exists(template_dir)}")
-        
-        # Verify template directory exists
+
         if not os.path.exists(template_dir):
-            print(f"❌ Template directory not found: {template_dir}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Template directory not found. Please ensure the server is properly configured."
-            )
-        
-        # Remove project directory if it exists to start fresh
-        if os.path.exists(project_dir):
-            print(f"Removing existing project directory: {project_dir}")
-            shutil.rmtree(project_dir)
-        
-        # Copy template to project directory
-        print(f"Copying template from {template_dir} to {project_dir}")
-        shutil.copytree(template_dir, project_dir)
-        
-        # Verify the copy was successful
-        required_files = ['package.json', 'index.html', 'vite.config.js']
-        missing_files = []
-        for required_file in required_files:
-            file_path = os.path.join(project_dir, required_file)
-            if not os.path.exists(file_path):
-                missing_files.append(required_file)
-        
-        if missing_files:
-            print(f"Missing required files after template copy: {missing_files}")
+            logger.error(f"[CREATE] Template directory not found: {template_dir}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Template copy incomplete. Missing files: {', '.join(missing_files)}"
+                detail=f"Template directory not found. Server configuration error."
             )
-        
-        print(f"Template successfully copied to {project_dir}")
-        
-        # Save template files to database for tracking and editing
+
+        logger.info(f"[CREATE] Reading template files from: {template_dir}")
+
+        # Save template files to database for frontend display and editing
+        # The actual files will be created by the K8s init container from the backend image
         files_saved = 0
-        for root, dirs, files in os.walk(project_dir):
-            # Skip node_modules, .git, dist, build directories for database storage
+        for root, dirs, files in os.walk(template_dir):
+            # Skip node_modules, .git, dist, build directories
             dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
-            
+
             for file in files:
                 # Skip system files, locks, and binary files
-                if (file.startswith('.') or 
-                    file.endswith(('.lock', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')) or 
+                if (file.startswith('.') or
+                    file.endswith(('.lock', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')) or
                     file in ['package-lock.json']):
                     continue
-                    
+
                 file_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_path, project_dir).replace('\\', '/')
-                
+                relative_path = os.path.relpath(file_path, template_dir).replace('\\', '/')
+
                 try:
-                    # Read file content with proper encoding handling
+                    # Read file content
                     with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                         content = f.read()
-                    
+
                     # Save to database
                     db_file = ProjectFile(
                         project_id=db_project.id,
@@ -117,55 +95,37 @@ async def create_project(
                     )
                     db.add(db_file)
                     files_saved += 1
-                    
+
                 except Exception as e:
-                    print(f"Warning: Could not read file {relative_path}: {e}")
+                    logger.warning(f"[CREATE] Could not read template file {relative_path}: {e}")
                     continue
-        
-        # Commit all database changes
+
+        # Commit database changes
         await db.commit()
-        print(f"Saved {files_saved} template files to database for project {db_project.id}")
-        
-        # Final verification that project is ready
-        package_json_path = os.path.join(project_dir, 'package.json')
-        node_modules_path = os.path.join(project_dir, 'node_modules')
-        
-        if not os.path.exists(package_json_path):
-            raise HTTPException(
-                status_code=500,
-                detail="Project creation failed: package.json not found after template copy"
-            )
-        
-        if not os.path.exists(node_modules_path):
-            print(f"node_modules not found - will be installed when dev server starts")
-        else:
-            print(f"node_modules found in template")
-        
-        print(f"Project {db_project.id} created successfully!")
-        
+        logger.info(f"[CREATE] Saved {files_saved} template files to database for project {db_project.id}")
+        logger.info(f"[CREATE] Project {db_project.id} created successfully - files will be created by K8s init container")
+
+        return db_project
+
     except HTTPException:
-        # Re-raise HTTP exceptions
+        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        print(f"Critical error during project creation: {e}")
-        import traceback
-        traceback.print_exc()
-        
-        # Clean up failed project
+        logger.error(f"[CREATE] Critical error during project creation: {e}", exc_info=True)
+
+        # Clean up failed project from database
         try:
-            if os.path.exists(project_dir):
-                shutil.rmtree(project_dir)
-            await db.delete(db_project)
-            await db.commit()
+            if 'db_project' in locals():
+                await db.delete(db_project)
+                await db.commit()
+                logger.info(f"[CREATE] Cleaned up failed project from database")
         except Exception as cleanup_error:
-            print(f"Error during cleanup: {cleanup_error}")
-        
+            logger.error(f"[CREATE] Error during cleanup: {cleanup_error}", exc_info=True)
+
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create project: {str(e)}"
         )
-    
-    return db_project
 
 @router.get("/{project_id}", response_model=ProjectSchema)
 async def get_project(
@@ -184,13 +144,58 @@ async def get_project(
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
+@router.delete("/{project_id}")
+async def delete_project(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Stop any running dev container for this project first
+    await dev_container_manager.stop_container(str(project_id), current_user.id)
+
+    # Delete project directory (Docker mode only - K8s uses PVCs)
+    settings = get_settings()
+    if settings.deployment_mode == "docker":
+        project_dir = f"users/{current_user.id}/{project_id}"
+        if os.path.exists(project_dir):
+            try:
+                shutil.rmtree(project_dir)
+            except PermissionError:
+                # On Windows, wait a moment and try again
+                await asyncio.sleep(1)
+                try:
+                    shutil.rmtree(project_dir)
+                except PermissionError as e:
+                    raise HTTPException(status_code=500, detail=f"Could not delete project directory: {str(e)}")
+
+    await db.delete(project)
+    await db.commit()
+    return {"message": "Project deleted successfully"}
 
 @router.get("/{project_id}/files", response_model=List[ProjectFileSchema])
 async def get_project_files(
     project_id: int,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    from_pod: bool = False  # Optional query param to force reading from pod
 ):
+    """
+    Get project files from database (default) or from running pod (if from_pod=true).
+
+    Strategy:
+    - Default: Return files from database (fast, always available)
+    - If from_pod=true: Try to read from pod, fall back to DB if pod unavailable
+    """
     # Verify project ownership
     result = await db.execute(
         select(Project).where(
@@ -201,12 +206,65 @@ async def get_project_files(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Get files
+
+    # If from_pod requested, try to read from running container
+    if from_pod:
+        try:
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+
+            # Check if pod is ready
+            readiness = await k8s_manager.is_pod_ready(current_user.id, str(project_id))
+
+            if readiness["ready"]:
+                logger.info(f"[FILES] Reading files from pod for project {project_id}")
+
+                # Get list of files from pod
+                pod_files = await k8s_manager.list_files_in_pod(
+                    current_user.id,
+                    str(project_id),
+                    directory="."
+                )
+
+                # Read content for each file
+                files_with_content = []
+                for pod_file in pod_files:
+                    if pod_file["type"] == "file":
+                        try:
+                            content = await k8s_manager.read_file_from_pod(
+                                current_user.id,
+                                str(project_id),
+                                pod_file["path"]
+                            )
+
+                            if content is not None:
+                                files_with_content.append(ProjectFileSchema(
+                                    id=0,  # Temporary ID
+                                    project_id=project_id,
+                                    file_path=pod_file["path"],
+                                    content=content,
+                                    created_at=None,
+                                    updated_at=None
+                                ))
+                        except Exception as e:
+                            logger.warning(f"[FILES] Failed to read {pod_file['path']}: {e}")
+                            continue
+
+                logger.info(f"[FILES] ✅ Read {len(files_with_content)} files from pod")
+                return files_with_content
+
+            else:
+                logger.info(f"[FILES] Pod not ready, falling back to database")
+
+        except Exception as e:
+            logger.warning(f"[FILES] Failed to read from pod: {e}, falling back to database")
+
+    # Default: Get files from database
     result = await db.execute(
         select(ProjectFile).where(ProjectFile.project_id == project_id)
     )
     files = result.scalars().all()
+    logger.info(f"[FILES] Returning {len(files)} files from database")
     return files
 
 @router.post("/{project_id}/start-dev-container")
@@ -215,6 +273,9 @@ async def start_dev_container(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """Start a Kubernetes development environment for the project."""
+    logger.info(f"[START-CONTAINER] Request to start dev container for project {project_id}, user {current_user.id}")
+
     # Verify project ownership
     result = await db.execute(
         select(Project).where(
@@ -224,15 +285,20 @@ async def start_dev_container(
     )
     project = result.scalar_one_or_none()
     if not project:
+        logger.warning(f"[START-CONTAINER] Project {project_id} not found for user {current_user.id}")
         raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Start dev container
-    project_path = f"users/{current_user.id}/projects/{project_id}"
+
+    # Start dev container (path is for metadata only in K8s mode)
+    project_path = f"users/{current_user.id}/{project_id}"
+
     try:
-        port = await dev_container_manager.start_container(project_path, str(project_id), current_user.id)
-        return {"url": f"http://127.0.0.1:{port}", "port": port}
+        logger.info(f"[START-CONTAINER] Starting container for project {project_id}...")
+        url = await dev_container_manager.start_container(project_path, str(project_id), current_user.id)
+        logger.info(f"[START-CONTAINER] ✅ Container started successfully: {url}")
+        return {"url": url, "hostname": url}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"[START-CONTAINER] ❌ Failed to start container: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to start development environment: {str(e)}")
 
 @router.post("/{project_id}/restart-dev-container")
 async def restart_dev_container(
@@ -252,7 +318,7 @@ async def restart_dev_container(
         raise HTTPException(status_code=404, detail="Project not found")
     
     # Restart dev container
-    project_path = f"users/{current_user.id}/projects/{project_id}"
+    project_path = f"users/{current_user.id}/{project_id}"
     try:
         hostname = await dev_container_manager.restart_container(project_path, str(project_id), current_user.id)
         return {"url": hostname, "hostname": hostname, "message": "Dev container restarted successfully"}
@@ -290,6 +356,15 @@ async def get_dev_server_url(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """
+    Get or create the development server URL for a project.
+
+    Best practice implementation:
+    1. Check if container exists and is healthy
+    2. If not, create it
+    3. Wait for readiness before returning URL
+    4. Return detailed status for better UX
+    """
     # Verify project ownership
     result = await db.execute(
         select(Project).where(
@@ -299,143 +374,66 @@ async def get_dev_server_url(
     )
     project = result.scalar_one_or_none()
     if not project:
+        logger.warning(f"Project {project_id} not found for user {current_user.id}")
         raise HTTPException(status_code=404, detail="Project not found")
-    
-    url = dev_container_manager.get_container_url(str(project_id), current_user.id)
-    if url:
-        print(f"Dev container already running for user {current_user.id}, project {project_id}: {url}")
-        return {"url": url}
-    else:
-        # Try to start the container
-        project_path = os.path.abspath(f"users/{current_user.id}/projects/{project_id}")
-        print(f"Starting dev container for user {current_user.id}, project {project_id} at {project_path}")
-        
-        # Check if project has required files, if not, fix it by copying template
-        required_files = ["package.json", "vite.config.js", "index.html"]
-        missing_files = []
-        
-        for required_file in required_files:
-            file_path = os.path.join(project_path, required_file)
-            if not os.path.exists(file_path):
-                missing_files.append(required_file)
-        
-        if missing_files:
-            print(f"Project {project_id} missing required files: {missing_files}")
-            print(f"Fixing project by copying template...")
-            
-            try:
-                # Get template directory
-                template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "template"))
-                
-                if not os.path.exists(template_dir):
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Template directory not found. Cannot fix broken project."
-                    )
-                
-                # Ensure project directory exists
-                os.makedirs(project_path, exist_ok=True)
-                
-                # Copy template files to project (preserving any existing files)
-                for root, dirs, files in os.walk(template_dir):
-                    # Skip node_modules for now - will be installed by container build
-                    if 'node_modules' in root:
-                        continue
-                        
-                    rel_dir = os.path.relpath(root, template_dir)
-                    dest_dir = os.path.join(project_path, rel_dir) if rel_dir != '.' else project_path
-                    os.makedirs(dest_dir, exist_ok=True)
-                    
-                    for file in files:
-                        src_file = os.path.join(root, file)
-                        dest_file = os.path.join(dest_dir, file)
-                        
-                        # Only copy if file doesn't exist or is a required file
-                        if not os.path.exists(dest_file) or file in required_files:
-                            shutil.copy2(src_file, dest_file)
-                
-                # Verify the fix worked
-                still_missing = []
-                for required_file in required_files:
-                    file_path = os.path.join(project_path, required_file)
-                    if not os.path.exists(file_path):
-                        still_missing.append(required_file)
-                
-                if still_missing:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Failed to fix project. Still missing: {', '.join(still_missing)}"
-                    )
-                
-                print(f"Successfully fixed project {project_id}")
-                
-                # Save copied files to database for tracking
-                files_saved = 0
-                for root, dirs, files in os.walk(project_path):
-                    # Skip node_modules, .git, dist, build directories for database storage
-                    dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
-                    
-                    for file in files:
-                        # Skip system files, locks, and binary files
-                        if (file.startswith('.') or 
-                            file.endswith(('.lock', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')) or 
-                            file in ['package-lock.json']):
-                            continue
-                            
-                        file_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(file_path, project_path).replace('\\', '/')
-                        
-                        try:
-                            # Check if file already exists in database
-                            existing_result = await db.execute(
-                                select(ProjectFile).where(
-                                    ProjectFile.project_id == project_id,
-                                    ProjectFile.file_path == relative_path
-                                )
-                            )
-                            existing_file = existing_result.scalar_one_or_none()
-                            
-                            if not existing_file:
-                                # Read file content with proper encoding handling
-                                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                                    content = f.read()
-                                
-                                # Save to database
-                                db_file = ProjectFile(
-                                    project_id=project_id,
-                                    file_path=relative_path,
-                                    content=content
-                                )
-                                db.add(db_file)
-                                files_saved += 1
-                                
-                        except Exception as e:
-                            print(f"Warning: Could not save file {relative_path} to database: {e}")
-                            continue
-                
-                if files_saved > 0:
-                    await db.commit()
-                    print(f"Saved {files_saved} new files to database for project {project_id}")
-                        
-            except HTTPException:
-                raise
-            except Exception as e:
-                print(f"Error fixing project: {e}")
-                import traceback
-                traceback.print_exc()
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Failed to fix broken project: {str(e)}"
-                )
-        
-        try:
-            url = await dev_container_manager.start_container(project_path, str(project_id), current_user.id)
-            return {"url": url}
-        except Exception as e:
-            print(f"[ERROR] Dev container startup error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Dev container failed to start: {str(e)}")
+
+    logger.info(f"[DEV-URL] Checking dev environment for user {current_user.id}, project {project_id}")
+
+    try:
+        # Import k8s_client here to avoid circular imports
+        from ..k8s_client import get_k8s_manager
+
+        # Check health of existing environment
+        health = await get_k8s_manager().check_dev_environment_health(current_user.id, str(project_id))
+
+        if health["exists"] and health["ready"]:
+            logger.info(f"[DEV-URL] ✅ Environment exists and is ready: {health['url']}")
+
+            # Track activity when user accesses preview
+            dev_container_manager.track_activity(current_user.id, str(project_id))
+
+            return {
+                "url": health["url"],
+                "status": "ready",
+                "message": "Development environment is ready"
+            }
+
+        if health["exists"] and not health["ready"]:
+            logger.info(f"[DEV-URL] ⏳ Environment exists but not ready yet")
+            return {
+                "url": None,
+                "status": "starting",
+                "message": health["message"],
+                "replicas": health.get("replicas"),
+                "hint": "Please wait a moment and try again"
+            }
+
+        # Container doesn't exist - create it
+        logger.info(f"[DEV-URL] Container does not exist, creating new environment...")
+        project_path = f"users/{current_user.id}/{project_id}"
+
+        url = await dev_container_manager.start_container(project_path, str(project_id), current_user.id)
+        logger.info(f"[DEV-URL] ✅ Dev container started successfully: {url}")
+
+        return {
+            "url": url,
+            "status": "ready",
+            "message": "Development environment created successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"[DEV-URL] ❌ Failed to get/create dev environment", exc_info=True)
+
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Failed to start development environment",
+                "message": str(e),
+                "user_id": current_user.id,
+                "project_id": project_id,
+                "hint": "Check Kubernetes pod logs: kubectl logs -l app=dev-user{user_id}-project{project_id} -n tesslate"
+            }
+        )
 
 @router.get("/{project_id}/container-status")
 async def get_container_status(
@@ -443,6 +441,12 @@ async def get_container_status(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """
+    Get detailed status of the development container/pod.
+
+    Returns readiness, phase, and detailed status information.
+    Frontend should poll this endpoint to know when pod is ready.
+    """
     # Verify project ownership
     result = await db.execute(
         select(Project).where(
@@ -453,9 +457,49 @@ async def get_container_status(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
-    status = dev_container_manager.get_container_status(str(project_id), current_user.id)
-    return status
+
+    try:
+        # Get pod readiness status from K8s
+        from ..k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+
+        readiness = await k8s_manager.is_pod_ready(
+            current_user.id,
+            str(project_id),
+            check_responsive=True
+        )
+
+        # Get full environment status
+        env_status = await k8s_manager.get_dev_environment_status(
+            current_user.id,
+            str(project_id)
+        )
+
+        return {
+            "status": "ready" if readiness["ready"] else "starting",
+            "ready": readiness["ready"],
+            "phase": readiness["phase"],
+            "message": readiness["message"],
+            "responsive": readiness.get("responsive"),
+            "conditions": readiness.get("conditions", []),
+            "pod_name": readiness.get("pod_name"),
+            "url": env_status.get("url"),
+            "deployment": env_status.get("deployment_ready"),
+            "replicas": env_status.get("replicas"),
+            "project_id": project_id,
+            "user_id": current_user.id
+        }
+
+    except Exception as e:
+        logger.error(f"[STATUS] Failed to get container status: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "ready": False,
+            "phase": "Unknown",
+            "message": f"Failed to get status: {str(e)}",
+            "project_id": project_id,
+            "user_id": current_user.id
+        }
 
 @router.post("/{project_id}/files/save")
 async def save_project_file(
@@ -464,6 +508,12 @@ async def save_project_file(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """
+    Save a file to the user's dev container.
+
+    Architecture: Backend is stateless and doesn't store files.
+    Instead, it writes files directly to the dev container pod via K8s API.
+    """
     # Verify project ownership
     result = await db.execute(
         select(Project).where(
@@ -474,28 +524,40 @@ async def save_project_file(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     file_path = file_data.get('file_path')
     content = file_data.get('content')
-    
+
     if not file_path or content is None:
         raise HTTPException(status_code=400, detail="file_path and content are required")
-    
-    # Write to disk (for container to see changes)
-    project_dir = os.path.abspath(f"users/{current_user.id}/projects/{project_id}")
-    full_file_path = os.path.join(project_dir, file_path)
-    
+
     try:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(full_file_path), exist_ok=True)
-        
-        # Write file to disk
-        with open(full_file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        
-        print(f"[FILE] Saved {file_path} to disk ({len(content)} chars)")
-        
-        # Update database
+        # 1. Write file directly to dev container via Kubernetes API
+        from ..k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+
+        try:
+            success = await k8s_manager.write_file_to_pod(
+                user_id=current_user.id,
+                project_id=str(project_id),
+                file_path=file_path,
+                content=content
+            )
+
+            if not success:
+                raise RuntimeError("Failed to write file to pod")
+
+            logger.info(f"[FILE] ✅ Wrote {file_path} to dev container for user {current_user.id}, project {project_id}")
+
+            # Track activity to prevent idle timeout
+            dev_container_manager.track_activity(current_user.id, str(project_id))
+
+        except Exception as k8s_error:
+            logger.warning(f"[FILE] ⚠️ Failed to write to pod: {k8s_error}")
+            # Continue to save in DB even if pod write fails
+            # This ensures data isn't lost if pod is temporarily unavailable
+
+        # 2. Update database record (for version history / backup)
         result = await db.execute(
             select(ProjectFile).where(
                 ProjectFile.project_id == project_id,
@@ -503,7 +565,7 @@ async def save_project_file(
             )
         )
         existing_file = result.scalar_one_or_none()
-        
+
         if existing_file:
             existing_file.content = content
         else:
@@ -513,13 +575,25 @@ async def save_project_file(
                 content=content
             )
             db.add(new_file)
-        
+
+        # Update project's updated_at timestamp
+        from datetime import datetime
+        project.updated_at = datetime.utcnow()
+
         await db.commit()
-        
-        return {"message": "File saved successfully", "file_path": file_path}
-        
+
+        logger.info(f"[FILE] Saved {file_path} to database as backup")
+
+        return {
+            "message": "File saved successfully",
+            "file_path": file_path,
+            "method": "kubernetes_api"
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[ERROR] Failed to save file {file_path}: {e}")
+        logger.error(f"[ERROR] Failed to save file {file_path}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
 @router.get("/containers/all")
@@ -591,7 +665,7 @@ async def delete_project(
         print(f"[DELETE] Deleted project from database")
         
         # 5. Delete filesystem directory
-        project_dir = f"users/{current_user.id}/projects/{project_id}"
+        project_dir = f"users/{current_user.id}/{project_id}"
         if os.path.exists(project_dir):
             shutil.rmtree(project_dir)
             print(f"[DELETE] Deleted filesystem directory: {project_dir}")

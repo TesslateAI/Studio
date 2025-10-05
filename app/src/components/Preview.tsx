@@ -23,7 +23,20 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     try {
       setLoading(true);
       const response = await projectsApi.getDevServerUrl(projectId);
-      setDevServerUrl(response.url);
+
+      // Add JWT token to URL for NGINX auth-url verification
+      // The NGINX ingress controller will extract the Authorization header
+      // and forward it to the auth-url endpoint
+      const token = localStorage.getItem('token');
+      let authenticatedUrl = response.url;
+
+      if (token) {
+        // Store token in sessionStorage for iframe to use
+        // The iframe will be loaded with credentials to pass cookies/headers
+        sessionStorage.setItem(`preview_token_${projectId}`, token);
+      }
+
+      setDevServerUrl(authenticatedUrl);
     } catch (error) {
       console.error('Failed to start dev server:', error);
       toast.error('Failed to start preview server');
@@ -63,6 +76,10 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     const container = document.getElementById('preview-container');
     if (!container || !devServerUrl) return;
 
+    // Get token for authenticated iframe loading
+    const token = localStorage.getItem('token');
+    const authenticatedUrl = token ? `${devServerUrl}?auth_token=${encodeURIComponent(token)}` : devServerUrl;
+
     container.innerHTML = `
       <div class="h-full flex flex-col rounded-t-3xl overflow-hidden bg-gray-900/50 backdrop-blur-sm">
         <div class="bg-gradient-to-r from-gray-800/80 to-gray-700/60 border-b border-gray-700/30 p-4 flex items-center justify-between rounded-t-3xl shadow-lg">
@@ -94,7 +111,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
               <div class="absolute top-1 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl shadow-lg transition-all duration-300 ease-in-out ${
                 activeTab === 'preview' ? 'left-1 w-20' : 'left-[85px] w-16'
               }"></div>
-              
+
               <div class="relative flex">
                 <button id="tab-preview" class="relative z-10 px-4 py-2 flex items-center gap-2 rounded-xl font-medium transition-all duration-300 text-sm ${
                   activeTab === 'preview' ? 'text-white' : 'text-gray-400 hover:text-gray-200'
@@ -130,7 +147,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
         <div class="flex-1 p-2 bg-gray-800/20">
           <iframe
             id="preview-iframe"
-            src="${devServerUrl}"
+            src="${authenticatedUrl}"
             class="w-full h-full bg-white rounded-2xl shadow-2xl border border-gray-700/30"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           ></iframe>

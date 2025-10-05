@@ -19,6 +19,9 @@ backend/
 # User content
 users/
 
+# Template node_modules (will be copied separately from builder stage)
+template/node_modules/
+
 # IDE
 .vscode/
 .idea/

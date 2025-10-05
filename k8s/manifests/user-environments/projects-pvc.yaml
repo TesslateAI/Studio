@@ -1,0 +1,35 @@
+# PersistentVolumeClaim for User Development Environment Projects
+# This PVC stores all user project files in the user-environments namespace
+#
+# IMPORTANT NOTES:
+# - DigitalOcean block storage only supports ReadWriteOnce (RWO), not ReadWriteMany (RWX)
+# - With RWO, all pods mounting this volume must be on the same node
+# - Each user environment uses a unique subPath for isolation: users/{user_id}/{project_id}
+# - For production with multiple nodes, consider:
+#   1. Using DigitalOcean Managed NFS for ReadWriteMany support
+#   2. Using separate PVCs per user environment
+#   3. Using object storage (S3/Spaces) for shared file access
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tesslate-projects-pvc
+  namespace: tesslate-user-environments
+  labels:
+    app: tesslate
+    component: user-storage
+    tier: user-workloads
+spec:
+  # Use DigitalOcean's default block storage class
+  storageClassName: do-block-storage
+
+  # ReadWriteOnce - volume can be mounted read-write by pods on a single node
+  # All user environment pods will need to be scheduled on the same node
+  accessModes:
+    - ReadWriteOnce
+
+  resources:
+    requests:
+      storage: 10Gi  # Matches resource quota limit
+
+  # No selector - let Kubernetes dynamically provision the volume

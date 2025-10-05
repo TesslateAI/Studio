@@ -19,6 +19,12 @@ export default function Login() {
     try {
       const response = await authApi.login(formData.username, formData.password);
       localStorage.setItem('token', response.access_token);
+
+      // Store refresh token for automatic token renewal
+      if (response.refresh_token) {
+        localStorage.setItem('refreshToken', response.refresh_token);
+      }
+
       toast.success('Logged in successfully!');
       navigate('/dashboard');
     } catch (error: any) {

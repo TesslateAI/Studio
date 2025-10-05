@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: true,
-    allowedHosts: ['your-domain.com', 'localhost', 'host.docker.internal', '.localhost'],
+    allowedHosts: ['your-domain.com', 'studio-test.tesslate.com', 'localhost', 'host.docker.internal', '.localhost'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

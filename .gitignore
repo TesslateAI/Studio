@@ -130,6 +130,17 @@ desktop.ini
 ~*
 _nul
 
+# Kubernetes deployment artifacts
+*.tar
+registry.conf
+registry.key
+registry.crt
+**/docr-secret.yaml
+k8s/manifests/**/secrets.yaml
+k8s/manifests/security/app-secrets.yaml
+k8s/manifests/database/postgres-secret.yaml
+k8s/.env
+
 # Claude AI
 .claude/
 

@@ -1,0 +1,54 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tesslate-ingress-traefik
+  namespace: tesslate
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: tesslate-strip-api@kubernetescrd
+spec:
+  rules:
+  - host: tesslate.local
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-backend-service
+            port:
+              number: 8005
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-frontend-service
+            port:
+              number: 80
+  - host: localhost
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-backend-service
+            port:
+              number: 8005
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-frontend-service
+            port:
+              number: 80
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-api
+  namespace: tesslate
+spec:
+  stripPrefix:
+    prefixes:
+      - /api

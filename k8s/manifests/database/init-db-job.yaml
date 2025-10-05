@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tesslate-init-db
+  namespace: tesslate
+  labels:
+    app: tesslate-init-db
+spec:
+  # Keep successful pods for 1 hour for debugging
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: tesslate-init-db
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: docr-secret
+      containers:
+        - name: init-db
+          image: registry.digitalocean.com/finetune/tesslate-backend:latest
+          command:
+            - python
+            - /app/k8s/scripts/deployment/init-database.py
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: DATABASE_URL
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"

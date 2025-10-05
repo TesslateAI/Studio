@@ -4,7 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
 from ..models import User, Chat, Message, Project, ProjectFile
-from ..schemas import Chat as ChatSchema, Message as MessageSchema, MessageCreate
+from ..schemas import (
+    Chat as ChatSchema, Message as MessageSchema, MessageCreate,
+    AgentChatRequest, AgentChatResponse, AgentStepResponse
+)
 from ..auth import get_current_active_user
 from ..config import get_settings
 from openai import AsyncOpenAI
@@ -13,9 +16,15 @@ import os
 import aiofiles
 import re
 import asyncio
+import logging
+
+# Agent imports
+from ..agent import UniversalAgent, get_tool_registry
+from ..agent.models import get_model_adapter_from_settings
 
 settings = get_settings()
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/", response_model=List[ChatSchema])
 async def get_chats(
@@ -86,6 +95,153 @@ async def get_project_messages(
     messages = messages_result.scalars().all()
     return messages
 
+
+@router.post("/agent", response_model=AgentChatResponse)
+async def agent_chat(
+    request: AgentChatRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Agent mode chat - uses Universal Agent with tool calling.
+
+    The agent can read/write files, execute commands, and manage the project
+    autonomously using any language model (Cerebras, GPT, Claude, etc.)
+
+    This is an alternative to the streaming WebSocket chat that gives the AI
+    more autonomy and tool access.
+
+    Args:
+        request: Agent chat request with project_id and message
+        current_user: Authenticated user
+        db: Database session
+
+    Returns:
+        Agent execution result with steps and final response
+    """
+    try:
+        # Verify project ownership
+        result = await db.execute(
+            select(Project).where(
+                Project.id == request.project_id,
+                Project.owner_id == current_user.id
+            )
+        )
+        project = result.scalar_one_or_none()
+
+        if not project:
+            raise HTTPException(
+                status_code=404,
+                detail="Project not found or access denied"
+            )
+
+        logger.info(
+            f"Agent chat started - user: {current_user.id}, "
+            f"project: {request.project_id}, message: {request.message[:100]}..."
+        )
+
+        # Create model adapter
+        model_adapter = get_model_adapter_from_settings(settings)
+
+        # Create agent
+        agent = UniversalAgent(
+            model=model_adapter,
+            tool_registry=get_tool_registry(),
+            max_iterations=request.max_iterations,
+            minimal_prompts=request.minimal_prompts
+        )
+
+        # Prepare context for tool execution
+        context = {
+            "user_id": current_user.id,
+            "project_id": request.project_id,
+            "db": db
+        }
+
+        # Get project context
+        project_context = {
+            "project_name": project.name,
+            "project_description": project.description
+        }
+
+        # Run agent
+        agent_result = await agent.run(
+            user_request=request.message,
+            context=context,
+            project_context=project_context
+        )
+
+        # Convert steps to response format
+        steps_response = [
+            AgentStepResponse(
+                iteration=step.iteration,
+                thought=step.thought,
+                tool_calls=[tc.name for tc in step.tool_calls],
+                response_text=step.response_text,
+                is_complete=step.is_complete,
+                timestamp=step.timestamp.isoformat()
+            )
+            for step in agent_result.steps
+        ]
+
+        # Save to chat history
+        # Get or create chat for this project
+        chat_result = await db.execute(
+            select(Chat).where(
+                Chat.user_id == current_user.id,
+                Chat.project_id == request.project_id
+            )
+        )
+        chat = chat_result.scalar_one_or_none()
+
+        if not chat:
+            chat = Chat(user_id=current_user.id, project_id=request.project_id)
+            db.add(chat)
+            await db.commit()
+            await db.refresh(chat)
+
+        # Save user message
+        user_message = Message(
+            chat_id=chat.id,
+            role="user",
+            content=request.message
+        )
+        db.add(user_message)
+
+        # Save agent response
+        assistant_message = Message(
+            chat_id=chat.id,
+            role="assistant",
+            content=f"[Agent Mode - {agent_result.tool_calls_made} tool calls]\n\n{agent_result.final_response}"
+        )
+        db.add(assistant_message)
+        await db.commit()
+
+        logger.info(
+            f"Agent chat completed - success: {agent_result.success}, "
+            f"iterations: {agent_result.iterations}, tool_calls: {agent_result.tool_calls_made}"
+        )
+
+        return AgentChatResponse(
+            success=agent_result.success,
+            iterations=agent_result.iterations,
+            final_response=agent_result.final_response,
+            tool_calls_made=agent_result.tool_calls_made,
+            completion_reason=agent_result.completion_reason,
+            steps=steps_response,
+            error=agent_result.error
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Agent chat error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent execution failed: {str(e)}"
+        )
+
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[int, WebSocket] = {}
@@ -146,51 +302,60 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
 async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocket: WebSocket):
     message_content = data.get("message")
     project_id = data.get("project_id")
-    
-    # Get or create chat for this user and project
-    if project_id:
-        result = await db.execute(
-            select(Chat).where(
-                Chat.user_id == user.id,
-                Chat.project_id == project_id
+
+    try:
+        # Get or create chat for this user and project
+        if project_id:
+            result = await db.execute(
+                select(Chat).where(
+                    Chat.user_id == user.id,
+                    Chat.project_id == project_id
+                )
             )
+            chat = result.scalar_one_or_none()
+
+            if not chat:
+                # Create new chat for this project
+                chat = Chat(user_id=user.id, project_id=project_id)
+                db.add(chat)
+                await db.commit()
+                await db.refresh(chat)
+
+            chat_id = chat.id
+        else:
+            # Fallback to chat_id from frontend (for backwards compatibility)
+            chat_id = data.get("chat_id", 1)
+
+        # Save user message
+        user_message = Message(
+            chat_id=chat_id,
+            role="user",
+            content=message_content
         )
-        chat = result.scalar_one_or_none()
-        
-        if not chat:
-            # Create new chat for this project
-            chat = Chat(user_id=user.id, project_id=project_id)
-            db.add(chat)
-            await db.commit()
-            await db.refresh(chat)
-        
-        chat_id = chat.id
-    else:
-        # Fallback to chat_id from frontend (for backwards compatibility)
-        chat_id = data.get("chat_id", 1)
-    
-    # Save user message
-    user_message = Message(
-        chat_id=chat_id,
-        role="user",
-        content=message_content
-    )
-    db.add(user_message)
-    await db.commit()
-    
-    # Get project context if available
-    context = ""
-    has_existing_files = False
-    if project_id:
-        result = await db.execute(
-            select(ProjectFile).where(ProjectFile.project_id == project_id)
-        )
-        files = result.scalars().all()
-        if files:
-            has_existing_files = True
-            context = "\n\nProject files:\n"
-            for file in files:
-                context += f"\nFile: {file.file_path}\n{file.content}\n"
+        db.add(user_message)
+        await db.commit()
+
+        # Get project context if available
+        context = ""
+        has_existing_files = False
+        if project_id:
+            result = await db.execute(
+                select(ProjectFile).where(ProjectFile.project_id == project_id)
+            )
+            files = result.scalars().all()
+            if files:
+                has_existing_files = True
+                context = "\n\nProject files:\n"
+                for file in files:
+                    context += f"\nFile: {file.file_path}\n{file.content}\n"
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Database error in initial chat setup: {e}", exc_info=True)
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Database error: {str(e)}"
+        })
+        return
     
     # WebSocket is already connected if we got here
     
@@ -272,16 +437,56 @@ You MUST follow these rules:
         if project_id:
             code_blocks = extract_complete_code_blocks(full_response)
             print(f"Processing {len(code_blocks)} files from completed response")
-            
+
+            package_json_modified = False
+
             for i, (file_path, code) in enumerate(code_blocks):
                 if file_path not in processed_files:
                     print(f"📁 Saving file {i+1}/{len(code_blocks)}: {file_path}")
                     processed_files.add(file_path)
                     await save_file(file_path, code, project_id, user.id, db, websocket)
-                    
+
+                    # Track if package.json was modified
+                    if file_path == "package.json":
+                        package_json_modified = True
+
                     # Small delay between files to prevent overwhelming dev server
                     if i < len(code_blocks) - 1:  # Don't delay after the last file
                         await asyncio.sleep(0.2)
+
+            # Run npm install if package.json was modified
+            if package_json_modified:
+                print("[NPM] package.json was modified, running npm install...")
+                try:
+                    from ..k8s_client import get_k8s_manager
+                    k8s_manager = get_k8s_manager()
+
+                    await websocket.send_json({
+                        "type": "status",
+                        "content": "📦 Installing dependencies..."
+                    })
+
+                    output = await k8s_manager.execute_command_in_pod(
+                        user_id=user.id,
+                        project_id=str(project_id),
+                        command=["npm", "install"],
+                        timeout=180  # 3 minutes for npm install
+                    )
+
+                    print(f"[NPM] ✅ npm install completed")
+                    print(f"[NPM] Output: {output[:500]}")  # Log first 500 chars
+
+                    await websocket.send_json({
+                        "type": "status",
+                        "content": "✅ Dependencies installed successfully"
+                    })
+
+                except Exception as e:
+                    print(f"[NPM] ⚠️ Failed to run npm install: {e}")
+                    await websocket.send_json({
+                        "type": "warning",
+                        "content": f"⚠️ Failed to install dependencies: {str(e)}"
+                    })
                 
     except Exception as e:
         print(f"Error during AI stream: {e}")
@@ -292,14 +497,19 @@ You MUST follow these rules:
         return
     
     # Save assistant message
-    assistant_message = Message(
-        chat_id=chat_id,
-        role="assistant",
-        content=full_response
-    )
-    db.add(assistant_message)
-    await db.commit()
-    
+    try:
+        assistant_message = Message(
+            chat_id=chat_id,
+            role="assistant",
+            content=full_response
+        )
+        db.add(assistant_message)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Database error saving assistant message: {e}", exc_info=True)
+        # Continue anyway - the AI response was already sent to the user
+
     # Send completion message
     try:
         await websocket.send_json({
@@ -355,49 +565,99 @@ def extract_complete_code_blocks(content: str):
     return matches
 
 async def save_file(file_path: str, code: str, project_id: int, user_id: int, db: AsyncSession, websocket: WebSocket):
-    """Save file to database and filesystem, then notify frontend"""
+    """
+    Save file to database and dev container (Docker or K8s).
+
+    Deployment-aware file saving:
+    - Docker mode: Writes to local filesystem in users/{user_id}/projects/{project_id}/
+    - Kubernetes mode: Writes to pod via K8s API
+
+    Both modes trigger hot module reload for instant preview updates.
+    """
     print(f"💾 Saving file: {file_path}")
+    settings = get_settings()
+
     try:
-        # Save to database
-        result = await db.execute(
-            select(ProjectFile).where(
-                ProjectFile.project_id == project_id,
-                ProjectFile.file_path == file_path
+        # 1. Save to database (for backup/version history)
+        try:
+            result = await db.execute(
+                select(ProjectFile).where(
+                    ProjectFile.project_id == project_id,
+                    ProjectFile.file_path == file_path
+                )
             )
-        )
-        db_file = result.scalar_one_or_none()
-        
-        if db_file:
-            db_file.content = code
+            db_file = result.scalar_one_or_none()
+
+            if db_file:
+                db_file.content = code
+            else:
+                db_file = ProjectFile(
+                    project_id=project_id,
+                    file_path=file_path,
+                    content=code
+                )
+                db.add(db_file)
+
+            await db.commit()
+            print(f"[DB] Saved {file_path} to database")
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Database error saving file {file_path}: {e}", exc_info=True)
+            # Continue to try writing to container even if DB save fails
+
+        # 2. Write file to dev container (deployment mode aware)
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes: Write to pod via K8s API
+            try:
+                from ..k8s_client import get_k8s_manager
+                k8s_manager = get_k8s_manager()
+
+                success = await k8s_manager.write_file_to_pod(
+                    user_id=user_id,
+                    project_id=str(project_id),
+                    file_path=file_path,
+                    content=code
+                )
+
+                if not success:
+                    raise RuntimeError("Failed to write file to pod")
+
+                print(f"[K8S] ✅ Wrote {file_path} to pod - Vite HMR will trigger")
+
+            except Exception as e:
+                print(f"[K8S] ⚠️ Warning: Failed to write to pod: {e}")
+                print(f"[K8S] File saved to DB but pod not updated - HMR won't trigger")
+                # Don't fail the entire operation - file is in DB
+
         else:
-            db_file = ProjectFile(
-                project_id=project_id,
-                file_path=file_path,
-                content=code
-            )
-            db.add(db_file)
-        
-        await db.commit()
-        
-        # Save to filesystem
-        project_dir = f"users/{user_id}/projects/{project_id}"
-        full_path = os.path.join(project_dir, file_path)
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        
-        async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
-            await f.write(code)
-            await f.flush()  # Ensure data is written to disk
-        
-        # Notify frontend with the file
+            # Docker: Write to local filesystem
+            try:
+                project_dir = f"users/{user_id}/projects/{project_id}"
+                full_path = os.path.join(project_dir, file_path)
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
+                    await f.write(code)
+
+                print(f"[DOCKER] ✅ Wrote {file_path} to {full_path} - Vite HMR will trigger")
+
+            except Exception as e:
+                print(f"[DOCKER] ⚠️ Warning: Failed to write to filesystem: {e}")
+                print(f"[DOCKER] File saved to DB but filesystem not updated - HMR won't trigger")
+                # Don't fail the entire operation - file is in DB
+
+        # 3. Notify frontend with the file
         try:
             await websocket.send_json({
                 "type": "file_ready",
                 "file_path": file_path,
                 "content": code
             })
-            print(f"✅ File ready: {file_path}")
+            print(f"✅ File ready notification sent: {file_path}")
         except Exception as e:
             print(f"WebSocket error notifying file ready: {e}")
-            
+
     except Exception as e:
         print(f"❌ Error saving file {file_path}: {e}")
+        import traceback
+        traceback.print_exc()

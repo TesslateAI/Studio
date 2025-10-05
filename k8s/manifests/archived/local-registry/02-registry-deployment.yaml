@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docker-registry
+  namespace: tesslate-registry
+  labels:
+    app: docker-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-registry
+  template:
+    metadata:
+      labels:
+        app: docker-registry
+    spec:
+      containers:
+      - name: registry
+        image: registry:2
+        ports:
+        - containerPort: 5000
+          name: registry
+        env:
+        - name: REGISTRY_HTTP_ADDR
+          value: ":5000"
+        - name: REGISTRY_HTTP_TLS_CERTIFICATE
+          value: "/etc/ssl/certs/tls.crt"
+        - name: REGISTRY_HTTP_TLS_KEY
+          value: "/etc/ssl/private/tls.key"
+        - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+          value: "/var/lib/registry"
+        - name: REGISTRY_STORAGE_DELETE_ENABLED
+          value: "true"
+        volumeMounts:
+        - name: registry-storage
+          mountPath: /var/lib/registry
+        - name: registry-tls
+          mountPath: /etc/ssl/certs
+          readOnly: true
+        - name: registry-tls-key
+          mountPath: /etc/ssl/private
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /v2/
+            port: 5000
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /v2/
+            port: 5000
+            scheme: HTTPS
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: registry-storage
+        persistentVolumeClaim:
+          claimName: registry-pvc
+      - name: registry-tls
+        secret:
+          secretName: registry-tls
+          items:
+          - key: tls.crt
+            path: tls.crt
+      - name: registry-tls-key
+        secret:
+          secretName: registry-tls
+          items:
+          - key: tls.key
+            path: tls.key

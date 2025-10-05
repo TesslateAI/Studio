@@ -2,10 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Send, Code, File, Loader2, FileCode } from 'lucide-react';
 import { createWebSocket, chatApi } from '../lib/api';
 import toast from 'react-hot-toast';
+import ChatModeToggle from './ChatModeToggle';
+import AgentMessage from './AgentMessage';
+import { AgentMessageData } from '../types/agent';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  agentData?: AgentMessageData;
 }
 
 interface StreamingFile {
@@ -23,6 +27,8 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
+  const [chatMode, setChatMode] = useState<'stream' | 'agent'>('stream');
+  const [agentExecuting, setAgentExecuting] = useState(false);
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -167,7 +173,60 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, currentStream]);
 
-  const sendMessage = () => {
+  // Load chat mode preference from localStorage
+  useEffect(() => {
+    const savedMode = localStorage.getItem(`chat_mode_${projectId}`);
+    if (savedMode === 'agent' || savedMode === 'stream') {
+      setChatMode(savedMode);
+    }
+  }, [projectId]);
+
+  const handleModeToggle = (mode: 'stream' | 'agent') => {
+    setChatMode(mode);
+    localStorage.setItem(`chat_mode_${projectId}`, mode);
+  };
+
+  const sendAgentMessage = async () => {
+    if (!input.trim() || agentExecuting) return;
+
+    const userMessage = { role: 'user' as const, content: input };
+    setMessages(prev => [...prev, userMessage]);
+    setAgentExecuting(true);
+    const messageText = input;
+    setInput('');
+
+    try {
+      const response = await chatApi.sendAgentMessage({
+        project_id: projectId,
+        message: messageText,
+        max_iterations: 20,
+      });
+
+      if (response.success) {
+        const agentMessage: Message = {
+          role: 'assistant',
+          content: response.final_response,
+          agentData: {
+            steps: response.steps,
+            iterations: response.iterations,
+            tool_calls_made: response.tool_calls_made,
+            completion_reason: response.completion_reason,
+          },
+        };
+        setMessages(prev => [...prev, agentMessage]);
+        toast.success('Task completed successfully');
+      } else {
+        toast.error(response.error || 'Agent execution failed');
+      }
+    } catch (error: any) {
+      console.error('Agent execution error:', error);
+      toast.error(error?.response?.data?.detail || 'Failed to execute agent');
+    } finally {
+      setAgentExecuting(false);
+    }
+  };
+
+  const sendStreamMessage = () => {
     if (!input.trim() || !wsRef.current || isStreaming) return;
 
     const userMessage = { role: 'user' as const, content: input };
@@ -179,21 +238,29 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
     wsRef.current.send(JSON.stringify({
       message: input,
       project_id: projectId,
-      chat_id: 1, // Simple chat ID - messages are separated by localStorage per project
+      chat_id: 1,
     }));
+  };
+
+  const sendMessage = () => {
+    if (chatMode === 'agent') {
+      sendAgentMessage();
+    } else {
+      sendStreamMessage();
+    }
   };
 
   const renderMessage = (content: string, isCurrentlyStreaming: boolean = false) => {
     // Handle incomplete code blocks during streaming
     let processedContent = content;
-    
+
     // For streaming content, also handle incomplete code blocks
     if (isCurrentlyStreaming) {
       // Replace complete code blocks
       processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*?```/g, (match, fileName) => {
         return `[FILE: ${fileName.trim()}]`;
       });
-      
+
       // Handle incomplete code blocks (still streaming)
       processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*$/g, (match, fileName) => {
         return `[FILE: ${fileName.trim()}]`;
@@ -209,7 +276,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
         return ''; // Remove code blocks without file names
       });
     }
-    
+
     // Split by file placeholders
     const parts = processedContent.split(/\[FILE: ([^\]]+)\]/g);
     
@@ -282,41 +349,55 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
           </div>
         )}
         
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`flex ${
-              message.role === 'user' ? 'justify-end' : 'justify-start'
-            }`}
-          >
-            {message.role === 'assistant' && (
-              <div className="w-8 h-8 bg-orange-500/90 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md ring-1 ring-orange-200/50 mr-3 mt-1 flex-shrink-0">
-                <Code size={14} className="text-white" />
-              </div>
-            )}
+        {messages.map((message, index) => {
+          // Render agent message differently
+          if (message.role === 'assistant' && message.agentData) {
+            return (
+              <AgentMessage
+                key={index}
+                agentData={message.agentData}
+                finalResponse={message.content}
+              />
+            );
+          }
+
+          // Regular message rendering
+          return (
             <div
-              className={`max-w-[80%] rounded-2xl px-4 py-3 shadow-lg backdrop-blur-sm ${
-                message.role === 'user'
-                  ? 'bg-orange-500/90 text-white shadow-orange-200/50 ring-1 ring-orange-300/50'
-                  : 'bg-white/80 text-gray-800 shadow-gray-200/50 ring-1 ring-gray-200/50'
+              key={index}
+              className={`flex ${
+                message.role === 'user' ? 'justify-end' : 'justify-start'
               }`}
             >
-              <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                {renderMessage(message.content, false)}
+              {message.role === 'assistant' && (
+                <div className="w-8 h-8 bg-orange-500/90 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md ring-1 ring-orange-200/50 mr-3 mt-1 flex-shrink-0">
+                  <Code size={14} className="text-white" />
+                </div>
+              )}
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-3 shadow-lg backdrop-blur-sm ${
+                  message.role === 'user'
+                    ? 'bg-orange-500/90 text-white shadow-orange-200/50 ring-1 ring-orange-300/50'
+                    : 'bg-white/80 text-gray-800 shadow-gray-200/50 ring-1 ring-gray-200/50'
+                }`}
+              >
+                <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {renderMessage(message.content, false)}
+                </div>
+                <div className={`text-xs mt-2 opacity-70 ${
+                  message.role === 'user' ? 'text-orange-100' : 'text-gray-500'
+                }`}>
+                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
               </div>
-              <div className={`text-xs mt-2 opacity-70 ${
-                message.role === 'user' ? 'text-orange-100' : 'text-gray-500'
-              }`}>
-                {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </div>
+              {message.role === 'user' && (
+                <div className="w-8 h-8 bg-gray-300/80 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md ring-1 ring-gray-200/50 ml-3 mt-1 flex-shrink-0">
+                  <div className="w-5 h-5 bg-gray-600 rounded-full"></div>
+                </div>
+              )}
             </div>
-            {message.role === 'user' && (
-              <div className="w-8 h-8 bg-gray-300/80 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md ring-1 ring-gray-200/50 ml-3 mt-1 flex-shrink-0">
-                <div className="w-5 h-5 bg-gray-600 rounded-full"></div>
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
         
         {isStreaming && (
           <div className="flex justify-start">
@@ -336,12 +417,31 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
             </div>
           </div>
         )}
+
+        {agentExecuting && (
+          <div className="flex justify-start">
+            <div className="w-8 h-8 bg-purple-500 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md ring-1 ring-purple-200 mr-3 mt-1 flex-shrink-0 animate-pulse">
+              <Code size={14} className="text-white" />
+            </div>
+            <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-gradient-to-r from-purple-50 to-white text-gray-800 shadow-lg backdrop-blur-sm ring-1 ring-purple-200/50">
+              <div className="flex items-center gap-2 text-purple-600">
+                <Loader2 className="animate-spin" size={14} />
+                <span className="text-xs font-medium">Agent is working...</span>
+              </div>
+            </div>
+          </div>
+        )}
         
         <div ref={messagesEndRef} />
       </div>
       
       {/* Input Area */}
       <div className="p-4 border-t border-orange-200/30 bg-white/80 backdrop-blur-lg">
+        <ChatModeToggle
+          mode={chatMode}
+          onChange={handleModeToggle}
+          disabled={isStreaming || agentExecuting}
+        />
         <div className="flex gap-3">
           <div className="flex-1 relative">
             <input
@@ -351,7 +451,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
               onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
               placeholder="Describe what you'd like to build..."
               className="w-full bg-white/90 backdrop-blur-sm text-gray-800 px-4 py-3 pr-12 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-400/50 border border-orange-200/50 placeholder-gray-500 shadow-sm text-sm"
-              disabled={isStreaming}
+              disabled={isStreaming || agentExecuting}
             />
             <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
               {input.length > 0 && (
@@ -363,10 +463,14 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
           </div>
           <button
             onClick={sendMessage}
-            disabled={isStreaming || !input.trim()}
-            className="bg-orange-500/90 backdrop-blur-sm text-white px-4 py-3 rounded-2xl hover:bg-orange-600/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg ring-1 ring-orange-300/50 hover:shadow-xl hover:scale-105"
+            disabled={isStreaming || agentExecuting || !input.trim()}
+            className={`backdrop-blur-sm text-white px-4 py-3 rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 ${
+              chatMode === 'agent'
+                ? 'bg-purple-500/90 hover:bg-purple-600/90 ring-1 ring-purple-300/50'
+                : 'bg-orange-500/90 hover:bg-orange-600/90 ring-1 ring-orange-300/50'
+            }`}
           >
-            {isStreaming ? (
+            {isStreaming || agentExecuting ? (
               <Loader2 className="animate-spin" size={18} />
             ) : (
               <Send size={18} />
