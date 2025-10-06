@@ -1,0 +1,53 @@
+http:
+  routers:
+    # Frontend HTTP router (lowest priority - catch-all)
+    frontend-http:
+      rule: "Host(`studio-demo.tesslate.com`) && !PathPrefix(`/api`) && !PathPrefix(`/preview`)"
+      service: frontend
+      entryPoints:
+        - web
+      priority: 1
+
+    # Frontend HTTPS router (lowest priority - catch-all)
+    frontend-https:
+      rule: "Host(`studio-demo.tesslate.com`) && !PathPrefix(`/api`) && !PathPrefix(`/preview`)"
+      service: frontend
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+      priority: 1
+
+    # API HTTP router
+    backend-http:
+      rule: "Host(`studio-demo.tesslate.com`) && PathPrefix(`/api`)"
+      service: backend
+      entryPoints:
+        - web
+      priority: 10
+
+    # API HTTPS router
+    backend-https:
+      rule: "Host(`studio-demo.tesslate.com`) && PathPrefix(`/api`)"
+      service: backend
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cloudflare
+      priority: 10
+
+    # Preview containers routing - handled by Docker provider auto-discovery
+    # Individual preview containers register themselves with labels
+    # Priority 100 ensures preview routes take precedence
+    # Format: /preview/user{N}-project{M}/
+
+  services:
+    frontend:
+      loadBalancer:
+        servers:
+          - url: "http://tesslate-app:80"
+
+    backend:
+      loadBalancer:
+        servers:
+          - url: "http://tesslate-orchestrator:8000"

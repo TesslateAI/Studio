@@ -216,13 +216,18 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
         # Production path-based routing WITHOUT stripprefix
         # Let Vite handle the full path with --base flag
         labels.extend([
-            # Path-based routing: /preview/user2-project15
+            # Path-based routing HTTP: /preview/user2-project15
             "--label", f"traefik.http.routers.{service_name}-path.rule=PathPrefix(`/preview/{user_project}`)",
             "--label", f"traefik.http.routers.{service_name}-path.entrypoints=web",
             "--label", f"traefik.http.routers.{service_name}-path.priority=100",  # High priority
+            # Path-based routing HTTPS: /preview/user2-project15
+            "--label", f"traefik.http.routers.{service_name}-path-secure.rule=PathPrefix(`/preview/{user_project}`)",
+            "--label", f"traefik.http.routers.{service_name}-path-secure.entrypoints=websecure",
+            "--label", f"traefik.http.routers.{service_name}-path-secure.priority=100",
+            "--label", f"traefik.http.routers.{service_name}-path-secure.tls=true",
             # NO stripprefix - Vite needs to see the full path
         ])
-        
+
         return labels
     
     def _create_dockerfile(self, project_path: str) -> str:

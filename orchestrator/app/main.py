@@ -95,8 +95,14 @@ async def startup():
                 logger.error(f"Full traceback:", exc_info=True)
                 raise
 
-    # Create users directory (legacy - not used in K8s architecture)
-    # os.makedirs("users", exist_ok=True)
+    # Create users directory for Docker mode
+    # In Docker mode, user project files are stored in the users directory
+    # In K8s mode, files are stored on PVC and this is not needed
+    from .config import get_settings
+    settings = get_settings()
+    if settings.deployment_mode == "docker":
+        os.makedirs("users", exist_ok=True)
+        logger.info("Created users directory for Docker deployment mode")
 
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods

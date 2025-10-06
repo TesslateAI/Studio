@@ -23,7 +23,8 @@ class DockerContainerManager:
     
     def __init__(self):
         self.containers: Dict[str, Dict] = {}  # project_key -> {container_name, hostname, user_id, project_id}
-        self.network_name = "tesslate-network"  # Use same network as Traefik
+        # Detect the correct network name by checking which network Traefik is on
+        self.network_name = self._detect_traefik_network()
         self.base_image_name = "builder-devserver:latest"
         self.container_label = "com.builder.devserver"
         self._docker_available = None  # Lazy check
@@ -35,71 +36,157 @@ class DockerContainerManager:
         # When creating child containers, we need to use host paths, not container paths
         self._detect_host_mount_path()
 
-        print("[INFO] DevContainerManager initialized - Traefik-powered zero-port-conflict architecture")
+        print(f"[INFO] DevContainerManager initialized - Using network: {self.network_name}")
+        print("[INFO] Traefik-powered zero-port-conflict architecture")
+
+    def _detect_traefik_network(self) -> str:
+        """
+        Detect which network Traefik is on to ensure preview containers use the same network.
+        This handles both development (tesslate-network) and production (tesslate-studio_tesslate-network).
+        """
+        try:
+            # Try to find Traefik container
+            result = subprocess.run(
+                ["docker", "ps", "--filter", "name=traefik", "--format", "{{.Names}}"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                traefik_container = result.stdout.strip().split('\n')[0]
+
+                # Get Traefik's networks
+                network_result = subprocess.run(
+                    ["docker", "inspect", traefik_container, "-f", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+
+                if network_result.returncode == 0:
+                    networks = network_result.stdout.strip().split()
+                    # Prefer networks with 'tesslate' in the name
+                    for network in networks:
+                        if 'tesslate' in network.lower():
+                            print(f"[INFO] Detected Traefik network: {network}")
+                            return network
+
+                    # Fallback to first network if no tesslate network found
+                    if networks:
+                        print(f"[WARN] No tesslate network found, using: {networks[0]}")
+                        return networks[0]
+
+            # Fallback: check which tesslate network exists
+            network_list = subprocess.run(
+                ["docker", "network", "ls", "--filter", "name=tesslate", "--format", "{{.Name}}"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if network_list.returncode == 0 and network_list.stdout.strip():
+                available_networks = network_list.stdout.strip().split('\n')
+                # Prefer production network if it exists
+                if 'tesslate-studio_tesslate-network' in available_networks:
+                    print(f"[INFO] Using production network: tesslate-studio_tesslate-network")
+                    return 'tesslate-studio_tesslate-network'
+                elif available_networks:
+                    print(f"[INFO] Using network: {available_networks[0]}")
+                    return available_networks[0]
+
+        except Exception as e:
+            print(f"[WARN] Could not detect Traefik network: {e}")
+
+        # Final fallback
+        print("[WARN] Could not detect network, using default: tesslate-network")
+        return "tesslate-network"
 
     def _detect_host_mount_path(self):
         """
-        Detect the host path that corresponds to /app in the container.
-        This is needed for Docker-in-Docker scenarios where the orchestrator
-        runs in a container but needs to mount volumes from the host.
+        Detect the host paths for volume mounts in Docker-in-Docker scenarios.
+
+        The orchestrator container has TWO separate volume mounts:
+        - ./users:/app/users (user project files)
+        - ./orchestrator/app:/app/app (orchestrator code)
+
+        We need to detect both to correctly map container paths to host paths.
         """
         # Check if we're running in a container
         if os.path.exists('/.dockerenv'):
-            # We're in a container - need to convert /app to host path
-            # The orchestrator container has ./orchestrator:/app mounted
-            # So /app/users/1/1 should become /root/Tesslate-Studio/orchestrator/users/1/1 on the host
+            # We're in a container - need to detect host paths for volume mounts
+            try:
+                # Get all mounts for this container
+                result = subprocess.run(
+                    ["docker", "inspect", "-f", "{{ json .Mounts }}",
+                     socket.gethostname()],
+                    capture_output=True,
+                    text=True,
+                    timeout=3
+                )
 
-            # Try to detect the host path by checking environment or using a fallback
-            settings = get_settings()
-            host_base = os.environ.get('HOST_ORCHESTRATOR_PATH')
+                if result.returncode == 0 and result.stdout.strip():
+                    import json
+                    mounts = json.loads(result.stdout.strip())
 
-            if not host_base:
-                # Fallback: assume we're in the standard setup
-                # Try to get the actual path from docker inspect if available
-                try:
-                    result = subprocess.run(
-                        ["docker", "inspect", "-f", "{{ range .Mounts }}{{ if eq .Destination \"/app\" }}{{ .Source }}{{ end }}{{ end }}",
-                         socket.gethostname()],
-                        capture_output=True,
-                        text=True,
-                        timeout=3
-                    )
-                    if result.returncode == 0 and result.stdout.strip():
-                        host_base = result.stdout.strip()
-                        print(f"[INFO] Detected host mount path: {host_base}")
+                    # Find the /app/users mount
+                    users_mount = None
+                    for mount in mounts:
+                        if mount.get('Destination') == '/app/users':
+                            users_mount = mount.get('Source')
+                            print(f"[INFO] Detected /app/users mount: {users_mount}")
+                            break
+
+                    if users_mount:
+                        self.host_users_base = users_mount
                     else:
-                        # Final fallback
-                        host_base = "/root/Tesslate-Studio/orchestrator"
-                        print(f"[WARN] Could not detect host path, using fallback: {host_base}")
-                except Exception as e:
-                    host_base = "/root/Tesslate-Studio/orchestrator"
-                    print(f"[WARN] Error detecting host path: {e}, using fallback: {host_base}")
+                        # Fallback: assume standard setup
+                        self.host_users_base = "/root/Tesslate-Studio/users"
+                        print(f"[WARN] Could not detect /app/users mount, using fallback: {self.host_users_base}")
+                else:
+                    # Fallback if docker inspect fails
+                    self.host_users_base = "/root/Tesslate-Studio/users"
+                    print(f"[WARN] Docker inspect failed, using fallback for users: {self.host_users_base}")
 
-            self.host_mount_base = host_base
-            print(f"[INFO] Host mount base path: {self.host_mount_base}")
+            except Exception as e:
+                # Fallback if anything goes wrong
+                self.host_users_base = "/root/Tesslate-Studio/users"
+                print(f"[WARN] Error detecting host paths: {e}, using fallback: {self.host_users_base}")
+
+            # Also set host_mount_base for backwards compatibility
+            self.host_mount_base = "/root/Tesslate-Studio/orchestrator"
+            print(f"[INFO] Host users base path: {self.host_users_base}")
         else:
             # Not in a container - paths are already host paths
+            self.host_users_base = os.path.abspath("users")
             self.host_mount_base = os.path.abspath(".")
-            print(f"[INFO] Running on host, base path: {self.host_mount_base}")
+            print(f"[INFO] Running on host, users base: {self.host_users_base}")
 
     def _convert_to_host_path(self, container_path: str) -> str:
         """
-        Convert a container path (/app/users/1/1) to the corresponding host path.
-        This is necessary for Docker-in-Docker scenarios.
+        Convert a container path to the corresponding host path for Docker-in-Docker.
+
+        The orchestrator container has TWO separate volume mounts:
+        - ./users:/app/users (user project files)
+        - ./orchestrator/app:/app/app (orchestrator code)
+
+        We need to use the correct base path depending on which mount the path refers to.
         """
-        if not hasattr(self, 'host_mount_base'):
+        if not hasattr(self, 'host_users_base'):
             return container_path
 
-        # If the path starts with /app, replace it with the host mount base
-        if container_path.startswith('/app/'):
-            relative_path = container_path[5:]  # Remove '/app/'
-            host_path = os.path.join(self.host_mount_base, relative_path)
-            print(f"[DEBUG] Converted path: {container_path} -> {host_path}")
+        # /app/users/* paths use the separate users volume mount
+        if container_path.startswith('/app/users/'):
+            # Extract the relative path after /app/users/
+            relative_path = container_path[11:]  # Remove '/app/users/'
+            host_path = os.path.join(self.host_users_base, relative_path)
+            print(f"[DEBUG] Converted users path: {container_path} -> {host_path}")
             return host_path
-        elif container_path.startswith('/app'):
-            relative_path = container_path[4:]  # Remove '/app'
-            host_path = os.path.join(self.host_mount_base, relative_path)
-            print(f"[DEBUG] Converted path: {container_path} -> {host_path}")
+        elif container_path.startswith('/app/'):
+            # Other /app paths use the standard mount (if we need to handle them)
+            relative_path = container_path[5:]  # Remove '/app/'
+            host_path = os.path.join(self.host_mount_base, relative_path) if hasattr(self, 'host_mount_base') else container_path
+            print(f"[DEBUG] Converted app path: {container_path} -> {host_path}")
             return host_path
         else:
             # Path doesn't start with /app, assume it's already a host path
@@ -273,7 +360,7 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
         """Generate Traefik labels for automatic service discovery and routing."""
         service_name = f"builder-dev-user{user_id}-project{project_id}"
         user_project = hostname.replace('.localhost', '')
-        
+
         # Check if we need path-based routing for production
         settings = get_settings()
         labels = [
@@ -284,19 +371,25 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
             "--label", f"traefik.http.routers.{service_name}.priority=100",  # High priority
             # Service configuration
             "--label", f"traefik.http.services.{service_name}.loadbalancer.server.port=5173",
-            "--label", "traefik.docker.network=builder-devserver-network",
+            "--label", f"traefik.docker.network={self.network_name}",
         ]
-        
+
         # Production path-based routing WITHOUT stripprefix
         # Let Vite handle the full path with --base flag
+        # Add both HTTP (web) and HTTPS (websecure) routing
         labels.extend([
-            # Path-based routing: /preview/user2-project15
+            # HTTP path-based routing: /preview/user2-project15
             "--label", f"traefik.http.routers.{service_name}-path.rule=PathPrefix(`/preview/{user_project}`)",
             "--label", f"traefik.http.routers.{service_name}-path.entrypoints=web",
             "--label", f"traefik.http.routers.{service_name}-path.priority=100",  # High priority
+            # HTTPS path-based routing: /preview/user2-project15
+            "--label", f"traefik.http.routers.{service_name}-path-secure.rule=PathPrefix(`/preview/{user_project}`)",
+            "--label", f"traefik.http.routers.{service_name}-path-secure.entrypoints=websecure",
+            "--label", f"traefik.http.routers.{service_name}-path-secure.priority=100",  # High priority
+            "--label", f"traefik.http.routers.{service_name}-path-secure.tls=true",
             # NO stripprefix - Vite needs to see the full path
         ])
-        
+
         return labels
     
     def _create_dockerfile(self, project_path: str) -> str:
@@ -480,6 +573,25 @@ docker-compose*
             print("[WARN] Docker network setup failed, proceeding without custom network")
         
         abs_project_path = os.path.abspath(project_path)
+
+        # Ensure users directory structure exists
+        # Extract user_id directory from project_path (e.g., "users/6/123" -> "users/6")
+        if project_path.startswith("users/"):
+            parts = project_path.split("/")
+            if len(parts) >= 2:
+                user_dir = os.path.join(parts[0], parts[1])  # "users/6"
+                user_dir_abs = os.path.abspath(user_dir)
+
+                # Create users directory if it doesn't exist
+                users_base = os.path.abspath("users")
+                if not os.path.exists(users_base):
+                    os.makedirs(users_base, exist_ok=True)
+                    print(f"[SETUP] Created users directory: {users_base}")
+
+                # Create user-specific directory if it doesn't exist
+                if not os.path.exists(user_dir_abs):
+                    os.makedirs(user_dir_abs, exist_ok=True)
+                    print(f"[SETUP] Created user directory: {user_dir_abs}")
 
         if not os.path.exists(abs_project_path):
             raise FileNotFoundError(f"Project directory not found: {abs_project_path}")

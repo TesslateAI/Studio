@@ -12,7 +12,7 @@ providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
-    network: "tesslate-studio_tesslate-network"
+    network: "tesslate-network"
   file:
     directory: /etc/traefik/dynamic
     watch: true

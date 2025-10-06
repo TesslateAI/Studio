@@ -201,7 +201,8 @@ async def delete_project(
         raise HTTPException(status_code=404, detail="Project not found")
     
     # Stop any running dev container for this project first
-    await dev_container_manager.stop_container(str(project_id), current_user.id)
+    if dev_container_manager:
+        await dev_container_manager.stop_container(str(project_id), current_user.id)
     
     # Delete project directory
     project_dir = f"users/{current_user.id}/projects/{project_id}"

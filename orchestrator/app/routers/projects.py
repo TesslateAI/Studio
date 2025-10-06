@@ -161,12 +161,13 @@ async def delete_project(
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Stop any running dev container for this project first
-    await dev_container_manager.stop_container(str(project_id), current_user.id)
+    if dev_container_manager:
+        await dev_container_manager.stop_container(str(project_id), current_user.id)
 
     # Delete project directory (Docker mode only - K8s uses PVCs)
     settings = get_settings()
     if settings.deployment_mode == "docker":
-        project_dir = f"users/{current_user.id}/{project_id}"
+        project_dir = os.path.abspath(f"users/{current_user.id}/{project_id}")
         if os.path.exists(project_dir):
             try:
                 shutil.rmtree(project_dir)
@@ -290,7 +291,7 @@ async def start_dev_container(
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Start dev container (path is for metadata only in K8s mode)
-    project_path = f"users/{current_user.id}/{project_id}"
+    project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
 
     try:
         logger.info(f"[START-CONTAINER] Starting container for project {project_id}...")
@@ -319,7 +320,7 @@ async def restart_dev_container(
         raise HTTPException(status_code=404, detail="Project not found")
     
     # Restart dev container
-    project_path = f"users/{current_user.id}/{project_id}"
+    project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
     try:
         hostname = await dev_container_manager.restart_container(project_path, str(project_id), current_user.id)
         return {"url": hostname, "hostname": hostname, "message": "Dev container restarted successfully"}
@@ -424,7 +425,8 @@ async def get_dev_server_url(
 
         # Container doesn't exist - create it
         logger.info(f"[DEV-URL] Container does not exist, creating new environment...")
-        project_path = f"users/{current_user.id}/{project_id}"
+        # Use absolute path to ensure files are created in the correct location
+        project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
 
         # In Docker mode, create project directory from database files if it doesn't exist
         if settings.deployment_mode == "docker" and not os.path.exists(project_path):
@@ -625,7 +627,7 @@ async def save_project_file(
         else:
             # Docker mode: Write to filesystem (volume-mounted to container)
             try:
-                project_path = f"users/{current_user.id}/{project_id}"
+                project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
                 os.makedirs(project_path, exist_ok=True)
 
                 full_file_path = os.path.join(project_path, file_path)
@@ -746,7 +748,7 @@ async def delete_project(
         print(f"[DELETE] Deleted project from database")
         
         # 5. Delete filesystem directory
-        project_dir = f"users/{current_user.id}/{project_id}"
+        project_dir = os.path.abspath(f"users/{current_user.id}/{project_id}")
         if os.path.exists(project_dir):
             shutil.rmtree(project_dir)
             print(f"[DELETE] Deleted filesystem directory: {project_dir}")

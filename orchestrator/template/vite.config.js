@@ -1,10 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
   // Base path is set via command line when needed (--base flag)
   // This allows dynamic configuration without rebuilding
   server: {
@@ -12,7 +11,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // Allow requests from any host (needed for production access)
-    allowedHosts: ['.localhost', 'your-domain.com'],
+    allowedHosts: ['.localhost', 'your-domain.com', 'studio-demo.tesslate.com'],
     hmr: {
       // Use environment variables set by our container system
       host: process.env.VITE_HMR_HOST || 'localhost',
