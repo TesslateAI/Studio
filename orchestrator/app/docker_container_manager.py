@@ -23,6 +23,7 @@ class DockerContainerManager:
     
     def __init__(self):
         self.containers: Dict[str, Dict] = {}  # project_key -> {container_name, hostname, user_id, project_id}
+        self.activity_tracker: Dict[str, float] = {}  # project_key -> last_activity_timestamp
         # Detect the correct network name by checking which network Traefik is on
         self.network_name = self._detect_traefik_network()
         self.base_image_name = "builder-devserver:latest"
@@ -967,7 +968,7 @@ docker-compose*
     def force_rebuild_base_image(self) -> bool:
         """Force rebuild the base image (for development/debugging)."""
         print("[REBUILD] Force rebuilding base image...")
-        
+
         # Remove existing image
         try:
             subprocess.run(
@@ -977,9 +978,85 @@ docker-compose*
             )
         except Exception:
             pass
-        
+
         # Reset flags
         self._base_image_ready = False
 
         # Rebuild
         return self._ensure_base_image_exists()
+
+    def track_activity(self, user_id: int, project_id: str) -> None:
+        """Record activity for a project container."""
+        project_key = self._get_project_key(user_id, project_id)
+        self.activity_tracker[project_key] = time.time()
+        print(f"[DEBUG] Activity tracked for {project_key}")
+
+    async def cleanup_idle_containers(self, idle_timeout_minutes: int = 30) -> List[str]:
+        """
+        Cleanup containers that have been idle for longer than the timeout.
+
+        Args:
+            idle_timeout_minutes: Minutes of inactivity before cleanup (default: 30)
+
+        Returns:
+            List of cleaned up project keys
+        """
+        print(f"[CLEANUP] Checking for idle containers (timeout: {idle_timeout_minutes} minutes)...")
+
+        cleaned = []
+        current_time = time.time()
+        timeout_seconds = idle_timeout_minutes * 60
+
+        try:
+            # Get list of all containers before iterating (to avoid modifying dict during iteration)
+            containers_to_check = list(self.containers.items())
+
+            for project_key, container_info in containers_to_check:
+                user_id = container_info.get("user_id")
+                project_id = container_info.get("project_id")
+                container_name = container_info.get("container_name")
+
+                # Check last activity time
+                last_activity = self.activity_tracker.get(project_key, 0)
+                idle_time = current_time - last_activity if last_activity > 0 else float('inf')
+                idle_minutes = idle_time / 60
+
+                # If no activity tracked yet, use container creation time as baseline
+                if last_activity == 0 and container_name:
+                    try:
+                        result = subprocess.run(
+                            ["docker", "inspect", container_name, "--format", "{{.State.StartedAt}}"],
+                            capture_output=True,
+                            text=True,
+                            timeout=5
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            # Parse Docker timestamp (ISO 8601 format)
+                            from datetime import datetime
+                            started_at = result.stdout.strip()
+                            # Docker returns timestamp like: 2025-10-07T12:34:56.789Z
+                            created_time = datetime.fromisoformat(started_at.replace('Z', '+00:00')).timestamp()
+                            idle_time = current_time - created_time
+                            idle_minutes = idle_time / 60
+                    except Exception as e:
+                        print(f"[DEBUG] Could not get container creation time for {container_name}: {e}")
+
+                if idle_time > timeout_seconds:
+                    print(f"[CLEANUP] Cleaning up idle container {project_key} (idle for {idle_minutes:.1f} minutes)")
+                    try:
+                        await self.stop_container(project_id, user_id)
+                        cleaned.append(project_key)
+
+                        # Remove from activity tracker
+                        self.activity_tracker.pop(project_key, None)
+
+                    except Exception as e:
+                        print(f"[ERROR] Failed to cleanup {project_key}: {e}")
+                else:
+                    print(f"[DEBUG] {project_key} is active (idle for {idle_minutes:.1f} minutes)")
+
+        except Exception as e:
+            print(f"[ERROR] Error during idle cleanup: {e}")
+
+        print(f"[CLEANUP] Idle cleanup completed. Removed {len(cleaned)} idle containers")
+        return cleaned
