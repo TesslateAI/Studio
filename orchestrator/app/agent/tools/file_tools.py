@@ -232,6 +232,121 @@ async def list_files_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             }
 
 
+async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Apply search/replace edits to an existing file using fuzzy matching.
+
+    This tool allows surgical edits to files without rewriting the entire content.
+    Uses progressive fuzzy matching strategies to handle whitespace variations.
+
+    Args:
+        params: {
+            file_path: str,
+            search: str,  # Code block to search for
+            replace: str  # Code block to replace it with
+        }
+        context: {user_id: int, project_id: str, db: AsyncSession}
+
+    Returns:
+        Dict with success status and details
+    """
+    file_path = params.get("file_path")
+    search = params.get("search")
+    replace = params.get("replace")
+
+    if not file_path:
+        raise ValueError("file_path parameter is required")
+    if search is None:
+        raise ValueError("search parameter is required")
+    if replace is None:
+        raise ValueError("replace parameter is required")
+
+    user_id = context["user_id"]
+    project_id = str(context["project_id"])
+    settings = get_settings()
+
+    # Import diff editing utilities
+    from ...utils.code_patching import apply_search_replace
+
+    # 1. Read current file content
+    current_content = None
+
+    if settings.deployment_mode == "kubernetes":
+        from ...k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+        current_content = await k8s_manager.read_file_from_pod(
+            user_id=user_id,
+            project_id=project_id,
+            file_path=file_path
+        )
+    else:
+        # Docker mode: Read from local filesystem
+        project_dir = f"users/{user_id}/{project_id}"
+        full_path = os.path.join(project_dir, file_path)
+
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                current_content = f.read()
+
+    if current_content is None:
+        return {
+            "success": False,
+            "file_path": file_path,
+            "message": f"File not found: {file_path}. Use write_file to create new files."
+        }
+
+    # 2. Apply search/replace with fuzzy matching
+    result = apply_search_replace(current_content, search, replace, fuzzy=True)
+
+    if not result.success:
+        return {
+            "success": False,
+            "file_path": file_path,
+            "message": f"Failed to apply patch: {result.error}",
+            "hint": "Make sure the search block matches existing code exactly (including indentation)"
+        }
+
+    # 3. Write the patched content back
+    if settings.deployment_mode == "kubernetes":
+        from ...k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+        success = await k8s_manager.write_file_to_pod(
+            user_id=user_id,
+            project_id=project_id,
+            file_path=file_path,
+            content=result.content
+        )
+
+        if not success:
+            return {
+                "success": False,
+                "file_path": file_path,
+                "message": "Failed to write patched file to pod"
+            }
+    else:
+        # Docker mode: Write to local filesystem
+        project_dir = f"users/{user_id}/{project_id}"
+        full_path = os.path.join(project_dir, file_path)
+
+        try:
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(result.content)
+        except Exception as e:
+            return {
+                "success": False,
+                "file_path": file_path,
+                "message": f"Error writing file: {str(e)}"
+            }
+
+    return {
+        "success": True,
+        "file_path": file_path,
+        "match_method": result.match_method,
+        "message": f"Successfully patched {file_path} using {result.match_method} matching",
+        "bytes_written": len(result.content)
+    }
+
+
 async def delete_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Delete a file from the user's development pod.
@@ -289,8 +404,36 @@ def register_tools(registry: ToolRegistry):
     ))
 
     registry.register(Tool(
+        name="patch_file",
+        description="Apply surgical edits to an existing file using search/replace. More efficient than write_file for small changes. Uses fuzzy matching to handle whitespace variations.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file relative to project root"
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Exact code block to find (include 3-5 lines of context for uniqueness, preserve exact indentation)"
+                },
+                "replace": {
+                    "type": "string",
+                    "description": "New code block to replace it with"
+                }
+            },
+            "required": ["file_path", "search", "replace"]
+        },
+        executor=patch_file_tool,
+        category=ToolCategory.FILE_OPS,
+        examples=[
+            '<tool_call><tool_name>patch_file</tool_name><parameters>{"file_path": "src/App.jsx", "search": "  <button className=\\"bg-blue-500\\">\\n    Click Me\\n  </button>", "replace": "  <button className=\\"bg-green-500\\">\\n    Click Me\\n  </button>"}</parameters></tool_call>'
+        ]
+    ))
+
+    registry.register(Tool(
         name="write_file",
-        description="Write content to a file in the project directory (creates if doesn't exist)",
+        description="Write complete file content (creates if doesn't exist). Use patch_file for editing existing files to avoid token waste.",
         parameters={
             "type": "object",
             "properties": {
@@ -300,7 +443,7 @@ def register_tools(registry: ToolRegistry):
                 },
                 "content": {
                     "type": "string",
-                    "description": "Content to write to the file"
+                    "description": "Complete content to write to the file"
                 }
             },
             "required": ["file_path", "content"]
@@ -354,4 +497,4 @@ def register_tools(registry: ToolRegistry):
         ]
     ))
 
-    logger.info("Registered 4 file operation tools")
+    logger.info("Registered 5 file operation tools")
