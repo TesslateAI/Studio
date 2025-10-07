@@ -154,15 +154,12 @@ class KubernetesManager:
                                         exit 1
                                     fi
 
-                                    # Copy pre-built template if project directory is empty
+                                    # Initialize project from template
                                     # Template is baked into the image at /template with all dependencies
                                     if [ -z "$(ls -A /app/project 2>/dev/null)" ]; then
                                         echo "[DEV] Initializing new project from template..."
                                         echo "[DEV] Copying pre-built template with dependencies..."
-
-                                        # Copy all files including hidden ones
                                         cp -r /template/. /app/project/
-
                                         echo "[DEV] ✓ Template copied (includes node_modules)"
                                         echo "[DEV] Project size: $(du -sh /app/project | cut -f1)"
                                     else
@@ -173,16 +170,25 @@ class KubernetesManager:
                                     # Navigate to project directory
                                     cd /app/project || (echo "[DEV] ERROR: Cannot cd to /app/project" && exit 1)
 
-                                    # Verify critical files
+                                    # Ensure node_modules is complete - critical for fast startup
+                                    # If Vite binary is missing, copy pre-built node_modules from template
+                                    if [ ! -f "node_modules/.bin/vite" ] && [ ! -L "node_modules/.bin/vite" ]; then
+                                        echo "[DEV] node_modules missing or incomplete"
+                                        echo "[DEV] Copying pre-built node_modules from template..."
+                                        rm -rf node_modules 2>/dev/null || true
+                                        cp -r /template/node_modules /app/project/
+                                        echo "[DEV] ✓ node_modules restored from template"
+                                    fi
+
+                                    # Verify critical files exist
                                     if [ ! -f "package.json" ]; then
                                         echo "[DEV] ERROR: No package.json found!"
                                         exit 1
                                     fi
-
                                     if [ ! -f "node_modules/.bin/vite" ] && [ ! -L "node_modules/.bin/vite" ]; then
-                                        echo "[DEV] WARNING: Vite binary missing, dependencies may be corrupted"
-                                        echo "[DEV] Running npm install as fallback..."
-                                        npm install
+                                        echo "[DEV] ERROR: Vite binary still missing after template copy!"
+                                        echo "[DEV] This should not happen - template may be corrupted"
+                                        exit 1
                                     fi
 
                                     # Configure Vite to allow all hosts (required for ingress routing)
