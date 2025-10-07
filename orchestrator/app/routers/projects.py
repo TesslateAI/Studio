@@ -6,7 +6,6 @@ from ..database import get_db
 from ..models import Project, User, ProjectFile, Chat, Message
 from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema
 from ..auth import get_current_active_user
-from ..dev_server_manager import dev_container_manager
 from ..config import get_settings
 import os
 import shutil
@@ -144,45 +143,6 @@ async def get_project(
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
-@router.delete("/{project_id}")
-async def delete_project(
-    project_id: int,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # Stop any running dev container for this project first
-    if dev_container_manager:
-        await dev_container_manager.stop_container(str(project_id), current_user.id)
-
-    # Delete project directory (Docker mode only - K8s uses PVCs)
-    settings = get_settings()
-    if settings.deployment_mode == "docker":
-        project_dir = os.path.abspath(f"users/{current_user.id}/{project_id}")
-        if os.path.exists(project_dir):
-            try:
-                shutil.rmtree(project_dir)
-            except PermissionError:
-                # On Windows, wait a moment and try again
-                await asyncio.sleep(1)
-                try:
-                    shutil.rmtree(project_dir)
-                except PermissionError as e:
-                    raise HTTPException(status_code=500, detail=f"Could not delete project directory: {str(e)}")
-
-    await db.delete(project)
-    await db.commit()
-    return {"message": "Project deleted successfully"}
-
 @router.get("/{project_id}/files", response_model=List[ProjectFileSchema])
 async def get_project_files(
     project_id: int,
@@ -294,8 +254,10 @@ async def start_dev_container(
     project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
 
     try:
+        from ..dev_server_manager import get_container_manager
+        container_manager = get_container_manager()
         logger.info(f"[START-CONTAINER] Starting container for project {project_id}...")
-        url = await dev_container_manager.start_container(project_path, str(project_id), current_user.id)
+        url = await container_manager.start_container(project_path, str(project_id), current_user.id)
         logger.info(f"[START-CONTAINER] ✅ Container started successfully: {url}")
         return {"url": url, "hostname": url}
     except Exception as e:
@@ -318,11 +280,13 @@ async def restart_dev_container(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     # Restart dev container
     project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
     try:
-        hostname = await dev_container_manager.restart_container(project_path, str(project_id), current_user.id)
+        from ..dev_server_manager import get_container_manager
+        container_manager = get_container_manager()
+        hostname = await container_manager.restart_container(project_path, str(project_id), current_user.id)
         return {"url": hostname, "hostname": hostname, "message": "Dev container restarted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to restart dev container: {str(e)}")
@@ -343,10 +307,12 @@ async def stop_dev_container(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     # Stop dev container
     try:
-        await dev_container_manager.stop_container(str(project_id), current_user.id)
+        from ..dev_server_manager import get_container_manager
+        container_manager = get_container_manager()
+        await container_manager.stop_container(str(project_id), current_user.id)
         return {"message": "Dev container stopped successfully", "project_id": project_id}
     except Exception as e:
         # Don't fail if container is already stopped
@@ -685,7 +651,9 @@ async def get_all_dev_containers(
 ):
     """Get all running development containers (for admin/debugging)."""
     try:
-        containers = dev_container_manager.get_all_containers()
+        from ..dev_server_manager import get_container_manager
+        container_manager = get_container_manager()
+        containers = container_manager.get_all_containers()
         # Filter to show only containers for current user unless admin
         user_containers = [c for c in containers if c.get('user_id') == current_user.id]
         return {
@@ -713,50 +681,57 @@ async def delete_project(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     try:
-        print(f"[DELETE] Starting deletion of project {project_id} for user {current_user.id}")
-        
-        # 1. Stop and remove any running containers
+        logger.info(f"[DELETE] Starting deletion of project {project_id} for user {current_user.id}")
+
+        # 1. Stop and remove any running containers/pods
         try:
-            await dev_container_manager.stop_container(str(project_id), current_user.id)
-            print(f"[DELETE] Stopped containers for project {project_id}")
+            from ..dev_server_manager import get_container_manager
+            container_manager = get_container_manager()
+            await container_manager.stop_container(str(project_id), current_user.id)
+            logger.info(f"[DELETE] Stopped containers for project {project_id}")
         except Exception as e:
-            print(f"[DELETE] Error stopping containers: {e}")
-        
+            logger.warning(f"[DELETE] Error stopping containers: {e}")
+
         # 2. Delete all chats associated with this project (and their messages will cascade)
         chats_result = await db.execute(
             select(Chat).where(Chat.project_id == project_id)
         )
         project_chats = chats_result.scalars().all()
-        
+
         for chat in project_chats:
-            print(f"[DELETE] Deleting chat {chat.id} with messages")
-            # Delete messages first (explicit cleanup)
-            await db.execute(delete(Message).where(Message.chat_id == chat.id))
-            await db.execute(delete(Chat).where(Chat.id == chat.id))
-        
-        print(f"[DELETE] Deleted {len(project_chats)} chats and their messages")
-        
-        # 3. Delete project files from database (cascade should handle this, but be explicit)
-        await db.execute(delete(ProjectFile).where(ProjectFile.project_id == project_id))
-        print(f"[DELETE] Deleted project files from database")
-        
-        # 4. Delete project from database
-        await db.execute(delete(Project).where(Project.id == project_id))
+            logger.info(f"[DELETE] Deleting chat {chat.id} with messages")
+            await db.delete(chat)  # Use ORM delete to trigger cascades
+
+        logger.info(f"[DELETE] Deleted {len(project_chats)} chats and their messages")
+
+        # 3. Delete project from database (files will cascade automatically)
+        await db.delete(project)  # Use ORM delete to trigger cascades
         await db.commit()
-        print(f"[DELETE] Deleted project from database")
-        
-        # 5. Delete filesystem directory
-        project_dir = os.path.abspath(f"users/{current_user.id}/{project_id}")
-        if os.path.exists(project_dir):
-            shutil.rmtree(project_dir)
-            print(f"[DELETE] Deleted filesystem directory: {project_dir}")
-        
-        print(f"[DELETE] Successfully deleted project {project_id}")
+        logger.info(f"[DELETE] Deleted project from database")
+
+        # 5. Delete filesystem directory (Docker mode only - K8s uses PVCs)
+        settings = get_settings()
+        if settings.deployment_mode == "docker":
+            project_dir = os.path.abspath(f"users/{current_user.id}/{project_id}")
+            if os.path.exists(project_dir):
+                try:
+                    shutil.rmtree(project_dir)
+                    logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
+                except PermissionError:
+                    # On Windows, wait a moment and try again
+                    await asyncio.sleep(1)
+                    try:
+                        shutil.rmtree(project_dir)
+                        logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
+                    except PermissionError as e:
+                        logger.warning(f"[DELETE] Could not delete project directory: {e}")
+
+        logger.info(f"[DELETE] Successfully deleted project {project_id}")
         return {"message": "Project deleted successfully", "project_id": project_id}
-        
+
     except Exception as e:
         await db.rollback()
-        print(f"[DELETE] Error during project deletion: {e}")
+        logger.error(f"[DELETE] Error during project deletion: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
