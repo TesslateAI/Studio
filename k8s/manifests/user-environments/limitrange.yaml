@@ -16,9 +16,10 @@ spec:
       memory: 1Gi
       cpu: 1000m
     # Minimum requests per container
+    # Note: Set low to allow cert-manager ACME HTTP solver pods (10m CPU, 64Mi memory)
     min:
-      memory: 128Mi
-      cpu: 50m
+      memory: 64Mi
+      cpu: 10m
     # Default limits if not specified
     default:
       memory: 512Mi

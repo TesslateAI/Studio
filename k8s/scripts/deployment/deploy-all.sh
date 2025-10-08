@@ -35,6 +35,7 @@ fi
 
 echo "🚀 Starting complete Tesslate Studio deployment..."
 echo "This will:"
+echo "  0. Install Kubernetes prerequisites (NGINX Ingress, cert-manager)"
 echo "  1. Setup DigitalOcean Container Registry authentication"
 echo "  2. Build and push application images to registry"
 echo "  3. Setup application secrets (API keys, database, etc.)"
@@ -48,6 +49,13 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Deployment cancelled"
     exit 1
 fi
+
+# Step 0: Install prerequisites
+echo ""
+echo "==============================================="
+echo "STEP 0: Installing Kubernetes prerequisites"
+echo "==============================================="
+./install-prerequisites.sh
 
 # Step 1: Setup registry authentication
 echo ""
@@ -106,12 +114,13 @@ echo ""
 echo "Your Tesslate Studio is now running on Kubernetes!"
 echo ""
 echo "📋 What was deployed:"
+echo "  ✅ Kubernetes prerequisites (NGINX Ingress Controller, cert-manager)"
 echo "  ✅ DigitalOcean Container Registry authentication"
-echo "  ✅ Application images (backend, frontend)"
+echo "  ✅ Application images (backend, frontend, dev-server)"
 echo "  ✅ PostgreSQL database"
 echo "  ✅ Main application (tesslate namespace)"
 echo "  ✅ User environments infrastructure (tesslate-user-environments namespace)"
-echo "  ✅ NGINX Ingress Controller with SSL"
+echo "  ✅ Ingress with SSL certificates"
 echo "  ✅ RBAC and security policies"
 echo ""
 echo "Check the output above for access URLs and next steps."
