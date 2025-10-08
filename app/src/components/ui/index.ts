@@ -8,3 +8,4 @@ export { ToggleSwitch } from './ToggleSwitch';
 export { Dropdown } from './Dropdown';
 export { ProjectCard } from './ProjectCard';
 export { MarketplaceCard } from './MarketplaceCard';
+export { default as HelpModal } from './HelpModal';
