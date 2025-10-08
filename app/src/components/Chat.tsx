@@ -4,7 +4,7 @@ import { createWebSocket, chatApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import ChatModeToggle from './ChatModeToggle';
 import AgentMessage from './AgentMessage';
-import { AgentMessageData } from '../types/agent';
+import { type AgentMessageData } from '../types/agent';
 
 interface Message {
   role: 'user' | 'assistant';

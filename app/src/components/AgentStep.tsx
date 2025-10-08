@@ -1,7 +1,7 @@
 import React from 'react';
 import { Brain } from 'lucide-react';
 import ToolBadge from './ToolBadge';
-import { AgentStep as AgentStepType } from '../types/agent';
+import { type AgentStep as AgentStepType } from '../types/agent';
 
 interface AgentStepProps {
   step: AgentStepType;

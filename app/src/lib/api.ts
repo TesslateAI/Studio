@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { AgentChatRequest, AgentChatResponse } from '../types/agent';
+import type { AgentChatRequest, AgentChatResponse } from '../types/agent';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 

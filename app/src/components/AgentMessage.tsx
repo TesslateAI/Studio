@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Bot, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import AgentStep from './AgentStep';
-import { AgentMessageData } from '../types/agent';
+import { type AgentMessageData } from '../types/agent';
 
 interface AgentMessageProps {
   agentData: AgentMessageData;
