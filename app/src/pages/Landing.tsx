@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ArrowRight, Play, Check, Users, Zap, Shield, Code, 
-  Database, Palette, Rocket, Building, Camera, Store,
-  ChevronDown, ChevronUp, Star, Quote, ArrowUp, Pause,
-  PlayCircle, Copy, ExternalLink, Github, Twitter, 
-  Mail, MessageSquare, TrendingUp, Clock, DollarSign
+import {
+  ArrowRight, Play, Check, Users, Zap, Shield, Code,
+  Database, Palette, Rocket, Building, Camera,
+  ChevronDown, Star, Quote, Pause,
+  PlayCircle, Copy, Github, Twitter,
+  Mail, MessageSquare, TrendingUp, Clock, DollarSign, Sun, Moon, Sparkles
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useTheme } from '../theme/ThemeContext';
 
 interface AnimatedCounterProps {
   end: number;
@@ -56,7 +57,7 @@ function AnimatedCounter({ end, suffix = '', duration = 2000 }: AnimatedCounterP
   }, [isVisible, end, duration]);
 
   return (
-    <span ref={ref} className="font-mono text-orange-600 font-bold">
+    <span ref={ref} className="font-mono font-bold" style={{ color: 'var(--primary)' }}>
       {count}{suffix}
     </span>
   );
@@ -76,13 +77,14 @@ function FloatingOrb({ delay, size, position }: FloatingOrbProps) {
   };
 
   return (
-    <div 
-      className={`absolute ${sizeClasses[size]} bg-gradient-to-br from-orange-400 to-orange-600 rounded-full shadow-lg animate-pulse`}
+    <div
+      className={`absolute ${sizeClasses[size]} rounded-full shadow-lg animate-pulse`}
       style={{
         left: position.x,
         top: position.y,
         animationDelay: `${delay}s`,
-        animationDuration: '3s'
+        animationDuration: '3s',
+        background: 'linear-gradient(135deg, var(--primary), #ea580c)'
       }}
     >
       <div className="absolute inset-1 bg-white rounded-full opacity-30"></div>
@@ -91,14 +93,25 @@ function FloatingOrb({ delay, size, position }: FloatingOrbProps) {
 }
 
 function ThreeDGrid() {
+  const { theme } = useTheme();
+
   return (
-    <div className="relative w-full h-96 overflow-hidden rounded-2xl bg-gradient-to-br from-orange-50 to-white border border-orange-200/30 shadow-2xl">
+    <div
+      className="relative w-full h-96 overflow-hidden shadow-2xl"
+      style={{
+        borderRadius: 'var(--radius)',
+        background: theme === 'dark'
+          ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02))'
+          : 'linear-gradient(135deg, rgba(255, 107, 0, 0.05), rgba(255, 255, 255, 0.9))',
+        border: '1px solid rgba(255, 255, 255, 0.08)'
+      }}
+    >
       {/* Grid Background */}
       <div className="absolute inset-0 opacity-10">
         <svg className="w-full h-full" viewBox="0 0 400 400">
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#f97316" strokeWidth="1"/>
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="var(--primary)" strokeWidth="1"/>
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
@@ -118,32 +131,71 @@ function ThreeDGrid() {
           {/* Main Cube */}
           <div className="w-32 h-32 relative">
             {/* Cube faces with glassmorphism */}
-            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm rounded-lg border-2 border-orange-400/50 shadow-xl transform rotate-12"></div>
-            <div className="absolute inset-0 bg-white/60 backdrop-blur-sm rounded-lg border-2 border-orange-400/30 shadow-lg transform -rotate-6 translate-x-2 translate-y-2"></div>
-            <div className="absolute inset-0 bg-orange-100/80 backdrop-blur-sm rounded-lg border-2 border-orange-400/40 shadow-md transform rotate-3 translate-x-1 translate-y-1"></div>
+            <div
+              className="absolute inset-0 backdrop-blur-sm rounded-lg shadow-xl transform rotate-12"
+              style={{
+                background: 'rgba(255, 255, 255, 0.8)',
+                border: '2px solid rgba(255, 107, 0, 0.5)'
+              }}
+            ></div>
+            <div
+              className="absolute inset-0 backdrop-blur-sm rounded-lg shadow-lg transform -rotate-6 translate-x-2 translate-y-2"
+              style={{
+                background: 'rgba(255, 255, 255, 0.6)',
+                border: '2px solid rgba(255, 107, 0, 0.3)'
+              }}
+            ></div>
+            <div
+              className="absolute inset-0 backdrop-blur-sm rounded-lg shadow-md transform rotate-3 translate-x-1 translate-y-1"
+              style={{
+                background: 'rgba(255, 107, 0, 0.1)',
+                border: '2px solid rgba(255, 107, 0, 0.4)'
+              }}
+            ></div>
           </div>
-          
+
           {/* Connected nodes */}
-          <div className="absolute -top-8 -left-8 w-4 h-4 bg-orange-500 rounded-full shadow-lg animate-ping"></div>
-          <div className="absolute -top-4 -right-6 w-3 h-3 bg-orange-600 rounded-full shadow-md animate-pulse"></div>
-          <div className="absolute -bottom-6 -right-4 w-5 h-5 bg-orange-400 rounded-full shadow-lg animate-bounce"></div>
-          
+          <div className="absolute -top-8 -left-8 w-4 h-4 rounded-full shadow-lg animate-ping" style={{ background: 'var(--primary)' }}></div>
+          <div className="absolute -top-4 -right-6 w-3 h-3 rounded-full shadow-md animate-pulse" style={{ background: 'var(--primary)' }}></div>
+          <div className="absolute -bottom-6 -right-4 w-5 h-5 rounded-full shadow-lg animate-bounce" style={{ background: 'var(--primary)' }}></div>
+
           {/* Connection lines */}
           <svg className="absolute inset-0 w-full h-full pointer-events-none">
-            <line x1="20%" y1="20%" x2="80%" y2="30%" stroke="#f97316" strokeWidth="2" className="animate-pulse" />
-            <line x1="30%" y1="70%" x2="70%" y2="20%" stroke="#f97316" strokeWidth="1" className="animate-pulse" strokeDasharray="4,4" />
+            <line x1="20%" y1="20%" x2="80%" y2="30%" stroke="var(--primary)" strokeWidth="2" className="animate-pulse" />
+            <line x1="30%" y1="70%" x2="70%" y2="20%" stroke="var(--primary)" strokeWidth="1" className="animate-pulse" strokeDasharray="4,4" />
           </svg>
         </div>
       </div>
       
       {/* Agent Labels */}
-      <div className="absolute top-4 left-4 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-full text-xs font-medium text-orange-700 border border-orange-200/50 shadow-sm">
+      <div
+        className="absolute top-4 left-4 px-3 py-1 backdrop-blur-sm rounded-full text-xs font-medium shadow-sm"
+        style={{
+          background: 'rgba(255, 255, 255, 0.9)',
+          color: 'var(--primary)',
+          border: '1px solid rgba(255, 107, 0, 0.2)'
+        }}
+      >
         UI Agent
       </div>
-      <div className="absolute top-8 right-6 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-full text-xs font-medium text-orange-700 border border-orange-200/50 shadow-sm">
+      <div
+        className="absolute top-8 right-6 px-3 py-1 backdrop-blur-sm rounded-full text-xs font-medium shadow-sm"
+        style={{
+          background: 'rgba(255, 255, 255, 0.9)',
+          color: 'var(--primary)',
+          border: '1px solid rgba(255, 107, 0, 0.2)'
+        }}
+      >
         Backend Agent
       </div>
-      <div className="absolute bottom-12 left-8 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-full text-xs font-medium text-orange-700 border border-orange-200/50 shadow-sm">
+      <div
+        className="absolute bottom-12 left-8 px-3 py-1 backdrop-blur-sm rounded-full text-xs font-medium shadow-sm"
+        style={{
+          background: 'rgba(255, 255, 255, 0.9)',
+          color: 'var(--primary)',
+          border: '1px solid rgba(255, 107, 0, 0.2)'
+        }}
+      >
         DB Agent
       </div>
     </div>
@@ -180,13 +232,36 @@ function FeatureCard({ icon, title, description, accent, delay = 0 }: FeatureCar
   }, [delay]);
 
   return (
-    <div 
+    <div
       ref={ref}
-      className={`group bg-white/80 backdrop-blur-lg rounded-2xl p-6 border border-orange-200/30 shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-500 hover:ring-2 hover:ring-orange-400/20 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
-      style={{ transitionDelay: `${delay}ms` }}
+      className={`group backdrop-blur-lg p-6 shadow-lg transition-all duration-500 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
+      style={{
+        transitionDelay: `${delay}ms`,
+        background: 'var(--surface)',
+        borderRadius: '20px',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        transition: 'all 0.3s var(--ease)',
+        cursor: 'pointer'
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-4px)';
+        e.currentTarget.style.boxShadow = '0 12px 40px rgba(0, 0, 0, 0.2)';
+        e.currentTarget.style.borderColor = 'rgba(255, 107, 0, 0.3)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.1)';
+        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+      }}
     >
       <div className="relative mb-4">
-        <div className="w-16 h-16 bg-orange-100/80 backdrop-blur-sm rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+        <div
+          className="w-16 h-16 backdrop-blur-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300"
+          style={{
+            background: 'rgba(255, 107, 0, 0.1)',
+            borderRadius: 'calc(var(--radius) / 2)'
+          }}
+        >
           {icon}
         </div>
         {accent && (
@@ -195,9 +270,12 @@ function FeatureCard({ icon, title, description, accent, delay = 0 }: FeatureCar
           </div>
         )}
       </div>
-      <h3 className="text-lg font-bold text-gray-800 mb-2">{title}</h3>
-      <p className="text-gray-600 text-sm leading-relaxed mb-4">{description}</p>
-      <button className="text-orange-600 text-sm font-medium hover:text-orange-700 transition-colors group-hover:translate-x-1 duration-200 flex items-center gap-1">
+      <h3 className="text-lg font-bold mb-2 font-heading" style={{ color: 'var(--text)' }}>{title}</h3>
+      <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>{description}</p>
+      <button
+        className="text-sm font-medium transition-all group-hover:translate-x-1 duration-200 flex items-center gap-1"
+        style={{ color: 'var(--primary)' }}
+      >
         Learn more <ArrowRight size={12} />
       </button>
     </div>
@@ -214,15 +292,36 @@ interface StepProps {
 
 function Step({ number, title, description, demo, isActive }: StepProps) {
   return (
-    <div className={`flex items-center gap-8 p-6 rounded-2xl transition-all duration-500 ${isActive ? 'bg-orange-50/80 backdrop-blur-sm border border-orange-200/50 shadow-lg' : 'hover:bg-white/40'}`}>
+    <div
+      className={`flex items-center gap-8 p-6 transition-all duration-500`}
+      style={{
+        borderRadius: '20px',
+        background: isActive
+          ? 'rgba(255, 107, 0, 0.1)'
+          : 'transparent',
+        border: isActive ? '1px solid rgba(255, 107, 0, 0.2)' : '1px solid transparent',
+        boxShadow: isActive ? '0 8px 32px rgba(0, 0, 0, 0.1)' : 'none',
+        transition: 'all 0.3s var(--ease)'
+      }}
+    >
       <div className="flex-shrink-0">
-        <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg transition-all duration-300 ${isActive ? 'bg-orange-500 text-white shadow-lg scale-110' : 'bg-white/80 text-gray-600 border border-orange-200/30'}`}>
+        <div
+          className={`w-12 h-12 flex items-center justify-center font-bold text-lg transition-all duration-300`}
+          style={{
+            background: isActive ? 'var(--primary)' : 'rgba(255, 255, 255, 0.05)',
+            color: isActive ? '#fff' : 'var(--text)',
+            border: isActive ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
+            transform: isActive ? 'scale(1.1)' : 'scale(1)',
+            boxShadow: isActive ? '0 4px 12px rgba(255, 107, 0, 0.3)' : 'none',
+            borderRadius: '12px'
+          }}
+        >
           {number}
         </div>
       </div>
       <div className="flex-1">
-        <h3 className="text-xl font-bold text-gray-800 mb-2">{title}</h3>
-        <p className="text-gray-600">{description}</p>
+        <h3 className="text-xl font-bold mb-2 font-heading" style={{ color: 'var(--text)' }}>{title}</h3>
+        <p style={{ color: 'var(--text)', opacity: 0.7 }}>{description}</p>
       </div>
       <div className="flex-shrink-0 w-48">
         {demo}
@@ -234,7 +333,7 @@ function Step({ number, title, description, demo, isActive }: StepProps) {
 function TypingDemo() {
   const [text, setText] = useState('');
   const fullText = 'Build a modern dashboard with charts';
-  
+
   useEffect(() => {
     let i = 0;
     const timer = setInterval(() => {
@@ -247,15 +346,30 @@ function TypingDemo() {
         }, 2000);
       }
     }, 100);
-    
+
     return () => clearInterval(timer);
   }, []);
-  
+
   return (
-    <div className="bg-white rounded-lg p-4 shadow-lg border border-orange-200/30">
-      <div className="text-sm text-gray-600 mb-2">Describe what you want:</div>
-      <div className="font-mono text-sm bg-gray-50 p-3 rounded border">
-        {text}<span className="animate-pulse text-orange-500">|</span>
+    <div
+      className="p-4 shadow-lg"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '12px'
+      }}
+    >
+      <div className="text-sm mb-2" style={{ color: 'var(--text)', opacity: 0.7 }}>Describe what you want:</div>
+      <div
+        className="font-mono text-sm p-3"
+        style={{
+          background: 'rgba(255, 255, 255, 0.03)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          color: 'var(--text)',
+          borderRadius: '8px'
+        }}
+      >
+        {text}<span className="animate-pulse" style={{ color: 'var(--primary)' }}>|</span>
       </div>
     </div>
   );
@@ -264,24 +378,35 @@ function TypingDemo() {
 function AssemblyDemo() {
   const [step, setStep] = useState(0);
   const blocks = ['UI', 'API', 'DB', 'Auth'];
-  
+
   useEffect(() => {
     const timer = setInterval(() => {
       setStep(s => (s + 1) % 5);
     }, 800);
     return () => clearInterval(timer);
   }, []);
-  
+
   return (
-    <div className="bg-white rounded-lg p-4 shadow-lg border border-orange-200/30">
-      <div className="text-sm text-gray-600 mb-3">Assembling stack...</div>
+    <div
+      className="p-4 shadow-lg"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '12px'
+      }}
+    >
+      <div className="text-sm mb-3" style={{ color: 'var(--text)', opacity: 0.7 }}>Assembling stack...</div>
       <div className="flex gap-2">
         {blocks.map((block, i) => (
-          <div 
+          <div
             key={block}
-            className={`w-12 h-8 rounded text-xs flex items-center justify-center font-medium transition-all duration-500 ${
-              i < step ? 'bg-orange-500 text-white shadow-md' : 'bg-gray-100 text-gray-400'
-            }`}
+            className="w-12 h-8 text-xs flex items-center justify-center font-medium transition-all duration-500"
+            style={{
+              background: i < step ? 'var(--primary)' : 'rgba(255, 255, 255, 0.05)',
+              color: i < step ? '#fff' : 'rgba(255, 255, 255, 0.4)',
+              boxShadow: i < step ? '0 4px 12px rgba(255, 107, 0, 0.3)' : 'none',
+              borderRadius: '6px'
+            }}
           >
             {block}
           </div>
@@ -293,20 +418,32 @@ function AssemblyDemo() {
 
 function ThemeDemo() {
   const [theme, setTheme] = useState('light');
-  
+
   useEffect(() => {
     const timer = setInterval(() => {
       setTheme(t => t === 'light' ? 'orange' : 'light');
     }, 1500);
     return () => clearInterval(timer);
   }, []);
-  
+
   return (
-    <div className="bg-white rounded-lg p-4 shadow-lg border border-orange-200/30">
-      <div className="text-sm text-gray-600 mb-3">Customizing theme...</div>
-      <div className={`p-3 rounded transition-all duration-500 ${
-        theme === 'orange' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-800'
-      }`}>
+    <div
+      className="p-4 shadow-lg"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '12px'
+      }}
+    >
+      <div className="text-sm mb-3" style={{ color: 'var(--text)', opacity: 0.7 }}>Customizing theme...</div>
+      <div
+        className="p-3 transition-all duration-500"
+        style={{
+          background: theme === 'orange' ? 'var(--primary)' : 'rgba(255, 255, 255, 0.05)',
+          color: theme === 'orange' ? '#fff' : 'var(--text)',
+          borderRadius: '8px'
+        }}
+      >
         <div className="text-xs font-medium mb-1">Button</div>
         <div className="text-xs opacity-75">Click me</div>
       </div>
@@ -317,7 +454,7 @@ function ThemeDemo() {
 function DeployDemo() {
   const [progress, setProgress] = useState(0);
   const [showConfetti, setShowConfetti] = useState(false);
-  
+
   useEffect(() => {
     const timer = setInterval(() => {
       setProgress(p => {
@@ -334,17 +471,34 @@ function DeployDemo() {
     }, 100);
     return () => clearInterval(timer);
   }, []);
-  
+
   return (
-    <div className="bg-white rounded-lg p-4 shadow-lg border border-orange-200/30 relative">
-      <div className="text-sm text-gray-600 mb-3">Deploying...</div>
-      <div className="bg-gray-100 rounded-full h-2 mb-2">
-        <div 
-          className="bg-orange-500 h-2 rounded-full transition-all duration-300"
-          style={{ width: `${progress}%` }}
+    <div
+      className="p-4 shadow-lg relative"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '12px'
+      }}
+    >
+      <div className="text-sm mb-3" style={{ color: 'var(--text)', opacity: 0.7 }}>Deploying...</div>
+      <div
+        className="h-2 mb-2"
+        style={{
+          background: 'rgba(255, 255, 255, 0.05)',
+          borderRadius: '9999px'
+        }}
+      >
+        <div
+          className="h-2 transition-all duration-300"
+          style={{
+            width: `${progress}%`,
+            background: 'var(--primary)',
+            borderRadius: '9999px'
+          }}
         ></div>
       </div>
-      <div className="text-xs text-gray-500">{progress}%</div>
+      <div className="text-xs" style={{ color: 'var(--text)', opacity: 0.5 }}>{progress}%</div>
       {showConfetti && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-2xl animate-bounce">🎉</div>
@@ -356,6 +510,7 @@ function DeployDemo() {
 
 export default function Landing() {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const [activeStep, setActiveStep] = useState(0);
   const [animationsPaused, setAnimationsPaused] = useState(false);
   const [expandedFAQ, setExpandedFAQ] = useState<number | null>(null);
@@ -441,44 +596,80 @@ export default function Landing() {
   ];
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50/30 ${animationsPaused ? 'pause-animations' : ''}`}>
+    <div className={`min-h-screen ${animationsPaused ? 'pause-animations' : ''}`}>
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-orange-200/30 shadow-sm">
+      <header
+        className="sticky top-0 z-50 backdrop-blur-xl shadow-sm"
+        style={{
+          background: 'rgba(var(--surface-rgb, 26, 26, 26), 0.8)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+        }}
+      >
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-orange-500/90 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg ring-1 ring-orange-200/50">
-                <Code size={20} className="text-white" />
+              <div
+                className="w-10 h-10 flex items-center justify-center shadow-lg transition-transform hover:scale-105"
+                style={{
+                  background: 'linear-gradient(135deg, var(--primary), #ea580c)',
+                  borderRadius: 'calc(var(--radius) / 2)'
+                }}
+              >
+                <Sparkles size={20} className="text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-800">Tesslate Studio</h1>
+                <h1 className="font-heading text-xl font-bold" style={{ color: 'var(--text)' }}>Tesslate Studio</h1>
               </div>
             </div>
-            
+
             <nav className="hidden md:flex items-center gap-8">
-              <a href="#features" className="text-gray-600 hover:text-orange-600 transition-colors text-sm font-medium">Features</a>
-              <a href="#how-it-works" className="text-gray-600 hover:text-orange-600 transition-colors text-sm font-medium">How it Works</a>
-              <a href="#pricing" className="text-gray-600 hover:text-orange-600 transition-colors text-sm font-medium">Pricing</a>
-              <a href="#faq" className="text-gray-600 hover:text-orange-600 transition-colors text-sm font-medium">FAQ</a>
+              <a href="#features" className="text-sm font-medium transition-all hover:opacity-100" style={{ color: 'var(--text)', opacity: 0.6 }}>Features</a>
+              <a href="#how-it-works" className="text-sm font-medium transition-all hover:opacity-100" style={{ color: 'var(--text)', opacity: 0.6 }}>How it Works</a>
+              <a href="#pricing" className="text-sm font-medium transition-all hover:opacity-100" style={{ color: 'var(--text)', opacity: 0.6 }}>Pricing</a>
+              <a href="#faq" className="text-sm font-medium transition-all hover:opacity-100" style={{ color: 'var(--text)', opacity: 0.6 }}>FAQ</a>
             </nav>
-            
+
             <div className="flex items-center gap-3">
               <button
+                onClick={toggleTheme}
+                className="w-10 h-10 flex items-center justify-center transition-all duration-300 hover:scale-108"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '12px'
+                }}
+                aria-label="Toggle theme"
+                title="Toggle theme"
+              >
+                {theme === 'dark' ? (
+                  <Sun className="w-5 h-5" style={{ color: 'var(--primary)' }} />
+                ) : (
+                  <Moon className="w-5 h-5" style={{ color: 'var(--text)' }} />
+                )}
+              </button>
+              <button
                 onClick={() => setAnimationsPaused(!animationsPaused)}
-                className="p-2 text-gray-400 hover:text-orange-600 transition-colors"
+                className="p-2 transition-all hover:opacity-100"
+                style={{ color: 'var(--text)', opacity: 0.4 }}
                 title={animationsPaused ? 'Resume Animations' : 'Pause Animations'}
               >
                 {animationsPaused ? <Play size={16} /> : <Pause size={16} />}
               </button>
               <button
                 onClick={() => navigate('/login')}
-                className="text-gray-600 hover:text-orange-600 transition-colors text-sm font-medium"
+                className="text-sm font-medium transition-all hover:opacity-100"
+                style={{ color: 'var(--text)', opacity: 0.6 }}
               >
                 Sign In
               </button>
               <button
                 onClick={handleGetStarted}
-                className="bg-orange-500/90 hover:bg-orange-600/90 text-white px-4 py-2 rounded-xl font-medium transition-all hover:shadow-lg hover:scale-105 text-sm"
+                className="px-4 py-2 font-medium text-sm text-white transition-all hover:scale-105"
+                style={{
+                  background: 'linear-gradient(135deg, var(--primary), #ea580c)',
+                  borderRadius: 'calc(var(--radius) / 2)',
+                  boxShadow: '0 4px 12px rgba(255, 107, 0, 0.25)'
+                }}
               >
                 Get Started
               </button>
@@ -493,32 +684,45 @@ export default function Landing() {
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-8">
               <div className="space-y-4">
-                <h1 className="text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
+                <h1 className="text-5xl lg:text-6xl font-bold font-heading leading-tight" style={{ color: 'var(--text)' }}>
                   Build full-stack apps from{' '}
-                  <span className="text-orange-600">one prompt</span>
+                  <span style={{ color: 'var(--primary)' }}>one prompt</span>
                 </h1>
-                <p className="text-xl text-gray-600 leading-relaxed max-w-2xl">
+                <p className="text-xl leading-relaxed max-w-2xl" style={{ color: 'var(--text)', opacity: 0.7 }}>
                   Tesslate Studio uses UIGEN-X to deliver{' '}
-                  <span className="font-semibold text-gray-800">Claude-level design quality</span>{' '}
-                  at <span className="font-semibold text-orange-600">1/10th the cost</span>.
+                  <span className="font-semibold" style={{ color: 'var(--text)' }}>Claude-level design quality</span>{' '}
+                  at <span className="font-semibold" style={{ color: 'var(--primary)' }}>1/10th the cost</span>.
                 </p>
               </div>
-              
+
               <div className="flex flex-col sm:flex-row gap-4">
                 <button
                   onClick={handleGetStarted}
-                  className="group bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:shadow-xl hover:scale-105 flex items-center justify-center gap-2"
+                  className="group text-white px-8 py-4 font-bold text-lg transition-all duration-300 hover:shadow-xl hover:scale-105 flex items-center justify-center gap-2"
+                  style={{
+                    background: 'linear-gradient(135deg, var(--primary), #ea580c)',
+                    borderRadius: 'var(--radius)',
+                    boxShadow: '0 4px 16px rgba(255, 107, 0, 0.2)'
+                  }}
                 >
                   Start Free
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform duration-300" />
                 </button>
-                <button className="border-2 border-orange-500 text-orange-600 hover:bg-orange-50 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:shadow-lg flex items-center justify-center gap-2">
+                <button
+                  className="px-8 py-4 font-bold text-lg transition-all duration-300 hover:shadow-lg hover:scale-105 flex items-center justify-center gap-2"
+                  style={{
+                    border: '2px solid var(--primary)',
+                    color: 'var(--primary)',
+                    borderRadius: 'var(--radius)',
+                    background: 'rgba(255, 107, 0, 0.05)'
+                  }}
+                >
                   <PlayCircle className="w-5 h-5" />
                   See Demo
                 </button>
               </div>
-              
-              <div className="flex items-center gap-6 text-sm text-gray-500">
+
+              <div className="flex items-center gap-6 text-sm" style={{ color: 'var(--text)', opacity: 0.6 }}>
                 <div className="flex items-center gap-2">
                   <Check className="w-4 h-4 text-green-500" />
                   No credit card required
@@ -541,16 +745,16 @@ export default function Landing() {
       </section>
 
       {/* Value Props */}
-      <section id="features" className="py-20 bg-white/40 backdrop-blur-sm">
+      <section id="features" className="py-20 backdrop-blur-sm" style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">Why Tesslate Studio</h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">Experience the future of full-stack development with AI-powered tools that understand your vision.</p>
+            <h2 className="text-4xl font-bold font-heading mb-4" style={{ color: 'var(--text)' }}>Why Tesslate Studio</h2>
+            <p className="text-xl max-w-3xl mx-auto" style={{ color: 'var(--text)', opacity: 0.7 }}>Experience the future of full-stack development with AI-powered tools that understand your vision.</p>
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <FeatureCard
-              icon={<DollarSign className="w-8 h-8 text-orange-600" />}
+              icon={<DollarSign className="w-8 h-8" style={{ color: 'var(--primary)' }} />}
               title="Claude-like design, 1/10th the cost"
               description="Premium design quality powered by UIGEN-X at a fraction of traditional costs."
               accent={
@@ -560,16 +764,16 @@ export default function Landing() {
               }
               delay={0}
             />
-            
+
             <FeatureCard
               icon={
                 <div className="relative">
-                  <div className="w-8 h-2 bg-orange-600 rounded mb-1"></div>
-                  <div className="w-8 h-2 bg-orange-500 rounded mb-1"></div>
-                  <div className="w-8 h-2 bg-orange-400 rounded mb-1"></div>
-                  <div className="w-8 h-2 bg-orange-300 rounded"></div>
+                  <div className="w-8 h-2 rounded mb-1" style={{ background: 'var(--primary)' }}></div>
+                  <div className="w-8 h-2 rounded mb-1" style={{ background: 'var(--primary)', opacity: 0.8 }}></div>
+                  <div className="w-8 h-2 rounded mb-1" style={{ background: 'var(--primary)', opacity: 0.6 }}></div>
+                  <div className="w-8 h-2 rounded" style={{ background: 'var(--primary)', opacity: 0.4 }}></div>
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-1 h-6 bg-orange-800 rounded-full animate-pulse"></div>
+                    <div className="w-1 h-6 rounded-full animate-pulse" style={{ background: 'var(--primary)' }}></div>
                   </div>
                 </div>
               }
@@ -577,11 +781,11 @@ export default function Landing() {
               description="Complete applications with UI, API, database, and authentication generated together."
               delay={200}
             />
-            
+
             <FeatureCard
               icon={
                 <div className="relative">
-                  <Users className="w-8 h-8 text-orange-600" />
+                  <Users className="w-8 h-8" style={{ color: 'var(--primary)' }} />
                   <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full animate-ping"></div>
                 </div>
               }
@@ -589,9 +793,9 @@ export default function Landing() {
               description="Work together with live cursors, comments, and instant synchronization across your team."
               delay={400}
             />
-            
+
             <FeatureCard
-              icon={<Shield className="w-8 h-8 text-orange-600" />}
+              icon={<Shield className="w-8 h-8" style={{ color: 'var(--primary)' }} />}
               title="Enterprise-grade output"
               description="Production-ready code with security best practices, testing, and scalability built-in."
               accent={
@@ -609,8 +813,8 @@ export default function Landing() {
       <section id="how-it-works" className="py-20">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">How It Works</h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">From idea to production in four simple steps.</p>
+            <h2 className="text-4xl font-bold font-heading mb-4" style={{ color: 'var(--text)' }}>How It Works</h2>
+            <p className="text-xl max-w-3xl mx-auto" style={{ color: 'var(--text)', opacity: 0.7 }}>From idea to production in four simple steps.</p>
           </div>
           
           <div className="space-y-6">
@@ -633,9 +837,11 @@ export default function Landing() {
                 <button
                   key={index}
                   onClick={() => setActiveStep(index)}
-                  className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                    activeStep === index ? 'bg-orange-500 scale-125' : 'bg-orange-200'
-                  }`}
+                  className="w-3 h-3 rounded-full transition-all duration-300"
+                  style={{
+                    background: activeStep === index ? 'var(--primary)' : 'rgba(255, 107, 0, 0.2)',
+                    transform: activeStep === index ? 'scale(1.25)' : 'scale(1)'
+                  }}
                 />
               ))}
             </div>
@@ -644,16 +850,23 @@ export default function Landing() {
       </section>
 
       {/* Product Demo */}
-      <section className="py-20 bg-white/40 backdrop-blur-sm">
+      <section className="py-20 backdrop-blur-sm" style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">See Studio in Action</h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+            <h2 className="text-4xl font-bold font-heading mb-4" style={{ color: 'var(--text)' }}>See Studio in Action</h2>
+            <p className="text-xl max-w-3xl mx-auto" style={{ color: 'var(--text)', opacity: 0.7 }}>
               From prompt to production: design, code, data, and agents—cohesively generated.
             </p>
           </div>
-          
-          <div className="bg-white/80 backdrop-blur-lg rounded-3xl shadow-2xl border border-orange-200/30 overflow-hidden">
+
+          <div
+            className="backdrop-blur-lg shadow-2xl overflow-hidden"
+            style={{
+              background: 'var(--surface)',
+              borderRadius: '20px',
+              border: '1px solid rgba(255, 255, 255, 0.08)'
+            }}
+          >
             {/* Browser chrome */}
             <div className="bg-gray-100 px-6 py-4 border-b border-gray-200">
               <div className="flex items-center gap-2">
@@ -743,28 +956,28 @@ export default function Landing() {
       <section className="py-20">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">Trusted by Teams Worldwide</h2>
+            <h2 className="text-4xl font-bold font-heading mb-4" style={{ color: 'var(--text)' }}>Trusted by Teams Worldwide</h2>
           </div>
           
           {/* Metrics */}
           <div className="grid md:grid-cols-3 gap-8 mb-16">
             <div className="text-center">
-              <div className="text-5xl font-bold text-orange-600 mb-2 font-mono">
+              <div className="text-5xl font-bold mb-2 font-mono">
                 <AnimatedCounter end={10} suffix="×" />
               </div>
-              <div className="text-gray-600">Faster prototyping</div>
+              <div style={{ color: 'var(--text)', opacity: 0.7 }}>Faster prototyping</div>
             </div>
             <div className="text-center">
-              <div className="text-5xl font-bold text-orange-600 mb-2 font-mono">
+              <div className="text-5xl font-bold mb-2 font-mono">
                 <AnimatedCounter end={90} suffix="%" />
               </div>
-              <div className="text-gray-600">Cost savings</div>
+              <div style={{ color: 'var(--text)', opacity: 0.7 }}>Cost savings</div>
             </div>
             <div className="text-center">
-              <div className="text-5xl font-bold text-orange-600 mb-2 font-mono">
+              <div className="text-5xl font-bold mb-2 font-mono">
                 <AnimatedCounter end={50000} suffix="+" />
               </div>
-              <div className="text-gray-600">Projects created</div>
+              <div style={{ color: 'var(--text)', opacity: 0.7 }}>Projects created</div>
             </div>
           </div>
           
@@ -812,11 +1025,11 @@ export default function Landing() {
       </section>
 
       {/* Who It's For */}
-      <section className="py-20 bg-white/40 backdrop-blur-sm">
+      <section className="py-20 backdrop-blur-sm" style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">Who It's For</h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">Perfect for teams and individuals who want to build faster.</p>
+            <h2 className="text-4xl font-bold font-heading mb-4" style={{ color: 'var(--text)' }}>Who It's For</h2>
+            <p className="text-xl max-w-3xl mx-auto" style={{ color: 'var(--text)', opacity: 0.7 }}>Perfect for teams and individuals who want to build faster.</p>
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -859,12 +1072,19 @@ export default function Landing() {
       <section id="pricing" className="py-20">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">Simple, Transparent Pricing</h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">Claude-like designs at 1/10th the cost—thanks to UIGEN-X.</p>
+            <h2 className="text-4xl font-bold font-heading mb-4" style={{ color: 'var(--text)' }}>Simple, Transparent Pricing</h2>
+            <p className="text-xl max-w-3xl mx-auto" style={{ color: 'var(--text)', opacity: 0.7 }}>Claude-like designs at 1/10th the cost—thanks to UIGEN-X.</p>
           </div>
           
           <div className="max-w-4xl mx-auto">
-            <div className="bg-white/80 backdrop-blur-lg rounded-3xl p-8 border border-orange-200/30 shadow-2xl">
+            <div
+              className="backdrop-blur-lg p-8 shadow-2xl"
+              style={{
+                background: 'rgba(255, 255, 255, 0.8)',
+                borderRadius: '20px',
+                border: '1px solid rgba(255, 107, 0, 0.15)'
+              }}
+            >
               <div className="grid md:grid-cols-2 gap-8 items-center">
                 <div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-4">Traditional Build</h3>
@@ -923,16 +1143,24 @@ export default function Landing() {
       </section>
 
       {/* FAQs */}
-      <section id="faq" className="py-20 bg-white/40 backdrop-blur-sm">
+      <section id="faq" className="py-20 backdrop-blur-sm" style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">Frequently Asked Questions</h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">Everything you need to know about Tesslate Studio.</p>
+            <h2 className="text-4xl font-bold font-heading mb-4" style={{ color: 'var(--text)' }}>Frequently Asked Questions</h2>
+            <p className="text-xl max-w-3xl mx-auto" style={{ color: 'var(--text)', opacity: 0.7 }}>Everything you need to know about Tesslate Studio.</p>
           </div>
           
           <div className="max-w-3xl mx-auto space-y-4">
             {faqs.map((faq, index) => (
-              <div key={index} className="bg-white/80 backdrop-blur-lg rounded-2xl border border-orange-200/30 shadow-lg overflow-hidden">
+              <div
+                key={index}
+                className="backdrop-blur-lg shadow-lg overflow-hidden"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.8)',
+                  borderRadius: '16px',
+                  border: '1px solid rgba(255, 107, 0, 0.15)'
+                }}
+              >
                 <button
                   onClick={() => setExpandedFAQ(expandedFAQ === index ? null : index)}
                   className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-orange-50/50 transition-colors"
@@ -956,28 +1184,42 @@ export default function Landing() {
       </section>
 
       {/* Final CTA */}
-      <section className="py-20 bg-gradient-to-r from-orange-500 to-orange-600 text-white relative overflow-hidden">
+      <section
+        className="py-20 text-white relative overflow-hidden"
+        style={{
+          background: 'linear-gradient(135deg, var(--primary), #ea580c)'
+        }}
+      >
         <div className="absolute inset-0 bg-black/10"></div>
         <div className="absolute inset-0">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-pulse"></div>
         </div>
-        
+
         <div className="container mx-auto px-6 relative z-10">
           <div className="text-center max-w-4xl mx-auto">
-            <h2 className="text-5xl font-bold mb-6">Build your next app in minutes, not months</h2>
-            <p className="text-xl text-orange-100 mb-8 max-w-2xl mx-auto">
+            <h2 className="text-5xl font-bold font-heading mb-6">Build your next app in minutes, not months</h2>
+            <p className="text-xl mb-8 max-w-2xl mx-auto" style={{ color: 'rgba(255, 255, 255, 0.9)' }}>
               Start free. See why teams choose Tesslate Studio.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
               <button
                 onClick={handleGetStarted}
-                className="bg-white text-orange-600 px-8 py-4 rounded-2xl font-bold text-lg transition-all hover:shadow-xl hover:scale-105 flex items-center justify-center gap-2"
+                className="bg-white px-8 py-4 font-bold text-lg transition-all duration-300 hover:shadow-xl hover:scale-105 flex items-center justify-center gap-2"
+                style={{
+                  color: 'var(--primary)',
+                  borderRadius: '20px'
+                }}
               >
                 Start Free
                 <ArrowRight className="w-5 h-5" />
               </button>
-              <button className="border-2 border-white text-white hover:bg-white hover:text-orange-600 px-8 py-4 rounded-2xl font-bold text-lg transition-all flex items-center justify-center gap-2">
+              <button
+                className="border-2 border-white text-white px-8 py-4 font-bold text-lg transition-all duration-300 flex items-center justify-center gap-2 hover:bg-white hover:text-orange-500"
+                style={{
+                  borderRadius: '20px'
+                }}
+              >
                 <PlayCircle className="w-5 h-5" />
                 See Demo
               </button>
@@ -1002,17 +1244,23 @@ export default function Landing() {
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-white py-16">
+      <footer className="py-16" style={{ background: '#0a0a0a', color: '#e2e2e2' }}>
         <div className="container mx-auto px-6">
           <div className="grid md:grid-cols-4 gap-8 mb-12">
             <div>
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center">
-                  <Code size={20} className="text-white" />
+                <div
+                  className="w-10 h-10 flex items-center justify-center shadow-lg"
+                  style={{
+                    background: 'linear-gradient(135deg, var(--primary), #ea580c)',
+                    borderRadius: 'calc(var(--radius) / 2)'
+                  }}
+                >
+                  <Sparkles size={20} className="text-white" />
                 </div>
-                <span className="text-xl font-bold">Tesslate Studio</span>
+                <span className="text-xl font-bold font-heading">Tesslate Studio</span>
               </div>
-              <p className="text-gray-400 mb-6">Build full-stack apps from one prompt with AI-powered design tools.</p>
+              <p className="mb-6" style={{ color: '#999' }}>Build full-stack apps from one prompt with AI-powered design tools.</p>
               
               {/* Newsletter */}
               <form onSubmit={handleNewsletterSubmit} className="space-y-3">
@@ -1021,11 +1269,16 @@ export default function Landing() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email"
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                  className="w-full bg-gray-800 border border-gray-700 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm transition-all"
+                  style={{ borderRadius: '12px' }}
                 />
                 <button
                   type="submit"
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition-all text-sm"
+                  className="w-full text-white px-4 py-2 font-medium transition-all text-sm hover:scale-105"
+                  style={{
+                    background: 'linear-gradient(135deg, var(--primary), #ea580c)',
+                    borderRadius: '12px'
+                  }}
                 >
                   Subscribe to Updates
                 </button>

@@ -23,7 +23,8 @@
 body {
   font-family: 'Inter', sans-serif;
   margin: 0;
-  overflow: hidden;
+  overflow-x: hidden; /* Prevent horizontal scroll */
+  overflow-y: auto; /* Allow vertical scroll */
 }
 
 /* Light mode - dots background */
