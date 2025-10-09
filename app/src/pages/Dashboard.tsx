@@ -187,94 +187,101 @@ export default function Dashboard() {
       <FloatingSidebar position="right" items={rightSidebarItems} />
 
       {/* Header */}
-      <header className="mb-12 text-center">
-        <div className="flex items-center justify-center gap-4 mb-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-[var(--primary)] to-orange-600 rounded-2xl flex items-center justify-center shadow-lg">
-            <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Z"/>
+      <div className="mb-10">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="font-heading text-4xl font-bold text-[var(--text)]">My Projects</h1>
+
+          {/* Credits Display */}
+          <div className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-[rgba(0,217,255,0.1)] to-[rgba(0,217,255,0.05)] border border-[rgba(0,217,255,0.2)] rounded-2xl">
+            <svg className="w-5 h-5 text-[var(--accent)]" fill="currentColor" viewBox="0 0 256 256">
+              <path d="M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.69-7l-112,120a8,8,0,0,0,3,13l57.63,21.61-14.62,73.25a8,8,0,0,0,13.69,7l112-120A8,8,0,0,0,215.79,118.17ZM109.37,214l10.47-52.38a8,8,0,0,0-5-9.06L62,132.71l84.62-90.66L136.16,94.43a8,8,0,0,0,5,9.06l52.8,19.8Z"/>
             </svg>
+            <span className="text-[var(--accent)] font-semibold">247 credits left</span>
+            <button
+              onClick={() => toast('Upgrade to PRO!')}
+              className="text-xs bg-[rgba(0,217,255,0.2)] hover:bg-[rgba(0,217,255,0.3)] px-3 py-1 rounded-full transition-colors"
+            >
+              Get More
+            </button>
           </div>
-          <h1 className="font-heading text-4xl font-bold text-[var(--text)]">Tesslate Studio</h1>
         </div>
 
-        {/* Credits Display */}
-        <div className="inline-flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-[rgba(0,217,255,0.1)] to-[rgba(0,217,255,0.05)] border border-[rgba(0,217,255,0.2)] rounded-2xl">
-          <svg className="w-5 h-5 text-[var(--accent)]" fill="currentColor" viewBox="0 0 256 256">
-            <path d="M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.69-7l-112,120a8,8,0,0,0,3,13l57.63,21.61-14.62,73.25a8,8,0,0,0,13.69,7l112-120A8,8,0,0,0,215.79,118.17ZM109.37,214l10.47-52.38a8,8,0,0,0-5-9.06L62,132.71l84.62-90.66L136.16,94.43a8,8,0,0,0,5,9.06l52.8,19.8Z"/>
-          </svg>
-          <span className="text-[var(--accent)] font-semibold">150 credits left</span>
-          <button
-            onClick={() => toast('Upgrade to PRO!')}
-            className="px-4 py-1.5 bg-[var(--accent)] text-black rounded-lg text-sm font-semibold hover:opacity-90 transition-all"
-          >
-            Get More
-          </button>
+        {/* Tab Navigation */}
+        <div className="flex items-center gap-4">
+          {[
+            { key: 'all', label: 'All Projects' },
+            { key: 'idea', label: 'Idea' },
+            { key: 'build', label: 'Build' },
+            { key: 'launch', label: 'Launch' }
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as TabFilter)}
+              className={`
+                font-heading text-xl pb-2 border-b-2 transition-all
+                ${activeTab === tab.key
+                  ? 'text-[var(--primary)] border-[var(--primary)]'
+                  : 'text-gray-400 border-transparent hover:text-[var(--text)]'
+                }
+              `}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-      </header>
-
-      {/* Tab Navigation */}
-      <div className="flex justify-center gap-2 mb-12">
-        {[
-          { key: 'all', label: 'All Projects', icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256"><path d="M224,177.32l-47.06-21.93a8,8,0,0,0-7.12.12c-17.74,10.44-35.78,10.44-47.56,0a8,8,0,0,0-7.12-.12L68.08,177.32A8,8,0,0,0,64,184.34V208a16,16,0,0,0,16,16H176a16,16,0,0,0,16-16V184.34A8,8,0,0,0,224,177.32Z"/></svg> },
-          { key: 'idea', label: 'Idea', icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256"><path d="M176,232a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h80A8,8,0,0,1,176,232Zm40-128a87.55,87.55,0,0,1-33.64,69.21A16.24,16.24,0,0,0,176,186v6a16,16,0,0,1-16,16H96a16,16,0,0,1-16-16v-6a16,16,0,0,0-6.23-12.66A87.59,87.59,0,0,1,40,104.49C39.74,56.83,78.26,17.14,125.88,16A88,88,0,0,1,216,104Z"/></svg> },
-          { key: 'build', label: 'Build', icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256"><path d="M192,104a8,8,0,0,1-8,8H72a8,8,0,0,1,0-16H184A8,8,0,0,1,192,104Zm-8,24H72a8,8,0,0,0,0,16H184a8,8,0,0,0,0-16Zm40-80V208a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32H208A16,16,0,0,1,224,48ZM208,208V48H48V208H208Z"/></svg> },
-          { key: 'launch', label: 'Launch', icon: <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256"><path d="M152,224a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h32A8,8,0,0,1,152,224ZM128,112a12,12,0,1,0-12-12A12,12,0,0,0,128,112Zm95.62,43.83-12.36,55.63a16,16,0,0,1-25.51,9.11L158.51,200h-61L70.25,220.57a16,16,0,0,1-25.51-9.11L32.38,155.83a15.95,15.95,0,0,1,1.93-12.78L64,96.28V48a16,16,0,0,1,16-16h96a16,16,0,0,1,16,16V96.28l29.69,46.77A15.95,15.95,0,0,1,223.62,155.83Z"/></svg> }
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key as TabFilter)}
-            className={`
-              tab-link px-6 py-3 rounded-xl font-medium transition-all flex items-center gap-2
-              ${activeTab === tab.key
-                ? 'tab-active bg-[var(--primary)] text-white shadow-lg'
-                : 'bg-white/5 border border-white/10 text-gray-400 hover:text-[var(--text)] hover:bg-white/8'
-              }
-            `}
-          >
-            {tab.icon}
-            <span>{tab.label}</span>
-            <span className={`
-              px-2 py-0.5 rounded-full text-xs font-bold
-              ${activeTab === tab.key ? 'bg-white/20' : 'bg-white/5'}
-            `}>
-              {tab.key === 'all' ? projects.length : projects.filter(p => p.status === tab.key).length}
-            </span>
-          </button>
-        ))}
       </div>
 
       {/* Marketplace Section */}
-      <div className="marketplace-section mb-12">
+      <div className="bg-white/[0.02] dark:bg-white/[0.02] border border-white/[0.08] rounded-2xl p-5 mb-8">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="font-heading text-2xl font-bold text-[var(--text)]">Recommended for You</h2>
+          <h2 className="font-heading text-xl font-bold text-[var(--text)] flex items-center gap-2">
+            <svg className="w-5 h-5 text-orange-400" fill="currentColor" viewBox="0 0 256 256">
+              <path d="M240,128a16,16,0,0,1-6.65,12.94L208,160l10.65,19.06A16,16,0,0,1,204.94,198l-19.06-10.65L166.82,212A16,16,0,0,1,149.19,214l-10-20.24-10,20.24A16,16,0,0,1,111.56,218a15.93,15.93,0,0,1-7.38-4L85.12,187.35,66.06,198a16,16,0,0,1-13.71-18.94L62,160,36.65,140.94A16,16,0,0,1,30,128a16,16,0,0,1,6.65-12.94L62,96,52.35,76.94A16,16,0,0,1,66.06,58l19.06,10.65L104.18,44a16,16,0,0,1,17.63-2,15.93,15.93,0,0,1,7.38,4l10,20.24,10-20.24a16,16,0,0,1,17.63-2,15.93,15.93,0,0,1,7.38,4l19.06,24.65L212.94,62a16,16,0,0,1,13.71,18.94L218,100l25.35,19.06A16,16,0,0,1,240,128Z"/>
+            </svg>
+            Recommended for Your Projects
+          </h2>
           <button
             onClick={() => toast('Browse marketplace')}
-            className="text-[var(--primary)] hover:text-orange-400 font-semibold flex items-center gap-2 transition-colors"
+            className="text-sm text-[var(--primary)] hover:text-orange-400 transition-colors"
           >
-            Browse Marketplace
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/>
-            </svg>
+            Browse Marketplace →
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <MarketplaceCard
-            title="React Expert AI"
-            description="Advanced React patterns and optimization"
-            icon={<svg className="w-6 h-6 text-cyan-400" fill="currentColor" viewBox="0 0 256 256"><path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160ZM231.77,154.8c-1.59-2.5-3.89-6.11-6.93-10.86-6.38-10-16-24.84-29.17-44.26s-26.42-37.34-38.55-53.28c-5.76-7.58-10.92-14.34-15.48-20.25a146,146,0,0,0-83.26,0C53.84,31.91,48.67,38.66,42.92,46.24,30.79,62.18,20.51,80.76,13.33,99.68S1.59,135.8,0,149.2a146,146,0,0,0,83.26,0c4.56-5.91,9.72-12.67,15.48-20.25,12.13-15.94,22.41-34.52,29.59-53.44s11.74-33.88,13.33-47.28a146,146,0,0,0,0,83.26c-1.59,13.4-6.15,25.36-13.33,44.28s-17.46,37.34-29.59,53.28c-5.76,7.58-10.92,14.34-15.48,20.25a146,146,0,0,0,83.26,0c4.56-5.91,9.72-12.67,15.48-20.25,12.13-15.94,22.41-34.52,29.59-53.44s11.74-33.88,13.33-47.28a146,146,0,0,0,0-83.26c-1.59,13.4-6.15,25.36-13.33,44.28s-17.46,37.34-29.59,53.28c-5.76,7.58-10.92,14.34-15.48,20.25Z"/></svg>}
-            badge="PRO"
+            title="React Expert"
+            description="Advanced React assistant"
+            icon={
+              <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160ZM231.77,154.8c-1.59-2.5-3.89-6.11-6.93-10.86-6.38-10-16-24.84-29.17-44.26s-26.42-37.34-38.55-53.28c-5.76-7.58-10.92-14.34-15.48-20.25a146,146,0,0,0-83.26,0C53.84,31.91,48.67,38.66,42.92,46.24,30.79,62.18,20.51,80.76,13.33,99.68S1.59,135.8,0,149.2a146,146,0,0,0,83.26,0c4.56-5.91,9.72-12.67,15.48-20.25,12.13-15.94,22.41-34.52,29.59-53.44s11.74-33.88,13.33-47.28a146,146,0,0,0,0,83.26c-1.59,13.4-6.15,25.36-13.33,44.28s-17.46,37.34-29.59,53.28c-5.76,7.58-10.92,14.34-15.48,20.25a146,146,0,0,0,83.26,0c4.56-5.91,9.72-12.67,15.48-20.25,12.13-15.94,22.41-34.52,29.59-53.44s11.74-33.88,13.33-47.28a146,146,0,0,0,0-83.26c-1.59,13.4-6.15,25.36-13.33,44.28s-17.46,37.34-29.59,53.28c-5.76,7.58-10.92,14.34-15.48,20.25Z"/>
+                </svg>
+              </div>
+            }
+            badge="Free"
           />
           <MarketplaceCard
             title="Database Pro"
-            description="PostgreSQL and MongoDB expertise"
-            icon={<svg className="w-6 h-6 text-purple-400" fill="currentColor" viewBox="0 0 256 256"><path d="M128,24C74.17,24,32,48.6,32,80v96c0,31.4,42.17,56,96,56s96-24.6,96-56V80C224,48.6,181.83,24,128,24Zm80,104c0,9.62-7.88,19.43-21.61,26.92C170.93,163.35,150.19,168,128,168s-42.93-4.65-58.39-13.08C55.88,147.43,48,137.62,48,128V111.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64ZM69.61,53.08C85.07,44.65,105.81,40,128,40s42.93,4.65,58.39,13.08C200.12,60.57,208,70.38,208,80s-7.88,19.43-21.61,26.92C170.93,115.35,150.19,120,128,120s-42.93-4.65-58.39-13.08C55.88,99.43,48,89.62,48,80S55.88,60.57,69.61,53.08ZM186.39,202.92C170.93,211.35,150.19,216,128,216s-42.93-4.65-58.39-13.08C55.88,195.43,48,185.62,48,176V159.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64V176C208,185.62,200.12,195.43,186.39,202.92Z"/></svg>}
+            description="SQL optimization & design"
+            icon={
+              <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-purple-400" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M128,24C74.17,24,32,48.6,32,80v96c0,31.4,42.17,56,96,56s96-24.6,96-56V80C224,48.6,181.83,24,128,24Zm80,104c0,9.62-7.88,19.43-21.61,26.92C170.93,163.35,150.19,168,128,168s-42.93-4.65-58.39-13.08C55.88,147.43,48,137.62,48,128V111.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64ZM69.61,53.08C85.07,44.65,105.81,40,128,40s42.93,4.65,58.39,13.08C200.12,60.57,208,70.38,208,80s-7.88,19.43-21.61,26.92C170.93,115.35,150.19,120,128,120s-42.93-4.65-58.39-13.08C55.88,99.43,48,89.62,48,80S55.88,60.57,69.61,53.08ZM186.39,202.92C170.93,211.35,150.19,216,128,216s-42.93-4.65-58.39-13.08C55.88,195.43,48,185.62,48,176V159.36c17.06,15,46.23,24.64,80,24.64s62.94-9.68,80-24.64V176C208,185.62,200.12,195.43,186.39,202.92Z"/>
+                </svg>
+              </div>
+            }
             badge="Free"
-            installed
           />
           <MarketplaceCard
-            title="UI/UX Designer"
-            description="Beautiful interfaces instantly"
-            icon={<svg className="w-6 h-6 text-pink-400" fill="currentColor" viewBox="0 0 256 256"><path d="M201.54,54.46A104,104,0,0,0,54.46,201.54,104,104,0,0,0,201.54,54.46ZM96,210V152H48.8A88.15,88.15,0,0,1,96,210Zm0-74V46a88.15,88.15,0,0,1,0,164Zm16,74a88.15,88.15,0,0,0,47.2-58H112Zm95.2-74H160V46A88.15,88.15,0,0,1,207.2,136Z"/></svg>}
+            title="Security Scanner"
+            description="Code vulnerability detection"
+            icon={
+              <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M208,40H48A16,16,0,0,0,32,56v58.78c0,89.61,75.82,119.34,91,124.39a15.53,15.53,0,0,0,10,0c15.2-5.05,91-34.78,91-124.39V56A16,16,0,0,0,208,40Zm0,74.79c0,78.42-66.35,104.62-80,109.91-13.53-5.19-80-31.09-80-109.91V56H208Z"/>
+                </svg>
+              </div>
+            }
             badge="PRO"
           />
         </div>

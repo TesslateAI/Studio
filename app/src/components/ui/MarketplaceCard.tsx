@@ -34,8 +34,8 @@ export function MarketplaceCard({
       onClick={onClick}
     >
       {/* Icon */}
-      <div className="agent-icon w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-opacity-20">
-        <div className="text-xl">{icon}</div>
+      <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0">
+        {icon}
       </div>
 
       {/* Content */}

@@ -28,7 +28,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
       // The NGINX ingress controller will extract the Authorization header
       // and forward it to the auth-url endpoint
       const token = localStorage.getItem('token');
-      let authenticatedUrl = response.url;
+      const authenticatedUrl = response.url;
 
       if (token) {
         // Store token in sessionStorage for iframe to use

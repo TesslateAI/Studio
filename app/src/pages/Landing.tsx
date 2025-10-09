@@ -601,8 +601,12 @@ export default function Landing() {
       <header
         className="sticky top-0 z-50 backdrop-blur-xl shadow-sm"
         style={{
-          background: 'rgba(var(--surface-rgb, 26, 26, 26), 0.8)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+          background: theme === 'dark'
+            ? 'rgba(26, 26, 26, 0.8)'
+            : 'rgba(255, 255, 255, 0.8)',
+          borderBottom: theme === 'dark'
+            ? '1px solid rgba(255, 255, 255, 0.1)'
+            : '1px solid rgba(0, 0, 0, 0.1)'
         }}
       >
         <div className="container mx-auto px-6 py-4">
