@@ -144,7 +144,7 @@ export function ChatInput({
   ];
 
   return (
-    <form className="chat-input-wrapper px-5 py-4 border-t border-white/5 flex-shrink-0" onSubmit={handleSubmit}>
+    <form className="chat-input-wrapper px-5 py-4 border-t border-[var(--border-color)] flex-shrink-0" onSubmit={handleSubmit}>
       <div className="input-container flex items-center gap-2">
         {/* Upload dropdown */}
         <ToolDropdown
@@ -157,7 +157,7 @@ export function ChatInput({
         />
 
         {/* Chat input container with agent pill */}
-        <div className="chat-input-container relative flex-1 flex items-center bg-white/5 border border-white/10 rounded-2xl overflow-hidden transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)]">
+        <div className="chat-input-container relative flex-1 flex items-center bg-[var(--text)]/5 border border-[var(--border-color)] rounded-2xl overflow-hidden transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)]">
           <AgentSelector
             agents={agents}
             currentAgent={currentAgent}
@@ -171,7 +171,7 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled}
-            className="chat-input bg-transparent border-none px-4 py-2.5 text-white flex-1 text-sm outline-none placeholder:text-white/40"
+            className="chat-input bg-transparent border-none px-4 py-2.5 text-[var(--text)] flex-1 text-sm outline-none placeholder:text-[var(--text)]/40"
           />
         </div>
 

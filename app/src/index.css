@@ -1,5 +1,43 @@
 @import "tailwindcss";
 
+:root {
+  --primary: #FF6B00;
+  --accent: #00D9FF;
+  --hue1: 25;
+  --hue2: 240;
+  --bg-dark: #0a0a0a;
+  --surface: #1a1a1a;
+  --text: #e2e2e2;
+  --border-color: hsl(var(--hue2), 12%, 20%);
+  --radius: 22px;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Mode (default) */
+body.dark-mode {
+  --bg-dark: #0a0a0a;
+  --surface: #1a1a1a;
+  --text: #e2e2e2;
+  --border-color: hsl(var(--hue2), 12%, 20%);
+  background-color: var(--bg-dark);
+  color: var(--text);
+}
+
+/* Light Mode */
+body.light-mode {
+  --bg-dark: #f8f9fa;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --border-color: hsl(var(--hue2), 12%, 80%);
+  background-color: var(--bg-dark);
+  color: var(--text);
+}
+
+/* Hide dark-mode-only elements in light mode */
+body.light-mode .dark-mode-only {
+  display: none;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -25,7 +63,26 @@ body {
   animation-play-state: paused !important;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - Global styles matching design */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Custom scrollbar utilities */
 .scrollbar-thin {
   scrollbar-width: thin;
 }

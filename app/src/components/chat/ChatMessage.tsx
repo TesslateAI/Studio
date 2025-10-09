@@ -45,7 +45,7 @@ export function ChatMessage({ type, content, avatar, actions, toolCalls }: ChatM
             message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed
             ${isUser
               ? 'bg-gradient-to-br from-[rgba(255,107,0,0.9)] to-[rgba(255,140,58,0.9)] text-white border border-white/20'
-              : 'bg-white/5 text-gray-200 border border-white/8'
+              : 'bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]'
             }
           `}
         >
@@ -61,7 +61,7 @@ export function ChatMessage({ type, content, avatar, actions, toolCalls }: ChatM
                 className="tool-call bg-[rgba(0,217,255,0.1)] border border-[rgba(0,217,255,0.2)] rounded-lg px-3 py-2 text-xs text-[var(--accent)] font-mono"
               >
                 <strong>{tool.name}</strong>
-                {tool.description && <span className="ml-2 text-gray-400">{tool.description}</span>}
+                {tool.description && <span className="ml-2 text-[var(--text)]/60">{tool.description}</span>}
               </div>
             ))}
           </div>

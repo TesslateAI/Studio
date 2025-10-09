@@ -5,19 +5,18 @@ import {
   Monitor,
   Code,
   Folder,
-  Box,
-  GitBranch as GitFlow,
+  Cube,
+  GitBranch,
   BookOpen,
   Sun,
   Moon,
-  GitBranch,
-  Image as ImageIcon,
-  Store,
-  Settings,
+  Image,
+  Storefront,
+  Gear,
   Rocket,
-  Share2,
-  RefreshCw
-} from 'lucide-react';
+  ShareNetwork,
+  ArrowsClockwise
+} from '@phosphor-icons/react';
 import { FloatingSidebar } from '../components/ui/FloatingSidebar';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { ChatContainer } from '../components/chat/ChatContainer';
@@ -188,7 +187,7 @@ export default function Project() {
   };
 
   const agents = [
-    { id: 'builder', name: 'Builder AI', icon: <Box className="w-4 h-4" />, active: true },
+    { id: 'builder', name: 'Builder AI', icon: <Cube className="w-4 h-4" />, active: true },
     { id: 'react', name: 'React Expert', icon: <Code className="w-4 h-4" /> },
   ];
 
@@ -201,12 +200,13 @@ export default function Project() {
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-gray-900 to-black">
+    <div className="h-screen flex flex-col overflow-hidden relative">
+
       {/* Back Button */}
       <div className="absolute top-6 left-6 z-50">
         <button
           onClick={() => navigate('/dashboard')}
-          className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-gray-300 hover:text-white transition-all"
+          className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-[var(--text)]/80 hover:text-[var(--text)] transition-all"
         >
           <ArrowLeft size={20} />
           <span className="font-medium hidden sm:inline">Back to Projects</span>
@@ -215,8 +215,8 @@ export default function Project() {
 
       {/* Project Title */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3">
-        <h1 className="font-heading text-xl sm:text-2xl font-bold text-white">{project.name}</h1>
-        <div className="github-sync flex items-center gap-2 px-3 py-2 bg-white/5 rounded-lg text-xs text-green-400">
+        <h1 className="font-heading text-xl sm:text-2xl font-bold text-[var(--text)]">{project.name}</h1>
+        <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-lg text-xs text-green-400">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
           <GitBranch size={14} />
           <span>Synced</span>
@@ -245,12 +245,12 @@ export default function Project() {
             onClick: () => alert('File tree feature')
           },
           {
-            icon: <Box size={20} />,
+            icon: <Cube size={20} />,
             title: 'Components',
             onClick: () => alert('Components library')
           },
           {
-            icon: <GitFlow size={20} />,
+            icon: <GitBranch size={20} />,
             title: 'Architecture',
             onClick: () => togglePanel('architecture'),
             active: activePanel === 'architecture'
@@ -280,19 +280,19 @@ export default function Project() {
             active: activePanel === 'github'
           },
           {
-            icon: <ImageIcon size={20} />,
+            icon: <Image size={20} />,
             title: 'Assets',
             onClick: () => togglePanel('assets'),
             active: activePanel === 'assets'
           },
           {
-            icon: <Store size={20} />,
+            icon: <Storefront size={20} />,
             title: 'Marketplace',
             onClick: () => togglePanel('marketplace'),
             active: activePanel === 'marketplace'
           },
           {
-            icon: <Settings size={20} />,
+            icon: <Gear size={20} />,
             title: 'Settings',
             onClick: () => togglePanel('settings'),
             active: activePanel === 'settings'
@@ -303,7 +303,7 @@ export default function Project() {
             onClick: () => alert('Deploy feature')
           },
           {
-            icon: <Share2 size={20} />,
+            icon: <ShareNetwork size={20} />,
             title: 'Share',
             onClick: () => alert('Share feature')
           }
@@ -311,31 +311,31 @@ export default function Project() {
       />
 
       {/* Main Preview/Code Container */}
-      <div className="h-screen w-screen flex items-center justify-center px-20 sm:px-32 py-20 sm:py-24 transition-all duration-500">
-        <div className="preview-container w-full h-full relative bg-[var(--surface)] rounded-[20px] overflow-hidden border border-white/8 transition-all duration-500 ease-[var(--ease)]">
+      <div className="h-screen w-screen flex items-center justify-center px-20 sm:px-32 py-20 sm:py-24 transition-all duration-500 relative z-10">
+        <div className="w-full h-full relative bg-[var(--surface)] rounded-[20px] overflow-hidden border border-white/8 transition-all duration-500 shadow-2xl">
           {/* Preview View */}
           <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
             {devServerUrl ? (
               <>
-                {/* Browser-style URL bar */}
-                <div className="bg-black/20 backdrop-blur-lg border-b border-white/10 p-2 flex items-center gap-2">
-                  <div className="flex items-center gap-1 pl-2">
+                {/* Browser-style chrome */}
+                <div className="bg-[var(--surface)] border-b border-white/10 p-3 flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-red-500" />
                     <div className="w-3 h-3 rounded-full bg-yellow-500" />
                     <div className="w-3 h-3 rounded-full bg-green-500" />
                   </div>
-                  <div className="flex-1 mx-3">
-                    <div className="bg-white/5 backdrop-blur-sm rounded-lg px-4 py-2 text-sm text-gray-300 font-mono flex items-center border border-white/10">
-                      <span className="text-green-400 mr-2">🔒</span>
-                      {devServerUrl}
+                  <div className="flex-1">
+                    <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)]">
+                      <span className="text-yellow-500 mr-2">🔒</span>
+                      <span className="text-[var(--text)]/80">{devServerUrl}</span>
                     </div>
                   </div>
                   <button
                     onClick={refreshPreview}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
                     title="Refresh"
                   >
-                    <RefreshCw size={14} />
+                    <ArrowsClockwise size={16} />
                   </button>
                 </div>
                 {/* Preview iframe */}
@@ -349,7 +349,7 @@ export default function Project() {
                 </div>
               </>
             ) : (
-              <div className="h-full flex items-center justify-center text-gray-400">
+              <div className="h-full flex items-center justify-center text-[var(--text)]/60">
                 <div className="text-center">
                   <div className="animate-spin h-8 w-8 mx-auto mb-2 border-2 border-orange-500 border-t-transparent rounded-full" />
                   <p>Starting development server...</p>
@@ -359,19 +359,25 @@ export default function Project() {
           </div>
 
           {/* Code View */}
-          <div className={`w-full h-full bg-[#1e1e1e] ${activeView === 'code' ? 'flex' : 'hidden'} flex-col`}>
-            <div className="flex items-center justify-between px-6 py-4 bg-[#252526] border-b border-white/10">
+          <div className={`w-full h-full bg-[var(--surface)] ${activeView === 'code' ? 'flex' : 'hidden'} flex-col`}>
+            <div className="flex items-center justify-between px-6 py-3 bg-[var(--surface)] border-b border-white/10">
               <div className="flex items-center gap-4">
                 <div className="flex gap-2">
                   <div className="w-3 h-3 rounded-full bg-red-500" />
                   <div className="w-3 h-3 rounded-full bg-yellow-500" />
                   <div className="w-3 h-3 rounded-full bg-green-500" />
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-400">
+                <div className="flex items-center gap-2 text-sm text-[var(--text)]/60">
                   <Code size={16} />
                   <span>src/App.jsx</span>
                 </div>
               </div>
+              <button
+                onClick={() => setActiveView('preview')}
+                className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 text-sm transition-colors"
+              >
+                Close
+              </button>
             </div>
             <div className="flex-1 overflow-auto">
               <CodeEditor
@@ -396,7 +402,7 @@ export default function Project() {
 
       <FloatingPanel
         title="Architecture"
-        icon={<GitFlow size={20} />}
+        icon={<GitBranch size={20} />}
         isOpen={activePanel === 'architecture'}
         onClose={() => setActivePanel(null)}
       >
@@ -414,7 +420,7 @@ export default function Project() {
 
       <FloatingPanel
         title="Settings"
-        icon={<Settings size={20} />}
+        icon={<Gear size={20} />}
         isOpen={activePanel === 'settings'}
         onClose={() => setActivePanel(null)}
       >
@@ -423,7 +429,7 @@ export default function Project() {
 
       <FloatingPanel
         title="Marketplace"
-        icon={<Store size={20} />}
+        icon={<Storefront size={20} />}
         isOpen={activePanel === 'marketplace'}
         onClose={() => setActivePanel(null)}
       >
@@ -432,7 +438,7 @@ export default function Project() {
 
       <FloatingPanel
         title="Assets"
-        icon={<ImageIcon size={20} />}
+        icon={<Image size={20} />}
         isOpen={activePanel === 'assets'}
         onClose={() => setActivePanel(null)}
       >

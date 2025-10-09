@@ -50,7 +50,7 @@ export default function Register() {
       {/* Theme toggle button */}
       <button
         onClick={toggleTheme}
-        className="absolute top-6 right-6 w-12 h-12 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all duration-300 hover:scale-105"
+        className="absolute top-6 right-6 w-12 h-12 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all duration-300 hover:scale-105 z-50"
         aria-label="Toggle theme"
       >
         {theme === 'dark' ? (

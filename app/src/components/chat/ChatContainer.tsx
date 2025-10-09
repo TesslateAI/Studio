@@ -90,17 +90,17 @@ export function ChatContainer({
         fixed bottom-6 left-1/2 -translate-x-1/2
         z-[150]
         flex flex-col
-        bg-gradient-to-br from-[hsl(var(--hue1)_30%_10%_/_0.7)] to-[hsl(var(--hue2)_30%_10%_/_0.7)]
+        bg-[var(--surface)]/95
         backdrop-blur-xl saturate-180
         rounded-3xl
-        border border-white/12
-        shadow-[0_8px_32px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.1)]
+        border border-[var(--border-color)]
+        shadow-2xl
         transition-all duration-400 ease-[var(--ease)]
         max-h-[calc(100vh-48px)]
         ${isExpanded
-          ? 'w-[min(900px,calc(100vw-48px))]'
+          ? 'w-[min(800px,calc(100vw-48px))]'
           : isHovered
-          ? 'w-[min(700px,calc(100vw-48px))]'
+          ? 'w-[min(650px,calc(100vw-48px))]'
           : 'w-[min(600px,calc(100vw-48px))]'
         }
         ${className}
