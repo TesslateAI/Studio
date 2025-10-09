@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "@phosphor-icons/react": "^2.1.10",
     "@types/react-router-dom": "^5.3.3",
     "axios": "^1.11.0",
     "lucide-react": "^0.541.0",
@@ -38,8 +39,8 @@
     "vite": "^7.1.2"
   },
   "optionalDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.47.1",
+    "@rollup/rollup-linux-x64-gnu": "^4.47.1",
     "@rollup/rollup-linux-x64-musl": "^4.47.1",
-    "@rollup/rollup-linux-x64-gnu": "^4.47.1"
+    "@rollup/rollup-win32-x64-msvc": "^4.47.1"
   }
 }
