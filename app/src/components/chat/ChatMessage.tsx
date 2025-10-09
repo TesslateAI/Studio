@@ -2,7 +2,7 @@ import { type ReactNode } from 'react';
 
 interface ChatMessageProps {
   type: 'user' | 'ai';
-  content: string;
+  content: ReactNode;
   avatar?: ReactNode;
   actions?: Array<{
     label: string;

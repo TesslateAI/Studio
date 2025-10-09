@@ -45,8 +45,6 @@ export default function Project() {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
   const projectId = parseInt(id!);
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -165,26 +163,6 @@ export default function Project() {
     setActivePanel(activePanel === panel ? null : panel);
   };
 
-  const handleSendMessage = (message: string) => {
-    const newMessage = {
-      id: Date.now().toString(),
-      type: 'user' as const,
-      content: message
-    };
-    setChatMessages([...chatMessages, newMessage]);
-    setIsTyping(true);
-
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage = {
-        id: (Date.now() + 1).toString(),
-        type: 'ai' as const,
-        content: 'I received your message: ' + message
-      };
-      setChatMessages(prev => [...prev, aiMessage]);
-      setIsTyping(false);
-    }, 2000);
-  };
 
   const agents = [
     { id: 'builder', name: 'Builder AI', icon: <Cube className="w-4 h-4" />, active: true },
@@ -447,16 +425,15 @@ export default function Project() {
 
       {/* Chat Interface */}
       <ChatContainer
+        projectId={projectId}
         agents={agents}
-        messages={chatMessages}
         currentAgent={agents[0]}
         onSelectAgent={(agent) => console.log('Selected agent:', agent)}
-        onSendMessage={handleSendMessage}
+        onFileUpdate={handleFileUpdate}
         onUpload={(type) => console.log('Upload:', type)}
         onAction={(action) => console.log('Action:', action)}
         onGetMoreCredits={() => alert('Get more credits')}
         creditsLeft={10}
-        isTyping={isTyping}
       />
     </div>
   );

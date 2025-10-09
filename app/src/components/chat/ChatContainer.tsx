@@ -1,8 +1,14 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { Code, Loader2, FileCode } from 'lucide-react';
 import { UsageRibbon } from './UsageRibbon';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { TypingIndicator } from './TypingIndicator';
+import { createWebSocket, chatApi } from '../../lib/api';
+import toast from 'react-hot-toast';
+import ChatModeToggle from '../ChatModeToggle';
+import AgentMessage from '../AgentMessage';
+import { type AgentMessageData } from '../../types/agent';
 
 interface Agent {
   id: string;
@@ -15,6 +21,7 @@ interface Message {
   id: string;
   type: 'user' | 'ai';
   content: string;
+  agentData?: AgentMessageData;
   toolCalls?: Array<{
     name: string;
     description: string;
@@ -25,44 +32,185 @@ interface Message {
   }>;
 }
 
+interface StreamingFile {
+  fileName: string;
+  isStreaming: boolean;
+}
+
 interface ChatContainerProps {
+  projectId: number;
   agents: Agent[];
-  messages: Message[];
   currentAgent: Agent;
   onSelectAgent: (agent: Agent) => void;
-  onSendMessage: (message: string) => void;
+  onFileUpdate: (filePath: string, content: string) => void;
   onUpload?: (type: 'image' | 'file' | 'folder') => void;
   onAction?: (action: string) => void;
   onGetMoreCredits: () => void;
   creditsLeft: number;
-  isTyping?: boolean;
   className?: string;
 }
 
 export function ChatContainer({
+  projectId,
   agents,
-  messages,
   currentAgent,
   onSelectAgent,
-  onSendMessage,
+  onFileUpdate,
   onUpload,
   onAction,
   onGetMoreCredits,
   creditsLeft,
-  isTyping = false,
   className = ''
 }: ChatContainerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [chatMode, setChatMode] = useState<'stream' | 'agent'>('stream');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [agentExecuting, setAgentExecuting] = useState(false);
+  const [currentStream, setCurrentStream] = useState('');
+  const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Load chat history from database
+  useEffect(() => {
+    const loadChatHistory = async () => {
+      try {
+        console.log('[CHAT] Loading chat history from database for project:', projectId);
+        const dbMessages = await chatApi.getProjectMessages(projectId);
+        console.log('[CHAT] Loaded', dbMessages.length, 'messages from database');
+        setMessages(dbMessages.map((msg, idx) => ({
+          id: `msg-${idx}`,
+          type: msg.role as 'user' | 'ai',
+          content: msg.content
+        })));
+      } catch (error) {
+        console.error('[CHAT] Failed to load chat history:', error);
+        setMessages([]);
+      }
+    };
+
+    loadChatHistory();
+  }, [projectId]);
+
+  // Load chat mode preference
+  useEffect(() => {
+    const savedMode = localStorage.getItem(`chat_mode_${projectId}`);
+    if (savedMode === 'agent' || savedMode === 'stream') {
+      setChatMode(savedMode);
+    }
+  }, [projectId]);
+
+  // WebSocket connection
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    let ws: WebSocket | null = null;
+    let isCleaningUp = false;
+
+    const connectWebSocket = () => {
+      if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+        wsRef.current.close();
+      }
+
+      ws = createWebSocket(token);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (!isCleaningUp) {
+          console.log('[WS] WebSocket connected');
+        }
+      };
+
+      ws.onmessage = (event) => {
+        if (isCleaningUp) return;
+
+        const data = JSON.parse(event.data);
+        console.log('[WS] Message:', data.type);
+
+        if (data.type === 'stream') {
+          setCurrentStream(prev => prev + data.content);
+
+          // Extract file names from code blocks
+          const codeBlockPattern = /```\w+\s*\n\/\/\s*File:\s*([^\n]+)/g;
+          let match;
+          while ((match = codeBlockPattern.exec(data.content)) !== null) {
+            const fileName = match[1].trim();
+            setStreamingFiles(prev => new Map(prev).set(fileName, { fileName, isStreaming: true }));
+          }
+        } else if (data.type === 'complete') {
+          setMessages(prev => [...prev, {
+            id: `msg-${Date.now()}`,
+            type: 'ai',
+            content: data.content
+          }]);
+          setCurrentStream('');
+          setIsStreaming(false);
+          setStreamingFiles(prev => {
+            const newMap = new Map(prev);
+            newMap.forEach((file, key) => {
+              newMap.set(key, { ...file, isStreaming: false });
+            });
+            return newMap;
+          });
+        } else if (data.type === 'file_ready') {
+          onFileUpdate(data.file_path, data.content);
+          toast.success(`Created ${data.file_path}`, { duration: 2000 });
+
+          const fileName = data.file_path.replace(/^src\//, '');
+          setStreamingFiles(prev => {
+            const newMap = new Map(prev);
+            if (newMap.has(fileName)) {
+              newMap.set(fileName, { fileName, isStreaming: false });
+            }
+            return newMap;
+          });
+        } else if (data.type === 'error') {
+          toast.error(data.content);
+          setIsStreaming(false);
+          setCurrentStream('');
+          setStreamingFiles(prev => {
+            const newMap = new Map(prev);
+            newMap.forEach((file, key) => {
+              newMap.set(key, { ...file, isStreaming: false });
+            });
+            return newMap;
+          });
+        }
+      };
+
+      ws.onerror = (error) => {
+        if (!isCleaningUp) {
+          console.error('[WS] WebSocket error:', error);
+        }
+      };
+
+      ws.onclose = () => {
+        if (!isCleaningUp) {
+          console.log('[WS] WebSocket disconnected');
+        }
+      };
+    };
+
+    connectWebSocket();
+
+    return () => {
+      isCleaningUp = true;
+      if (ws && ws.readyState !== WebSocket.CLOSED) {
+        ws.close();
+      }
+    };
+  }, [projectId, onFileUpdate]);
 
   // Auto-scroll to latest message
   useEffect(() => {
     if (isExpanded && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isExpanded]);
+  }, [messages, currentStream, isExpanded]);
 
   // Collapse chat when clicking outside
   useEffect(() => {
@@ -81,6 +229,132 @@ export function ChatContainer({
   const handleInputFocus = () => {
     setIsExpanded(true);
   };
+
+  const handleModeToggle = (mode: 'stream' | 'agent') => {
+    setChatMode(mode);
+    localStorage.setItem(`chat_mode_${projectId}`, mode);
+  };
+
+  const sendStreamMessage = (message: string) => {
+    if (!message.trim() || !wsRef.current || isStreaming) return;
+
+    const userMessage: Message = {
+      id: `msg-${Date.now()}`,
+      type: 'user',
+      content: message
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setIsStreaming(true);
+    setStreamingFiles(new Map());
+
+    wsRef.current.send(JSON.stringify({
+      message,
+      project_id: projectId
+    }));
+  };
+
+  const sendAgentMessage = async (message: string) => {
+    if (!message.trim() || agentExecuting) return;
+
+    const userMessage: Message = {
+      id: `msg-${Date.now()}`,
+      type: 'user',
+      content: message
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setAgentExecuting(true);
+
+    try {
+      const response = await chatApi.sendAgentMessage({
+        project_id: projectId,
+        message,
+        max_iterations: 20,
+      });
+
+      if (response.success) {
+        const agentMessage: Message = {
+          id: `msg-${Date.now()}`,
+          type: 'ai',
+          content: response.final_response,
+          agentData: {
+            steps: response.steps,
+            iterations: response.iterations,
+            tool_calls_made: response.tool_calls_made,
+            completion_reason: response.completion_reason,
+          },
+        };
+        setMessages(prev => [...prev, agentMessage]);
+        toast.success('Task completed successfully');
+      } else {
+        toast.error(response.error || 'Agent execution failed');
+      }
+    } catch (error: any) {
+      console.error('[AGENT] Execution error:', error);
+      toast.error(error?.response?.data?.detail || 'Failed to execute agent');
+    } finally {
+      setAgentExecuting(false);
+    }
+  };
+
+  const handleSendMessage = (message: string) => {
+    if (chatMode === 'agent') {
+      sendAgentMessage(message);
+    } else {
+      sendStreamMessage(message);
+    }
+  };
+
+  const renderMessageContent = (content: string, isCurrentlyStreaming: boolean = false) => {
+    let processedContent = content;
+
+    if (isCurrentlyStreaming) {
+      processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*?```/g, (match, fileName) => {
+        return `[FILE: ${fileName.trim()}]`;
+      });
+      processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*$/g, (match, fileName) => {
+        return `[FILE: ${fileName.trim()}]`;
+      });
+    } else {
+      processedContent = processedContent.replace(/```[\s\S]*?```/g, (match) => {
+        const fileMatch = match.match(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)/);
+        if (fileMatch) {
+          return `[FILE: ${fileMatch[1].trim()}]`;
+        }
+        return '';
+      });
+    }
+
+    const parts = processedContent.split(/\[FILE: ([^\]]+)\]/g);
+
+    return parts.map((part, index) => {
+      if (index % 2 === 0) {
+        return <span key={index}>{part}</span>;
+      } else {
+        const fileName = part;
+        const fileInfo = streamingFiles.get(fileName);
+        const isFileStreaming = isCurrentlyStreaming && (!fileInfo || fileInfo.isStreaming !== false);
+
+        return (
+          <div key={index} className="my-2">
+            <div className="flex items-center gap-2 p-3 bg-[var(--surface)]/50 rounded-lg border border-[var(--border-color)]">
+              <FileCode size={18} className="text-orange-500" />
+              <span className="text-sm font-medium flex-1">{fileName}</span>
+              {isFileStreaming && (
+                <Loader2 className="animate-spin text-orange-500" size={16} />
+              )}
+              {!isFileStreaming && (
+                <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
+                  <div className="w-2 h-2 bg-white rounded-full" />
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+    });
+  };
+
+  const isTyping = isStreaming || agentExecuting;
 
   return (
     <div
@@ -156,30 +430,84 @@ export function ChatContainer({
           }
         `}
       >
-        {messages.map((message) => (
-          <ChatMessage
-            key={message.id}
-            type={message.type}
-            content={message.content}
-            toolCalls={message.toolCalls}
-            actions={message.actions}
-          />
-        ))}
+        {messages.length === 0 && !isStreaming && (
+          <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
+            <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
+              <Code size={24} className="text-orange-500" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-lg font-semibold">Let's start building</p>
+              <p className="text-sm max-w-xs mx-auto leading-relaxed">
+                Describe what you'd like to create and I'll help you build it step by step
+              </p>
+            </div>
+          </div>
+        )}
+
+        {messages.map((message) => {
+          // Render agent message with special component
+          if (message.type === 'ai' && message.agentData) {
+            return (
+              <div key={message.id} className="mb-4">
+                <AgentMessage
+                  agentData={message.agentData}
+                  finalResponse={message.content}
+                />
+              </div>
+            );
+          }
+
+          // Render regular messages
+          return (
+            <ChatMessage
+              key={message.id}
+              type={message.type}
+              content={renderMessageContent(message.content, false)}
+              toolCalls={message.toolCalls}
+              actions={message.actions}
+            />
+          );
+        })}
+
+        {/* Streaming message */}
+        {isStreaming && currentStream && (
+          <div className="mb-4">
+            <ChatMessage
+              type="ai"
+              content={renderMessageContent(currentStream, true)}
+            />
+          </div>
+        )}
+
+        {/* Agent executing indicator */}
+        {agentExecuting && (
+          <div className="flex items-center gap-2 p-4 bg-purple-50 rounded-lg border border-purple-200">
+            <Loader2 className="animate-spin text-purple-600" size={16} />
+            <span className="text-sm font-medium text-purple-700">Agent is working...</span>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
       {/* Typing indicator */}
       <TypingIndicator visible={isTyping && isExpanded} />
 
-      {/* Chat input */}
-      <div onFocus={handleInputFocus}>
+      {/* Chat mode toggle and input */}
+      <div onFocus={handleInputFocus} className="px-5 py-3 border-t border-[var(--border-color)]">
+        <ChatModeToggle
+          mode={chatMode}
+          onChange={handleModeToggle}
+          disabled={isStreaming || agentExecuting}
+        />
         <ChatInput
           agents={agents}
           currentAgent={currentAgent}
           onSelectAgent={onSelectAgent}
-          onSendMessage={onSendMessage}
+          onSendMessage={handleSendMessage}
           onUpload={onUpload}
           onAction={onAction}
+          disabled={isStreaming || agentExecuting}
         />
       </div>
     </div>
