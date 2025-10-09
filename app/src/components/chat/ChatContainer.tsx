@@ -4,17 +4,18 @@ import { UsageRibbon } from './UsageRibbon';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { TypingIndicator } from './TypingIndicator';
-import { createWebSocket, chatApi } from '../../lib/api';
+import { createWebSocket, chatApi, agentsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
-import ChatModeToggle from '../ChatModeToggle';
 import AgentMessage from '../AgentMessage';
-import { type AgentMessageData } from '../../types/agent';
+import { type AgentMessageData, type Agent as BackendAgent } from '../../types/agent';
 
 interface Agent {
   id: string;
   name: string;
   icon: ReactNode;
   active?: boolean;
+  backendId?: number;  // Link to backend agent ID
+  mode?: 'stream' | 'agent';
 }
 
 interface Message {
@@ -52,8 +53,8 @@ interface ChatContainerProps {
 
 export function ChatContainer({
   projectId,
-  agents,
-  currentAgent,
+  agents: initialAgents,
+  currentAgent: initialCurrentAgent,
   onSelectAgent,
   onFileUpdate,
   onUpload,
@@ -65,7 +66,9 @@ export function ChatContainer({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [chatMode, setChatMode] = useState<'stream' | 'agent'>('stream');
+  const [backendAgents, setBackendAgents] = useState<BackendAgent[]>([]);
+  const [agents, setAgents] = useState<Agent[]>(initialAgents);
+  const [currentAgent, setCurrentAgent] = useState<Agent>(initialCurrentAgent);
   const [isStreaming, setIsStreaming] = useState(false);
   const [agentExecuting, setAgentExecuting] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
@@ -95,13 +98,38 @@ export function ChatContainer({
     loadChatHistory();
   }, [projectId]);
 
-  // Load chat mode preference
+  // Load agents from backend
   useEffect(() => {
-    const savedMode = localStorage.getItem(`chat_mode_${projectId}`);
-    if (savedMode === 'agent' || savedMode === 'stream') {
-      setChatMode(savedMode);
-    }
-  }, [projectId]);
+    const loadAgents = async () => {
+      try {
+        const fetchedAgents = await agentsApi.getAll();
+        setBackendAgents(fetchedAgents);
+
+        // Convert backend agents to UI agents
+        const uiAgents = fetchedAgents.map(agent => ({
+          id: agent.slug,
+          name: agent.name,
+          icon: agent.icon,
+          backendId: agent.id,
+          mode: agent.mode
+        }));
+
+        setAgents(uiAgents);
+
+        // Set first agent as default if no current agent
+        if (uiAgents.length > 0 && !currentAgent) {
+          const defaultAgent = uiAgents[0];
+          setCurrentAgent(defaultAgent);
+          onSelectAgent(defaultAgent);
+        }
+      } catch (error) {
+        console.error('Failed to load agents:', error);
+        toast.error('Failed to load AI agents');
+      }
+    };
+
+    loadAgents();
+  }, []);
 
   // WebSocket connection
   useEffect(() => {
@@ -230,9 +258,9 @@ export function ChatContainer({
     setIsExpanded(true);
   };
 
-  const handleModeToggle = (mode: 'stream' | 'agent') => {
-    setChatMode(mode);
-    localStorage.setItem(`chat_mode_${projectId}`, mode);
+  const handleAgentSelect = (agent: Agent) => {
+    setCurrentAgent(agent);
+    onSelectAgent(agent);
   };
 
   const sendStreamMessage = (message: string) => {
@@ -249,7 +277,8 @@ export function ChatContainer({
 
     wsRef.current.send(JSON.stringify({
       message,
-      project_id: projectId
+      project_id: projectId,
+      agent_id: currentAgent.backendId  // Include agent_id
     }));
   };
 
@@ -297,7 +326,8 @@ export function ChatContainer({
   };
 
   const handleSendMessage = (message: string) => {
-    if (chatMode === 'agent') {
+    // Use agent's mode to determine stream vs agent execution
+    if (currentAgent.mode === 'agent') {
       sendAgentMessage(message);
     } else {
       sendStreamMessage(message);
@@ -424,6 +454,7 @@ export function ChatContainer({
           chat-messages
           flex-1 overflow-y-auto px-5
           transition-all duration-300
+          pointer-events-none
           ${isExpanded
             ? 'opacity-100 max-h-[calc(100vh-400px)] py-5'
             : 'opacity-0 max-h-0 py-0'
@@ -493,17 +524,12 @@ export function ChatContainer({
       {/* Typing indicator */}
       <TypingIndicator visible={isTyping && isExpanded} />
 
-      {/* Chat mode toggle and input */}
-      <div onFocus={handleInputFocus} className="px-5 py-3 border-t border-[var(--border-color)]">
-        <ChatModeToggle
-          mode={chatMode}
-          onChange={handleModeToggle}
-          disabled={isStreaming || agentExecuting}
-        />
+      {/* Chat input */}
+      <div onFocus={handleInputFocus} className="px-5 py-3 border-t border-[var(--border-color)] pointer-events-auto">
         <ChatInput
           agents={agents}
           currentAgent={currentAgent}
-          onSelectAgent={onSelectAgent}
+          onSelectAgent={handleAgentSelect}
           onSendMessage={handleSendMessage}
           onUpload={onUpload}
           onAction={onAction}

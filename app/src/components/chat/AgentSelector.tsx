@@ -51,6 +51,7 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
           rounded-l-2xl
           -ml-px -my-px
           hover:bg-orange-600
+          relative z-[10000]
         "
       >
         <span className="text-sm">{currentAgent.icon}</span>
@@ -61,13 +62,15 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
       </button>
 
       {isOpen && (
-        <div className="
-          agent-dropdown absolute bottom-full left-0 mb-2
-          bg-[rgba(20,20,20,0.98)] backdrop-blur-xl
-          border border-white/10 rounded-xl
-          min-w-[300px] z-[1000]
-          shadow-lg overflow-hidden
-        ">
+        <div
+          className="
+            agent-dropdown absolute bottom-full left-0 mb-2
+            bg-[rgba(20,20,20,0.98)] backdrop-blur-xl
+            border border-white/10 rounded-xl
+            min-w-[300px] z-[10000]
+            shadow-lg overflow-hidden
+          "
+        >
           <div className="px-4 py-2 text-xs text-gray-400 border-b border-white/5">
             PURCHASED AGENTS
           </div>

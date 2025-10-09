@@ -47,6 +47,11 @@ rules:
   resources: ["pods"]
   verbs: ["get", "list", "watch"]
 
+# Pod exec - for executing commands in pods (required for file operations)
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create", "get"]
+
 # Pod logs - for debugging (read-only)
 - apiGroups: [""]
   resources: ["pods/log"]

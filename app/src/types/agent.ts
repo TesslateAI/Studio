@@ -30,3 +30,26 @@ export interface AgentMessageData {
   tool_calls_made: number;
   completion_reason: string;
 }
+
+export interface Agent {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+  system_prompt: string;
+  icon: string;
+  mode: 'stream' | 'agent';
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface AgentCreate {
+  name: string;
+  slug: string;
+  description?: string;
+  system_prompt: string;
+  icon?: string;
+  mode?: 'stream' | 'agent';
+  is_active?: boolean;
+}

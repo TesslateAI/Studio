@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
-from ..models import User, Chat, Message, Project, ProjectFile
+from ..models import User, Chat, Message, Project, ProjectFile, Agent as AgentModel
 from ..schemas import (
     Chat as ChatSchema, Message as MessageSchema, MessageCreate,
     AgentChatRequest, AgentChatResponse, AgentStepResponse
@@ -302,6 +302,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
 async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocket: WebSocket):
     message_content = data.get("message")
     project_id = data.get("project_id")
+    agent_id = data.get("agent_id")  # Get agent_id from request
 
     try:
         # Get or create chat for this user and project
@@ -368,7 +369,8 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     full_response = ""
     processed_files = set()
     
-    # Build system prompt based on context
+    # Get agent and use its system prompt
+    agent = None
     base_system_prompt = """You are an expert React developer. Generate clean, modern React code for Vite applications using Tailwind CSS.
 
 CRITICAL RULES:
@@ -385,6 +387,22 @@ CRITICAL RULES:
 <code>
 9. ALWAYS PLAN AND MAKE A MULTIPAGE WEB APPLICATION. DO NOT CREATE SINGLE PAGE APPS. THEY SHOULD ALL BE CONNECTED.
 ```"""
+
+    # Fetch agent if agent_id is provided
+    if agent_id:
+        try:
+            agent_result = await db.execute(
+                select(AgentModel).where(AgentModel.id == agent_id, AgentModel.is_active == True)
+            )
+            agent = agent_result.scalar_one_or_none()
+            if agent:
+                base_system_prompt = agent.system_prompt
+                logger.info(f"Using agent '{agent.name}' (ID: {agent.id}) with custom system prompt")
+            else:
+                logger.warning(f"Agent ID {agent_id} not found or inactive, using default system prompt")
+        except Exception as e:
+            logger.error(f"Error fetching agent: {e}")
+            # Continue with default prompt
 
     surgical_edit_prompt = """
 

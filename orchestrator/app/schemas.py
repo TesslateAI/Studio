@@ -213,3 +213,38 @@ class AgentChatResponse(BaseModel):
     completion_reason: str
     steps: List[AgentStepResponse]
     error: Optional[str] = None
+
+
+# AI Agent Configuration Schemas
+
+class AgentBase(BaseModel):
+    """Base schema for AI Agent."""
+    name: str
+    slug: str
+    description: Optional[str] = None
+    system_prompt: str
+    icon: str = "🤖"
+    mode: str = "stream"  # "stream" or "agent"
+    is_active: bool = True
+
+class AgentCreate(AgentBase):
+    """Schema for creating a new agent."""
+    pass
+
+class AgentUpdate(BaseModel):
+    """Schema for updating an agent."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    icon: Optional[str] = None
+    mode: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class Agent(AgentBase):
+    """Schema for AI Agent response."""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True

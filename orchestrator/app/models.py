@@ -119,3 +119,19 @@ class PodAccessLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User")
+
+
+class Agent(Base):
+    """AI Agent configurations with custom system prompts."""
+    __tablename__ = "agents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)  # "Full Stack Builder"
+    slug = Column(String, unique=True, nullable=False)  # "fullstack-builder"
+    description = Column(Text)
+    system_prompt = Column(Text, nullable=False)
+    icon = Column(String, default="🤖")  # emoji or icon identifier
+    mode = Column(String, default="stream")  # "stream" or "agent"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

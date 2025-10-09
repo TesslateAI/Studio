@@ -157,7 +157,7 @@ export function ChatInput({
         />
 
         {/* Chat input container with agent pill */}
-        <div className="chat-input-container relative flex-1 flex items-center bg-[var(--text)]/5 border border-[var(--border-color)] rounded-2xl overflow-hidden transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)]">
+        <div className="chat-input-container relative flex-1 flex items-center bg-[var(--text)]/5 border border-[var(--border-color)] rounded-2xl overflow-visible transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)]">
           <AgentSelector
             agents={agents}
             currentAgent={currentAgent}

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AgentChatRequest, AgentChatResponse } from '../types/agent';
+import type { AgentChatRequest, AgentChatResponse, Agent, AgentCreate } from '../types/agent';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -183,6 +183,29 @@ export const chatApi = {
   },
   sendAgentMessage: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
     const response = await api.post('/api/chat/agent', request);
+    return response.data;
+  },
+};
+
+export const agentsApi = {
+  getAll: async (): Promise<Agent[]> => {
+    const response = await api.get('/api/agents/');
+    return response.data;
+  },
+  get: async (id: number): Promise<Agent> => {
+    const response = await api.get(`/api/agents/${id}`);
+    return response.data;
+  },
+  create: async (agent: AgentCreate): Promise<Agent> => {
+    const response = await api.post('/api/agents/', agent);
+    return response.data;
+  },
+  update: async (id: number, agent: Partial<AgentCreate>): Promise<Agent> => {
+    const response = await api.put(`/api/agents/${id}`, agent);
+    return response.data;
+  },
+  delete: async (id: number) => {
+    const response = await api.delete(`/api/agents/${id}`);
     return response.data;
   },
 };
