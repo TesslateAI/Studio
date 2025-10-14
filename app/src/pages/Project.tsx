@@ -52,6 +52,7 @@ export default function Project() {
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const urlCheckIntervalRef = React.useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     loadProject();
@@ -63,39 +64,52 @@ export default function Project() {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
+      if (urlCheckIntervalRef.current) {
+        clearInterval(urlCheckIntervalRef.current);
+      }
     };
   }, []);
 
-  // Track iframe URL changes
+  // Track iframe URL changes with polling
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
 
+    let lastUrl = '';
+
     const updateUrl = () => {
       try {
         const iframeUrl = iframe.contentWindow?.location.href;
-        if (iframeUrl && iframeUrl !== 'about:blank') {
+        if (iframeUrl && iframeUrl !== 'about:blank' && iframeUrl !== lastUrl) {
           // Remove auth token from display
           const urlObj = new URL(iframeUrl);
           urlObj.searchParams.delete('auth_token');
           urlObj.searchParams.delete('t');
           urlObj.searchParams.delete('hmr_fallback');
-          setCurrentPreviewUrl(urlObj.href);
+          const cleanUrl = urlObj.href;
+
+          if (cleanUrl !== lastUrl) {
+            lastUrl = cleanUrl;
+            setCurrentPreviewUrl(cleanUrl);
+          }
         }
       } catch (error) {
         // Cross-origin error - can't access iframe URL
-        // Just show the base dev server URL
-        if (devServerUrl) {
-          setCurrentPreviewUrl(devServerUrl);
-        }
+        // Keep showing the current URL
       }
     };
 
-    // Update URL on load
+    // Update URL on initial load
     iframe.addEventListener('load', updateUrl);
+
+    // Poll for URL changes (catches navigation without page reload)
+    urlCheckIntervalRef.current = setInterval(updateUrl, 500);
 
     return () => {
       iframe.removeEventListener('load', updateUrl);
+      if (urlCheckIntervalRef.current) {
+        clearInterval(urlCheckIntervalRef.current);
+      }
     };
   }, [devServerUrl]);
 
@@ -203,12 +217,31 @@ export default function Project() {
     }
   };
 
+  const updateIframeUrl = () => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    try {
+      const iframeUrl = iframe.contentWindow?.location.href;
+      if (iframeUrl && iframeUrl !== 'about:blank') {
+        const urlObj = new URL(iframeUrl);
+        urlObj.searchParams.delete('auth_token');
+        urlObj.searchParams.delete('t');
+        urlObj.searchParams.delete('hmr_fallback');
+        setCurrentPreviewUrl(urlObj.href);
+      }
+    } catch (error) {
+      // Cross-origin error - can't access iframe URL
+    }
+  };
+
   const navigateBack = () => {
     const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
       try {
         iframe.contentWindow.history.back();
-        // URL will be updated by the load event listener
+        // Update URL immediately after navigation
+        setTimeout(updateIframeUrl, 100);
       } catch (error) {
         console.log('Navigation back error:', error);
       }
@@ -220,7 +253,8 @@ export default function Project() {
     if (iframe && iframe.contentWindow) {
       try {
         iframe.contentWindow.history.forward();
-        // URL will be updated by the load event listener
+        // Update URL immediately after navigation
+        setTimeout(updateIframeUrl, 100);
       } catch (error) {
         console.log('Navigation forward error:', error);
       }
