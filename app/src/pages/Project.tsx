@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -76,7 +76,7 @@ export default function Project() {
     }
   };
 
-  const handleFileUpdate = async (filePath: string, content: string) => {
+  const handleFileUpdate = useCallback(async (filePath: string, content: string) => {
     setFiles(prev => {
       const existing = prev.find(f => f.file_path === filePath);
       if (existing) {
@@ -111,7 +111,7 @@ export default function Project() {
         }
       }, 5000);
     }
-  };
+  }, [projectId]);
 
   const loadDevServerUrl = async () => {
     try {

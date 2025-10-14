@@ -42,6 +42,7 @@ services:
       - "8000:8000"
     volumes:
       - ./orchestrator:/app
+      - ./orchestrator/users:/app/users
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./orchestrator.db
@@ -50,6 +51,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_API_BASE=${OPENAI_API_BASE}
       - OPENAI_MODEL=${OPENAI_MODEL}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,*.localhost}
     networks:
       - tesslate-network
     labels:
@@ -67,7 +70,10 @@ services:
       - ./app:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=
+      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,host.docker.internal,.localhost}
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
     networks:
       - tesslate-network
     labels:

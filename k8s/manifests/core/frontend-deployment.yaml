@@ -32,6 +32,11 @@ spec:
           value: ""
         - name: VITE_API_URL
           value: ""
+        - name: VITE_ALLOWED_HOSTS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: ALLOWED_HOSTS
         resources:
           requests:
             memory: "512Mi"

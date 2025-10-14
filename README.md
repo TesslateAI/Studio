@@ -259,6 +259,10 @@ DEPLOYMENT_MODE=docker  # or "kubernetes"
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_API_BASE=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4
+
+# CORS and Security (optional - has sensible defaults)
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+ALLOWED_HOSTS=localhost,*.localhost
 ```
 
 **`k8s/.env` (Kubernetes):**
@@ -274,7 +278,11 @@ SECRET_KEY: <base64-encoded>
 JWT_SECRET: <base64-encoded>
 OPENAI_API_KEY: <base64-encoded>
 DATABASE_URL: <base64-encoded>
+CORS_ORIGINS: "https://studio-test.tesslate.com,https://studio-demo.tesslate.com"
+ALLOWED_HOSTS: "studio-test.tesslate.com,*.studio-test.tesslate.com"
 ```
+
+> **Note**: To add new domains after deployment, simply update the secrets file and restart the deployments. No image rebuild needed!
 
 ### Service Ports
 

@@ -353,9 +353,16 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
     def _get_container_access_url(self, hostname: str) -> str:
         """Get the access URL for a container, considering proxy configuration."""
         settings = get_settings()
-        # Always use production URL when configured (with trailing slash for Vite base path)
         user_project = hostname.replace('.localhost', '')
-        return f"{settings.dev_server_base_url}/preview/{user_project}/"
+
+        # For local development (no base_url configured), use http://localhost for Traefik
+        # For production (base_url configured), use the configured URL
+        if settings.dev_server_base_url:
+            # Production: use configured base URL (e.g., https://your-domain.com)
+            return f"{settings.dev_server_base_url}/preview/{user_project}/"
+        else:
+            # Local development: use localhost with Traefik (port 80)
+            return f"http://localhost/preview/{user_project}/"
     
     def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str) -> List[str]:
         """Generate Traefik labels for automatic service discovery and routing."""

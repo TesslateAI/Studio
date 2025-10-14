@@ -4,28 +4,27 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from .database import engine, Base
 from .routers import auth, projects, chat, agent, agents
+from .config import get_settings
 import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+settings = get_settings()
+
 app = FastAPI(title="AI Application Builder API")
 
 # CORS middleware - MUST be added first
 # Production: Only allow specific origins, no wildcards
 # Development: Limit to known frontend dev servers only
+# Parse comma-separated CORS origins from environment variable
+cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+logger.info(f"CORS origins configured: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",   # Vite dev server (frontend)
-        "http://localhost:3000",   # Alternative dev port
-        "http://127.0.0.1:5173",   # Explicit localhost IP
-        "http://127.0.0.1:3000",   # Explicit localhost IP
-        "https://your-domain.com",       # Legacy production domain
-        "https://studio-test.tesslate.com",  # Production domain
-        "https://studio-demo.tesslate.com"   # Demo production domain
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],  # Explicit methods only
     allow_headers=[
@@ -41,18 +40,93 @@ app.add_middleware(
     max_age=600,  # Cache preflight requests for 10 minutes
 )
 
+def load_agents_config():
+    """Load agent definitions from agents_config.json file."""
+    import json
+    from pathlib import Path
+
+    # Agent config is located at app/agent/agents_config.json
+    # Works for both local development and K8s deployment
+    config_path = Path(__file__).parent / "agent" / "agents_config.json"
+
+    if config_path.exists():
+        logger.info(f"Loading agent definitions from: {config_path}")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    logger.error(f"agents_config.json not found at: {config_path}")
+    return []
+
+
+async def seed_default_agents():
+    """Seed the database with default agents if they don't exist."""
+    from .models import Agent
+    from .database import AsyncSessionLocal
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as session:
+        try:
+            # Check if agents already exist
+            result = await session.execute(select(Agent))
+            existing_agents = result.scalars().all()
+
+            if existing_agents:
+                logger.info(f"Agents already seeded ({len(existing_agents)} agents found)")
+                return
+
+            # Load agent definitions from config file
+            agent_configs = load_agents_config()
+            if not agent_configs:
+                logger.warning("No agent configurations found, skipping seed")
+                return
+
+            # Create new agents
+            logger.info(f"Seeding {len(agent_configs)} default agents...")
+            for agent_data in agent_configs:
+                agent = Agent(**agent_data)
+                session.add(agent)
+                logger.info(f"  Created: {agent_data['name']} ({agent_data['slug']})")
+
+            await session.commit()
+            logger.info(f"Successfully seeded {len(agent_configs)} default agents")
+        except Exception as e:
+            logger.error(f"Error seeding agents: {e}")
+            await session.rollback()
+            raise
+
+
 # Add security headers middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
+
+    # Build CSP from allowed hosts configuration
+    allowed_hosts = [host.strip() for host in settings.allowed_hosts.split(",") if host.strip()]
+
+    # Convert allowed hosts to CSP directives
+    # For localhost and *.localhost, use http://localhost:* for CSP
+    # For production domains, use https://
+    csp_hosts = []
+    for host in allowed_hosts:
+        if "localhost" in host:
+            csp_hosts.append("http://localhost:*")
+            csp_hosts.append("ws://localhost:*")
+        else:
+            csp_hosts.append(f"https://{host}")
+            csp_hosts.append(f"wss://{host}")
+
+    # Remove duplicates and join
+    csp_hosts = list(set(csp_hosts))
+    csp_hosts_str = " ".join(csp_hosts)
+
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self' https://your-domain.com http://localhost:*; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://your-domain.com http://localhost:*; "
-        "style-src 'self' 'unsafe-inline' https://your-domain.com http://localhost:*; "
-        "img-src 'self' data: blob: https://your-domain.com http://localhost:*; "
-        "font-src 'self' data: https://your-domain.com http://localhost:*; "
-        "connect-src 'self' ws://localhost:* wss://your-domain.com https://your-domain.com http://localhost:*; "
-        "frame-src 'self' https://your-domain.com http://localhost:*;"
+        f"default-src 'self' {csp_hosts_str}; "
+        f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {csp_hosts_str}; "
+        f"style-src 'self' 'unsafe-inline' {csp_hosts_str}; "
+        f"img-src 'self' data: blob: {csp_hosts_str}; "
+        f"font-src 'self' data: {csp_hosts_str}; "
+        f"connect-src 'self' {csp_hosts_str}; "
+        f"frame-src 'self' {csp_hosts_str};"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -103,6 +177,9 @@ async def startup():
     if settings.deployment_mode == "docker":
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
+
+    # Seed default agents if they don't exist
+    await seed_default_agents()
 
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods

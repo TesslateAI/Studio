@@ -454,7 +454,7 @@ export function ChatContainer({
           chat-messages
           flex-1 overflow-y-auto px-5
           transition-all duration-300
-          pointer-events-none
+          ${isExpanded ? 'pointer-events-auto' : 'pointer-events-none'}
           ${isExpanded
             ? 'opacity-100 max-h-[calc(100vh-400px)] py-5'
             : 'opacity-0 max-h-0 py-0'

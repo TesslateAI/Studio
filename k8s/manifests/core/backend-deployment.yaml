@@ -92,6 +92,16 @@ spec:
           value: "tesslate"
         - name: DEPLOYMENT_MODE
           value: "kubernetes"
+        - name: CORS_ORIGINS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: CORS_ORIGINS
+        - name: ALLOWED_HOSTS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: ALLOWED_HOSTS
         resources:
           requests:
             memory: "512Mi"

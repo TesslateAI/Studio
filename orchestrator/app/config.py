@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     # Deployment mode: "docker" (local with Docker+Traefik) or "kubernetes" (K8s cluster)
     deployment_mode: str = "docker"
 
+    # CORS Configuration
+    # Comma-separated list of allowed origins for CORS requests
+    # Default includes common local development URLs
+    cors_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000"
+
+    # Allowed hosts for Vite dev server and CSP
+    # Comma-separated list of hostnames
+    allowed_hosts: str = "your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,*.localhost"
+
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignore extra fields from .env file
