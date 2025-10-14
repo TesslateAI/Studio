@@ -47,9 +47,11 @@ export default function Project() {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
+  const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const projectId = parseInt(id!);
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     loadProject();
@@ -63,6 +65,46 @@ export default function Project() {
       }
     };
   }, []);
+
+  // Track iframe URL changes
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const updateUrl = () => {
+      try {
+        const iframeUrl = iframe.contentWindow?.location.href;
+        if (iframeUrl && iframeUrl !== 'about:blank') {
+          // Remove auth token from display
+          const urlObj = new URL(iframeUrl);
+          urlObj.searchParams.delete('auth_token');
+          urlObj.searchParams.delete('t');
+          urlObj.searchParams.delete('hmr_fallback');
+          setCurrentPreviewUrl(urlObj.href);
+        }
+      } catch (error) {
+        // Cross-origin error - can't access iframe URL
+        // Just show the base dev server URL
+        if (devServerUrl) {
+          setCurrentPreviewUrl(devServerUrl);
+        }
+      }
+    };
+
+    // Update URL on load
+    iframe.addEventListener('load', updateUrl);
+
+    return () => {
+      iframe.removeEventListener('load', updateUrl);
+    };
+  }, [devServerUrl]);
+
+  // Initialize current URL when dev server is ready
+  useEffect(() => {
+    if (devServerUrl) {
+      setCurrentPreviewUrl(devServerUrl);
+    }
+  }, [devServerUrl]);
 
   const loadProject = async () => {
     try {
@@ -102,7 +144,7 @@ export default function Project() {
       }
 
       refreshTimeoutRef.current = setTimeout(() => {
-        const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+        const iframe = iframeRef.current;
         if (iframe) {
           try {
             const currentSrc = iframe.src;
@@ -152,7 +194,7 @@ export default function Project() {
 
   const refreshPreview = () => {
     if (devServerUrlWithAuth) {
-      const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+      const iframe = iframeRef.current;
       if (iframe) {
         const url = new URL(devServerUrlWithAuth);
         url.searchParams.set('t', Date.now().toString());
@@ -162,10 +204,11 @@ export default function Project() {
   };
 
   const navigateBack = () => {
-    const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+    const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
       try {
         iframe.contentWindow.history.back();
+        // URL will be updated by the load event listener
       } catch (error) {
         console.log('Navigation back error:', error);
       }
@@ -173,10 +216,11 @@ export default function Project() {
   };
 
   const navigateForward = () => {
-    const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+    const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
       try {
         iframe.contentWindow.history.forward();
+        // URL will be updated by the load event listener
       } catch (error) {
         console.log('Navigation forward error:', error);
       }
@@ -343,9 +387,9 @@ export default function Project() {
                     </button>
                   </div>
                   <div className="flex-1">
-                    <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)]">
+                    <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
                       <span className="text-yellow-500 mr-2">🔒</span>
-                      <span className="text-[var(--text)]/80">{devServerUrl}</span>
+                      <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
                     </div>
                   </div>
                   <button
@@ -359,6 +403,7 @@ export default function Project() {
                 {/* Preview iframe */}
                 <div className="w-full h-[calc(100%-50px)] bg-white">
                   <iframe
+                    ref={iframeRef}
                     id="preview-iframe"
                     src={devServerUrlWithAuth || devServerUrl}
                     className="w-full h-full"
