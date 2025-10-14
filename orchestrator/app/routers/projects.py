@@ -645,6 +645,61 @@ async def save_project_file(
         logger.error(f"[ERROR] Failed to save file {file_path}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
+@router.get("/{project_id}/container-info")
+async def get_container_info(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get container/pod information for a project.
+
+    This endpoint is useful for agents that need to execute commands (like Git operations)
+    in the user's development environment. It returns the deployment mode and container/pod
+    naming information.
+
+    Returns:
+        - deployment_mode: "kubernetes" or "docker"
+        - For Kubernetes:
+          - pod_name: Name of the pod (e.g., "dev-user1-project5")
+          - namespace: Kubernetes namespace (e.g., "tesslate-user-environments")
+          - command_prefix: kubectl exec command prefix
+        - For Docker:
+          - container_name: Name of the container (e.g., "tesslate-dev-user1-project5")
+          - command_prefix: docker exec command prefix
+    """
+    # Verify project ownership
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    settings = get_settings()
+
+    if settings.deployment_mode == "kubernetes":
+        pod_name = f"dev-user{current_user.id}-project{project_id}"
+        namespace = "tesslate-user-environments"
+        return {
+            "deployment_mode": "kubernetes",
+            "pod_name": pod_name,
+            "namespace": namespace,
+            "command_prefix": f"kubectl exec -n {namespace} {pod_name} --",
+            "git_command_example": f"kubectl exec -n {namespace} {pod_name} -- git status"
+        }
+    else:
+        container_name = f"tesslate-dev-user{current_user.id}-project{project_id}"
+        return {
+            "deployment_mode": "docker",
+            "container_name": container_name,
+            "command_prefix": f"docker exec {container_name}",
+            "git_command_example": f"docker exec {container_name} git status"
+        }
+
 @router.get("/containers/all")
 async def get_all_dev_containers(
     current_user: User = Depends(get_current_active_user)

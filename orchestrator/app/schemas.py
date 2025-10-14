@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 class UserBase(BaseModel):
     username: str
@@ -248,3 +248,195 @@ class Agent(AgentBase):
 
     class Config:
         from_attributes = True
+
+
+# ============================
+# GitHub & Git Schemas
+# ============================
+
+class GitHubConnectRequest(BaseModel):
+    """Request schema for connecting GitHub via Personal Access Token."""
+    pat_token: str
+
+    @field_validator('pat_token')
+    @classmethod
+    def validate_pat_token(cls, v):
+        if not v or not v.strip():
+            raise ValueError('PAT token cannot be empty')
+        if not (v.startswith('ghp_') or v.startswith('github_pat_')):
+            raise ValueError('Invalid GitHub PAT token format')
+        return v.strip()
+
+
+class GitHubCredentialResponse(BaseModel):
+    """Response schema for GitHub credentials status."""
+    connected: bool
+    github_username: Optional[str] = None
+    github_email: Optional[str] = None
+    auth_method: Optional[str] = None  # 'oauth' or 'pat'
+
+
+class GitRepositoryResponse(BaseModel):
+    """Response schema for Git repository information."""
+    id: int
+    project_id: int
+    repo_url: str
+    repo_name: Optional[str] = None
+    repo_owner: Optional[str] = None
+    default_branch: str
+    sync_status: Optional[str] = None
+    last_sync_at: Optional[datetime] = None
+    last_commit_sha: Optional[str] = None
+    auto_push: bool
+    auto_pull: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class GitCloneRequest(BaseModel):
+    """Request schema for cloning a repository."""
+    repo_url: str
+    branch: Optional[str] = None
+
+    @field_validator('repo_url')
+    @classmethod
+    def validate_repo_url(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Repository URL cannot be empty')
+        if 'github.com' not in v:
+            raise ValueError('Only GitHub repositories are supported')
+        return v.strip()
+
+
+class GitInitRequest(BaseModel):
+    """Request schema for initializing a Git repository."""
+    remote_url: Optional[str] = None
+    default_branch: str = "main"
+
+
+class GitCommitRequest(BaseModel):
+    """Request schema for creating a commit."""
+    message: str
+    files: Optional[List[str]] = None
+
+    @field_validator('message')
+    @classmethod
+    def validate_message(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Commit message cannot be empty')
+        if len(v) > 500:
+            raise ValueError('Commit message cannot exceed 500 characters')
+        return v.strip()
+
+
+class GitPushRequest(BaseModel):
+    """Request schema for pushing commits."""
+    branch: Optional[str] = None
+    remote: str = "origin"
+    force: bool = False
+
+
+class GitPullRequest(BaseModel):
+    """Request schema for pulling changes."""
+    branch: Optional[str] = None
+    remote: str = "origin"
+
+
+class GitBranchRequest(BaseModel):
+    """Request schema for creating a branch."""
+    name: str
+    checkout: bool = True
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Branch name cannot be empty')
+        # Validate branch name format
+        import re
+        if not re.match(r'^[a-zA-Z0-9/_-]+$', v):
+            raise ValueError('Branch name contains invalid characters')
+        return v.strip()
+
+
+class GitSwitchBranchRequest(BaseModel):
+    """Request schema for switching branches."""
+    name: str
+
+
+class GitStatusResponse(BaseModel):
+    """Response schema for Git status."""
+    branch: str
+    status: str  # 'clean', 'modified', 'ahead', 'behind', 'diverged'
+    changes: List[Dict[str, str]]  # List of changed files
+    changes_count: int
+    ahead: int
+    behind: int
+    last_commit: Optional[Dict[str, Any]] = None
+
+
+class GitCommitResponse(BaseModel):
+    """Response schema for commit creation."""
+    sha: str
+    message: str
+
+
+class GitPushResponse(BaseModel):
+    """Response schema for push operation."""
+    success: bool
+    message: str
+
+
+class GitPullResponse(BaseModel):
+    """Response schema for pull operation."""
+    success: bool
+    conflicts: List[str]
+    message: str
+
+
+class GitCommitInfo(BaseModel):
+    """Schema for commit information."""
+    sha: str
+    author_name: str
+    author_email: str
+    message: str
+    timestamp: int
+
+
+class GitBranchInfo(BaseModel):
+    """Schema for branch information."""
+    name: str
+    current: bool
+    remote: bool
+
+
+class GitHistoryResponse(BaseModel):
+    """Response schema for commit history."""
+    commits: List[GitCommitInfo]
+
+
+class GitBranchesResponse(BaseModel):
+    """Response schema for branch listing."""
+    branches: List[GitBranchInfo]
+    current_branch: Optional[str] = None
+
+
+class CreateGitHubRepoRequest(BaseModel):
+    """Request schema for creating a new GitHub repository."""
+    name: str
+    description: Optional[str] = None
+    private: bool = True
+    auto_init: bool = False
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Repository name cannot be empty')
+        # Validate GitHub repo name format
+        import re
+        if not re.match(r'^[a-zA-Z0-9._-]+$', v):
+            raise ValueError('Repository name contains invalid characters')
+        return v.strip()

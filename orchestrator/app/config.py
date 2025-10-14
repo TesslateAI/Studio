@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     # Comma-separated list of hostnames
     allowed_hosts: str = "your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,*.localhost"
 
+    # GitHub OAuth Configuration
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_oauth_redirect_uri: str = "http://localhost:5173/auth/github/callback"  # Frontend callback URL
+
+    # Encryption key for GitHub tokens (base64 encoded Fernet key)
+    # This is derived from secret_key if not provided
+    github_token_encryption_key: str = ""
+
     class Config:
         env_file = ".env"
         extra = "ignore"  # Ignore extra fields from .env file

@@ -18,6 +18,8 @@ class User(Base):
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     agent_commands = relationship("AgentCommandLog", back_populates="user", cascade="all, delete-orphan")
+    github_credential = relationship("GitHubCredential", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    git_repositories = relationship("GitRepository", back_populates="user", cascade="all, delete-orphan")
 
 
 class RefreshToken(Base):
@@ -40,11 +42,14 @@ class Project(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    has_git_repo = Column(Boolean, default=False)
+    git_remote_url = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     owner = relationship("User", back_populates="projects")
     files = relationship("ProjectFile", back_populates="project", cascade="all, delete-orphan")
+    git_repository = relationship("GitRepository", back_populates="project", uselist=False, cascade="all, delete-orphan")
 
 class ProjectFile(Base):
     __tablename__ = "project_files"
@@ -135,3 +140,62 @@ class Agent(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GitHubCredential(Base):
+    """Store encrypted GitHub credentials for users."""
+    __tablename__ = "github_credentials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+
+    # OAuth tokens (encrypted)
+    access_token = Column(Text, nullable=True)  # Encrypted
+    refresh_token = Column(Text, nullable=True)  # Encrypted
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Personal Access Token (encrypted)
+    pat_token = Column(Text, nullable=True)  # Encrypted
+
+    # GitHub user info
+    github_username = Column(String(255), nullable=True)
+    github_email = Column(String(255), nullable=True)
+    github_user_id = Column(String(100), nullable=True)  # GitHub user ID for OAuth
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="github_credential")
+
+
+class GitRepository(Base):
+    """Track Git repository connections for projects."""
+    __tablename__ = "git_repositories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Repository info
+    repo_url = Column(String(500), nullable=False)
+    repo_name = Column(String(255), nullable=True)
+    repo_owner = Column(String(255), nullable=True)
+    default_branch = Column(String(100), default="main")
+
+    # Authentication method
+    auth_method = Column(String(20), nullable=True)  # 'oauth', 'pat', 'ssh'
+
+    # Sync status
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    sync_status = Column(String(20), nullable=True)  # 'synced', 'ahead', 'behind', 'diverged', 'error'
+    last_commit_sha = Column(String(40), nullable=True)
+
+    # Configuration
+    auto_push = Column(Boolean, default=False)
+    auto_pull = Column(Boolean, default=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    project = relationship("Project", back_populates="git_repository")
+    user = relationship("User", back_populates="git_repositories")
