@@ -230,3 +230,129 @@ button, a, input, select, textarea {
     scroll-behavior: auto !important;
   }
 }
+
+/* Tiptap Editor Styles */
+.tiptap-editor {
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror {
+  outline: none;
+  min-height: 400px;
+  padding: 1rem;
+}
+
+.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  height: 0;
+}
+
+.tiptap-editor .ProseMirror h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.75;
+}
+
+.tiptap-editor .ProseMirror ul,
+.tiptap-editor .ProseMirror ol {
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap-editor .ProseMirror ul {
+  list-style-type: disc;
+}
+
+.tiptap-editor .ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.tiptap-editor .ProseMirror li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.tiptap-editor .ProseMirror code {
+  background-color: rgba(255, 107, 0, 0.1);
+  color: #ff6b00;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.9em;
+}
+
+.tiptap-editor .ProseMirror pre {
+  background-color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
+}
+
+.tiptap-editor .ProseMirror pre code {
+  background-color: transparent;
+  color: #e2e2e2;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.875em;
+  line-height: 1.7;
+}
+
+.tiptap-editor .ProseMirror blockquote {
+  border-left: 4px solid var(--primary);
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
+}
+
+.tiptap-editor .ProseMirror strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror em {
+  font-style: italic;
+}
+
+.tiptap-editor .ProseMirror a {
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.tiptap-editor .ProseMirror a:hover {
+  color: #ff8533;
+}

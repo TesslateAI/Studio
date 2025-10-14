@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
+  CaretLeft,
+  CaretRight,
   Monitor,
   Code,
   Folder,
@@ -159,6 +161,28 @@ export default function Project() {
     }
   };
 
+  const navigateBack = () => {
+    const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.history.back();
+      } catch (error) {
+        console.log('Navigation back error:', error);
+      }
+    }
+  };
+
+  const navigateForward = () => {
+    const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.history.forward();
+      } catch (error) {
+        console.log('Navigation forward error:', error);
+      }
+    }
+  };
+
   const togglePanel = (panel: PanelType) => {
     setActivePanel(activePanel === panel ? null : panel);
   };
@@ -302,6 +326,22 @@ export default function Project() {
                     <div className="w-3 h-3 rounded-full bg-yellow-500" />
                     <div className="w-3 h-3 rounded-full bg-green-500" />
                   </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={navigateBack}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                      title="Go back"
+                    >
+                      <CaretLeft size={18} weight="bold" />
+                    </button>
+                    <button
+                      onClick={navigateForward}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                      title="Go forward"
+                    >
+                      <CaretRight size={18} weight="bold" />
+                    </button>
+                  </div>
                   <div className="flex-1">
                     <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)]">
                       <span className="text-yellow-500 mr-2">🔒</span>
@@ -337,33 +377,12 @@ export default function Project() {
           </div>
 
           {/* Code View */}
-          <div className={`w-full h-full bg-[var(--surface)] ${activeView === 'code' ? 'flex' : 'hidden'} flex-col`}>
-            <div className="flex items-center justify-between px-6 py-3 bg-[var(--surface)] border-b border-white/10">
-              <div className="flex items-center gap-4">
-                <div className="flex gap-2">
-                  <div className="w-3 h-3 rounded-full bg-red-500" />
-                  <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                  <div className="w-3 h-3 rounded-full bg-green-500" />
-                </div>
-                <div className="flex items-center gap-2 text-sm text-[var(--text)]/60">
-                  <Code size={16} />
-                  <span>src/App.jsx</span>
-                </div>
-              </div>
-              <button
-                onClick={() => setActiveView('preview')}
-                className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 text-sm transition-colors"
-              >
-                Close
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto">
-              <CodeEditor
-                projectId={projectId}
-                files={files}
-                onFileUpdate={handleFileUpdate}
-              />
-            </div>
+          <div className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}>
+            <CodeEditor
+              projectId={projectId}
+              files={files}
+              onFileUpdate={handleFileUpdate}
+            />
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 
 interface FloatingPanelProps {
   title: string;
@@ -25,45 +25,75 @@ export function FloatingPanel({
   const [size, setSize] = useState(defaultSize);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const [dockPosition, setDockPosition] = useState<DockPosition>(null);
+  const [dockHoverPosition, setDockHoverPosition] = useState<DockPosition>(null); // Preview only
+  const [actualDockPosition, setActualDockPosition] = useState<DockPosition>(null); // Actually docked
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
   const panelRef = useRef<HTMLDivElement>(null);
+  const dragStartPosRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!isDragging && !isResizing) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging && dockPosition === null) {
+      if (isDragging && panelRef.current) {
+        // Use CSS transform for smooth dragging - no React state updates
         const newX = e.clientX - dragOffset.x;
         const newY = e.clientY - dragOffset.y;
-        setPosition({ x: newX, y: newY });
 
-        // Check for dock zones
-        const DOCK_THRESHOLD = 100;
+        // Apply transform directly to DOM
+        panelRef.current.style.transform = `translate(${newX - dragStartPosRef.current.x}px, ${newY - dragStartPosRef.current.y}px)`;
+        panelRef.current.style.willChange = 'transform';
+
+        // Check for dock zones - only for preview (this is lightweight)
+        const DOCK_THRESHOLD = 80;
+        let newDockHover: DockPosition = null;
+
         if (e.clientX < DOCK_THRESHOLD) {
-          setDockPosition('left');
+          newDockHover = 'left';
         } else if (window.innerWidth - e.clientX < DOCK_THRESHOLD) {
-          setDockPosition('right');
+          newDockHover = 'right';
         } else if (e.clientY < DOCK_THRESHOLD) {
-          setDockPosition('top');
+          newDockHover = 'top';
         } else if (window.innerHeight - e.clientY < DOCK_THRESHOLD) {
-          setDockPosition('bottom');
-        } else {
-          setDockPosition(null);
+          newDockHover = 'bottom';
         }
-      } else if (isResizing) {
+
+        if (newDockHover !== dockHoverPosition) {
+          setDockHoverPosition(newDockHover);
+        }
+      } else if (isResizing && panelRef.current) {
         const newWidth = Math.max(300, e.clientX - position.x);
         const newHeight = Math.max(200, e.clientY - position.y);
-        setSize({ width: newWidth, height: newHeight });
+        panelRef.current.style.width = `${newWidth}px`;
+        panelRef.current.style.height = `${newHeight}px`;
       }
     };
 
-    const handleMouseUp = () => {
-      if (isDragging && dockPosition) {
-        // Apply docking
-        applyDock(dockPosition);
+    const handleMouseUp = (e: MouseEvent) => {
+      if (isDragging && panelRef.current) {
+        // Calculate final position
+        const newX = e.clientX - dragOffset.x;
+        const newY = e.clientY - dragOffset.y;
+
+        // Reset transform
+        panelRef.current.style.transform = '';
+        panelRef.current.style.willChange = 'auto';
+
+        // Only apply docking on mouse up if hovering over dock zone
+        if (dockHoverPosition) {
+          setActualDockPosition(dockHoverPosition);
+        } else {
+          // Update position state for next drag
+          setPosition({ x: newX, y: newY });
+        }
+        setDockHoverPosition(null);
+      } else if (isResizing && panelRef.current) {
+        // Commit resize to state
+        const rect = panelRef.current.getBoundingClientRect();
+        setSize({ width: rect.width, height: rect.height });
       }
+
       setIsDragging(false);
       setIsResizing(false);
     };
@@ -75,21 +105,35 @@ export function FloatingPanel({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, isResizing, dragOffset, position, dockPosition]);
+  }, [isDragging, isResizing, dragOffset, position, dockHoverPosition]);
 
   const handleDragStart = (e: React.MouseEvent) => {
-    if (dockPosition) {
-      setDockPosition(null);
-      setPosition(defaultPosition);
-      setSize(defaultSize);
-    }
+    // Calculate offset based on current position
     const rect = panelRef.current?.getBoundingClientRect();
     if (rect) {
       setDragOffset({
         x: e.clientX - rect.left,
         y: e.clientY - rect.top
       });
+
+      // Store the starting position for transform calculations
+      dragStartPosRef.current = { x: rect.left, y: rect.top };
     }
+
+    // If docked, undock and restore to a floating position
+    if (actualDockPosition !== null) {
+      setPosition(defaultPosition);
+      setSize(defaultSize);
+      setActualDockPosition(null);
+      // Update drag start ref after undocking
+      setTimeout(() => {
+        const rect = panelRef.current?.getBoundingClientRect();
+        if (rect) {
+          dragStartPosRef.current = { x: rect.left, y: rect.top };
+        }
+      }, 0);
+    }
+
     setIsDragging(true);
   };
 
@@ -98,16 +142,11 @@ export function FloatingPanel({
     setIsResizing(true);
   };
 
-  const applyDock = (dock: DockPosition) => {
-    // Docking logic would set position and size based on dock position
-    // For now, simplified
-  };
-
   if (!isOpen) return null;
 
-  const isDocked = dockPosition !== null;
+  const isDocked = actualDockPosition !== null;
   const panelStyle = isDocked
-    ? getDockStyle(dockPosition)
+    ? getDockStyle(actualDockPosition)
     : {
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -117,13 +156,14 @@ export function FloatingPanel({
 
   return (
     <>
-      {/* Dock indicator */}
-      {isDragging && dockPosition && (
+      {/* Dock indicator - only show during drag when hovering over dock zone */}
+      {isDragging && dockHoverPosition && (
         <div
           className={`
-            fixed bg-[rgba(255,107,0,0.2)] border-2 border-dashed border-[var(--primary)]
-            pointer-events-none opacity-100 transition-opacity duration-200 rounded-lg z-[1000]
-            ${getDockIndicatorClass(dockPosition)}
+            fixed bg-orange-500/20 border-2 border-dashed border-orange-500
+            pointer-events-none z-[999] rounded-lg
+            transition-all duration-150
+            ${getDockIndicatorClass(dockHoverPosition)}
           `}
         />
       )}
@@ -135,16 +175,21 @@ export function FloatingPanel({
           floating-panel fixed flex flex-col
           bg-[rgba(30,30,30,0.98)] backdrop-blur-xl
           border border-white/20 rounded-lg
-          shadow-lg overflow-hidden
-          transition-all duration-300
+          shadow-2xl overflow-hidden
           z-[200]
           ${isDocked ? 'resize-none rounded-none h-screen' : 'min-w-[300px] min-h-[200px]'}
+          ${isDragging || isResizing ? 'cursor-grabbing transition-none select-none' : 'transition-all duration-200'}
         `}
-        style={panelStyle}
+        style={{
+          ...panelStyle,
+          userSelect: isDragging || isResizing ? 'none' : 'auto'
+        }}
       >
         {/* Drag handle */}
         <div
-          className="panel-drag-handle h-10 bg-black/20 border-b border-white/10 cursor-move select-none flex items-center justify-between px-3 rounded-t-lg"
+          className={`panel-drag-handle h-10 bg-black/20 border-b border-white/10 select-none flex items-center justify-between px-3 rounded-t-lg ${
+            isDragging ? 'cursor-grabbing' : 'cursor-grab'
+          }`}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
@@ -196,13 +241,13 @@ function getDockStyle(dock: DockPosition): React.CSSProperties {
 function getDockIndicatorClass(dock: DockPosition): string {
   switch (dock) {
     case 'left':
-      return 'left-0 top-0 w-[100px] h-screen';
+      return 'left-0 top-0 w-[80px] h-screen';
     case 'right':
-      return 'right-0 top-0 w-[100px] h-screen';
+      return 'right-0 top-0 w-[80px] h-screen';
     case 'top':
-      return 'top-0 left-[100px] right-[100px] h-[100px]';
+      return 'top-0 left-[80px] right-[80px] h-[80px]';
     case 'bottom':
-      return 'bottom-0 left-[100px] right-[100px] h-[100px]';
+      return 'bottom-0 left-[80px] right-[80px] h-[80px]';
     default:
       return '';
   }
