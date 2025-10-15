@@ -12,6 +12,9 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.10",
+    "@tiptap/extension-placeholder": "^3.7.0",
+    "@tiptap/react": "^3.7.0",
+    "@tiptap/starter-kit": "^3.7.0",
     "@types/react-router-dom": "^5.3.3",
     "axios": "^1.11.0",
     "lucide-react": "^0.541.0",

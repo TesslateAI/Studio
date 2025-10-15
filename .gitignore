@@ -36,7 +36,8 @@ lerna-debug.log*
 .yarn-integrity
 *.tsbuildinfo
 .eslintcache
-
+repomix-output.xml
+.repomixignore
 # Build outputs
 dist/
 dist-ssr/

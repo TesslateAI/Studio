@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { File, Folder, ChevronRight, ChevronDown, FileText, Code } from 'lucide-react';
+import Editor from '@monaco-editor/react';
 
 interface FileNode {
   name: string;
@@ -19,6 +20,35 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
+  const editorRef = useRef<any>(null);
+
+  const getLanguage = (fileName: string): string => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'js': return 'javascript';
+      case 'jsx': return 'javascript';
+      case 'ts': return 'typescript';
+      case 'tsx': return 'typescript';
+      case 'html': return 'html';
+      case 'css': return 'css';
+      case 'json': return 'json';
+      case 'md': return 'markdown';
+      case 'py': return 'python';
+      case 'yml':
+      case 'yaml': return 'yaml';
+      default: return 'plaintext';
+    }
+  };
+
+  const handleEditorDidMount = (editor: any) => {
+    editorRef.current = editor;
+  };
+
+  const handleEditorChange = (value: string | undefined) => {
+    if (selectedFile && value !== undefined) {
+      onFileUpdate(selectedFile, value);
+    }
+  };
 
   useEffect(() => {
     // Build file tree structure
@@ -105,10 +135,10 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
     return nodes.map(node => (
       <div key={node.path} className="select-none">
         <div
-          className={`flex items-center py-2 px-3 cursor-pointer rounded-xl mx-2 mb-1 transition-all duration-200 ${
-            selectedFile === node.path 
-              ? 'bg-gradient-to-r from-blue-600/30 to-purple-600/20 text-blue-200 shadow-lg border border-blue-500/30' 
-              : 'hover:bg-gray-700/50 hover:rounded-xl'
+          className={`flex items-center py-2 px-3 cursor-pointer rounded-lg mb-0.5 transition-all duration-150 ${
+            selectedFile === node.path
+              ? 'bg-orange-500/20 text-orange-300 border-l-2 border-orange-500'
+              : 'hover:bg-[var(--surface)]/70 text-[var(--text)]/80 hover:text-[var(--text)]'
           }`}
           style={{ paddingLeft: `${depth * 16 + 12}px` }}
           onClick={() => {
@@ -122,11 +152,11 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
           {node.isDirectory ? (
             <>
               {expandedDirs.has(node.path) ? (
-                <ChevronDown size={14} className="mr-2 text-gray-400" />
+                <ChevronDown size={14} className="mr-2 text-[var(--text)]/50" />
               ) : (
-                <ChevronRight size={14} className="mr-2 text-gray-400" />
+                <ChevronRight size={14} className="mr-2 text-[var(--text)]/50" />
               )}
-              <Folder size={14} className="mr-2 text-yellow-400" />
+              <Folder size={14} className="mr-2 text-blue-400" />
             </>
           ) : (
             <>
@@ -135,15 +165,15 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
               <div className="mr-2"></div>
             </>
           )}
-          <span className={`text-sm flex-1 font-medium ${
-            selectedFile === node.path 
-              ? 'text-blue-200'
-              : 'text-gray-300'
+          <span className={`text-sm flex-1 font-medium truncate ${
+            selectedFile === node.path
+              ? 'text-orange-200'
+              : ''
           }`}>
             {node.name}
           </span>
         </div>
-        
+
         {node.isDirectory && expandedDirs.has(node.path) && node.children && (
           renderFileTree(node.children, depth + 1)
         )}
@@ -154,83 +184,100 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
   const selectedFileContent = files.find(f => f.file_path === selectedFile);
 
   return (
-    <div className="h-full flex bg-gray-900 rounded-t-3xl overflow-hidden">
+    <div className="h-full flex bg-[var(--surface)] overflow-hidden">
       {/* File tree sidebar */}
-      <div className="w-80 bg-gray-800/50 backdrop-blur-sm border-r border-gray-600/30 overflow-y-auto rounded-tl-3xl">
-        <div className="p-4 border-b border-gray-600/30 bg-gradient-to-r from-gray-750/50 to-gray-800/50 rounded-tl-3xl">
+      <div className="w-72 bg-[var(--background)] border-r border-[var(--border-color)] overflow-y-auto flex flex-col">
+        <div className="p-4 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-600 rounded-lg flex items-center justify-center">
+            <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-pink-600 rounded-lg flex items-center justify-center shadow-lg">
               <FileText size={16} className="text-white" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-200">Project Files</h3>
-              <p className="text-xs text-gray-400">
-                {files.length} files
+              <h3 className="text-sm font-semibold text-[var(--text)]">Explorer</h3>
+              <p className="text-xs text-[var(--text)]/60">
+                {files.length} {files.length === 1 ? 'file' : 'files'}
               </p>
             </div>
           </div>
         </div>
         
-        <div className="p-3">
+        <div className="flex-1 p-2 overflow-y-auto">
           {fileTree.length > 0 ? renderFileTree(fileTree) : (
-            <div className="text-gray-400 text-sm p-6 text-center rounded-xl bg-gray-800/30">
+            <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
               <Code size={32} className="mx-auto mb-3 opacity-50" />
-              <p className="font-medium mb-1">No files yet</p>
-              <p className="text-xs text-gray-500">Files will appear here as AI creates them</p>
+              <p className="font-medium mb-1 text-[var(--text)]">No files yet</p>
+              <p className="text-xs text-[var(--text)]/40">Files will appear here as you build</p>
             </div>
           )}
         </div>
       </div>
 
       {/* Code editor area */}
-      <div className="flex-1 bg-gray-900/50 backdrop-blur-sm overflow-hidden flex flex-col rounded-tr-3xl">
+      <div className="flex-1 bg-[var(--background)] overflow-hidden flex flex-col">
         {selectedFile && selectedFileContent ? (
           <>
             {/* File header */}
-            <div className="p-4 border-b border-gray-700/50 bg-gradient-to-r from-gray-800/50 to-gray-750/50 shadow-sm rounded-tr-3xl">
+            <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm">
               <div className="flex items-center gap-3">
                 {getFileIcon(selectedFile.split('/').pop() || '')}
                 <div className="flex-1">
-                  <h4 className="text-sm font-semibold text-gray-200">{selectedFile}</h4>
-                  <p className="text-xs text-gray-400">
-                    {selectedFileContent.content.split('\n').length} lines • {selectedFileContent.content.length} chars
+                  <h4 className="text-sm font-semibold text-[var(--text)]">{selectedFile}</h4>
+                  <p className="text-xs text-[var(--text)]/50">
+                    {selectedFileContent.content.split('\n').length} lines • {selectedFileContent.content.length} characters
                   </p>
                 </div>
               </div>
             </div>
             
-            {/* Code content */}
-            <div className="flex-1 overflow-y-auto p-4 bg-gray-900/30">
-              <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl border border-gray-700/30 shadow-lg overflow-hidden">
-                <div className="p-4 bg-gradient-to-r from-gray-800/80 to-gray-700/60 border-b border-gray-700/30">
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
-                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                    <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                    <span className="ml-2">{selectedFile}</span>
-                  </div>
-                </div>
-                <div className="p-6 max-h-[600px] overflow-y-auto">
-                  <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
-                    <code>{selectedFileContent.content}</code>
-                  </pre>
-                </div>
-              </div>
+            {/* Monaco Editor */}
+            <div className="flex-1 overflow-hidden">
+              <Editor
+                height="100%"
+                language={getLanguage(selectedFile)}
+                value={selectedFileContent.content}
+                onChange={handleEditorChange}
+                onMount={handleEditorDidMount}
+                theme="vs-dark"
+                options={{
+                  fontSize: 14,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+                  lineNumbers: 'on',
+                  minimap: { enabled: true },
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  tabSize: 2,
+                  wordWrap: 'on',
+                  padding: { top: 16, bottom: 16 },
+                  smoothScrolling: true,
+                  cursorBlinking: 'smooth',
+                  cursorSmoothCaretAnimation: 'on',
+                  renderLineHighlight: 'all',
+                  bracketPairColorization: { enabled: true },
+                  guides: {
+                    bracketPairs: true,
+                    indentation: true,
+                  },
+                  suggestOnTriggerCharacters: true,
+                  quickSuggestions: true,
+                  formatOnPaste: true,
+                  formatOnType: true,
+                }}
+              />
             </div>
           </>
         ) : (
-          <div className="h-full flex items-center justify-center text-gray-400 rounded-tr-3xl">
+          <div className="h-full flex items-center justify-center text-[var(--text)]/60">
             <div className="text-center p-8">
-              <div className="w-16 h-16 bg-gradient-to-r from-blue-500/20 to-purple-600/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Code size={32} className="opacity-60" />
+              <div className="w-20 h-20 bg-gradient-to-br from-orange-500/20 to-pink-600/20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                <Code size={40} className="opacity-60 text-orange-500" />
               </div>
-              <h3 className="text-lg font-semibold mb-2 text-gray-300">
-                {files.length > 0 ? 'Select a file to view' : 'No files created yet'}
+              <h3 className="text-lg font-semibold mb-2 text-[var(--text)]">
+                {files.length > 0 ? 'Select a file to edit' : 'No files yet'}
               </h3>
-              <p className="text-sm text-gray-500 max-w-sm">
-                {files.length > 0 
-                  ? 'Choose a file from the sidebar to view its code' 
-                  : 'Start chatting with the AI to create your first file'}
+              <p className="text-sm text-[var(--text)]/50 max-w-sm">
+                {files.length > 0
+                  ? 'Choose a file from the explorer to start editing'
+                  : 'Chat with your AI agent to generate code'}
               </p>
             </div>
           </div>

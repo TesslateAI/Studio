@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
+  CaretLeft,
+  CaretRight,
   Monitor,
   Code,
   Folder,
@@ -45,9 +47,12 @@ export default function Project() {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
+  const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const projectId = parseInt(id!);
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const urlCheckIntervalRef = React.useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     loadProject();
@@ -59,8 +64,61 @@ export default function Project() {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
+      if (urlCheckIntervalRef.current) {
+        clearInterval(urlCheckIntervalRef.current);
+      }
     };
   }, []);
+
+  // Track iframe URL changes with polling
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    let lastUrl = '';
+
+    const updateUrl = () => {
+      try {
+        const iframeUrl = iframe.contentWindow?.location.href;
+        if (iframeUrl && iframeUrl !== 'about:blank' && iframeUrl !== lastUrl) {
+          // Remove auth token from display
+          const urlObj = new URL(iframeUrl);
+          urlObj.searchParams.delete('auth_token');
+          urlObj.searchParams.delete('t');
+          urlObj.searchParams.delete('hmr_fallback');
+          const cleanUrl = urlObj.href;
+
+          if (cleanUrl !== lastUrl) {
+            lastUrl = cleanUrl;
+            setCurrentPreviewUrl(cleanUrl);
+          }
+        }
+      } catch (error) {
+        // Cross-origin error - can't access iframe URL
+        // Keep showing the current URL
+      }
+    };
+
+    // Update URL on initial load
+    iframe.addEventListener('load', updateUrl);
+
+    // Poll for URL changes (catches navigation without page reload)
+    urlCheckIntervalRef.current = setInterval(updateUrl, 500);
+
+    return () => {
+      iframe.removeEventListener('load', updateUrl);
+      if (urlCheckIntervalRef.current) {
+        clearInterval(urlCheckIntervalRef.current);
+      }
+    };
+  }, [devServerUrl]);
+
+  // Initialize current URL when dev server is ready
+  useEffect(() => {
+    if (devServerUrl) {
+      setCurrentPreviewUrl(devServerUrl);
+    }
+  }, [devServerUrl]);
 
   const loadProject = async () => {
     try {
@@ -100,7 +158,7 @@ export default function Project() {
       }
 
       refreshTimeoutRef.current = setTimeout(() => {
-        const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+        const iframe = iframeRef.current;
         if (iframe) {
           try {
             const currentSrc = iframe.src;
@@ -150,11 +208,55 @@ export default function Project() {
 
   const refreshPreview = () => {
     if (devServerUrlWithAuth) {
-      const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+      const iframe = iframeRef.current;
       if (iframe) {
         const url = new URL(devServerUrlWithAuth);
         url.searchParams.set('t', Date.now().toString());
         iframe.src = url.toString();
+      }
+    }
+  };
+
+  const updateIframeUrl = () => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    try {
+      const iframeUrl = iframe.contentWindow?.location.href;
+      if (iframeUrl && iframeUrl !== 'about:blank') {
+        const urlObj = new URL(iframeUrl);
+        urlObj.searchParams.delete('auth_token');
+        urlObj.searchParams.delete('t');
+        urlObj.searchParams.delete('hmr_fallback');
+        setCurrentPreviewUrl(urlObj.href);
+      }
+    } catch (error) {
+      // Cross-origin error - can't access iframe URL
+    }
+  };
+
+  const navigateBack = () => {
+    const iframe = iframeRef.current;
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.history.back();
+        // Update URL immediately after navigation
+        setTimeout(updateIframeUrl, 100);
+      } catch (error) {
+        console.log('Navigation back error:', error);
+      }
+    }
+  };
+
+  const navigateForward = () => {
+    const iframe = iframeRef.current;
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.history.forward();
+        // Update URL immediately after navigation
+        setTimeout(updateIframeUrl, 100);
+      } catch (error) {
+        console.log('Navigation forward error:', error);
       }
     }
   };
@@ -302,10 +404,26 @@ export default function Project() {
                     <div className="w-3 h-3 rounded-full bg-yellow-500" />
                     <div className="w-3 h-3 rounded-full bg-green-500" />
                   </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={navigateBack}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                      title="Go back"
+                    >
+                      <CaretLeft size={18} weight="bold" />
+                    </button>
+                    <button
+                      onClick={navigateForward}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                      title="Go forward"
+                    >
+                      <CaretRight size={18} weight="bold" />
+                    </button>
+                  </div>
                   <div className="flex-1">
-                    <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)]">
+                    <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
                       <span className="text-yellow-500 mr-2">🔒</span>
-                      <span className="text-[var(--text)]/80">{devServerUrl}</span>
+                      <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
                     </div>
                   </div>
                   <button
@@ -319,6 +437,7 @@ export default function Project() {
                 {/* Preview iframe */}
                 <div className="w-full h-[calc(100%-50px)] bg-white">
                   <iframe
+                    ref={iframeRef}
                     id="preview-iframe"
                     src={devServerUrlWithAuth || devServerUrl}
                     className="w-full h-full"
@@ -337,33 +456,12 @@ export default function Project() {
           </div>
 
           {/* Code View */}
-          <div className={`w-full h-full bg-[var(--surface)] ${activeView === 'code' ? 'flex' : 'hidden'} flex-col`}>
-            <div className="flex items-center justify-between px-6 py-3 bg-[var(--surface)] border-b border-white/10">
-              <div className="flex items-center gap-4">
-                <div className="flex gap-2">
-                  <div className="w-3 h-3 rounded-full bg-red-500" />
-                  <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                  <div className="w-3 h-3 rounded-full bg-green-500" />
-                </div>
-                <div className="flex items-center gap-2 text-sm text-[var(--text)]/60">
-                  <Code size={16} />
-                  <span>src/App.jsx</span>
-                </div>
-              </div>
-              <button
-                onClick={() => setActiveView('preview')}
-                className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 text-sm transition-colors"
-              >
-                Close
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto">
-              <CodeEditor
-                projectId={projectId}
-                files={files}
-                onFileUpdate={handleFileUpdate}
-              />
-            </div>
+          <div className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}>
+            <CodeEditor
+              projectId={projectId}
+              files={files}
+              onFileUpdate={handleFileUpdate}
+            />
           </div>
         </div>
       </div>

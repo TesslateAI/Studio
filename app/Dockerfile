@@ -2,9 +2,11 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --force
+# Install dependencies first (will be preserved in anonymous volume)
+COPY package.json package-lock.json ./
+RUN npm install --force && npm cache clean --force
 
+# Copy application code
 COPY . .
 
 EXPOSE 5173
