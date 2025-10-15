@@ -9,6 +9,7 @@ import {
   MarketplaceCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
+import { GitHubConnectModal } from '../components/modals';
 import toast from 'react-hot-toast';
 import {
   Atom,
@@ -55,6 +56,7 @@ export default function Dashboard() {
   const [githubBranch, setGithubBranch] = useState('main');
   const [githubConnected, setGithubConnected] = useState(false);
   const [checkingGithub, setCheckingGithub] = useState(false);
+  const [showGithubConnectModal, setShowGithubConnectModal] = useState(false);
 
   useEffect(() => {
     loadProjects();
@@ -106,10 +108,7 @@ export default function Dashboard() {
         toast.error('GitHub repository URL is required');
         return;
       }
-      if (!githubConnected) {
-        toast.error('Please connect your GitHub account first');
-        return;
-      }
+      // GitHub connection is optional - works for public repos without authentication
     }
 
     setIsCreating(true);
@@ -463,20 +462,36 @@ export default function Dashboard() {
               {/* GitHub Connection Status */}
               {sourceType === 'github' && (
                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-                  <div className="flex items-center gap-2">
-                    <GithubLogo className="w-4 h-4" weight="fill" />
-                    <span className="text-sm font-medium text-[var(--text)]">GitHub Connection:</span>
-                    {checkingGithub ? (
-                      <span className="text-xs text-gray-500">Checking...</span>
-                    ) : githubConnected ? (
-                      <span className="text-xs text-green-400">Connected</span>
-                    ) : (
-                      <span className="text-xs text-orange-400">Not Connected</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <GithubLogo className="w-4 h-4" weight="fill" />
+                      <span className="text-sm font-medium text-[var(--text)]">GitHub Connection:</span>
+                      {checkingGithub ? (
+                        <span className="text-xs text-gray-500">Checking...</span>
+                      ) : githubConnected ? (
+                        <span className="text-xs text-green-400">✓ Connected</span>
+                      ) : (
+                        <span className="text-xs text-orange-400">Not Connected</span>
+                      )}
+                    </div>
+                    {!githubConnected && !checkingGithub && (
+                      <button
+                        onClick={() => setShowGithubConnectModal(true)}
+                        disabled={isCreating}
+                        className="text-xs bg-purple-500 hover:bg-purple-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg font-medium transition-all"
+                      >
+                        Connect
+                      </button>
                     )}
                   </div>
                   {!githubConnected && !checkingGithub && (
                     <p className="text-xs text-gray-500 mt-2">
-                      Please connect your GitHub account in a project's GitHub panel before importing.
+                      Connection optional for public repos. Required for private repos.
+                    </p>
+                  )}
+                  {githubConnected && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      You can import both public and private repositories.
                     </p>
                   )}
                 </div>
@@ -493,7 +508,7 @@ export default function Dashboard() {
                       onChange={(e) => setGithubRepoUrl(e.target.value)}
                       className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500"
                       placeholder="https://github.com/username/repository"
-                      disabled={isCreating || !githubConnected}
+                      disabled={isCreating}
                     />
                   </div>
 
@@ -507,7 +522,7 @@ export default function Dashboard() {
                         onChange={(e) => setGithubBranch(e.target.value)}
                         className="w-full bg-white/5 border border-white/10 text-[var(--text)] pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500"
                         placeholder="main"
-                        disabled={isCreating || !githubConnected}
+                        disabled={isCreating}
                       />
                     </div>
                   </div>
@@ -546,7 +561,7 @@ export default function Dashboard() {
                   disabled={
                     isCreating ||
                     !newProject.name.trim() ||
-                    (sourceType === 'github' && (!githubRepoUrl.trim() || !githubConnected))
+                    (sourceType === 'github' && !githubRepoUrl.trim())
                   }
                   className="flex-1 bg-[var(--primary)] hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
                 >
@@ -567,6 +582,16 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* GitHub Connect Modal */}
+      <GitHubConnectModal
+        isOpen={showGithubConnectModal}
+        onClose={() => setShowGithubConnectModal(false)}
+        onSuccess={() => {
+          checkGithubConnection();
+          setShowGithubConnectModal(false);
+        }}
+      />
     </div>
   );
 }

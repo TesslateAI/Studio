@@ -33,7 +33,7 @@ export function GitHubConnectModal({ isOpen, onClose, onSuccess }: GitHubConnect
 
     try {
       const result = await githubApi.connect(patToken);
-      toast.success(`Connected as @${result.username}`, { id: loadingToast });
+      toast.success(`Connected as @${result.github_username}`, { id: loadingToast });
       setPatToken('');
       onSuccess();
       onClose();

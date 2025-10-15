@@ -41,7 +41,8 @@ async def create_project(
     - github: Import from a GitHub repository
 
     For GitHub import:
-    - Requires GitHub account to be connected
+    - GitHub authentication is OPTIONAL for public repositories
+    - GitHub authentication is REQUIRED for private repositories
     - Repository will be cloned into the project
     - Project files will be populated from the repository
     """
@@ -73,19 +74,15 @@ async def create_project(
         if project.source_type == "github":
             logger.info(f"[CREATE] Importing from GitHub: {project.github_repo_url}")
 
-            # Verify GitHub credentials
+            # Try to get GitHub credentials (optional for public repos)
             from ..services.credential_manager import get_credential_manager
             credential_manager = get_credential_manager()
             access_token = await credential_manager.get_access_token(db, current_user.id)
 
-            if not access_token:
-                logger.error(f"[CREATE] GitHub not connected for user {current_user.id}")
-                await db.delete(db_project)
-                await db.commit()
-                raise HTTPException(
-                    status_code=401,
-                    detail="GitHub not connected. Please connect your GitHub account first."
-                )
+            if access_token:
+                logger.info(f"[CREATE] Using GitHub authentication for {current_user.id}")
+            else:
+                logger.info(f"[CREATE] No GitHub authentication - attempting public repository clone")
 
             # Clone repository first (don't start container yet - no package.json exists!)
             # Container will be started later when user opens the project
@@ -102,11 +99,19 @@ async def create_project(
                 # Get default branch if not specified
                 branch = project.github_branch
                 if not branch or branch == "":
-                    github_client = GitHubClient(access_token)
-                    try:
-                        branch = await github_client.get_default_branch(repo_info['owner'], repo_info['repo'])
-                    except:
+                    if access_token:
+                        # Try to get default branch from GitHub API
+                        github_client = GitHubClient(access_token)
+                        try:
+                            branch = await github_client.get_default_branch(repo_info['owner'], repo_info['repo'])
+                            logger.info(f"[CREATE] Detected default branch: {branch}")
+                        except Exception as e:
+                            logger.warning(f"[CREATE] Could not detect default branch: {e}, defaulting to 'main'")
+                            branch = "main"
+                    else:
+                        # No auth token - default to 'main'
                         branch = "main"
+                        logger.info(f"[CREATE] No auth token, defaulting to branch: {branch}")
 
                 # Clone repository
                 git_manager = GitManager(current_user.id, str(db_project.id))
@@ -260,10 +265,11 @@ async def create_project(
                     repo_name=repo_info['repo'],
                     repo_owner=repo_info['owner'],
                     default_branch=branch,
-                    auth_method='pat'
+                    auth_method='pat' if access_token else 'none'
                 )
                 db.add(git_repo)
                 await db.commit()
+                await db.refresh(db_project)  # Refresh to get updated timestamps
 
                 logger.info(f"[CREATE] Git repository linked to project {db_project.id}")
 
@@ -332,6 +338,7 @@ async def create_project(
             # Commit database changes
             await db.commit()
             logger.info(f"[CREATE] Saved {files_saved} template files to database for project {db_project.id}")
+            await db.refresh(db_project)  # Refresh to get updated timestamps
 
             # In Docker mode, also copy template files to filesystem immediately
             if settings.deployment_mode == "docker":
