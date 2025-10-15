@@ -273,18 +273,10 @@ class Agent(AgentBase):
 # GitHub & Git Schemas
 # ============================
 
-class GitHubConnectRequest(BaseModel):
-    """Request schema for connecting GitHub via Personal Access Token."""
-    pat_token: str
-
-    @field_validator('pat_token')
-    @classmethod
-    def validate_pat_token(cls, v):
-        if not v or not v.strip():
-            raise ValueError('PAT token cannot be empty')
-        if not (v.startswith('ghp_') or v.startswith('github_pat_')):
-            raise ValueError('Invalid GitHub PAT token format')
-        return v.strip()
+class GitHubOAuthCallbackRequest(BaseModel):
+    """Request schema for OAuth callback handling."""
+    code: str
+    state: str
 
 
 class GitHubCredentialResponse(BaseModel):
@@ -292,7 +284,8 @@ class GitHubCredentialResponse(BaseModel):
     connected: bool
     github_username: Optional[str] = None
     github_email: Optional[str] = None
-    auth_method: Optional[str] = None  # 'oauth' or 'pat'
+    auth_method: str = "oauth"  # Always OAuth now
+    scope: Optional[str] = None  # OAuth scopes granted
 
 
 class GitRepositoryResponse(BaseModel):

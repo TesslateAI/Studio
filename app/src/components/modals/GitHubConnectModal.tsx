@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { GitBranch, X, Eye, EyeSlash } from '@phosphor-icons/react';
+import { GitBranch, X, ArrowSquareOut } from '@phosphor-icons/react';
 import { githubApi } from '../../lib/github-api';
+import { PulsingGridSpinner } from '../PulsingGridSpinner';
 import toast from 'react-hot-toast';
 
 interface GitHubConnectModalProps {
@@ -10,44 +11,32 @@ interface GitHubConnectModalProps {
 }
 
 export function GitHubConnectModal({ isOpen, onClose, onSuccess }: GitHubConnectModalProps) {
-  const [patToken, setPatToken] = useState('');
-  const [showToken, setShowToken] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleConnect = async () => {
-    if (!patToken.trim()) {
-      toast.error('Please enter your GitHub Personal Access Token');
-      return;
-    }
-
-    // Validate token format
-    if (!patToken.startsWith('ghp_') && !patToken.startsWith('github_pat_')) {
-      toast.error('Invalid token format. PAT should start with "ghp_" or "github_pat_"');
-      return;
-    }
-
+  const handleOAuthConnect = async () => {
     setIsConnecting(true);
-    const loadingToast = toast.loading('Connecting to GitHub...');
 
     try {
-      const result = await githubApi.connect(patToken);
-      toast.success(`Connected as @${result.github_username}`, { id: loadingToast });
-      setPatToken('');
-      onSuccess();
-      onClose();
+      // Store current page for redirect after OAuth
+      const currentPath = window.location.pathname;
+      sessionStorage.setItem('github_oauth_return', currentPath);
+
+      // Get OAuth authorization URL from backend
+      const { authorization_url } = await githubApi.initiateOAuth();
+
+      // Redirect to GitHub OAuth page
+      window.location.href = authorization_url;
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to connect to GitHub';
-      toast.error(errorMessage, { id: loadingToast });
-    } finally {
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to initiate GitHub OAuth';
+      toast.error(errorMessage);
       setIsConnecting(false);
     }
   };
 
   const handleClose = () => {
     if (!isConnecting) {
-      setPatToken('');
       onClose();
     }
   };
@@ -69,7 +58,7 @@ export function GitHubConnectModal({ isOpen, onClose, onSuccess }: GitHubConnect
             </div>
             <div>
               <h2 className="font-heading text-2xl font-bold text-[var(--text)]">Connect GitHub</h2>
-              <p className="text-sm text-gray-500">Link your GitHub account</p>
+              <p className="text-sm text-gray-500">Authorize Tesslate Studio</p>
             </div>
           </div>
           {!isConnecting && (
@@ -82,90 +71,82 @@ export function GitHubConnectModal({ isOpen, onClose, onSuccess }: GitHubConnect
           )}
         </div>
 
-        {/* Instructions */}
+        {/* OAuth Benefits */}
+        <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 mb-6">
+          <h3 className="text-sm font-semibold text-purple-400 mb-3">What you'll get:</h3>
+          <ul className="space-y-2 text-sm text-gray-300">
+            <li className="flex items-start gap-2">
+              <span className="text-purple-400 mt-0.5">✓</span>
+              <span>Access to all your repositories</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-purple-400 mt-0.5">✓</span>
+              <span>Push and pull code changes</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-purple-400 mt-0.5">✓</span>
+              <span>Create new repositories</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-purple-400 mt-0.5">✓</span>
+              <span>Manage branches and commits</span>
+            </li>
+          </ul>
+        </div>
+
+        {/* OAuth Permissions */}
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 mb-6">
-          <h3 className="text-sm font-semibold text-blue-400 mb-2">How to get your token:</h3>
-          <ol className="text-sm text-gray-400 space-y-1 list-decimal list-inside">
-            <li>Go to GitHub Settings → Developer settings → Personal access tokens</li>
-            <li>Click "Generate new token (classic)"</li>
-            <li>Select the "repo" scope (full control of repositories)</li>
-            <li>Copy the token and paste it below</li>
-          </ol>
-          <a
-            href="https://github.com/settings/tokens"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-blue-400 hover:text-blue-300 inline-flex items-center gap-1 mt-2"
-          >
-            Open GitHub Settings →
-          </a>
+          <h3 className="text-sm font-semibold text-blue-400 mb-2">Required permissions:</h3>
+          <div className="flex flex-wrap gap-2">
+            <span className="px-2 py-1 bg-blue-500/20 text-blue-300 text-xs rounded-lg font-mono">
+              repo
+            </span>
+            <span className="px-2 py-1 bg-blue-500/20 text-blue-300 text-xs rounded-lg font-mono">
+              user:email
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            We only request the minimum permissions needed to sync your code.
+          </p>
         </div>
 
-        {/* Token Input */}
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Personal Access Token
-            </label>
-            <div className="relative">
-              <input
-                type={showToken ? 'text' : 'password'}
-                value={patToken}
-                onChange={(e) => setPatToken(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 pr-12 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-500 font-mono text-sm"
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                disabled={isConnecting}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isConnecting) {
-                    handleConnect();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowToken(!showToken)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                disabled={isConnecting}
-              >
-                {showToken ? (
-                  <EyeSlash className="w-5 h-5" />
-                ) : (
-                  <Eye className="w-5 h-5" />
-                )}
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              Your token is encrypted and stored securely. We never share it.
-            </p>
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-3 pt-2">
-            <button
-              onClick={handleConnect}
-              disabled={isConnecting || !patToken.trim()}
-              className="flex-1 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
-            >
-              {isConnecting ? 'Connecting...' : 'Connect GitHub'}
-            </button>
-            <button
-              onClick={handleClose}
-              disabled={isConnecting}
-              className="flex-1 bg-white/5 border border-white/10 text-[var(--text)] py-3 rounded-xl font-semibold hover:bg-white/10 transition-all disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+        {/* Connect Button */}
+        <button
+          onClick={handleOAuthConnect}
+          disabled={isConnecting}
+          className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 group"
+        >
+          {isConnecting ? (
+            <>
+              <PulsingGridSpinner size={20} />
+              <span>Redirecting to GitHub...</span>
+            </>
+          ) : (
+            <>
+              <GitBranch className="w-5 h-5" weight="bold" />
+              <span>Connect with GitHub</span>
+              <ArrowSquareOut className="w-4 h-4 opacity-60 group-hover:opacity-100 transition-opacity" />
+            </>
+          )}
+        </button>
 
         {/* Security Note */}
-        <div className="mt-4 flex items-start gap-2 text-xs text-gray-500">
+        <div className="mt-6 flex items-start gap-2 text-xs text-gray-500">
           <span className="mt-0.5">🔒</span>
-          <p>
-            Your GitHub token is encrypted at rest and never exposed in logs or API responses.
-            You can revoke access anytime from your GitHub settings.
-          </p>
+          <div>
+            <p>Your connection is secured with OAuth 2.0</p>
+            <p className="mt-1">
+              You can revoke access anytime from your{' '}
+              <a
+                href="https://github.com/settings/applications"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 underline"
+              >
+                GitHub settings
+              </a>
+            </p>
+          </div>
         </div>
       </div>
     </div>

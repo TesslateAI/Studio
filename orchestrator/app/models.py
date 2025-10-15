@@ -154,24 +154,25 @@ class Agent(Base):
 
 
 class GitHubCredential(Base):
-    """Store encrypted GitHub credentials for users."""
+    """Store encrypted GitHub OAuth credentials for users."""
     __tablename__ = "github_credentials"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
 
     # OAuth tokens (encrypted)
-    access_token = Column(Text, nullable=True)  # Encrypted
-    refresh_token = Column(Text, nullable=True)  # Encrypted
+    access_token = Column(Text, nullable=False)  # Encrypted OAuth access token
+    refresh_token = Column(Text, nullable=True)  # Encrypted OAuth refresh token
     token_expires_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Personal Access Token (encrypted)
-    pat_token = Column(Text, nullable=True)  # Encrypted
+    # OAuth metadata
+    scope = Column(String(500), nullable=True)  # Granted OAuth scopes (e.g., "repo user:email")
+    state = Column(String(255), nullable=True)  # OAuth state for CSRF protection
 
     # GitHub user info
-    github_username = Column(String(255), nullable=True)
+    github_username = Column(String(255), nullable=False)
     github_email = Column(String(255), nullable=True)
-    github_user_id = Column(String(100), nullable=True)  # GitHub user ID for OAuth
+    github_user_id = Column(String(100), nullable=True)  # GitHub user ID
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -194,7 +195,7 @@ class GitRepository(Base):
     default_branch = Column(String(100), default="main")
 
     # Authentication method
-    auth_method = Column(String(20), nullable=True)  # 'oauth', 'pat', 'ssh'
+    auth_method = Column(String(20), default="oauth")  # 'oauth' only
 
     # Sync status
     last_sync_at = Column(DateTime(timezone=True), nullable=True)

@@ -15,6 +15,7 @@ import {
   Package,
   X
 } from '@phosphor-icons/react';
+import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 
 interface MarketplaceAgent {
@@ -187,10 +188,7 @@ export default function Marketplace() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin h-8 w-8 mx-auto mb-4 border-2 border-orange-500 border-t-transparent rounded-full" />
-          <p className="text-[var(--text)]/60">Loading marketplace...</p>
-        </div>
+        <LoadingSpinner message="Loading marketplace..." size={80} />
       </div>
     );
   }

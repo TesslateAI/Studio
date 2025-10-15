@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../lib/api';
+import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 
 export default function Register() {
@@ -144,8 +145,8 @@ export default function Register() {
             >
               {loading ? (
                 <div className="flex items-center justify-center gap-2">
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Creating account...
+                  <PulsingGridSpinner size={20} />
+                  <span>Creating account...</span>
                 </div>
               ) : (
                 'Create Account'

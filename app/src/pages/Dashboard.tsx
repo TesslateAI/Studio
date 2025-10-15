@@ -10,6 +10,7 @@ import {
 } from '../components/ui';
 import type { Status } from '../components/ui';
 import { GitHubConnectModal } from '../components/modals';
+import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import {
   Atom,
@@ -233,12 +234,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto animate-pulse">
-            <Folder className="w-8 h-8 text-[var(--primary)]" weight="fill" />
-          </div>
-          <p className="text-[var(--text)] font-medium">Loading projects...</p>
-        </div>
+        <LoadingSpinner message="Loading projects..." size={80} />
       </div>
     );
   }

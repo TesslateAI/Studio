@@ -18,6 +18,7 @@ import {
   Download,
   RefreshCw
 } from 'lucide-react';
+import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 // Using simple chart placeholders for now
 // Will integrate charts later
@@ -265,7 +266,7 @@ export default function AdminDashboard() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-white">Loading admin dashboard...</div>
+        <LoadingSpinner message="Loading admin dashboard..." size={80} />
       </div>
     );
   }
