@@ -41,7 +41,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./orchestrator:/app
+      - ./orchestrator/app:/app/app
+      - ./orchestrator/pyproject.toml:/app/pyproject.toml
       - ./orchestrator/users:/app/users
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -53,6 +54,8 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,*.localhost}
+      - PYTHONUNBUFFERED=1
+      - WATCHFILES_FORCE_POLLING=true
     networks:
       - tesslate-network
     labels:
@@ -73,8 +76,16 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - ./app:/app
-      - /app/node_modules
+      - ./app/src:/app/src
+      - ./app/public:/app/public
+      - ./app/index.html:/app/index.html
+      - ./app/vite.config.ts:/app/vite.config.ts
+      - ./app/tsconfig.json:/app/tsconfig.json
+      - ./app/tsconfig.app.json:/app/tsconfig.app.json
+      - ./app/tsconfig.node.json:/app/tsconfig.node.json
+      - ./app/tailwind.config.ts:/app/tailwind.config.ts
+      - ./app/postcss.config.js:/app/postcss.config.js
+      - ./app/package.json:/app/package.json
     environment:
       - VITE_API_URL=
       - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,host.docker.internal,.localhost}

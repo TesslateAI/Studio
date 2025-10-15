@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bot, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import AgentStep from './AgentStep';
 import { type AgentMessageData } from '../types/agent';
 
@@ -12,72 +12,58 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
   const [showDetails, setShowDetails] = useState(false);
 
   return (
-    <div className="flex justify-start">
-      <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center shadow-md ring-1 ring-purple-200 mr-3 mt-1 flex-shrink-0">
-        <Bot size={14} className="text-white" />
-      </div>
-      <div className="max-w-[80%] rounded-2xl bg-gradient-to-r from-purple-50 to-white border-l-4 border-purple-500 shadow-lg">
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-purple-100">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Bot size={16} className="text-purple-600" />
-              <span className="text-sm font-semibold text-gray-800">AI Agent</span>
-              <span className="px-2 py-0.5 bg-purple-500 text-white text-xs rounded-full font-medium">
-                Agent Mode
-              </span>
-            </div>
-            <div className="text-xs text-gray-500">
-              {agentData.iterations} steps • {agentData.tool_calls_made} tools
-            </div>
-          </div>
+    <div className="message my-4 flex gap-3">
+      {/* Avatar - matching streaming mode AI avatar */}
+      <div className="message-avatar flex-shrink-0">
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[hsl(var(--hue2)_60%_50%)] to-[hsl(var(--hue2)_60%_70%)] flex items-center justify-center">
+          <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 256 256">
+            <path d="M197.58,129.06,146,110l-19.06-51.58a15.92,15.92,0,0,0-29.88,0L78,110,26.42,129.06a15.92,15.92,0,0,0,0,29.88L78,178l19.06,51.58a15.92,15.92,0,0,0,29.88,0L146,178l51.58-19.06a15.92,15.92,0,0,0,0-29.88ZM137.75,142.25a16,16,0,0,0-9.5,9.5L112,193.58,95.75,151.75a16,16,0,0,0-9.5-9.5L44.42,128l41.83-14.25a16,16,0,0,0,9.5-9.5L112,62.42l16.25,41.83a16,16,0,0,0,9.5,9.5L179.58,128ZM248,80a8,8,0,0,1-8,8h-8v8a8,8,0,0,1-16,0V88h-8a8,8,0,0,1,0-16h8V64a8,8,0,0,1,16,0v8h8A8,8,0,0,1,248,80ZM152,40a8,8,0,0,1,8-8h8V24a8,8,0,0,1,16,0v8h8a8,8,0,0,1,0,16h-8v8a8,8,0,0,1-16,0V48h-8A8,8,0,0,1,152,40Z" />
+          </svg>
         </div>
+      </div>
 
-        {/* Execution Steps (Collapsible) */}
-        {agentData.steps && agentData.steps.length > 0 && (
-          <div className="px-4 py-3">
-            <button
-              onClick={() => setShowDetails(!showDetails)}
-              className="flex items-center gap-2 text-sm font-medium text-purple-600 hover:text-purple-700 transition-colors"
-            >
-              {showDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              {showDetails ? 'Hide' : 'View'} Execution Details
-            </button>
-
-            {showDetails && (
-              <div className="mt-3 space-y-2">
-                {agentData.steps.map((step, index) => (
-                  <AgentStep
-                    key={index}
-                    step={step}
-                    totalSteps={agentData.iterations}
-                  />
-                ))}
-              </div>
-            )}
+      {/* Content */}
+      <div className="flex-1 max-w-[75%]">
+        {/* Main message bubble */}
+        <div className="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]">
+          {/* Agent mode indicator */}
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-[var(--border-color)]">
+            <Sparkles size={14} className="text-[hsl(var(--hue2)_60%_50%)]" />
+            <span className="text-xs font-medium text-[var(--text)]/70">
+              Agent Mode • {agentData.iterations} iterations • {agentData.tool_calls_made} tool calls
+            </span>
           </div>
-        )}
 
-        {/* Final Response */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-2 mb-2">
-            <CheckCircle size={16} className="text-green-600" />
-            <span className="text-sm font-semibold text-gray-800">Task Complete</span>
-          </div>
-          <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+          {/* Final response */}
+          <div className="whitespace-pre-wrap">
             {finalResponse}
           </div>
-          <div className="text-xs text-gray-500 mt-2">
-            {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </div>
-        </div>
 
-        {/* Completion Reason */}
-        {agentData.completion_reason && (
-          <div className="px-4 py-2 bg-purple-50 text-xs text-purple-700 border-t border-purple-100">
-            Reason: {agentData.completion_reason}
-          </div>
-        )}
+          {/* Execution details toggle */}
+          {agentData.steps && agentData.steps.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-[var(--border-color)]">
+              <button
+                onClick={() => setShowDetails(!showDetails)}
+                className="flex items-center gap-2 text-xs font-medium text-[var(--text)]/60 hover:text-[var(--text)] transition-colors"
+              >
+                {showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {showDetails ? 'Hide' : 'Show'} execution steps
+              </button>
+
+              {showDetails && (
+                <div className="mt-3 space-y-2">
+                  {agentData.steps.map((step, index) => (
+                    <AgentStep
+                      key={index}
+                      step={step}
+                      totalSteps={agentData.iterations}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

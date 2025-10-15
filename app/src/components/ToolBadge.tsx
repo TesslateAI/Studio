@@ -29,9 +29,9 @@ const formatToolName = (tool: string) => {
 
 export default function ToolBadge({ tool }: ToolBadgeProps) {
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium border border-purple-200">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[rgba(0,217,255,0.1)] text-[var(--accent)] rounded-md text-xs font-medium border border-[rgba(0,217,255,0.2)]">
       {getToolIcon(tool)}
-      {formatToolName(tool)}
+      <span className="opacity-80">{formatToolName(tool)}</span>
     </span>
   );
 }

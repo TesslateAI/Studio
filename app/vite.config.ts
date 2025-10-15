@@ -16,6 +16,14 @@ export default defineConfig({
   server: {
     host: true,
     allowedHosts: allowedHosts,
+    watch: {
+      usePolling: true,
+      interval: 300,
+    },
+    hmr: {
+      host: 'localhost',
+      protocol: 'ws',
+    },
     proxy: {
       '/api': {
         // Use orchestrator service name in Docker, localhost for native development

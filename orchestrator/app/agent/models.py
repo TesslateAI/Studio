@@ -14,6 +14,7 @@ Supported:
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 import logging
+import asyncio
 from openai import AsyncOpenAI
 
 # Optional: Anthropic import (only needed if using Claude)
@@ -115,13 +116,20 @@ class OpenAIAdapter(ModelAdapter):
         try:
             logger.debug(f"Sending request to {self.model_name} with {len(messages)} messages")
 
-            response = await self.client.chat.completions.create(**request_params)
+            # Add 60 second timeout to prevent hanging
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(**request_params),
+                timeout=60.0
+            )
 
             content = response.choices[0].message.content or ""
             logger.debug(f"Received response: {len(content)} characters")
 
             return content
 
+        except asyncio.TimeoutError:
+            logger.error(f"Model API timeout after 60 seconds - model: {self.model_name}")
+            raise RuntimeError(f"Model API timeout: {self.model_name} did not respond within 60 seconds. Please check your API endpoint configuration.")
         except Exception as e:
             logger.error(f"OpenAI API error: {e}", exc_info=True)
             raise RuntimeError(f"Model API error: {str(e)}") from e

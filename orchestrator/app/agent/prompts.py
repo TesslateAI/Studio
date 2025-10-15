@@ -231,13 +231,25 @@ def get_user_message_wrapper(user_request: str, project_context: Optional[dict] 
     Returns:
         Enhanced user message
     """
-    message = f"User Request: {user_request}"
+    message_parts = []
 
     if project_context:
+        # Add TESSLATE.md context first (most important for understanding the project)
+        if project_context.get("tesslate_context"):
+            message_parts.append(project_context["tesslate_context"])
+
+        # Add Git context if available
+        if project_context.get("git_context"):
+            message_parts.append(project_context["git_context"])
+
+        # Add basic project info
         context_parts = []
 
         if project_context.get("project_name"):
             context_parts.append(f"Project: {project_context['project_name']}")
+
+        if project_context.get("project_description"):
+            context_parts.append(f"Description: {project_context['project_description']}")
 
         if project_context.get("file_count"):
             context_parts.append(f"Current files: {project_context['file_count']}")
@@ -246,9 +258,12 @@ def get_user_message_wrapper(user_request: str, project_context: Optional[dict] 
             context_parts.append(f"Recent changes: {project_context['recent_changes']}")
 
         if context_parts:
-            message = "Context: " + ", ".join(context_parts) + "\n\n" + message
+            message_parts.append("\n=== Project Info ===\n" + "\n".join(context_parts))
 
-    return message
+    # Add user request at the end
+    message_parts.append(f"\n=== User Request ===\n{user_request}")
+
+    return "\n".join(message_parts)
 
 
 # Mini-SWE-Agent inspired format (for models that prefer simpler prompts)

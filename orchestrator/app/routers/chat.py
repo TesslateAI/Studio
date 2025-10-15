@@ -137,6 +137,101 @@ async def _build_git_context(project: Project, user_id: int, db: AsyncSession) -
         logger.error(f"[GIT-CONTEXT] Failed to build Git context: {e}", exc_info=True)
         return None
 
+
+async def _build_tesslate_context(project: Project, user_id: int, db: AsyncSession) -> Optional[str]:
+    """
+    Build TESSLATE.md context for agent.
+
+    Reads TESSLATE.md from the user's project container. If it doesn't exist,
+    copies the generic template from orchestrator/template/TESSLATE.md.
+
+    Returns the TESSLATE.md content as a formatted string, or None if unable to read.
+    """
+    try:
+        # Read TESSLATE.md from the user's project (deployment-aware)
+        tesslate_content = None
+
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes mode: Read from pod
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+
+            tesslate_content = await k8s_manager.read_file_from_pod(
+                user_id=user_id,
+                project_id=str(project.id),
+                file_path="TESSLATE.md"
+            )
+
+            # If TESSLATE.md doesn't exist, copy the template
+            if tesslate_content is None:
+                logger.info(f"[TESSLATE-CONTEXT] TESSLATE.md not found in project {project.id}, copying template")
+
+                # Read the generic template
+                template_path = os.path.join(os.path.dirname(__file__), "..", "..", "template", "TESSLATE.md")
+                try:
+                    async with aiofiles.open(template_path, 'r', encoding='utf-8') as f:
+                        template_content = await f.read()
+
+                    # Write template to pod
+                    success = await k8s_manager.write_file_to_pod(
+                        user_id=user_id,
+                        project_id=str(project.id),
+                        file_path="TESSLATE.md",
+                        content=template_content
+                    )
+
+                    if success:
+                        tesslate_content = template_content
+                        logger.info(f"[TESSLATE-CONTEXT] Successfully copied template to project {project.id}")
+                    else:
+                        logger.warning(f"[TESSLATE-CONTEXT] Failed to write template to pod")
+
+                except Exception as e:
+                    logger.error(f"[TESSLATE-CONTEXT] Failed to read template file: {e}")
+
+        else:
+            # Docker mode: Read from local filesystem
+            project_dir = f"users/{user_id}/{project.id}"
+            tesslate_path = os.path.join(project_dir, "TESSLATE.md")
+
+            if os.path.exists(tesslate_path):
+                try:
+                    async with aiofiles.open(tesslate_path, 'r', encoding='utf-8') as f:
+                        tesslate_content = await f.read()
+                except Exception as e:
+                    logger.error(f"[TESSLATE-CONTEXT] Failed to read TESSLATE.md: {e}")
+            else:
+                # Copy template
+                logger.info(f"[TESSLATE-CONTEXT] TESSLATE.md not found in project {project.id}, copying template")
+                template_path = os.path.join(os.path.dirname(__file__), "..", "..", "template", "TESSLATE.md")
+
+                try:
+                    # Ensure project directory exists
+                    os.makedirs(project_dir, exist_ok=True)
+
+                    async with aiofiles.open(template_path, 'r', encoding='utf-8') as f:
+                        template_content = await f.read()
+
+                    async with aiofiles.open(tesslate_path, 'w', encoding='utf-8') as f:
+                        await f.write(template_content)
+
+                    tesslate_content = template_content
+                    logger.info(f"[TESSLATE-CONTEXT] Successfully copied template to project {project.id}")
+
+                except Exception as e:
+                    logger.error(f"[TESSLATE-CONTEXT] Failed to copy template: {e}")
+
+        if tesslate_content:
+            # Return formatted context
+            return f"\n=== Project Context (TESSLATE.md) ===\n\n{tesslate_content}\n"
+        else:
+            return None
+
+    except Exception as e:
+        logger.error(f"[TESSLATE-CONTEXT] Failed to build TESSLATE context: {e}", exc_info=True)
+        return None
+
+
 @router.get("/", response_model=List[ChatSchema])
 async def get_chats(
     current_user: User = Depends(get_current_active_user),
@@ -274,6 +369,12 @@ async def agent_chat(
             "project_name": project.name,
             "project_description": project.description
         }
+
+        # Build TESSLATE.md context (project-specific documentation for AI agents)
+        tesslate_context = await _build_tesslate_context(project, current_user.id, db)
+        if tesslate_context:
+            project_context["tesslate_context"] = tesslate_context
+            logger.info(f"[AGENT-CHAT] Added TESSLATE.md context for project {project.id}")
 
         # Check if project has Git repository connected and inject Git context
         git_context = await _build_git_context(project, current_user.id, db)
