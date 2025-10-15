@@ -347,22 +347,41 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
         return f"builder-dev-user{user_id}-project{project_id}"
     
     def _generate_hostname(self, user_id: int, project_id: str) -> str:
-        """Generate a unique hostname for Traefik routing."""
-        return f"user{user_id}-project{project_id}.localhost"
+        """
+        Generate a unique hostname for Traefik routing.
+
+        For production with DEV_SERVER_BASE_URL configured, uses wildcard subdomain.
+        For local development, uses .localhost domain.
+        """
+        settings = get_settings()
+
+        if settings.dev_server_base_url:
+            # Production: extract domain from base URL for wildcard subdomain
+            # e.g., "https://studio-demo.tesslate.com" → "user2-project15.studio-demo.tesslate.com"
+            base_url = settings.dev_server_base_url
+            domain = base_url.replace('https://', '').replace('http://', '').rstrip('/')
+            return f"user{user_id}-project{project_id}.{domain}"
+        else:
+            # Local development: use .localhost domain
+            return f"user{user_id}-project{project_id}.localhost"
     
     def _get_container_access_url(self, hostname: str) -> str:
-        """Get the access URL for a container, considering proxy configuration."""
-        settings = get_settings()
-        user_project = hostname.replace('.localhost', '')
+        """
+        Get the access URL for a container.
 
-        # For local development (no base_url configured), use http://localhost for Traefik
-        # For production (base_url configured), use the configured URL
+        Uses hostname-based routing to match Kubernetes behavior.
+        - Production: https://user2-project15.studio-demo.tesslate.com
+        - Local dev: http://user2-project15.localhost
+        """
+        settings = get_settings()
+
         if settings.dev_server_base_url:
-            # Production: use configured base URL (e.g., https://your-domain.com)
-            return f"{settings.dev_server_base_url}/preview/{user_project}/"
+            # Production: use HTTPS with wildcard subdomain routing
+            # Cloudflare/Let's Encrypt handles SSL automatically
+            return f"https://{hostname}"
         else:
-            # Local development: use localhost with Traefik (port 80)
-            return f"http://localhost/preview/{user_project}/"
+            # Local development: use HTTP with .localhost domain
+            return f"http://{hostname}"
     
     def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str) -> List[str]:
         """Generate Traefik labels for automatic service discovery and routing."""
@@ -678,12 +697,12 @@ docker-compose*
             
             # Add network (required for Traefik)
             run_cmd.extend(["--network", self.network_name])
-            
-            # Add image and startup command with base path for production
-            user_project = hostname.replace('.localhost', '')
+
+            # Add image and startup command
+            # Hostname-based routing - no base path needed (matches Kubernetes)
             run_cmd.extend([
                 self.base_image_name,
-                "sh", "-c", f"npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173 --base /preview/{user_project}/"
+                "sh", "-c", "npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173"
             ])
             
             print(f"[DEBUG] Docker run command: {' '.join(run_cmd)}")
@@ -802,6 +821,20 @@ docker-compose*
             try:
                 subprocess.run(["docker", "stop", container_name], capture_output=True, timeout=10)
                 subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=10)
+
+                # Wait and verify container is fully removed
+                for _ in range(10):  # Try for up to 5 seconds
+                    check = subprocess.run(
+                        ["docker", "ps", "-a", "-q", "-f", f"name={container_name}"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if not check.stdout.strip():
+                        # Container is gone
+                        break
+                    await asyncio.sleep(0.5)
+
                 print(f"[OK] Force cleaned up container: {container_name}")
             except Exception as e:
                 print(f"[DEBUG] Force cleanup failed: {e}")
@@ -817,29 +850,44 @@ docker-compose*
             subprocess.run([
                 "docker", "stop", container_name
             ], capture_output=True, timeout=30)
-            
+
             # Remove container (should auto-remove with --rm flag)
             subprocess.run([
                 "docker", "rm", "-f", container_name
             ], capture_output=True, timeout=10)
-            
+
+            # Wait and verify container is fully removed before returning
+            for _ in range(10):  # Try for up to 5 seconds
+                check = subprocess.run(
+                    ["docker", "ps", "-a", "-q", "-f", f"name={container_name}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if not check.stdout.strip():
+                    # Container is gone
+                    break
+                await asyncio.sleep(0.5)
+
             print(f"[OK] Container stopped: {container_name}")
-            
+
         except Exception as e:
             print(f"[WARN] Error stopping container {container_name}: {e}")
-            
+
             # Force remove if graceful stop failed
             try:
                 subprocess.run([
                     "docker", "rm", "-f", container_name
                 ], capture_output=True, timeout=10)
+                # Wait for force removal to complete
+                await asyncio.sleep(0.5)
             except Exception:
                 pass
-        
+
         # Clean up tracking
         if project_key:
             self.containers.pop(project_key, None)
-        
+
         # Log cleanup
         if hostname:
             print(f"[CLEANUP] Stopped container with hostname: {hostname}")

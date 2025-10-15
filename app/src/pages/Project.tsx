@@ -120,6 +120,29 @@ export default function Project() {
     }
   }, [devServerUrl]);
 
+  // Listen for URL change messages from iframe
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Handle URL change messages from the user project iframe
+      if (event.data && event.data.type === 'urlchange') {
+        const newUrl = event.data.url;
+        if (newUrl && devServerUrl) {
+          // Construct full URL from relative path
+          try {
+            const baseUrl = new URL(devServerUrl);
+            const fullUrl = new URL(newUrl, baseUrl.origin).href;
+            setCurrentPreviewUrl(fullUrl);
+          } catch (error) {
+            console.log('Error parsing URL from iframe:', error);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [devServerUrl]);
+
   const loadProject = async () => {
     try {
       const [projectData, filesData] = await Promise.all([
@@ -179,7 +202,12 @@ export default function Project() {
       if (response.status === 'ready' && response.url) {
         toast.dismiss('dev-server');
         toast.success('Development server ready!', { id: 'dev-server', duration: 2000 });
+
+        // Store clean URL for display (without auth token)
         setDevServerUrl(response.url);
+
+        // For Kubernetes mode: Add auth_token query param for authentication
+        // Note: Docker mode does NOT validate this token - authentication gap that needs to be addressed
         if (token) {
           const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
@@ -190,7 +218,10 @@ export default function Project() {
         toast.loading('Development server is starting up...', { id: 'dev-server' });
         setTimeout(() => loadDevServerUrl(), 3000);
       } else if (response.url) {
+        // Store clean URL for display
         setDevServerUrl(response.url);
+
+        // Add auth token to iframe URL (Kubernetes auth, Docker has no validation)
         if (token) {
           const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
@@ -238,26 +269,16 @@ export default function Project() {
   const navigateBack = () => {
     const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
-      try {
-        iframe.contentWindow.history.back();
-        // Update URL immediately after navigation
-        setTimeout(updateIframeUrl, 100);
-      } catch (error) {
-        console.log('Navigation back error:', error);
-      }
+      // Use postMessage to communicate with iframe instead of direct history access
+      iframe.contentWindow.postMessage({ type: 'navigate', direction: 'back' }, '*');
     }
   };
 
   const navigateForward = () => {
     const iframe = iframeRef.current;
     if (iframe && iframe.contentWindow) {
-      try {
-        iframe.contentWindow.history.forward();
-        // Update URL immediately after navigation
-        setTimeout(updateIframeUrl, 100);
-      } catch (error) {
-        console.log('Navigation forward error:', error);
-      }
+      // Use postMessage to communicate with iframe instead of direct history access
+      iframe.contentWindow.postMessage({ type: 'navigate', direction: 'forward' }, '*');
     }
   };
 

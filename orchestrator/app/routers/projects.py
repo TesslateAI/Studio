@@ -67,6 +67,9 @@ async def create_project(
         # In Docker mode, create the directory
         settings = get_settings()
         if settings.deployment_mode == "docker":
+            # Create parent directory first to avoid Windows bind mount issues
+            user_dir = os.path.abspath(f"users/{current_user.id}")
+            os.makedirs(user_dir, exist_ok=True)
             os.makedirs(project_path, exist_ok=True)
             logger.info(f"[CREATE] Created project directory: {project_path}")
 
@@ -661,6 +664,9 @@ async def get_dev_server_url(
         # In Docker mode, create project directory from database files if it doesn't exist
         if settings.deployment_mode == "docker" and not os.path.exists(project_path):
             logger.info(f"[DEV-URL] Creating project directory from database files: {project_path}")
+            # Create parent directory first to avoid Windows bind mount issues
+            user_dir = os.path.abspath(f"users/{current_user.id}")
+            os.makedirs(user_dir, exist_ok=True)
             os.makedirs(project_path, exist_ok=True)
 
             # Get all files from database

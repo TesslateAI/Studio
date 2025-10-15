@@ -22,6 +22,15 @@ app = FastAPI(title="AI Application Builder API")
 cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 logger.info(f"CORS origins configured: {cors_origins}")
 
+# Add wildcard support for *.localhost domains in Docker mode
+# This allows user containers (user2-project15.localhost) to communicate with backend
+if settings.deployment_mode == "docker":
+    # Use regex to match all *.localhost subdomains
+    allow_origin_regex = r"http://[^.]+\.localhost"
+    logger.info(f"Docker mode: Enabling CORS regex for *.localhost domains")
+else:
+    allow_origin_regex = None
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -38,6 +47,7 @@ app.add_middleware(
     ],
     expose_headers=["Content-Length", "X-Total-Count"],  # Headers frontend can read
     max_age=600,  # Cache preflight requests for 10 minutes
+    allow_origin_regex=allow_origin_regex,  # Add regex support for .localhost domains
 )
 
 def load_agents_config():
