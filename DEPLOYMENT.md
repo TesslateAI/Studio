@@ -56,14 +56,13 @@ Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment 
 
 ### Why Traefik is Required in Docker Mode
 
-Even if you run main services natively (orchestrator, frontend, AI service), **Traefik must run in Docker** because:
+Even if you run main services natively (orchestrator, frontend), **Traefik must run in Docker** because:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ Native Services (on host)                                    │
-│  • Orchestrator: localhost:8000                              │
+│  • Orchestrator: localhost:8000 (includes built-in AI)       │
 │  • Frontend: localhost:5173                                  │
-│  • AI Service: localhost:8001                                │
 └──────────────────────────────────────────────────────────────┘
                            │
                            │ Creates user containers
@@ -97,9 +96,8 @@ Even if you run main services natively (orchestrator, frontend, AI service), **T
 ### Architecture
 ```
 Host Machine:
-  • Orchestrator (Python/FastAPI) - Native process on port 8000
+  • Orchestrator (Python/FastAPI) - Native process on port 8000 (includes built-in AI)
   • Frontend (React/Vite) - Native process on port 5173
-  • AI Service (Python/FastAPI) - Native process on port 8001
 
 Docker:
   • Traefik - Reverse proxy for user dev containers
@@ -141,17 +139,13 @@ Docker:
    # 2. Start orchestrator
    cd orchestrator && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-   # 3. Start AI service
-   cd ai-service && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
-
-   # 4. Start frontend
+   # 3. Start frontend
    cd app && npm run dev
    ```
 
 3. **Access the application**
    - Frontend: http://localhost:5173
    - Orchestrator API: http://localhost:8000
-   - AI Service: http://localhost:8001
    - Traefik Dashboard: http://localhost:8080
    - User Projects: http://user{id}-project{id}.localhost (auto-created)
 
@@ -176,9 +170,8 @@ Docker:
 ```
 All services in Docker containers:
   • Traefik - Reverse proxy (port 80, 8080)
-  • Orchestrator - Backend API
+  • Orchestrator - Backend API (includes built-in AI)
   • Frontend - React dev server
-  • AI Service - Code generation service
   • User Containers - Dynamically created
 ```
 
@@ -493,7 +486,6 @@ OPENAI_API_KEY=your-openai-api-key
 |---------|-----------|-------------|------------|
 | Frontend | 5173 | 5173 | 80/443 (Ingress) |
 | Orchestrator | 8000 | 8000 | 80/443 (Ingress) |
-| AI Service | 8001 | 8001 | 8001 (Internal) |
 | Traefik Dashboard | - | 8080 | N/A |
 | PostgreSQL | - | 5432 | 5432 (Internal) |
 | User Dev Containers | - | 5173 | 80/443 (Ingress) |

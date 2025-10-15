@@ -104,7 +104,7 @@ Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment 
 - FastAPI backend with JWT authentication
 - Project and file management
 - Dual container orchestration (Docker/K8s)
-- **Built-in AI agent system** with OpenAI/Anthropic integration
+- Built-in AI agent system with OpenAI/Anthropic integration
 - Streaming chat with tool calling support
 - SQLAlchemy ORM with SQLite/PostgreSQL
 
@@ -480,14 +480,12 @@ tesslate-studio/
 │   ├── cleanup-k8s.sh    # K8s cleanup
 │   └── manage-k8s.sh     # K8s management
 ├── traefik/              # Traefik configuration (Docker mode)
-├── ai-service/           # Legacy AI service (not currently used)
 ├── docker-compose.yml     # Local development setup
 ├── docker-compose.prod.yml # Production Docker setup
 └── README.md             # This file
 
-Note: The `ai-service/` directory contains a standalone AI service that was
-      originally planned but is not currently integrated. All AI functionality
-      is handled directly by the orchestrator service.
+Note: All AI functionality is handled directly by the orchestrator service with
+      built-in support for OpenAI, Anthropic, and Cerebras models.
 ```
 
 ## 💡 Pro Tips

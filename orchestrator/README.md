@@ -149,8 +149,9 @@ orchestrator/
 
 This service integrates with:
 - **app/** - Frontend React application
-- **ai-service/** - AI code generation service (optional)
-- **traefik/** - Reverse proxy and routing
+- **traefik/** - Reverse proxy and routing (Docker mode)
 - **k8s/** - Kubernetes deployment manifests
+
+The orchestrator includes built-in AI integration with OpenAI, Anthropic, and Cerebras models.
 
 See the [main README](../README.md) for full architecture documentation.

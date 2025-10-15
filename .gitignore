@@ -112,8 +112,7 @@ orchestrator/backend/.venv/
 orchestrator/backend/.env
 orchestrator/backend/*.db
 
-# AI service templates (auto-generated)
-ai-service/app/templates/*.json
+# Note: ai-service has been removed - AI functionality is now built into orchestrator
 
 # OS files
 .DS_Store

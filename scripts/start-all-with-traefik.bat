@@ -17,9 +17,8 @@ REM
 REM NETWORK ARCHITECTURE:
 REM   ┌─────────────────────────────────────────────┐
 REM   │ Host Machine                                 │
-REM   │  • Orchestrator: localhost:8000             │
+REM   │  • Orchestrator: localhost:8000 (built-in AI)│
 REM   │  • Frontend: localhost:5173                 │
-REM   │  • AI Service: localhost:8001               │
 REM   └──────────────────┬──────────────────────────┘
 REM                      │ Creates containers
 REM                      ▼
@@ -94,17 +93,13 @@ echo ✅ Traefik ready
 
 REM Start orchestrator on port 8000
 echo.
-echo [5/6] Starting backend services...
+echo [5/6] Starting backend service...
 echo.
-echo Starting Orchestrator (Backend API)...
+echo Starting Orchestrator (Backend API with built-in AI)...
 start "Orchestrator Service" cmd /k "cd ..\orchestrator && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
-timeout /t 2 /nobreak > nul
+timeout /t 3 /nobreak > nul
 
-echo Starting AI Service (Code Generation)...
-start "AI Service" cmd /k "cd ..\ai-service && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8001"
-timeout /t 2 /nobreak > nul
-
-echo ✅ Backend services starting...
+echo ✅ Backend service starting...
 
 REM Start frontend dev server
 echo.
@@ -118,8 +113,7 @@ echo ===========================================================================
 echo.
 echo 📍 MAIN SERVICES (Native - Fast hot reload):
 echo   • Frontend:     http://localhost:5173
-echo   • Orchestrator: http://localhost:8000
-echo   • AI Service:   http://localhost:8001
+echo   • Orchestrator: http://localhost:8000 (with built-in AI)
 echo.
 echo 📍 TRAEFIK DASHBOARD (Docker):
 echo   • Dashboard:    http://localhost:8080
@@ -137,7 +131,7 @@ echo   • User containers created automatically when projects are created
 echo   • Hot reload works on all native services
 echo.
 echo ⚙️  TO STOP ALL SERVICES:
-echo   1. Close all service windows (Orchestrator, AI, Frontend)
+echo   1. Close all service windows (Orchestrator, Frontend)
 echo   2. Run: docker-compose down  (stops Traefik)
 echo.
 echo 📚 For other deployment options, see: DEPLOYMENT.md

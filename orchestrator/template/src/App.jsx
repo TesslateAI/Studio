@@ -14,6 +14,26 @@ function Home() {
 
 function App() {
   useEffect(() => {
+    // Parse and store auth_token from URL on initial load
+    const urlParams = new URLSearchParams(window.location.search);
+    const authToken = urlParams.get('auth_token');
+
+    if (authToken) {
+      // Store the token in localStorage for the dev preview
+      localStorage.setItem('auth_token', authToken);
+
+      // Remove the token from the URL to keep it clean
+      urlParams.delete('auth_token');
+      const newUrl = window.location.pathname +
+        (urlParams.toString() ? '?' + urlParams.toString() : '') +
+        window.location.hash;
+      window.history.replaceState({}, '', newUrl);
+
+      console.log('Auth token stored successfully');
+    }
+  }, []);
+
+  useEffect(() => {
     // Listen for navigation messages from parent window (Tesslate Studio)
     const handleMessage = (event) => {
       // Security: verify the message is from a trusted origin

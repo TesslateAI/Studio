@@ -86,7 +86,16 @@ export default function Project() {
           urlObj.searchParams.delete('auth_token');
           urlObj.searchParams.delete('t');
           urlObj.searchParams.delete('hmr_fallback');
-          const cleanUrl = urlObj.href;
+
+          // Reconstruct URL without the removed params
+          let cleanUrl = urlObj.origin + urlObj.pathname;
+          const remainingParams = urlObj.searchParams.toString();
+          if (remainingParams) {
+            cleanUrl += '?' + remainingParams;
+          }
+          if (urlObj.hash) {
+            cleanUrl += urlObj.hash;
+          }
 
           if (cleanUrl !== lastUrl) {
             lastUrl = cleanUrl;
@@ -130,8 +139,24 @@ export default function Project() {
           // Construct full URL from relative path
           try {
             const baseUrl = new URL(devServerUrl);
-            const fullUrl = new URL(newUrl, baseUrl.origin).href;
-            setCurrentPreviewUrl(fullUrl);
+            const fullUrlObj = new URL(newUrl, baseUrl.origin);
+
+            // Remove auth tokens from display
+            fullUrlObj.searchParams.delete('auth_token');
+            fullUrlObj.searchParams.delete('t');
+            fullUrlObj.searchParams.delete('hmr_fallback');
+
+            // Reconstruct clean URL
+            let cleanUrl = fullUrlObj.origin + fullUrlObj.pathname;
+            const remainingParams = fullUrlObj.searchParams.toString();
+            if (remainingParams) {
+              cleanUrl += '?' + remainingParams;
+            }
+            if (fullUrlObj.hash) {
+              cleanUrl += fullUrlObj.hash;
+            }
+
+            setCurrentPreviewUrl(cleanUrl);
           } catch (error) {
             console.log('Error parsing URL from iframe:', error);
           }
@@ -259,7 +284,18 @@ export default function Project() {
         urlObj.searchParams.delete('auth_token');
         urlObj.searchParams.delete('t');
         urlObj.searchParams.delete('hmr_fallback');
-        setCurrentPreviewUrl(urlObj.href);
+
+        // Reconstruct URL without the removed params
+        let cleanUrl = urlObj.origin + urlObj.pathname;
+        const remainingParams = urlObj.searchParams.toString();
+        if (remainingParams) {
+          cleanUrl += '?' + remainingParams;
+        }
+        if (urlObj.hash) {
+          cleanUrl += urlObj.hash;
+        }
+
+        setCurrentPreviewUrl(cleanUrl);
       }
     } catch (error) {
       // Cross-origin error - can't access iframe URL
