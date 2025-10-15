@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Float, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -11,6 +11,14 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+    last_active_at = Column(DateTime(timezone=True), nullable=True)
+    litellm_api_key = Column(String, unique=True, nullable=True)
+    litellm_user_id = Column(String, unique=True, nullable=True)
+    subscription_tier = Column(String, default="free")  # free, pro, enterprise
+    stripe_customer_id = Column(String, nullable=True)
+    total_spend = Column(Integer, default=0)  # In cents for precision
+    credits_balance = Column(Integer, default=0)  # In cents
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -20,6 +28,8 @@ class User(Base):
     agent_commands = relationship("AgentCommandLog", back_populates="user", cascade="all, delete-orphan")
     github_credential = relationship("GitHubCredential", back_populates="user", uselist=False, cascade="all, delete-orphan")
     git_repositories = relationship("GitRepository", back_populates="user", cascade="all, delete-orphan")
+    purchased_agents = relationship("UserPurchasedAgent", back_populates="user", cascade="all, delete-orphan")
+    agent_reviews = relationship("AgentReview", back_populates="user", cascade="all, delete-orphan")
 
 
 class RefreshToken(Base):
@@ -50,6 +60,7 @@ class Project(Base):
     owner = relationship("User", back_populates="projects")
     files = relationship("ProjectFile", back_populates="project", cascade="all, delete-orphan")
     git_repository = relationship("GitRepository", back_populates="project", uselist=False, cascade="all, delete-orphan")
+    project_agents = relationship("ProjectAgent", back_populates="project", cascade="all, delete-orphan")
 
 class ProjectFile(Base):
     __tablename__ = "project_files"
@@ -199,3 +210,104 @@ class GitRepository(Base):
 
     project = relationship("Project", back_populates="git_repository")
     user = relationship("User", back_populates="git_repositories")
+
+
+# ============================================================================
+# Marketplace Models
+# ============================================================================
+
+class MarketplaceAgent(Base):
+    """Agent listings in the marketplace."""
+    __tablename__ = "marketplace_agents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    long_description = Column(Text, nullable=True)
+    category = Column(String, nullable=False)  # builder, frontend, fullstack, data, etc
+    system_prompt = Column(Text, nullable=False)
+    mode = Column(String, nullable=False)  # "stream" or "agent"
+    icon = Column(String, default="🤖")  # emoji or phosphor icon name
+    preview_image = Column(String, nullable=True)
+
+    # Pricing
+    pricing_type = Column(String, nullable=False)  # free, monthly, usage, passthrough
+    price = Column(Integer, default=0)  # In cents for precision (monthly or per-token)
+    stripe_price_id = Column(String, nullable=True)
+    stripe_product_id = Column(String, nullable=True)
+
+    # Source type
+    source_type = Column(String, default="closed")  # open, closed
+    requires_user_keys = Column(Boolean, default=False)  # For passthrough pricing
+
+    # Stats
+    downloads = Column(Integer, default=0)
+    rating = Column(Float, default=5.0)
+    reviews_count = Column(Integer, default=0)
+
+    # Features & requirements
+    features = Column(JSON)  # ["Code generation", "File editing", etc]
+    required_models = Column(JSON)  # Models this agent needs access to
+    tags = Column(JSON)  # ["react", "typescript", "ai", etc]
+
+    is_featured = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    purchased_by = relationship("UserPurchasedAgent", back_populates="agent", cascade="all, delete-orphan")
+    project_assignments = relationship("ProjectAgent", back_populates="agent", cascade="all, delete-orphan")
+    reviews = relationship("AgentReview", back_populates="agent", cascade="all, delete-orphan")
+
+
+class UserPurchasedAgent(Base):
+    """Tracks which agents users have purchased/added to their library."""
+    __tablename__ = "user_purchased_agents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=False)
+    purchase_date = Column(DateTime(timezone=True), server_default=func.now())
+    purchase_type = Column(String, nullable=False)  # free, purchased, subscription
+    stripe_payment_intent = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # For subscriptions
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    user = relationship("User", back_populates="purchased_agents")
+    agent = relationship("MarketplaceAgent", back_populates="purchased_by")
+
+
+class ProjectAgent(Base):
+    """Tracks which agents are active on which projects."""
+    __tablename__ = "project_agents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # For validation
+    enabled = Column(Boolean, default=True)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    project = relationship("Project", back_populates="project_agents")
+    agent = relationship("MarketplaceAgent", back_populates="project_assignments")
+
+
+class AgentReview(Base):
+    """User reviews for marketplace agents."""
+    __tablename__ = "agent_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rating = Column(Integer, nullable=False)  # 1-5
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    agent = relationship("MarketplaceAgent", back_populates="reviews")
+    user = relationship("User", back_populates="agent_reviews")

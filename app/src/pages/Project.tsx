@@ -27,7 +27,6 @@ import {
   ArchitecturePanel,
   NotesPanel,
   SettingsPanel,
-  MarketplacePanel,
   AssetsPanel
 } from '../components/panels';
 import CodeEditor from '../components/CodeEditor';
@@ -388,9 +387,8 @@ export default function Project() {
           },
           {
             icon: <Storefront size={20} />,
-            title: 'Marketplace',
-            onClick: () => togglePanel('marketplace'),
-            active: activePanel === 'marketplace'
+            title: 'Agent Marketplace',
+            onClick: () => navigate('/marketplace')
           },
           {
             icon: <Gear size={20} />,
@@ -522,15 +520,6 @@ export default function Project() {
         onClose={() => setActivePanel(null)}
       >
         <SettingsPanel projectId={projectId} />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="Marketplace"
-        icon={<Storefront size={20} />}
-        isOpen={activePanel === 'marketplace'}
-        onClose={() => setActivePanel(null)}
-      >
-        <MarketplacePanel projectId={projectId} />
       </FloatingPanel>
 
       <FloatingPanel

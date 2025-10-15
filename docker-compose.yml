@@ -76,7 +76,7 @@ services:
       - ./app:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=
+      - VITE_API_URL=${VITE_API_URL:-}
       - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,host.docker.internal,.localhost}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
