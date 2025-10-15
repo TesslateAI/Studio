@@ -200,6 +200,7 @@ class AgentChatRequest(BaseModel):
     """Request schema for agent chat."""
     project_id: int
     message: str
+    agent_id: Optional[int] = None  # ID of the agent to use
     max_iterations: Optional[int] = 20
     minimal_prompts: Optional[bool] = False
 

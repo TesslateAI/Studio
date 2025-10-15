@@ -199,6 +199,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
       const response = await chatApi.sendAgentMessage({
         project_id: projectId,
         message: messageText,
+        agent_id: undefined,  // Note: This component doesn't have agent selection yet
         max_iterations: 20,
       });
 
@@ -216,11 +217,33 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
         setMessages(prev => [...prev, agentMessage]);
         toast.success('Task completed successfully');
       } else {
-        toast.error(response.error || 'Agent execution failed');
+        // Agent execution failed - add error message to chat
+        const errorMessage: Message = {
+          role: 'assistant',
+          content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
+        };
+        setMessages(prev => [...prev, errorMessage]);
+
+        // Show technical error in toast
+        toast.error(response.error || 'Agent execution failed', {
+          duration: 5000,
+        });
       }
     } catch (error: any) {
       console.error('Agent execution error:', error);
-      toast.error(error?.response?.data?.detail || 'Failed to execute agent');
+
+      // Add error message to chat
+      const errorMessage: Message = {
+        role: 'assistant',
+        content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
+      };
+      setMessages(prev => [...prev, errorMessage]);
+
+      // Show technical error in toast
+      const errorDetail = error?.response?.data?.detail || error?.message || 'Failed to execute agent';
+      toast.error(errorDetail, {
+        duration: 5000,
+      });
     } finally {
       setAgentExecuting(false);
     }
@@ -418,20 +441,6 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
           </div>
         )}
 
-        {agentExecuting && (
-          <div className="flex justify-start">
-            <div className="w-8 h-8 bg-purple-500 backdrop-blur-sm rounded-lg flex items-center justify-center shadow-md ring-1 ring-purple-200 mr-3 mt-1 flex-shrink-0 animate-pulse">
-              <Code size={14} className="text-white" />
-            </div>
-            <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-gradient-to-r from-purple-50 to-white text-gray-800 shadow-lg backdrop-blur-sm ring-1 ring-purple-200/50">
-              <div className="flex items-center gap-2 text-purple-600">
-                <Loader2 className="animate-spin" size={14} />
-                <span className="text-xs font-medium">Agent is working...</span>
-              </div>
-            </div>
-          </div>
-        )}
-        
         <div ref={messagesEndRef} />
       </div>
       

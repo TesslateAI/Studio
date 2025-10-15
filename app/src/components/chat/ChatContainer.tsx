@@ -297,6 +297,7 @@ export function ChatContainer({
       const response = await chatApi.sendAgentMessage({
         project_id: projectId,
         message,
+        agent_id: currentAgent.backendId,  // Include agent_id for proper agent selection
         max_iterations: 20,
       });
 
@@ -315,11 +316,35 @@ export function ChatContainer({
         setMessages(prev => [...prev, agentMessage]);
         toast.success('Task completed successfully');
       } else {
-        toast.error(response.error || 'Agent execution failed');
+        // Agent execution failed - add error message to chat
+        const errorMessage: Message = {
+          id: `msg-${Date.now()}`,
+          type: 'ai',
+          content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
+        };
+        setMessages(prev => [...prev, errorMessage]);
+
+        // Show technical error in toast
+        toast.error(response.error || 'Agent execution failed', {
+          duration: 5000,
+        });
       }
     } catch (error: any) {
       console.error('[AGENT] Execution error:', error);
-      toast.error(error?.response?.data?.detail || 'Failed to execute agent');
+
+      // Add error message to chat
+      const errorMessage: Message = {
+        id: `msg-${Date.now()}`,
+        type: 'ai',
+        content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
+      };
+      setMessages(prev => [...prev, errorMessage]);
+
+      // Show technical error in toast
+      const errorDetail = error?.response?.data?.detail || error?.message || 'Failed to execute agent';
+      toast.error(errorDetail, {
+        duration: 5000,
+      });
     } finally {
       setAgentExecuting(false);
     }
@@ -507,14 +532,6 @@ export function ChatContainer({
               type="ai"
               content={renderMessageContent(currentStream, true)}
             />
-          </div>
-        )}
-
-        {/* Agent executing indicator */}
-        {agentExecuting && (
-          <div className="flex items-center gap-2 p-4 bg-purple-50 rounded-lg border border-purple-200">
-            <Loader2 className="animate-spin text-purple-600" size={16} />
-            <span className="text-sm font-medium text-purple-700">Agent is working...</span>
           </div>
         )}
 

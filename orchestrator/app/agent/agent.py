@@ -56,7 +56,8 @@ class UniversalAgent:
         model: ModelAdapter,
         tool_registry: ToolRegistry,
         max_iterations: int = 20,
-        minimal_prompts: bool = False
+        minimal_prompts: bool = False,
+        system_prompt: Optional[str] = None
     ):
         """
         Initialize the Universal Agent.
@@ -66,12 +67,14 @@ class UniversalAgent:
             tool_registry: Registry of available tools
             max_iterations: Maximum number of agent loop iterations
             minimal_prompts: Use minimal system prompts (for simpler models)
+            system_prompt: Optional custom system prompt to override default
         """
         self.model = model
         self.tool_registry = tool_registry
         self.parser = AgentResponseParser()
         self.max_iterations = max_iterations
         self.minimal_prompts = minimal_prompts
+        self.custom_system_prompt = system_prompt  # Store custom system prompt
 
         # Conversation history
         self.messages: List[Dict[str, str]] = []
@@ -82,7 +85,8 @@ class UniversalAgent:
 
         logger.info(
             f"UniversalAgent initialized - model: {model.get_model_name()}, "
-            f"max_iterations: {max_iterations}, tools: {len(tool_registry._tools)}"
+            f"max_iterations: {max_iterations}, tools: {len(tool_registry._tools)}, "
+            f"custom_prompt: {'Yes' if system_prompt else 'No'}"
         )
 
     async def run(
@@ -289,12 +293,63 @@ class UniversalAgent:
 
     def _get_system_prompt(self) -> str:
         """Get the appropriate system prompt for the model."""
+        # Use custom system prompt if provided
+        if self.custom_system_prompt:
+            # Append tool information to the custom prompt
+            tool_info = "\n\n" + self._get_tool_info()
+            return self.custom_system_prompt + tool_info
+
+        # Otherwise use default prompts
         if self.minimal_prompts:
             from .prompts import get_minimal_system_prompt
             return get_minimal_system_prompt(self.tool_registry)
 
         base_prompt = get_base_system_prompt(self.tool_registry, include_examples=True)
         return get_model_specific_prompt(self.model.get_model_name(), base_prompt)
+
+    def _get_tool_info(self) -> str:
+        """Get formatted tool information to append to custom prompts."""
+        tools_text = [
+            "\n\n=== TOOL CALLING FORMAT ===",
+            "",
+            "When you need to perform an action, output tool calls in this XML format:",
+            "",
+            "<tool_call>",
+            "<tool_name>TOOL_NAME_HERE</tool_name>",
+            "<parameters>",
+            '{"parameter_name": "value"}',
+            "</parameters>",
+            "</tool_call>",
+            "",
+            "Important formatting rules:",
+            "- Parameters must be valid JSON",
+            "- You can call multiple tools in one response",
+            "- Always include a THOUGHT section before tool calls explaining your reasoning",
+            "",
+            "=== Available Tools ===",
+            ""
+        ]
+        for tool_name, tool in self.tool_registry._tools.items():
+            tools_text.append(f"- {tool_name}: {tool.description}")
+
+        tools_text.extend([
+            "",
+            "=== Task Completion ===",
+            "",
+            "When you have completed the user's request, output:",
+            "TASK_COMPLETE",
+            "",
+            "Example:",
+            "",
+            "THOUGHT: I need to add a red border to the button in App.jsx",
+            "",
+            "<tool_call>",
+            "<tool_name>read_file</tool_name>",
+            '<parameters>{"file_path": "src/App.jsx"}</parameters>',
+            "</tool_call>",
+        ])
+
+        return "\n".join(tools_text)
 
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """Get the full conversation history."""

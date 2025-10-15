@@ -346,15 +346,37 @@ async def agent_chat(
             f"project: {request.project_id}, message: {request.message[:100]}..."
         )
 
+        # Load agent configuration if agent_id is provided
+        agent_system_prompt = None
+        agent_name = "Universal Agent"
+        if request.agent_id:
+            try:
+                agent_result = await db.execute(
+                    select(AgentModel).where(
+                        AgentModel.id == request.agent_id,
+                        AgentModel.is_active == True
+                    )
+                )
+                db_agent = agent_result.scalar_one_or_none()
+                if db_agent:
+                    agent_system_prompt = db_agent.system_prompt
+                    agent_name = db_agent.name
+                    logger.info(f"Using agent '{agent_name}' (ID: {request.agent_id}) with custom system prompt")
+                else:
+                    logger.warning(f"Agent ID {request.agent_id} not found or inactive, using default agent")
+            except Exception as e:
+                logger.error(f"Error loading agent configuration: {e}")
+
         # Create model adapter
         model_adapter = get_model_adapter_from_settings(settings)
 
-        # Create agent
+        # Create agent with optional system prompt
         agent = UniversalAgent(
             model=model_adapter,
             tool_registry=get_tool_registry(),
             max_iterations=request.max_iterations,
-            minimal_prompts=request.minimal_prompts
+            minimal_prompts=request.minimal_prompts,
+            system_prompt=agent_system_prompt  # Pass the agent's system prompt if available
         )
 
         # Prepare context for tool execution

@@ -10,6 +10,7 @@ export interface AgentStep {
 export interface AgentChatRequest {
   project_id: number;
   message: string;
+  agent_id?: number;  // ID of the agent to use
   max_iterations?: number;
   minimal_prompts?: boolean;
 }
