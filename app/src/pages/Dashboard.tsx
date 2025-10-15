@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projectsApi } from '../lib/api';
+import { githubApi } from '../lib/github-api';
 import { useTheme } from '../theme/ThemeContext';
 import {
   FloatingSidebar,
@@ -23,7 +24,9 @@ import {
   Moon,
   Question,
   FilePlus,
-  FolderOpen
+  FolderOpen,
+  GithubLogo,
+  GitBranch
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -47,10 +50,21 @@ export default function Dashboard() {
   const [newProject, setNewProject] = useState({ name: '', description: '' });
   const [activeTab, setActiveTab] = useState<TabFilter>('all');
   const [isCreating, setIsCreating] = useState(false);
+  const [sourceType, setSourceType] = useState<'template' | 'github'>('template');
+  const [githubRepoUrl, setGithubRepoUrl] = useState('');
+  const [githubBranch, setGithubBranch] = useState('main');
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [checkingGithub, setCheckingGithub] = useState(false);
 
   useEffect(() => {
     loadProjects();
   }, []);
+
+  useEffect(() => {
+    if (showCreateModal) {
+      checkGithubConnection();
+    }
+  }, [showCreateModal]);
 
   const loadProjects = async () => {
     try {
@@ -69,25 +83,62 @@ export default function Dashboard() {
     }
   };
 
+  const checkGithubConnection = async () => {
+    setCheckingGithub(true);
+    try {
+      const status = await githubApi.getStatus();
+      setGithubConnected(status.connected);
+    } catch (error) {
+      setGithubConnected(false);
+    } finally {
+      setCheckingGithub(false);
+    }
+  };
+
   const createProject = async () => {
     if (!newProject.name.trim()) {
       toast.error('Project name is required');
       return;
     }
 
+    if (sourceType === 'github') {
+      if (!githubRepoUrl.trim()) {
+        toast.error('GitHub repository URL is required');
+        return;
+      }
+      if (!githubConnected) {
+        toast.error('Please connect your GitHub account first');
+        return;
+      }
+    }
+
     setIsCreating(true);
-    const creatingToast = toast.loading('Creating your project...');
+    const creatingToast = toast.loading(
+      sourceType === 'github'
+        ? 'Importing from GitHub...'
+        : 'Creating your project...'
+    );
 
     try {
-      const project = await projectsApi.create(newProject.name, newProject.description);
+      const project = await projectsApi.create(
+        newProject.name,
+        newProject.description,
+        sourceType,
+        githubRepoUrl || undefined,
+        githubBranch || 'main'
+      );
       toast.success('Project created successfully!', { id: creatingToast });
       setShowCreateModal(false);
       setNewProject({ name: '', description: '' });
+      setSourceType('template');
+      setGithubRepoUrl('');
+      setGithubBranch('main');
       setTimeout(() => {
         navigate(`/project/${project.id}`);
       }, 500);
-    } catch (error) {
-      toast.error('Failed to create project', { id: creatingToast });
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.detail || 'Failed to create project';
+      toast.error(errorMessage, { id: creatingToast });
     } finally {
       setIsCreating(false);
     }
@@ -360,16 +411,110 @@ export default function Dashboard() {
       {/* Create Project Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => !isCreating && setShowCreateModal(false)}>
-          <div className="bg-[var(--surface)] p-8 rounded-3xl w-full max-w-md shadow-2xl border border-white/10" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[var(--surface)] p-8 rounded-3xl w-full max-w-lg shadow-2xl border border-white/10" onClick={(e) => e.stopPropagation()}>
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
               </div>
               <h2 className="font-heading text-2xl font-bold text-[var(--text)] mb-2">Create New Project</h2>
-              <p className="text-gray-500">Build something incredible with AI</p>
+              <p className="text-gray-500">Choose how to start your project</p>
             </div>
 
             <div className="space-y-4">
+              {/* Source Type Selection */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-3">Project Source</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setSourceType('template')}
+                    disabled={isCreating}
+                    className={`
+                      p-4 rounded-xl border-2 transition-all
+                      ${sourceType === 'template'
+                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                      }
+                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                    `}
+                  >
+                    <FilePlus className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
+                    <div className="text-sm font-semibold text-[var(--text)]">Template</div>
+                    <div className="text-xs text-gray-500 mt-1">Start from scratch</div>
+                  </button>
+                  <button
+                    onClick={() => setSourceType('github')}
+                    disabled={isCreating}
+                    className={`
+                      p-4 rounded-xl border-2 transition-all
+                      ${sourceType === 'github'
+                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                      }
+                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                    `}
+                  >
+                    <GithubLogo className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
+                    <div className="text-sm font-semibold text-[var(--text)]">GitHub</div>
+                    <div className="text-xs text-gray-500 mt-1">Import repository</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* GitHub Connection Status */}
+              {sourceType === 'github' && (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                  <div className="flex items-center gap-2">
+                    <GithubLogo className="w-4 h-4" weight="fill" />
+                    <span className="text-sm font-medium text-[var(--text)]">GitHub Connection:</span>
+                    {checkingGithub ? (
+                      <span className="text-xs text-gray-500">Checking...</span>
+                    ) : githubConnected ? (
+                      <span className="text-xs text-green-400">Connected</span>
+                    ) : (
+                      <span className="text-xs text-orange-400">Not Connected</span>
+                    )}
+                  </div>
+                  {!githubConnected && !checkingGithub && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      Please connect your GitHub account in a project's GitHub panel before importing.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* GitHub Repository URL */}
+              {sourceType === 'github' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Repository URL</label>
+                    <input
+                      type="text"
+                      value={githubRepoUrl}
+                      onChange={(e) => setGithubRepoUrl(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500"
+                      placeholder="https://github.com/username/repository"
+                      disabled={isCreating || !githubConnected}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Branch</label>
+                    <div className="relative">
+                      <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+                      <input
+                        type="text"
+                        value={githubBranch}
+                        onChange={(e) => setGithubBranch(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 text-[var(--text)] pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500"
+                        placeholder="main"
+                        disabled={isCreating || !githubConnected}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Project Name & Description */}
               <div>
                 <label className="block text-sm font-medium text-[var(--text)] mb-2">Project Name</label>
                 <input
@@ -398,10 +543,17 @@ export default function Dashboard() {
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={createProject}
-                  disabled={isCreating || !newProject.name.trim()}
+                  disabled={
+                    isCreating ||
+                    !newProject.name.trim() ||
+                    (sourceType === 'github' && (!githubRepoUrl.trim() || !githubConnected))
+                  }
                   className="flex-1 bg-[var(--primary)] hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
                 >
-                  {isCreating ? 'Creating...' : 'Create Project'}
+                  {isCreating
+                    ? sourceType === 'github' ? 'Importing...' : 'Creating...'
+                    : sourceType === 'github' ? 'Import & Create' : 'Create Project'
+                  }
                 </button>
                 <button
                   onClick={() => setShowCreateModal(false)}

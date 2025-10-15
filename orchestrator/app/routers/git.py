@@ -226,11 +226,23 @@ async def get_git_status(
         # Verify project access
         await verify_project_access(project_id, current_user, db)
 
+        # Check if repository exists
+        result = await db.execute(
+            select(GitRepository).where(GitRepository.project_id == project_id)
+        )
+        git_repo = result.scalar_one_or_none()
+
+        if not git_repo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No Git repository connected to this project"
+            )
+
         # Get Git status
         git_manager = GitManager(current_user.id, str(project_id))
-        status = await git_manager.get_status()
+        git_status = await git_manager.get_status()
 
-        return GitStatusResponse(**status)
+        return GitStatusResponse(**git_status)
 
     except HTTPException:
         raise

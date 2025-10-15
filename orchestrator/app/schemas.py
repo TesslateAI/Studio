@@ -46,7 +46,26 @@ class ProjectBase(BaseModel):
     description: Optional[str] = None
 
 class ProjectCreate(ProjectBase):
-    pass
+    source_type: str = "template"  # "template" or "github"
+    github_repo_url: Optional[str] = None
+    github_branch: Optional[str] = "main"
+
+    @field_validator('source_type')
+    @classmethod
+    def validate_source_type(cls, v):
+        if v not in ['template', 'github']:
+            raise ValueError('source_type must be either "template" or "github"')
+        return v
+
+    @field_validator('github_repo_url')
+    @classmethod
+    def validate_github_repo_url(cls, v, info):
+        if info.data.get('source_type') == 'github':
+            if not v or not v.strip():
+                raise ValueError('github_repo_url is required when source_type is "github"')
+            if 'github.com' not in v:
+                raise ValueError('Only GitHub repositories are supported')
+        return v.strip() if v else None
 
 class Project(ProjectBase):
     id: int

@@ -555,31 +555,39 @@ docker-compose*
         print(f"[WARN] Container {container_name} readiness check timed out")
         return True  # Return True to allow container to continue - Traefik will handle routing when ready
     
-    async def start_container(self, project_path: str, project_id: str, user_id: int) -> str:
-        """Start a development container using base image + volume mounts (super fast!) with multi-user support."""
+    async def start_container(self, project_path: str, project_id: str, user_id: int, skip_validation: bool = False) -> str:
+        """
+        Start a development container using base image + volume mounts (super fast!) with multi-user support.
+
+        Args:
+            project_path: Path to project directory
+            project_id: Project ID
+            user_id: User ID
+            skip_validation: Skip file validation (useful for GitHub imports that will clone later)
+        """
         # Generate unique identifiers for multi-user system
         project_key = self._get_project_key(user_id, project_id)
         container_name = self._get_container_name(user_id, project_id)
-        
+
         print(f"[START] Starting development container for user {user_id}, project {project_id}")
         print(f"[INFO] Project key: {project_key}")
         print(f"[INFO] Container name: {container_name}")
-        
+
         # Check Docker availability first
         if not self._check_docker_available():
             raise RuntimeError(
                 "Docker is not available or not running. "
                 "Please install Docker Desktop and ensure it's running."
             )
-        
+
         # Ensure base image exists (reuse existing if available)
         if not self._ensure_base_image_exists():
             raise RuntimeError("Failed to create base development image")
-        
+
         # Ensure network exists
         if not self._ensure_network_exists():
             print("[WARN] Docker network setup failed, proceeding without custom network")
-        
+
         abs_project_path = os.path.abspath(project_path)
 
         # Ensure users directory structure exists
@@ -606,13 +614,16 @@ docker-compose*
 
         # Convert container path to host path for Docker-in-Docker
         host_project_path = self._convert_to_host_path(abs_project_path)
-        
-        # Validate required files
-        required_files = ["package.json", "vite.config.js", "index.html"]
-        missing_files = [f for f in required_files if not os.path.exists(os.path.join(abs_project_path, f))]
-        
-        if missing_files:
-            raise FileNotFoundError(f"Missing required files: {', '.join(missing_files)}")
+
+        # Validate required files (skip for GitHub imports - files will be cloned later)
+        if not skip_validation:
+            required_files = ["package.json", "vite.config.js", "index.html"]
+            missing_files = [f for f in required_files if not os.path.exists(os.path.join(abs_project_path, f))]
+
+            if missing_files:
+                raise FileNotFoundError(f"Missing required files: {', '.join(missing_files)}")
+        else:
+            print(f"[INFO] Skipping file validation (GitHub import mode)")
         
         # Stop existing container for this user and project
         await self.stop_container(project_id, user_id)
@@ -991,6 +1002,57 @@ docker-compose*
 
         # Rebuild
         return self._ensure_base_image_exists()
+
+    async def execute_command_in_container(
+        self,
+        user_id: int,
+        project_id: str,
+        command: List[str],
+        timeout: int = 120
+    ) -> str:
+        """
+        Execute a command inside a user's development container.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            command: Command to execute (as list, e.g., ["/bin/sh", "-c", "git status"])
+            timeout: Timeout in seconds
+
+        Returns:
+            Command output (stdout + stderr combined)
+
+        Raises:
+            RuntimeError: If command execution fails or container not found
+        """
+        # Get container name
+        container_name = self._get_container_name(user_id, project_id)
+
+        # Build docker exec command
+        exec_cmd = ["docker", "exec", container_name] + command
+
+        try:
+            # Execute with timeout
+            result = subprocess.run(
+                exec_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+
+            # Return combined output (Git operations need both stdout and stderr)
+            output = result.stdout + result.stderr
+
+            # If command failed, raise error with output
+            if result.returncode != 0:
+                raise RuntimeError(f"Command failed with exit code {result.returncode}: {output}")
+
+            return output
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"Command execution timed out after {timeout} seconds")
+        except Exception as e:
+            raise RuntimeError(f"Failed to execute command in container {container_name}: {str(e)}")
 
     def track_activity(self, user_id: int, project_id: str) -> None:
         """Record activity for a project container."""

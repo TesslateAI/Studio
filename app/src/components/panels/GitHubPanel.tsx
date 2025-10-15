@@ -255,7 +255,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                 </div>
                 <div>
                   <div className="text-sm font-semibold text-[var(--text)]">
-                    @{githubStatus?.username}
+                    @{githubStatus?.github_username}
                   </div>
                   <div className="text-xs text-gray-500">GitHub Connected</div>
                 </div>
@@ -317,7 +317,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
               <GitBranch className="w-4 h-4 text-purple-400" weight="fill" />
             </div>
             <div>
-              <div className="text-xs font-semibold text-[var(--text)]">@{githubStatus?.username}</div>
+              <div className="text-xs font-semibold text-[var(--text)]">@{githubStatus?.github_username}</div>
               <div className="text-xs text-gray-500">GitHub Connected</div>
             </div>
           </div>

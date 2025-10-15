@@ -135,8 +135,20 @@ export const projectsApi = {
     const response = await api.get('/api/projects/');
     return response.data;
   },
-  create: async (name: string, description?: string) => {
-    const response = await api.post('/api/projects/', { name, description });
+  create: async (
+    name: string,
+    description?: string,
+    sourceType?: 'template' | 'github',
+    githubRepoUrl?: string,
+    githubBranch?: string
+  ) => {
+    const response = await api.post('/api/projects/', {
+      name,
+      description,
+      source_type: sourceType || 'template',
+      github_repo_url: githubRepoUrl,
+      github_branch: githubBranch || 'main'
+    });
     return response.data;
   },
   get: async (id: number) => {

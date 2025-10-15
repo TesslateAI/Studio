@@ -59,6 +59,12 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.orchestrator.rule=Host(`api.localhost`)"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   app:
     build: ./app
@@ -80,6 +86,12 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.app.rule=Host(`studio.localhost`)"
       - "traefik.http.services.app.loadbalancer.server.port=5173"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5173/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 networks:
   tesslate-network:

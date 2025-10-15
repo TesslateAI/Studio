@@ -61,8 +61,11 @@ async def connect_github_pat(
                 emails = await github_client.get_user_emails()
                 primary_email = next((e['email'] for e in emails if e.get('primary')), None)
                 github_email = primary_email or (emails[0]['email'] if emails else None)
-            except:
-                pass
+                logger.info(f"[GITHUB] Retrieved {len(emails)} email addresses for user {user_info.get('login')}")
+            except httpx.HTTPStatusError as e:
+                logger.warning(f"[GITHUB] Could not fetch user emails (status {e.response.status_code}): Token may lack 'user:email' scope")
+            except Exception as e:
+                logger.warning(f"[GITHUB] Failed to fetch user emails: {e}")
 
         # Store credentials
         credential_manager = get_credential_manager()

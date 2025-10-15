@@ -13,9 +13,9 @@ export interface GitHubCredential {
 
 export interface GitHubCredentialResponse {
   connected: boolean;
-  username: string | null;
-  email: string | null;
-  github_user_id: string | null;
+  github_username: string | null;
+  github_email: string | null;
+  auth_method: string | null;
 }
 
 export interface GitHubConnectRequest {

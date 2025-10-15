@@ -49,8 +49,12 @@ class GitManager:
         Raises:
             RuntimeError: If command execution fails
         """
+        # Determine project path based on deployment mode
+        # Kubernetes mounts to /app/project via subPath, Docker mounts directly to /app
+        project_path = "/app/project" if self.settings.deployment_mode == "kubernetes" else "/app"
+
         # Build the full command
-        command = ["/bin/sh", "-c", f"cd /app/project && git {' '.join(shlex.quote(arg) for arg in git_args)}"]
+        command = ["/bin/sh", "-c", f"cd {project_path} && git {' '.join(shlex.quote(arg) for arg in git_args)}"]
 
         try:
             # Use the container manager to execute the command
@@ -125,7 +129,8 @@ class GitManager:
         self,
         repo_url: str,
         branch: Optional[str] = None,
-        auth_token: Optional[str] = None
+        auth_token: Optional[str] = None,
+        direct_to_filesystem: bool = False
     ) -> bool:
         """
         Clone a repository into the project directory.
@@ -136,6 +141,7 @@ class GitManager:
             repo_url: Repository URL to clone
             branch: Specific branch to clone (optional)
             auth_token: GitHub access token for authentication
+            direct_to_filesystem: Clone directly to filesystem (for Docker mode GitHub imports without container)
 
         Returns:
             True if successful
@@ -156,6 +162,39 @@ class GitManager:
                 # Inject token
                 repo_url = repo_url.replace("https://github.com/", f"https://{auth_token}@github.com/")
 
+            # Direct filesystem clone (for Docker mode without container)
+            if direct_to_filesystem and self.settings.deployment_mode == "docker":
+                import asyncio
+                import os
+
+                # Build project path on host filesystem
+                project_path = os.path.abspath(f"users/{self.user_id}/{self.project_id}")
+                os.makedirs(project_path, exist_ok=True)
+
+                # Build git clone command
+                git_cmd = ["git", "clone"]
+                if branch:
+                    git_cmd.extend(["--branch", branch])
+                git_cmd.extend([repo_url, project_path])
+
+                # Execute git clone directly on host
+                logger.info(f"[GIT] Executing direct filesystem clone: {' '.join(git_cmd[:3])} [URL] {project_path}")
+                process = await asyncio.create_subprocess_exec(
+                    *git_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+
+                if process.returncode != 0:
+                    error_msg = stderr.decode() if stderr else "Unknown error"
+                    raise RuntimeError(f"Git clone failed with exit code {process.returncode}: {error_msg}")
+
+                logger.info(f"[GIT] Repository cloned successfully to {project_path}")
+                return True
+
+            # Container-based clone (for running containers or Kubernetes)
             # Build clone command
             clone_args = ["clone"]
             if branch:
@@ -167,12 +206,15 @@ class GitManager:
             logger.info(f"[GIT] Repository cloned successfully")
 
             # Move files from clone to project directory
+            # Determine project path based on deployment mode
+            project_path = "/app/project" if self.settings.deployment_mode == "kubernetes" else "/app"
+
             # Use shell command to move contents
             move_command = [
                 "/bin/sh", "-c",
-                "rm -rf /app/project/.* /app/project/* 2>/dev/null || true && "
-                "mv /tmp/git-clone/.git /app/project/ && "
-                "mv /tmp/git-clone/* /tmp/git-clone/.* /app/project/ 2>/dev/null || true && "
+                f"rm -rf {project_path}/.* {project_path}/* 2>/dev/null || true && "
+                f"mv /tmp/git-clone/.git {project_path}/ && "
+                f"mv /tmp/git-clone/* /tmp/git-clone/.* {project_path}/ 2>/dev/null || true && "
                 "rm -rf /tmp/git-clone"
             ]
 
