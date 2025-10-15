@@ -10,13 +10,14 @@ import {
 } from '../components/ui';
 import type { Status } from '../components/ui';
 import { GitHubConnectModal } from '../components/modals';
+import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import {
   Atom,
   Database,
   ShieldCheck,
   Sparkle,
-  Lightning,
+  Lightning as LightningIcon,
   Folder,
   Storefront,
   Package,
@@ -27,7 +28,8 @@ import {
   FilePlus,
   FolderOpen,
   GithubLogo,
-  GitBranch
+  GitBranch,
+  ShoppingCart
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -202,7 +204,7 @@ export default function Dashboard() {
     {
       icon: <Storefront className="w-5 h-5" weight="fill" />,
       title: 'Marketplace',
-      onClick: () => toast('Marketplace coming soon!')
+      onClick: () => navigate('/marketplace')
     },
     {
       icon: <Package className="w-5 h-5" weight="fill" />,
@@ -232,12 +234,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto animate-pulse">
-            <Folder className="w-8 h-8 text-[var(--primary)]" weight="fill" />
-          </div>
-          <p className="text-[var(--text)] font-medium">Loading projects...</p>
-        </div>
+        <LoadingSpinner message="Loading projects..." size={80} />
       </div>
     );
   }
@@ -255,7 +252,7 @@ export default function Dashboard() {
 
           {/* Credits Display */}
           <div className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-[rgba(0,217,255,0.1)] to-[rgba(0,217,255,0.05)] border border-[rgba(0,217,255,0.2)] rounded-2xl">
-            <Lightning className="w-5 h-5 text-[var(--accent)]" weight="fill" />
+            <LightningIcon className="w-5 h-5 text-[var(--accent)]" weight="fill" />
             <span className="text-[var(--accent)] font-semibold">247 credits left</span>
             <button
               onClick={() => toast('Upgrade to PRO!')}

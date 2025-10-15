@@ -133,55 +133,6 @@ class CredentialManager:
         await db.refresh(credential)
         return credential
 
-    async def store_pat(
-        self,
-        db: AsyncSession,
-        user_id: int,
-        pat_token: str,
-        github_username: Optional[str] = None,
-        github_email: Optional[str] = None
-    ) -> GitHubCredential:
-        """
-        Store a Personal Access Token for a user (encrypted).
-
-        Args:
-            db: Database session
-            user_id: User ID
-            pat_token: GitHub Personal Access Token
-            github_username: GitHub username
-            github_email: GitHub email
-
-        Returns:
-            GitHubCredential object
-        """
-        # Check if credentials already exist
-        result = await db.execute(
-            select(GitHubCredential).where(GitHubCredential.user_id == user_id)
-        )
-        credential = result.scalar_one_or_none()
-
-        # Encrypt token
-        encrypted_pat = self.encrypt_token(pat_token)
-
-        if credential:
-            # Update existing credentials
-            credential.pat_token = encrypted_pat
-            credential.github_username = github_username or credential.github_username
-            credential.github_email = github_email or credential.github_email
-            credential.updated_at = datetime.utcnow()
-        else:
-            # Create new credentials
-            credential = GitHubCredential(
-                user_id=user_id,
-                pat_token=encrypted_pat,
-                github_username=github_username,
-                github_email=github_email
-            )
-            db.add(credential)
-
-        await db.commit()
-        await db.refresh(credential)
-        return credential
 
     async def get_credentials(
         self,
@@ -206,19 +157,18 @@ class CredentialManager:
         if not credential:
             return None
 
-        # Decrypt tokens
+        # Decrypt OAuth tokens only
         access_token = self.decrypt_token(credential.access_token) if credential.access_token else None
         refresh_token = self.decrypt_token(credential.refresh_token) if credential.refresh_token else None
-        pat_token = self.decrypt_token(credential.pat_token) if credential.pat_token else None
 
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
-            "pat_token": pat_token,
             "token_expires_at": credential.token_expires_at,
             "github_username": credential.github_username,
             "github_email": credential.github_email,
-            "github_user_id": credential.github_user_id
+            "github_user_id": credential.github_user_id,
+            "scope": credential.scope
         }
 
     async def get_access_token(
@@ -227,22 +177,21 @@ class CredentialManager:
         user_id: int
     ) -> Optional[str]:
         """
-        Get the decrypted access token for a user.
-        Returns PAT if OAuth token is not available.
+        Get the decrypted OAuth access token for a user.
 
         Args:
             db: Database session
             user_id: User ID
 
         Returns:
-            Decrypted access token or PAT, or None if not found
+            Decrypted OAuth access token, or None if not found
         """
         credentials = await self.get_credentials(db, user_id)
         if not credentials:
             return None
 
-        # Return OAuth access token if available, otherwise PAT
-        return credentials.get("access_token") or credentials.get("pat_token")
+        # Return OAuth access token only
+        return credentials.get("access_token")
 
     async def delete_credentials(
         self,

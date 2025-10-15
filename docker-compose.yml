@@ -84,10 +84,9 @@ services:
       - ./app/tsconfig.app.json:/app/tsconfig.app.json
       - ./app/tsconfig.node.json:/app/tsconfig.node.json
       - ./app/tailwind.config.ts:/app/tailwind.config.ts
-      - ./app/postcss.config.js:/app/postcss.config.js
       - ./app/package.json:/app/package.json
     environment:
-      - VITE_API_URL=
+      - VITE_API_URL=${VITE_API_URL:-}
       - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,host.docker.internal,.localhost}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true

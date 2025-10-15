@@ -273,18 +273,10 @@ class Agent(AgentBase):
 # GitHub & Git Schemas
 # ============================
 
-class GitHubConnectRequest(BaseModel):
-    """Request schema for connecting GitHub via Personal Access Token."""
-    pat_token: str
-
-    @field_validator('pat_token')
-    @classmethod
-    def validate_pat_token(cls, v):
-        if not v or not v.strip():
-            raise ValueError('PAT token cannot be empty')
-        if not (v.startswith('ghp_') or v.startswith('github_pat_')):
-            raise ValueError('Invalid GitHub PAT token format')
-        return v.strip()
+class GitHubOAuthCallbackRequest(BaseModel):
+    """Request schema for OAuth callback handling."""
+    code: str
+    state: str
 
 
 class GitHubCredentialResponse(BaseModel):
@@ -292,7 +284,8 @@ class GitHubCredentialResponse(BaseModel):
     connected: bool
     github_username: Optional[str] = None
     github_email: Optional[str] = None
-    auth_method: Optional[str] = None  # 'oauth' or 'pat'
+    auth_method: str = "oauth"  # Always OAuth now
+    scope: Optional[str] = None  # OAuth scopes granted
 
 
 class GitRepositoryResponse(BaseModel):
@@ -459,3 +452,48 @@ class CreateGitHubRepoRequest(BaseModel):
         if not re.match(r'^[a-zA-Z0-9._-]+$', v):
             raise ValueError('Repository name contains invalid characters')
         return v.strip()
+
+
+# ============================================================================
+# Marketplace Schemas
+# ============================================================================
+
+class MarketplaceAgentResponse(BaseModel):
+    """Response schema for marketplace agent."""
+    id: int
+    name: str
+    slug: str
+    description: str
+    long_description: Optional[str] = None
+    category: str
+    mode: str
+    icon: str
+    preview_image: Optional[str] = None
+    pricing_type: str
+    price: float
+    downloads: int
+    rating: float
+    reviews_count: int
+    features: Optional[List[str]] = []
+    required_models: Optional[List[str]] = []
+    tags: Optional[List[str]] = []
+    is_featured: bool
+    is_purchased: bool = False
+    system_prompt: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AgentPurchaseRequest(BaseModel):
+    """Request schema for purchasing an agent."""
+    return_url: Optional[str] = None  # For Stripe redirect
+
+
+class AgentPurchaseResponse(BaseModel):
+    """Response schema for agent purchase."""
+    success: bool
+    message: str
+    agent_id: int
+    checkout_url: Optional[str] = None  # For paid agents
+    session_id: Optional[str] = None  # Stripe session ID

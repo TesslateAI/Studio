@@ -1,7 +1,6 @@
 import api from './api';
 import type {
   GitHubCredentialResponse,
-  GitHubConnectRequest,
   GitHubRepositoryListResponse,
   CreateGitHubRepoRequest,
   GitHubRepository,
@@ -10,16 +9,26 @@ import type {
 
 /**
  * GitHub API Client
- * Handles GitHub authentication and repository operations
+ * Handles GitHub OAuth authentication and repository operations
  */
 export const githubApi = {
   /**
-   * Connect to GitHub using a Personal Access Token
+   * Initiate GitHub OAuth flow
    */
-  connect: async (patToken: string): Promise<GitHubCredentialResponse> => {
-    const response = await api.post('/api/github/connect', {
-      pat_token: patToken,
-    } as GitHubConnectRequest);
+  initiateOAuth: async (scope: string = 'repo user:email'): Promise<{ authorization_url: string; state: string }> => {
+    const response = await api.get('/api/github/oauth/authorize', {
+      params: { scope }
+    });
+    return response.data;
+  },
+
+  /**
+   * Handle OAuth callback
+   */
+  handleOAuthCallback: async (code: string, state: string): Promise<any> => {
+    const response = await api.get('/api/github/oauth/callback', {
+      params: { code, state }
+    });
     return response.data;
   },
 

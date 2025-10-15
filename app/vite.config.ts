@@ -26,10 +26,19 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        // Use orchestrator service name in Docker, localhost for native development
-        target: process.env.VITE_API_URL || 'http://orchestrator:8000',
+        // In Docker, containers communicate via service names on internal network
+        // This proxies all /api/* requests to the orchestrator service
+        target: 'http://orchestrator:8000',
         changeOrigin: true,
         ws: true,
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.log('proxy error', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            console.log('Proxying:', req.method, req.url, '→', options.target + req.url);
+          });
+        }
       },
     }
   }

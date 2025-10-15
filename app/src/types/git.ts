@@ -15,11 +15,8 @@ export interface GitHubCredentialResponse {
   connected: boolean;
   github_username: string | null;
   github_email: string | null;
-  auth_method: string | null;
-}
-
-export interface GitHubConnectRequest {
-  pat_token: string;
+  auth_method: 'oauth';
+  scope?: string | null;
 }
 
 // Git Repository Types
@@ -31,7 +28,7 @@ export interface GitRepository {
   repo_name: string | null;
   repo_owner: string | null;
   default_branch: string;
-  auth_method: 'oauth' | 'pat' | 'ssh';
+  auth_method: 'oauth';
   last_sync_at: string | null;
   sync_status: 'synced' | 'ahead' | 'behind' | 'diverged' | 'error' | null;
   last_commit_sha: string | null;

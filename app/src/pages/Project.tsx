@@ -22,12 +22,12 @@ import {
 import { FloatingSidebar } from '../components/ui/FloatingSidebar';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { ChatContainer } from '../components/chat/ChatContainer';
+import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import {
   GitHubPanel,
   ArchitecturePanel,
   NotesPanel,
   SettingsPanel,
-  MarketplacePanel,
   AssetsPanel
 } from '../components/panels';
 import CodeEditor from '../components/CodeEditor';
@@ -388,9 +388,8 @@ export default function Project() {
           },
           {
             icon: <Storefront size={20} />,
-            title: 'Marketplace',
-            onClick: () => togglePanel('marketplace'),
-            active: activePanel === 'marketplace'
+            title: 'Agent Marketplace',
+            onClick: () => navigate('/marketplace')
           },
           {
             icon: <Gear size={20} />,
@@ -468,10 +467,7 @@ export default function Project() {
               </>
             ) : (
               <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-                <div className="text-center">
-                  <div className="animate-spin h-8 w-8 mx-auto mb-2 border-2 border-orange-500 border-t-transparent rounded-full" />
-                  <p>Starting development server...</p>
-                </div>
+                <LoadingSpinner message="Starting development server..." size={60} />
               </div>
             )}
           </div>
@@ -522,15 +518,6 @@ export default function Project() {
         onClose={() => setActivePanel(null)}
       >
         <SettingsPanel projectId={projectId} />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="Marketplace"
-        icon={<Storefront size={20} />}
-        isOpen={activePanel === 'marketplace'}
-        onClose={() => setActivePanel(null)}
-      >
-        <MarketplacePanel projectId={projectId} />
       </FloatingPanel>
 
       <FloatingPanel

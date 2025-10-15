@@ -11,6 +11,7 @@ from ..auth import (
     create_refresh_token, validate_refresh_token, revoke_refresh_token
 )
 from ..config import get_settings
+from ..services.litellm_service import litellm_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,24 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
     db.add(db_user)
     await db.commit()
     await db.refresh(db_user)
+
+    # Create LiteLLM virtual key for the user
+    try:
+        litellm_result = await litellm_service.create_user_key(
+            user_id=db_user.id,
+            username=db_user.username
+        )
+
+        # Update user with LiteLLM details
+        db_user.litellm_api_key = litellm_result["api_key"]
+        db_user.litellm_user_id = litellm_result["litellm_user_id"]
+        await db.commit()
+
+        logger.info(f"Created LiteLLM key for user {db_user.username}")
+    except Exception as e:
+        logger.error(f"Failed to create LiteLLM key for user {db_user.username}: {e}")
+        # Don't fail registration if LiteLLM is down - can be added later
+
     return db_user
 
 @router.post("/token", response_model=Token)

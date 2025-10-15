@@ -7,6 +7,9 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Project from './pages/Project';
+import Marketplace from './pages/Marketplace';
+import AdminDashboard from './pages/AdminDashboard';
+import AuthCallback from './pages/AuthCallback';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('token');
@@ -35,6 +38,30 @@ function App() {
             element={
               <PrivateRoute>
                 <Project />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/marketplace"
+            element={
+              <PrivateRoute>
+                <Marketplace />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <PrivateRoute>
+                <AdminDashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/auth/github/callback"
+            element={
+              <PrivateRoute>
+                <AuthCallback />
               </PrivateRoute>
             }
           />

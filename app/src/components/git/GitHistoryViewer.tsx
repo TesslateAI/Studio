@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Clock, GitCommit, User, Calendar } from '@phosphor-icons/react';
 import { gitApi } from '../../lib/git-api';
 import type { GitCommitInfo } from '../../types/git';
+import { LoadingSpinner } from '../PulsingGridSpinner';
 import toast from 'react-hot-toast';
 
 interface GitHistoryViewerProps {
@@ -70,10 +71,7 @@ export function GitHistoryViewer({ projectId }: GitHistoryViewerProps) {
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin h-8 w-8 mx-auto mb-2 border-2 border-blue-500 border-t-transparent rounded-full" />
-          <p className="text-gray-400 text-sm">Loading commit history...</p>
-        </div>
+        <LoadingSpinner message="Loading commit history..." size={60} />
       </div>
     );
   }

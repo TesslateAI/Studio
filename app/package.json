@@ -17,8 +17,10 @@
     "@tiptap/starter-kit": "^3.7.0",
     "@types/react-router-dom": "^5.3.3",
     "axios": "^1.11.0",
+    "chart.js": "^4.5.1",
     "lucide-react": "^0.541.0",
     "react": "^19.1.1",
+    "react-chartjs-2": "^5.3.0",
     "react-dom": "^19.1.1",
     "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.8.2"

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from .database import engine, Base
-from .routers import auth, projects, chat, agent, agents, github, git
+from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin
 from .config import get_settings
 import os
 import logging
@@ -201,6 +201,8 @@ app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
+app.include_router(marketplace.router, prefix="/api", tags=["marketplace"])
+app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
 
