@@ -625,9 +625,12 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             files = result.scalars().all()
             if files:
                 has_existing_files = True
-                context = "\n\nProject files:\n"
-                for file in files:
-                    context += f"\nFile: {file.file_path}\n{file.content}\n"
+                # CONTEXT REDUCTION: Only include file list, not full content
+                # This prevents token limit errors (65k token limit for Cerebras)
+                context = "\n\nProject has existing files - the AI can read them if needed.\n"
+                # context = "\n\nProject files:\n"
+                # for file in files:
+                #     context += f"\nFile: {file.file_path}\n{file.content}\n"
     except Exception as e:
         await db.rollback()
         logger.error(f"Database error in initial chat setup: {e}", exc_info=True)

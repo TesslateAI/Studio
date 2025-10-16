@@ -96,8 +96,19 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         // File read result
         output = result.result.content;
       } else if (result.result.files) {
-        // Directory listing
-        output = result.result.files.join('\n');
+        // Directory listing - handle both string arrays and object arrays
+        if (Array.isArray(result.result.files)) {
+          output = result.result.files.map((file: any) => {
+            // If file is an object with file_path property, extract it
+            if (typeof file === 'object' && file.file_path) {
+              return `${file.file_path} (${file.size || 0} bytes)`;
+            }
+            // Otherwise treat it as a string
+            return String(file);
+          }).join('\n');
+        } else {
+          output = String(result.result.files);
+        }
       } else {
         // Generic object result
         output = JSON.stringify(result.result, null, 2);
