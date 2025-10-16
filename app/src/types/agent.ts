@@ -1,7 +1,18 @@
+export interface ToolCallDetail {
+  name: string;
+  parameters: Record<string, any>;
+  result?: {
+    success: boolean;
+    tool: string;
+    result?: any;
+    error?: string;
+  };
+}
+
 export interface AgentStep {
   iteration: number;
   thought?: string;
-  tool_calls: string[];
+  tool_calls: ToolCallDetail[];
   response_text: string;
   is_complete: boolean;
   timestamp: string;

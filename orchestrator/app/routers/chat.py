@@ -410,18 +410,32 @@ async def agent_chat(
             project_context=project_context
         )
 
-        # Convert steps to response format
-        steps_response = [
-            AgentStepResponse(
+        # Convert steps to response format with complete tool call details and results
+        from ..schemas import ToolCallDetail
+
+        steps_response = []
+        for step in agent_result.steps:
+            # Combine tool calls with their results
+            tool_call_details = []
+            for i, tc in enumerate(step.tool_calls):
+                # Get the corresponding result if available
+                result = step.tool_results[i] if i < len(step.tool_results) else None
+
+                tool_call_details.append(ToolCallDetail(
+                    name=tc.name,
+                    parameters=tc.parameters,
+                    result=result
+                ))
+
+            steps_response.append(AgentStepResponse(
                 iteration=step.iteration,
                 thought=step.thought,
-                tool_calls=[tc.name for tc in step.tool_calls],
+                tool_calls=tool_call_details,
                 response_text=step.response_text,
                 is_complete=step.is_complete,
                 timestamp=step.timestamp.isoformat()
-            )
-            for step in agent_result.steps
-        ]
+            ))
+
 
         # Save to chat history
         # Get or create chat for this project
@@ -447,11 +461,37 @@ async def agent_chat(
         )
         db.add(user_message)
 
-        # Save agent response
+        # Save agent response with metadata for UI restoration
+        agent_metadata = {
+            "agent_mode": True,
+            "iterations": agent_result.iterations,
+            "tool_calls_made": agent_result.tool_calls_made,
+            "completion_reason": agent_result.completion_reason,
+            "steps": [
+                {
+                    "iteration": step.iteration,
+                    "thought": step.thought,
+                    "tool_calls": [
+                        {
+                            "name": tc.name,
+                            "parameters": tc.parameters,
+                            "result": tc.result
+                        }
+                        for tc in step.tool_calls
+                    ],
+                    "response_text": step.response_text,
+                    "is_complete": step.is_complete,
+                    "timestamp": step.timestamp
+                }
+                for step in steps_response
+            ]
+        }
+
         assistant_message = Message(
             chat_id=chat.id,
             role="assistant",
-            content=f"[Agent Mode - {agent_result.tool_calls_made} tool calls]\n\n{agent_result.final_response}"
+            content=agent_result.final_response,
+            metadata=agent_metadata
         )
         db.add(assistant_message)
         await db.commit()

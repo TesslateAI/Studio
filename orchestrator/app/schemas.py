@@ -102,8 +102,9 @@ class MessageCreate(MessageBase):
 class Message(MessageBase):
     id: int
     chat_id: int
+    metadata: Optional[Dict[str, Any]] = None  # Agent execution data
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -214,11 +215,18 @@ class AgentChatRequest(BaseModel):
         return v.strip()
 
 
+class ToolCallDetail(BaseModel):
+    """Detailed information about a tool call."""
+    name: str
+    parameters: Dict[str, Any]
+    result: Optional[Dict[str, Any]] = None  # Execution result
+
+
 class AgentStepResponse(BaseModel):
     """Response schema for a single agent step."""
     iteration: int
     thought: Optional[str]
-    tool_calls: List[str]  # Tool names
+    tool_calls: List[ToolCallDetail]  # Complete tool call details with results
     response_text: str
     is_complete: bool
     timestamp: str
