@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Code, Loader2, FileCode } from 'lucide-react';
-import { UsageRibbon } from './UsageRibbon';
+import { Loader2, FileCode } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { TypingIndicator } from './TypingIndicator';
@@ -38,16 +37,19 @@ interface StreamingFile {
   isStreaming: boolean;
 }
 
+interface ProjectFile {
+  file_path: string;
+  content: string;
+}
+
 interface ChatContainerProps {
   projectId: number;
   agents: Agent[];
   currentAgent: Agent;
   onSelectAgent: (agent: Agent) => void;
   onFileUpdate: (filePath: string, content: string) => void;
-  onUpload?: (type: 'image' | 'file' | 'folder') => void;
-  onAction?: (action: string) => void;
-  onGetMoreCredits: () => void;
-  creditsLeft: number;
+  projectFiles?: ProjectFile[];
+  projectName?: string;
   className?: string;
 }
 
@@ -57,10 +59,8 @@ export function ChatContainer({
   currentAgent: initialCurrentAgent,
   onSelectAgent,
   onFileUpdate,
-  onUpload,
-  onAction,
-  onGetMoreCredits,
-  creditsLeft,
+  projectFiles = [],
+  projectName = 'project',
   className = ''
 }: ChatContainerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -254,7 +254,7 @@ export function ChatContainer({
     }
   }, [messages, currentStream, isExpanded]);
 
-  // Collapse chat when clicking outside
+  // Collapse chat when clicking outside (including clicks on iframe/preview)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -262,9 +262,23 @@ export function ChatContainer({
       }
     };
 
+    const handleWindowBlur = () => {
+      // Close chat when clicking on iframe (preview window)
+      // Small delay to ensure we're clicking on iframe, not just tabbing away
+      setTimeout(() => {
+        if (document.activeElement?.tagName === 'IFRAME' && isExpanded) {
+          setIsExpanded(false);
+        }
+      }, 0);
+    };
+
     if (isExpanded) {
       document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      window.addEventListener('blur', handleWindowBlur);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+        window.removeEventListener('blur', handleWindowBlur);
+      };
     }
   }, [isExpanded]);
 
@@ -355,7 +369,8 @@ export function ChatContainer({
       setMessages(prev => [...prev, errorMessage]);
 
       // Show technical error in toast
-      const errorDetail = error?.response?.data?.detail || error?.message || 'Failed to execute agent';
+      const detail = error?.response?.data?.detail;
+      const errorDetail = typeof detail === 'string' ? detail : (error?.message || 'Failed to execute agent');
       toast.error(errorDetail, {
         duration: 5000,
       });
@@ -481,12 +496,6 @@ export function ChatContainer({
         style={{ zIndex: -1 }}
       />
 
-      {/* Usage ribbon */}
-      <UsageRibbon
-        creditsLeft={creditsLeft}
-        onGetMore={onGetMoreCredits}
-      />
-
       {/* Chat messages - only shown when expanded */}
       <div
         className={`
@@ -503,7 +512,13 @@ export function ChatContainer({
         {messages.length === 0 && !isStreaming && (
           <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
             <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
-              <Code size={24} className="text-orange-500" />
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="25" viewBox="0 0 161.9 126.66" className="text-orange-500">
+                <g>
+                  <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor" strokeWidth="0"/>
+                  <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor" strokeWidth="0"/>
+                  <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor" strokeWidth="0"/>
+                </g>
+              </svg>
             </div>
             <div className="space-y-2">
               <p className="text-lg font-semibold">Let's start building</p>
@@ -556,14 +571,14 @@ export function ChatContainer({
       <TypingIndicator visible={isTyping && isExpanded} />
 
       {/* Chat input */}
-      <div onFocus={handleInputFocus} className="px-5 py-3 border-t border-[var(--border-color)] pointer-events-auto">
+      <div onFocus={handleInputFocus} className="px-5 py-3 pointer-events-auto">
         <ChatInput
           agents={agents}
           currentAgent={currentAgent}
           onSelectAgent={handleAgentSelect}
           onSendMessage={handleSendMessage}
-          onUpload={onUpload}
-          onAction={onAction}
+          projectFiles={projectFiles}
+          projectName={projectName}
           disabled={isStreaming || agentExecuting}
         />
       </div>

@@ -29,7 +29,8 @@ import {
   FolderOpen,
   GithubLogo,
   GitBranch,
-  ShoppingCart
+  ShoppingCart,
+  DiscordLogo
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -138,7 +139,8 @@ export default function Dashboard() {
         navigate(`/project/${project.id}`);
       }, 500);
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.detail || 'Failed to create project';
+      const detail = error?.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to create project';
       toast.error(errorMessage, { id: creatingToast });
     } finally {
       setIsCreating(false);
@@ -183,14 +185,39 @@ export default function Dashboard() {
   });
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInMinutes = (now.getTime() - date.getTime()) / (1000 * 60);
+    if (!dateString) return 'Never';
 
-    if (diffInMinutes < 60) return `${Math.floor(diffInMinutes)}m ago`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-    if (diffInMinutes < 10080) return `${Math.floor(diffInMinutes / 1440)}d ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    try {
+      // Handle ISO 8601 format with or without timezone
+      // If the date string doesn't have timezone info, assume UTC
+      const dateStr = dateString.includes('Z') || dateString.includes('+') || dateString.includes('T') && dateString.match(/[+-]\d{2}:\d{2}$/)
+        ? dateString
+        : dateString.replace(' ', 'T') + 'Z';
+
+      const date = new Date(dateStr);
+
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return 'Invalid date';
+      }
+
+      const now = new Date();
+      const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+
+      // Handle negative differences (future dates)
+      if (diffInMinutes < 0) {
+        return 'Just now';
+      }
+
+      if (diffInMinutes < 1) return 'Just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+      if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+      if (diffInMinutes < 10080) return `${Math.floor(diffInMinutes / 1440)}d ago`;
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch (error) {
+      console.error('Error formatting date:', dateString, error);
+      return 'Invalid date';
+    }
   };
 
   // Sidebar items
@@ -249,18 +276,6 @@ export default function Dashboard() {
       <div className="mb-10">
         <div className="flex items-center justify-between mb-4">
           <h1 className="font-heading text-4xl font-bold text-[var(--text)]">My Projects</h1>
-
-          {/* Credits Display */}
-          <div className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-[rgba(0,217,255,0.1)] to-[rgba(0,217,255,0.05)] border border-[rgba(0,217,255,0.2)] rounded-2xl">
-            <LightningIcon className="w-5 h-5 text-[var(--accent)]" weight="fill" />
-            <span className="text-[var(--accent)] font-semibold">247 credits left</span>
-            <button
-              onClick={() => toast('Upgrade to PRO!')}
-              className="text-xs bg-[rgba(0,217,255,0.2)] hover:bg-[rgba(0,217,255,0.3)] px-3 py-1 rounded-full transition-colors"
-            >
-              Get More
-            </button>
-          </div>
         </div>
 
         {/* Tab Navigation */}
@@ -289,50 +304,12 @@ export default function Dashboard() {
       </div>
 
       {/* Marketplace Section */}
-      <div className="bg-white/[0.02] dark:bg-white/[0.02] border border-white/[0.08] rounded-2xl p-5 mb-8">
-        <div className="flex items-center justify-between mb-6">
+      <div className="bg-white/[0.02] dark:bg-white/[0.02] border border-white/[0.08] rounded-2xl p-8 mb-8">
+        <div className="flex items-center justify-center">
           <h2 className="font-heading text-xl font-bold text-[var(--text)] flex items-center gap-2">
             <Sparkle className="w-5 h-5 text-orange-400" weight="fill" />
-            Recommended for Your Projects
+            Recommendations coming soon for your project
           </h2>
-          <button
-            onClick={() => toast('Browse marketplace')}
-            className="text-sm text-[var(--primary)] hover:text-orange-400 transition-colors"
-          >
-            Browse Marketplace →
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <MarketplaceCard
-            title="React Expert"
-            description="Advanced React assistant"
-            icon={
-              <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                <Atom className="w-5 h-5 text-blue-400" weight="fill" />
-              </div>
-            }
-            badge="Free"
-          />
-          <MarketplaceCard
-            title="Database Pro"
-            description="SQL optimization & design"
-            icon={
-              <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
-                <Database className="w-5 h-5 text-purple-400" weight="fill" />
-              </div>
-            }
-            badge="Free"
-          />
-          <MarketplaceCard
-            title="Security Scanner"
-            description="Code vulnerability detection"
-            icon={
-              <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
-                <ShieldCheck className="w-5 h-5 text-green-400" weight="fill" />
-              </div>
-            }
-            badge="PRO"
-          />
         </div>
       </div>
 
@@ -589,6 +566,41 @@ export default function Dashboard() {
           setShowGithubConnectModal(false);
         }}
       />
+
+      {/* Discord Support Bubble */}
+      <div className="fixed bottom-8 right-8 z-40 group">
+        <a
+          href="https://discord.gg/WgXabcN2r2"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex flex-col items-center gap-2"
+        >
+          <div className="
+            w-16 h-16 bg-[#5865F2] rounded-full
+            flex items-center justify-center
+            shadow-lg hover:shadow-xl
+            transition-all duration-300
+            hover:scale-110
+            relative
+          ">
+            <DiscordLogo className="w-8 h-8 text-white" weight="fill" />
+
+            {/* Hover tooltip */}
+            <div className="
+              absolute bottom-full mb-2 right-0
+              bg-gray-900 text-white text-sm
+              px-3 py-2 rounded-lg
+              whitespace-nowrap
+              opacity-0 group-hover:opacity-100
+              transition-opacity duration-200
+              pointer-events-none
+            ">
+              Join our Discord for support
+            </div>
+          </div>
+          <span className="text-sm font-medium text-[var(--text)]">Support</span>
+        </a>
+      </div>
     </div>
   );
 }

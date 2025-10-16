@@ -49,6 +49,13 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   const [isPulling, setIsPulling] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Branch management
+  const [showBranchMenu, setShowBranchMenu] = useState(false);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [showNewBranchInput, setShowNewBranchInput] = useState(false);
+  const [isSwitchingBranch, setIsSwitchingBranch] = useState(false);
+
   useEffect(() => {
     checkGitHubConnection();
     checkRepositoryConnection();
@@ -57,6 +64,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   useEffect(() => {
     if (repoConnected) {
       loadGitStatus();
+      loadBranches();
       const interval = setInterval(loadGitStatus, 30000); // Refresh every 30s
       return () => clearInterval(interval);
     }
@@ -134,7 +142,8 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       toast.success('Pushed successfully!', { id: loadingToast });
       await loadGitStatus();
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to push';
+      const detail = error.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to push';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
       setIsPushing(false);
@@ -156,7 +165,8 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       }
       await loadGitStatus();
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to pull';
+      const detail = error.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to pull';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
       setIsPulling(false);
@@ -181,7 +191,8 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       toast.success('Synced successfully!', { id: loadingToast });
       await loadGitStatus();
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to sync';
+      const detail = error.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to sync';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
       setIsSyncing(false);
@@ -191,6 +202,61 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   const getTotalChanges = () => {
     if (!gitStatus) return 0;
     return gitStatus.staged_count + gitStatus.unstaged_count + gitStatus.untracked_count;
+  };
+
+  const loadBranches = async () => {
+    try {
+      const branchesData = await gitApi.getBranches(projectId);
+      setBranches(branchesData.branches);
+    } catch (error) {
+      console.error('Failed to load branches:', error);
+    }
+  };
+
+  const handleSwitchBranch = async (branchName: string) => {
+    if (branchName === gitStatus?.branch) {
+      setShowBranchMenu(false);
+      return;
+    }
+
+    setIsSwitchingBranch(true);
+    const loadingToast = toast.loading(`Switching to ${branchName}...`);
+
+    try {
+      await gitApi.switchBranch(projectId, branchName);
+      toast.success(`Switched to ${branchName}`, { id: loadingToast });
+      setShowBranchMenu(false);
+      await loadGitStatus();
+    } catch (error: any) {
+      const detail = error.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to switch branch';
+      toast.error(errorMessage, { id: loadingToast });
+    } finally {
+      setIsSwitchingBranch(false);
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    if (!newBranchName.trim()) {
+      toast.error('Branch name is required');
+      return;
+    }
+
+    const loadingToast = toast.loading('Creating new branch...');
+
+    try {
+      await gitApi.createBranch(projectId, newBranchName.trim(), true);
+      toast.success(`Created and switched to ${newBranchName}`, { id: loadingToast });
+      setNewBranchName('');
+      setShowNewBranchInput(false);
+      setShowBranchMenu(false);
+      await loadGitStatus();
+      await loadBranches();
+    } catch (error: any) {
+      const detail = error.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to create branch';
+      toast.error(errorMessage, { id: loadingToast });
+    }
   };
 
   const getSyncStatus = () => {
@@ -342,10 +408,100 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
           {/* Branch and Sync Status */}
           {gitStatus && (
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 text-xs bg-white/5 px-2 py-1 rounded">
-                <GitBranch className="w-3 h-3" />
-                <span>{gitStatus.branch}</span>
+              {/* Branch Selector */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowBranchMenu(!showBranchMenu)}
+                  className="flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 px-2 py-1 rounded transition-colors"
+                >
+                  <GitBranch className="w-3 h-3" />
+                  <span>{gitStatus.branch}</span>
+                  <span className="text-gray-500">▾</span>
+                </button>
+
+                {/* Branch Dropdown Menu */}
+                {showBranchMenu && (
+                  <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--surface)] border border-white/10 rounded-lg shadow-xl z-50 max-h-64 overflow-hidden flex flex-col">
+                    {/* Current Branch */}
+                    <div className="p-2 border-b border-white/5">
+                      <div className="text-xs text-gray-400 mb-1">Current Branch</div>
+                      <div className="text-sm font-semibold text-[var(--text)]">{gitStatus.branch}</div>
+                    </div>
+
+                    {/* Branches List */}
+                    <div className="overflow-y-auto flex-1">
+                      {branches.map((branch) => (
+                        <button
+                          key={branch.name}
+                          onClick={() => handleSwitchBranch(branch.name)}
+                          disabled={isSwitchingBranch || branch.name === gitStatus.branch}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                            branch.name === gitStatus.branch
+                              ? 'bg-blue-500/20 text-blue-400 cursor-default'
+                              : 'hover:bg-white/5 text-[var(--text)]'
+                          } ${isSwitchingBranch ? 'opacity-50' : ''}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <GitBranch className="w-3 h-3" />
+                            <span>{branch.name}</span>
+                            {branch.name === gitStatus.branch && (
+                              <span className="ml-auto text-xs">✓</span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Create New Branch */}
+                    <div className="p-2 border-t border-white/5">
+                      {!showNewBranchInput ? (
+                        <button
+                          onClick={() => setShowNewBranchInput(true)}
+                          className="w-full text-left px-2 py-1.5 text-sm text-green-400 hover:bg-white/5 rounded transition-colors"
+                        >
+                          + Create new branch
+                        </button>
+                      ) : (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={newBranchName}
+                            onChange={(e) => setNewBranchName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleCreateBranch();
+                              if (e.key === 'Escape') {
+                                setShowNewBranchInput(false);
+                                setNewBranchName('');
+                              }
+                            }}
+                            placeholder="new-branch-name"
+                            className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-2 py-1 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            autoFocus
+                          />
+                          <div className="flex gap-1">
+                            <button
+                              onClick={handleCreateBranch}
+                              className="flex-1 px-2 py-1 bg-green-500 hover:bg-green-600 text-white text-xs rounded transition-colors"
+                            >
+                              Create
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowNewBranchInput(false);
+                                setNewBranchName('');
+                              }}
+                              className="flex-1 px-2 py-1 bg-white/5 hover:bg-white/10 text-white text-xs rounded transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
+
               {syncStatus && (
                 <div className={`flex items-center gap-1 text-xs ${syncStatus.color}`}>
                   <syncStatus.icon className="w-3 h-3" />

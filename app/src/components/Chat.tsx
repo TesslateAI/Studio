@@ -240,7 +240,8 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
       setMessages(prev => [...prev, errorMessage]);
 
       // Show technical error in toast
-      const errorDetail = error?.response?.data?.detail || error?.message || 'Failed to execute agent';
+      const detail = error?.response?.data?.detail;
+      const errorDetail = typeof detail === 'string' ? detail : (error?.message || 'Failed to execute agent');
       toast.error(errorDetail, {
         duration: 5000,
       });

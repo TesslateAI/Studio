@@ -97,7 +97,7 @@ async def initialize_repository(
                 repo_name=repo_info['repo'] if repo_info else None,
                 repo_owner=repo_info['owner'] if repo_info else None,
                 default_branch=request.default_branch,
-                auth_method='pat'
+                auth_method='oauth'
             )
             db.add(git_repo)
 
@@ -190,7 +190,7 @@ async def clone_repository(
                 repo_name=repo_info['repo'],
                 repo_owner=repo_info['owner'],
                 default_branch=branch,
-                auth_method='pat'
+                auth_method='oauth'
             )
             db.add(git_repo)
 

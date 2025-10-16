@@ -67,8 +67,22 @@ async def create_project(
         # In Docker mode, create the directory
         settings = get_settings()
         if settings.deployment_mode == "docker":
-            os.makedirs(project_path, exist_ok=True)
-            logger.info(f"[CREATE] Created project directory: {project_path}")
+            # Force create directories using Path (more reliable on Windows Docker volumes)
+            from pathlib import Path
+            try:
+                Path(project_path).mkdir(parents=True, exist_ok=True)
+                logger.info(f"[CREATE] Created project directory: {project_path}")
+            except Exception as e:
+                logger.warning(f"[CREATE] mkdir failed: {e}, trying subprocess")
+                # Try alternative method
+                import subprocess
+                subprocess.run(['mkdir', '-p', project_path], check=False, capture_output=True)
+
+            # Give filesystem a moment to sync (Windows Docker volume issue)
+            import time
+            time.sleep(0.1)
+
+            logger.info(f"[CREATE] Project directory ready: {project_path}")
 
         # Handle source type: template or github
         if project.source_type == "github":
@@ -224,10 +238,9 @@ async def create_project(
                         dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
 
                         for file in files:
-                            # Skip system files, locks, and binary files
+                            # Skip system files and binary files
                             if (file.startswith('.') or
-                                file.endswith(('.lock', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')) or
-                                file in ['package-lock.json']):
+                                file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'))):
                                 continue
 
                             file_full_path = os.path.join(root, file)
@@ -308,10 +321,9 @@ async def create_project(
                 dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
 
                 for file in files:
-                    # Skip system files, locks, and binary files
+                    # Skip system files and binary files
                     if (file.startswith('.') or
-                        file.endswith(('.lock', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')) or
-                        file in ['package-lock.json']):
+                        file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'))):
                         continue
 
                     file_path = os.path.join(root, file)
@@ -355,8 +367,16 @@ async def create_project(
                             rel_path = os.path.relpath(src_path, template_dir)
                             dst_path = os.path.join(project_path, rel_path)
 
-                            # Create directory if needed
-                            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                            # Create directory if needed (with safety check for Windows Docker volumes)
+                            parent_dir = os.path.dirname(dst_path)
+                            if parent_dir:
+                                try:
+                                    os.makedirs(parent_dir, exist_ok=True)
+                                except FileExistsError:
+                                    # Handle race condition on Windows Docker volumes - verify it exists
+                                    if not os.path.exists(parent_dir):
+                                        # If it still doesn't exist, something is wrong
+                                        raise
 
                             # Copy file
                             shutil.copy2(src_path, dst_path)
@@ -661,7 +681,27 @@ async def get_dev_server_url(
         # In Docker mode, create project directory from database files if it doesn't exist
         if settings.deployment_mode == "docker" and not os.path.exists(project_path):
             logger.info(f"[DEV-URL] Creating project directory from database files: {project_path}")
-            os.makedirs(project_path, exist_ok=True)
+            # Create parent directory first to avoid Windows bind mount issues
+            user_dir = os.path.abspath(f"users/{current_user.id}")
+
+            # Force create directories using Path (more reliable on Windows Docker volumes)
+            from pathlib import Path
+            try:
+                Path(project_path).mkdir(parents=True, exist_ok=True)
+                logger.info(f"[DEV-URL] Created project directory: {project_path}")
+            except Exception as e:
+                logger.error(f"[DEV-URL] Failed to create project directory: {e}")
+                # Try alternative method
+                import subprocess
+                subprocess.run(['mkdir', '-p', project_path], check=False, capture_output=True)
+
+            # Give filesystem a moment to sync (Windows Docker volume issue)
+            import time
+            time.sleep(0.1)
+
+            # Verify directory was created
+            if not os.path.exists(project_path):
+                raise FileNotFoundError(f"Failed to create project directory: {project_path}")
 
             # Get all files from database
             files_result = await db.execute(
@@ -679,7 +719,16 @@ async def get_dev_server_url(
             # Write each file to filesystem
             for db_file in project_files:
                 file_full_path = os.path.join(project_path, db_file.file_path)
-                os.makedirs(os.path.dirname(file_full_path), exist_ok=True)
+
+                # Create parent directory (with safety check for Windows Docker volumes)
+                parent_dir = os.path.dirname(file_full_path)
+                if parent_dir:
+                    try:
+                        os.makedirs(parent_dir, exist_ok=True)
+                    except FileExistsError:
+                        # Handle race condition on Windows Docker volumes - verify it exists
+                        if not os.path.exists(parent_dir):
+                            raise
 
                 with open(file_full_path, 'w', encoding='utf-8') as f:
                     f.write(db_file.content)
@@ -861,7 +910,16 @@ async def save_project_file(
                 os.makedirs(project_path, exist_ok=True)
 
                 full_file_path = os.path.join(project_path, file_path)
-                os.makedirs(os.path.dirname(full_file_path), exist_ok=True)
+
+                # Create parent directory (with safety check for Windows Docker volumes)
+                parent_dir = os.path.dirname(full_file_path)
+                if parent_dir:
+                    try:
+                        os.makedirs(parent_dir, exist_ok=True)
+                    except FileExistsError:
+                        # Handle race condition on Windows Docker volumes - verify it exists
+                        if not os.path.exists(parent_dir):
+                            raise
 
                 with open(full_file_path, 'w', encoding='utf-8') as f:
                     f.write(content)

@@ -290,12 +290,12 @@ export default function Project() {
           {
             icon: <Folder size={20} />,
             title: 'Files',
-            onClick: () => alert('File tree feature')
+            onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
           },
           {
             icon: <Cube size={20} />,
             title: 'Components',
-            onClick: () => alert('Components library')
+            onClick: () => toast('Components library coming soon!', { icon: '🧩' })
           },
           {
             icon: <GitBranch size={20} />,
@@ -347,12 +347,12 @@ export default function Project() {
           {
             icon: <Rocket size={20} />,
             title: 'Deploy',
-            onClick: () => alert('Deploy feature')
+            onClick: () => toast('Deploy feature coming soon!', { icon: '🚀' })
           },
           {
             icon: <ShareNetwork size={20} />,
             title: 'Share',
-            onClick: () => alert('Share feature')
+            onClick: () => toast('Share feature coming soon!', { icon: '🔗' })
           }
         ]}
       />
@@ -483,10 +483,8 @@ export default function Project() {
         currentAgent={agents[0]}
         onSelectAgent={(agent) => console.log('Selected agent:', agent)}
         onFileUpdate={handleFileUpdate}
-        onUpload={(type) => console.log('Upload:', type)}
-        onAction={(action) => console.log('Action:', action)}
-        onGetMoreCredits={() => alert('Get more credits')}
-        creditsLeft={10}
+        projectFiles={files}
+        projectName={project?.name}
       />
     </div>
   );
