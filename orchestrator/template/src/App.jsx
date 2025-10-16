@@ -34,9 +34,17 @@ function App() {
     // Notify parent window when URL changes
     const notifyParent = () => {
       if (window.parent !== window) {
+        // Get the base path from the import.meta.env
+        const basePath = import.meta.env.BASE_URL || '/';
+        // Strip the base path from the pathname before sending to parent
+        let pathname = window.location.pathname;
+        if (basePath !== '/' && pathname.startsWith(basePath)) {
+          pathname = pathname.slice(basePath.length) || '/';
+        }
+
         window.parent.postMessage({
           type: 'urlchange',
-          url: window.location.pathname + window.location.search + window.location.hash
+          url: pathname + window.location.search + window.location.hash
         }, '*');
       }
     };
@@ -68,8 +76,12 @@ function App() {
     };
   }, []);
 
+  // Get the base path from Vite's import.meta.env
+  // This is automatically set by Vite based on the 'base' config option
+  const basename = import.meta.env.BASE_URL;
+
   return (
-    <Router>
+    <Router basename={basename}>
       <Routes>
         <Route path="/" element={<Home />} />
       </Routes>

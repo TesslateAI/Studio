@@ -102,7 +102,7 @@ class MessageCreate(MessageBase):
 class Message(MessageBase):
     id: int
     chat_id: int
-    metadata: Optional[Dict[str, Any]] = None  # Agent execution data
+    message_metadata: Optional[Dict[str, Any]] = None  # Agent execution data
     created_at: datetime
 
     class Config:

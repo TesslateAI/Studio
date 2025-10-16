@@ -15,6 +15,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentPath, setCurrentPath] = useState<string>('/');
 
   useEffect(() => {
     startDevServer();
@@ -84,7 +85,18 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     container.innerHTML = `
       <div class="h-full flex flex-col rounded-t-3xl overflow-hidden bg-gray-900/50 backdrop-blur-sm">
         <div class="bg-gradient-to-r from-gray-800/80 to-gray-700/60 border-b border-gray-700/30 p-4 flex items-center justify-between rounded-t-3xl shadow-lg">
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-3 flex-1">
+            <!-- Navigation Controls -->
+            <button id="back-btn" class="p-2.5 hover:bg-gray-600/50 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105" title="Go Back">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            <button id="forward-btn" class="p-2.5 hover:bg-gray-600/50 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105" title="Go Forward">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
             <button id="refresh-btn" class="p-2.5 hover:bg-gray-600/50 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105" title="Refresh Preview">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
@@ -92,6 +104,16 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
               </svg>
             </button>
+
+            <!-- URL Bar -->
+            <div class="flex-1 flex items-center gap-2 bg-gray-800/50 rounded-xl px-4 py-2 border border-gray-600/30">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span id="url-display" class="text-sm text-gray-300 font-mono truncate">${devServerUrl}${currentPath}</span>
+            </div>
+
             <button id="restart-btn" class="p-2.5 hover:bg-orange-600/20 rounded-xl transition-all duration-200 text-orange-400 hover:text-orange-300 hover:scale-105 border border-orange-500/20" title="Restart Dev Server">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
@@ -106,7 +128,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
             </button>
           </div>
 
-          <div class="flex items-center gap-4">
+          <div class="flex items-center gap-4 ml-4">
             <!-- Sliding Toggle -->
             <div class="relative bg-gray-700/50 backdrop-blur-sm p-1 rounded-2xl border border-gray-600/30 shadow-inner">
               <div class="absolute top-1 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl shadow-lg transition-all duration-300 ease-in-out ${
@@ -141,7 +163,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
 
             <div class="flex items-center gap-2">
               <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span class="text-sm text-gray-300 font-medium px-3 py-1 bg-gray-800/50 rounded-full border border-gray-600/30">${devServerUrl}</span>
+              <span class="text-sm text-gray-300 font-medium px-3 py-1 bg-gray-800/50 rounded-full border border-gray-600/30">Live</span>
             </div>
           </div>
         </div>
@@ -156,12 +178,28 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
       </div>
     `;
 
+    const backBtn = document.getElementById('back-btn');
+    const forwardBtn = document.getElementById('forward-btn');
     const refreshBtn = document.getElementById('refresh-btn');
     const restartBtn = document.getElementById('restart-btn');
     const externalBtn = document.getElementById('external-btn');
     const tabPreview = document.getElementById('tab-preview');
     const tabCode = document.getElementById('tab-code');
     const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+    const urlDisplay = document.getElementById('url-display');
+
+    // Navigation handlers
+    if (backBtn) {
+      backBtn.onclick = () => {
+        iframe.contentWindow?.postMessage({ type: 'navigate', direction: 'back' }, '*');
+      };
+    }
+
+    if (forwardBtn) {
+      forwardBtn.onclick = () => {
+        iframe.contentWindow?.postMessage({ type: 'navigate', direction: 'forward' }, '*');
+      };
+    }
 
     if (refreshBtn) {
       refreshBtn.onclick = () => {
@@ -193,8 +231,40 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
       };
     }
 
+    // Listen for URL changes from iframe
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'url-change') {
+        // Extract pathname from the full URL
+        try {
+          const url = new URL(event.data.url);
+          const newPath = url.pathname + url.search + url.hash;
+          setCurrentPath(newPath);
+          // Query for the element each time to avoid stale references
+          const urlDisplayElement = document.getElementById('url-display');
+          if (urlDisplayElement) {
+            urlDisplayElement.textContent = `${devServerUrl}${newPath}`;
+          }
+        } catch (e) {
+          // Fallback if URL parsing fails
+          const newPath = event.data.url || '/';
+          setCurrentPath(newPath);
+          const urlDisplayElement = document.getElementById('url-display');
+          if (urlDisplayElement) {
+            urlDisplayElement.textContent = `${devServerUrl}${newPath}`;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
     iframeRef.current = iframe;
-  }, [devServerUrl, activeTab, setActiveTab]);
+
+    // Cleanup listener
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [devServerUrl, activeTab, setActiveTab, currentPath]);
 
   useEffect(() => {
     const container = document.getElementById('preview-container');

@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react()],
   // Base path is set via command line when needed (--base flag)
   // This allows dynamic configuration without rebuilding
+  // In Tesslate Studio, this should match the preview URL path
+  base: process.env.VITE_BASE_PATH || '/',
   server: {
     host: '0.0.0.0', // Allow external connections (required for Docker)
     port: 5173,
@@ -16,10 +18,12 @@ export default defineConfig({
       // CRITICAL: Configure HMR to work through Traefik proxy
       // The WebSocket connects to the same host as the page URL
       protocol: 'ws',
-      // Don't override host - let it use the same host as the page
+      // Use the page's hostname for WebSocket connection
       host: undefined,
       // Use port 80 (Traefik) instead of 5173
       clientPort: 80,
+      // Use the base path for WebSocket connection
+      path: (process.env.VITE_BASE_PATH || '/').replace(/\/$/, '') + '/',
     },
     watch: {
       // Use polling for reliable file watching in Docker containers

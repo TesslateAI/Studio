@@ -491,7 +491,7 @@ async def agent_chat(
             chat_id=chat.id,
             role="assistant",
             content=agent_result.final_response,
-            metadata=agent_metadata
+            message_metadata=agent_metadata
         )
         db.add(assistant_message)
         await db.commit()

@@ -245,7 +245,9 @@ export function ChatContainer({
         ws.close();
       }
     };
-  }, [projectId, onFileUpdate]);
+    // Only reconnect when projectId changes, not when onFileUpdate changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   // Auto-scroll to latest message
   useEffect(() => {

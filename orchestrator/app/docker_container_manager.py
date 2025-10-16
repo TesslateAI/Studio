@@ -656,9 +656,19 @@ docker-compose*
                 "-e", "CHOKIDAR_INTERVAL=1000",                         # Polling interval (1 second)
             ]
             
-            # Working directory and detached mode
+            # Calculate base path for routing
+            user_project = hostname.replace('.localhost', '')
+            base_path = f"/preview/{user_project}"
+
+            # Add base path environment variable for Vite config
+            run_cmd.extend([
+                "-e", f"VITE_BASE_PATH={base_path}/",                   # Base path for React Router and assets
+            ])
+
+            # Working directory, user, and detached mode
             run_cmd.extend([
                 "-w", "/app",                                           # Working directory
+                "--user", "root",                                        # Run as root to fix Windows volume permissions
                 "-d",                                                   # Detached mode
             ])
 
@@ -669,8 +679,6 @@ docker-compose*
             run_cmd.extend(["--network", self.network_name])
 
             # Add image and startup command with base path
-            user_project = hostname.replace('.localhost', '')
-            base_path = f"/preview/{user_project}"
             run_cmd.extend([
                 self.base_image_name,
                 "sh", "-c", f"npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173 --base {base_path}/"

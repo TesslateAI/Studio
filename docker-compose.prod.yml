@@ -84,6 +84,19 @@ services:
     labels:
       - "traefik.enable=false"
 
+  # Dev server base image - Used for user project containers
+  # This service doesn't run, it just builds the image
+  # Rebuild after template changes: docker compose -f docker-compose.prod.yml build dev-server
+  dev-server:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile.devserver
+    image: builder-devserver:latest
+    profiles:
+      - build-only
+    # This service is only for building the image, not running
+    command: ["echo", "Dev server image built successfully"]
+
 networks:
   tesslate-network:
     driver: bridge

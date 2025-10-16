@@ -68,9 +68,6 @@ export default function Project() {
 
   // Track iframe URL changes via postMessage
   useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
     const handleMessage = (event: MessageEvent) => {
       // Handle URL change messages from iframe
       if (event.data && event.data.type === 'url-change') {

@@ -49,7 +49,7 @@ class LiteLLMService:
                 user_data = {
                     "user_id": litellm_user_id,
                     "user_email": f"{username}@tesslate.internal",
-                    "user_role": "user",
+                    "user_role": "internal_user",
                     "max_parallel_requests": 10,
                     "metadata": {
                         "tesslate_user_id": user_id,
