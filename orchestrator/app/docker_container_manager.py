@@ -347,41 +347,22 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
         return f"builder-dev-user{user_id}-project{project_id}"
     
     def _generate_hostname(self, user_id: int, project_id: str) -> str:
-        """
-        Generate a unique hostname for Traefik routing.
-
-        For production with DEV_SERVER_BASE_URL configured, uses wildcard subdomain.
-        For local development, uses .localhost domain.
-        """
-        settings = get_settings()
-
-        if settings.dev_server_base_url:
-            # Production: extract domain from base URL for wildcard subdomain
-            # e.g., "https://studio-demo.tesslate.com" → "user2-project15.studio-demo.tesslate.com"
-            base_url = settings.dev_server_base_url
-            domain = base_url.replace('https://', '').replace('http://', '').rstrip('/')
-            return f"user{user_id}-project{project_id}.{domain}"
-        else:
-            # Local development: use .localhost domain
-            return f"user{user_id}-project{project_id}.localhost"
+        """Generate a unique hostname for Traefik routing."""
+        return f"user{user_id}-project{project_id}.localhost"
     
     def _get_container_access_url(self, hostname: str) -> str:
-        """
-        Get the access URL for a container.
-
-        Uses hostname-based routing to match Kubernetes behavior.
-        - Production: https://user2-project15.studio-demo.tesslate.com
-        - Local dev: http://user2-project15.localhost
-        """
+        """Get the access URL for a container, considering proxy configuration."""
         settings = get_settings()
+        user_project = hostname.replace('.localhost', '')
 
+        # For local development (no base_url configured), use http://localhost for Traefik
+        # For production (base_url configured), use the configured URL
         if settings.dev_server_base_url:
-            # Production: use HTTPS with wildcard subdomain routing
-            # Cloudflare/Let's Encrypt handles SSL automatically
-            return f"https://{hostname}"
+            # Production: use configured base URL (e.g., https://your-domain.com)
+            return f"{settings.dev_server_base_url}/preview/{user_project}/"
         else:
-            # Local development: use HTTP with .localhost domain
-            return f"http://{hostname}"
+            # Local development: use localhost with Traefik (port 80)
+            return f"http://localhost/preview/{user_project}/"
     
     def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str) -> List[str]:
         """Generate Traefik labels for automatic service discovery and routing."""
@@ -401,20 +382,18 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
             "--label", f"traefik.docker.network={self.network_name}",
         ]
 
-        # Production path-based routing WITHOUT stripprefix
-        # Let Vite handle the full path with --base flag
-        # Add both HTTP (web) and HTTPS (websecure) routing
+        # Path-based routing - Vite handles the base path with --base flag
         labels.extend([
             # HTTP path-based routing: /preview/user2-project15
             "--label", f"traefik.http.routers.{service_name}-path.rule=PathPrefix(`/preview/{user_project}`)",
             "--label", f"traefik.http.routers.{service_name}-path.entrypoints=web",
-            "--label", f"traefik.http.routers.{service_name}-path.priority=100",  # High priority
+            "--label", f"traefik.http.routers.{service_name}-path.priority=100",
+
             # HTTPS path-based routing: /preview/user2-project15
             "--label", f"traefik.http.routers.{service_name}-path-secure.rule=PathPrefix(`/preview/{user_project}`)",
             "--label", f"traefik.http.routers.{service_name}-path-secure.entrypoints=websecure",
-            "--label", f"traefik.http.routers.{service_name}-path-secure.priority=100",  # High priority
+            "--label", f"traefik.http.routers.{service_name}-path-secure.priority=100",
             "--label", f"traefik.http.routers.{service_name}-path-secure.tls=true",
-            # NO stripprefix - Vite needs to see the full path
         ])
 
         return labels
@@ -677,32 +656,24 @@ docker-compose*
                 "-e", "CHOKIDAR_INTERVAL=1000",                         # Polling interval (1 second)
             ]
             
-            # Add environment variables for production path-based routing
-            settings = get_settings()
-            if settings.dev_server_base_url:
-                user_project = hostname.replace('.localhost', '')
-                run_cmd.extend([
-                    "-e", f"VITE_BASE_PATH=/preview/{user_project}/",
-                    "-e", f"PUBLIC_URL=/preview/{user_project}"
-                ])
-            
             # Working directory and detached mode
             run_cmd.extend([
                 "-w", "/app",                                           # Working directory
                 "-d",                                                   # Detached mode
             ])
-            
+
             # Add Traefik labels for automatic service discovery
             run_cmd.extend(self._get_traefik_labels(user_id, project_id, hostname))
-            
+
             # Add network (required for Traefik)
             run_cmd.extend(["--network", self.network_name])
 
-            # Add image and startup command
-            # Hostname-based routing - no base path needed (matches Kubernetes)
+            # Add image and startup command with base path
+            user_project = hostname.replace('.localhost', '')
+            base_path = f"/preview/{user_project}"
             run_cmd.extend([
                 self.base_image_name,
-                "sh", "-c", "npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173"
+                "sh", "-c", f"npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173 --base {base_path}/"
             ])
             
             print(f"[DEBUG] Docker run command: {' '.join(run_cmd)}")
@@ -821,20 +792,6 @@ docker-compose*
             try:
                 subprocess.run(["docker", "stop", container_name], capture_output=True, timeout=10)
                 subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=10)
-
-                # Wait and verify container is fully removed
-                for _ in range(10):  # Try for up to 5 seconds
-                    check = subprocess.run(
-                        ["docker", "ps", "-a", "-q", "-f", f"name={container_name}"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    if not check.stdout.strip():
-                        # Container is gone
-                        break
-                    await asyncio.sleep(0.5)
-
                 print(f"[OK] Force cleaned up container: {container_name}")
             except Exception as e:
                 print(f"[DEBUG] Force cleanup failed: {e}")
@@ -850,44 +807,29 @@ docker-compose*
             subprocess.run([
                 "docker", "stop", container_name
             ], capture_output=True, timeout=30)
-
+            
             # Remove container (should auto-remove with --rm flag)
             subprocess.run([
                 "docker", "rm", "-f", container_name
             ], capture_output=True, timeout=10)
-
-            # Wait and verify container is fully removed before returning
-            for _ in range(10):  # Try for up to 5 seconds
-                check = subprocess.run(
-                    ["docker", "ps", "-a", "-q", "-f", f"name={container_name}"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if not check.stdout.strip():
-                    # Container is gone
-                    break
-                await asyncio.sleep(0.5)
-
+            
             print(f"[OK] Container stopped: {container_name}")
-
+            
         except Exception as e:
             print(f"[WARN] Error stopping container {container_name}: {e}")
-
+            
             # Force remove if graceful stop failed
             try:
                 subprocess.run([
                     "docker", "rm", "-f", container_name
                 ], capture_output=True, timeout=10)
-                # Wait for force removal to complete
-                await asyncio.sleep(0.5)
             except Exception:
                 pass
-
+        
         # Clean up tracking
         if project_key:
             self.containers.pop(project_key, None)
-
+        
         # Log cleanup
         if hostname:
             print(f"[CLEANUP] Stopped container with hostname: {hostname}")

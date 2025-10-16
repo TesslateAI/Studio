@@ -52,7 +52,6 @@ export default function Project() {
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const urlCheckIntervalRef = React.useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     loadProject();
@@ -64,25 +63,22 @@ export default function Project() {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
-      if (urlCheckIntervalRef.current) {
-        clearInterval(urlCheckIntervalRef.current);
-      }
     };
   }, []);
 
-  // Track iframe URL changes with polling
+  // Track iframe URL changes via postMessage
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
 
-    let lastUrl = '';
+    const handleMessage = (event: MessageEvent) => {
+      // Handle URL change messages from iframe
+      if (event.data && event.data.type === 'url-change') {
+        const url = event.data.url;
 
-    const updateUrl = () => {
-      try {
-        const iframeUrl = iframe.contentWindow?.location.href;
-        if (iframeUrl && iframeUrl !== 'about:blank' && iframeUrl !== lastUrl) {
-          // Remove auth token from display
-          const urlObj = new URL(iframeUrl);
+        // Remove auth token from display
+        try {
+          const urlObj = new URL(url);
           urlObj.searchParams.delete('auth_token');
           urlObj.searchParams.delete('t');
           urlObj.searchParams.delete('hmr_fallback');
@@ -97,75 +93,27 @@ export default function Project() {
             cleanUrl += urlObj.hash;
           }
 
-          if (cleanUrl !== lastUrl) {
-            lastUrl = cleanUrl;
-            setCurrentPreviewUrl(cleanUrl);
-          }
+          setCurrentPreviewUrl(cleanUrl);
+        } catch (error) {
+          // If URL parsing fails, use it as-is
+          setCurrentPreviewUrl(url);
         }
-      } catch (error) {
-        // Cross-origin error - can't access iframe URL
-        // Keep showing the current URL
       }
     };
 
-    // Update URL on initial load
-    iframe.addEventListener('load', updateUrl);
-
-    // Poll for URL changes (catches navigation without page reload)
-    urlCheckIntervalRef.current = setInterval(updateUrl, 500);
+    // Listen for messages from iframe
+    window.addEventListener('message', handleMessage);
 
     return () => {
-      iframe.removeEventListener('load', updateUrl);
-      if (urlCheckIntervalRef.current) {
-        clearInterval(urlCheckIntervalRef.current);
-      }
+      window.removeEventListener('message', handleMessage);
     };
-  }, [devServerUrl]);
+  }, []);
 
   // Initialize current URL when dev server is ready
   useEffect(() => {
     if (devServerUrl) {
       setCurrentPreviewUrl(devServerUrl);
     }
-  }, [devServerUrl]);
-
-  // Listen for URL change messages from iframe
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      // Handle URL change messages from the user project iframe
-      if (event.data && event.data.type === 'urlchange') {
-        const newUrl = event.data.url;
-        if (newUrl && devServerUrl) {
-          // Construct full URL from relative path
-          try {
-            const baseUrl = new URL(devServerUrl);
-            const fullUrlObj = new URL(newUrl, baseUrl.origin);
-
-            // Remove auth tokens from display
-            fullUrlObj.searchParams.delete('auth_token');
-            fullUrlObj.searchParams.delete('t');
-            fullUrlObj.searchParams.delete('hmr_fallback');
-
-            // Reconstruct clean URL
-            let cleanUrl = fullUrlObj.origin + fullUrlObj.pathname;
-            const remainingParams = fullUrlObj.searchParams.toString();
-            if (remainingParams) {
-              cleanUrl += '?' + remainingParams;
-            }
-            if (fullUrlObj.hash) {
-              cleanUrl += fullUrlObj.hash;
-            }
-
-            setCurrentPreviewUrl(cleanUrl);
-          } catch (error) {
-            console.log('Error parsing URL from iframe:', error);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
   }, [devServerUrl]);
 
   const loadProject = async () => {
@@ -227,12 +175,7 @@ export default function Project() {
       if (response.status === 'ready' && response.url) {
         toast.dismiss('dev-server');
         toast.success('Development server ready!', { id: 'dev-server', duration: 2000 });
-
-        // Store clean URL for display (without auth token)
         setDevServerUrl(response.url);
-
-        // For Kubernetes mode: Add auth_token query param for authentication
-        // Note: Docker mode does NOT validate this token - authentication gap that needs to be addressed
         if (token) {
           const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
@@ -243,10 +186,7 @@ export default function Project() {
         toast.loading('Development server is starting up...', { id: 'dev-server' });
         setTimeout(() => loadDevServerUrl(), 3000);
       } else if (response.url) {
-        // Store clean URL for display
         setDevServerUrl(response.url);
-
-        // Add auth token to iframe URL (Kubernetes auth, Docker has no validation)
         if (token) {
           const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
@@ -270,35 +210,6 @@ export default function Project() {
         url.searchParams.set('t', Date.now().toString());
         iframe.src = url.toString();
       }
-    }
-  };
-
-  const updateIframeUrl = () => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    try {
-      const iframeUrl = iframe.contentWindow?.location.href;
-      if (iframeUrl && iframeUrl !== 'about:blank') {
-        const urlObj = new URL(iframeUrl);
-        urlObj.searchParams.delete('auth_token');
-        urlObj.searchParams.delete('t');
-        urlObj.searchParams.delete('hmr_fallback');
-
-        // Reconstruct URL without the removed params
-        let cleanUrl = urlObj.origin + urlObj.pathname;
-        const remainingParams = urlObj.searchParams.toString();
-        if (remainingParams) {
-          cleanUrl += '?' + remainingParams;
-        }
-        if (urlObj.hash) {
-          cleanUrl += urlObj.hash;
-        }
-
-        setCurrentPreviewUrl(cleanUrl);
-      }
-    } catch (error) {
-      // Cross-origin error - can't access iframe URL
     }
   };
 
