@@ -13,9 +13,13 @@ export default defineConfig({
     // Allow requests from any host (needed for production access)
     allowedHosts: ['.localhost', 'your-domain.com', 'studio-demo.tesslate.com'],
     hmr: {
-      // Use environment variables set by our container system
-      host: process.env.VITE_HMR_HOST || 'localhost',
-      port: process.env.VITE_HMR_PORT ? parseInt(process.env.VITE_HMR_PORT) : 5173,
+      // CRITICAL: Configure HMR to work through Traefik proxy
+      // The WebSocket connects to the same host as the page URL
+      protocol: 'ws',
+      // Don't override host - let it use the same host as the page
+      host: undefined,
+      // Use port 80 (Traefik) instead of 5173
+      clientPort: 80,
     },
     watch: {
       // Use polling for reliable file watching in Docker containers

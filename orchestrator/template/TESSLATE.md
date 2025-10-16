@@ -39,26 +39,59 @@
 
 ### Application Routing
 
-[Describe your routing setup if applicable. Examples:
+**React Router Setup:**
 
-**For React Router:**
-- Using React Router DOM for client-side navigation
-- Use `<Link>` components instead of `<a>` tags to prevent page reloads
-- Configure routes in [specify file]
+This template includes React Router DOM v6 pre-configured for client-side navigation:
 
-**For Vue Router:**
-- Using Vue Router for navigation
-- Use `<router-link>` components
-- Routes defined in [specify file]
+- **Router Location**: `BrowserRouter` is configured inside `src/App.jsx`
+- **Routes**: Define routes in `src/App.jsx` using `<Routes>` and `<Route>` components
+- **Navigation**: Use `<Link>` components instead of `<a>` tags to prevent page reloads
+- **Programmatic Navigation**: Use the `useNavigate()` hook
 
-**For Single Page Apps:**
-- All navigation handled client-side
-- Use framework-specific router components
+**Adding New Routes:**
 
-**For Multi-Page Apps:**
-- Traditional server-side routing
-- Each page is a separate HTML file
-]
+1. Create a new page component (can be a simple function component)
+2. Import it in `src/App.jsx`
+3. Add a new `<Route>` inside the `<Routes>` component:
+   ```jsx
+   <Route path="/your-path" element={<YourComponent />} />
+   ```
+
+**Important for Tesslate Studio Preview:**
+
+- The app automatically communicates URL changes to the parent Tesslate Studio window
+- Back/forward navigation from the Studio UI is supported via `postMessage`
+- This communication is handled automatically - no additional setup needed
+
+**Example:**
+
+```jsx
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+
+function Home() {
+  return (
+    <div>
+      <h1>Home</h1>
+      <Link to="/about">Go to About</Link>
+    </div>
+  );
+}
+
+function About() {
+  return <div><h1>About Page</h1></div>;
+}
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/about" element={<About />} />
+      </Routes>
+    </Router>
+  );
+}
+```
 
 ## File Structure
 

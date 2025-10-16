@@ -61,17 +61,16 @@ cd k8s
 
 Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment variable:
 
-**Docker Mode** (Local Development & Production)
+**Docker Mode** (Local Development)
 - User projects run as Docker containers
-- Traefik reverse proxy for hostname-based routing
-- **Local dev**: `http://user{id}-project{id}.localhost`
-- **Production**: `https://user{id}-project{id}.yourdomain.com` (with wildcard DNS)
-- Storage: Volume mounts to `users/{user_id}/{project_id}/`
+- Traefik reverse proxy for routing
+- URLs: `user{id}-project{id}.localhost`
+- Storage: Local file system
 
 **Kubernetes Mode** (Production)
 - User projects run as K8s Pods/Deployments
-- NGINX Ingress Controller with hostname-based routing
-- URLs: `https://user{id}-project{id}.studio-test.tesslate.com`
+- NGINX Ingress Controller with SSL
+- URLs: `user{id}-project{id}.studio-test.tesslate.com`
 - Storage: Shared PVC with subPath isolation
 
 ### Services
@@ -260,11 +259,6 @@ DEPLOYMENT_MODE=docker  # or "kubernetes"
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_API_BASE=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4
-
-# Dev Container URL Configuration (optional)
-# Leave empty for local development (uses .localhost domains)
-# For production, set to your domain: https://studio-demo.tesslate.com
-# DEV_SERVER_BASE_URL=
 
 # CORS and Security (optional - has sensible defaults)
 CORS_ORIGINS=http://localhost:5173,http://localhost:3000

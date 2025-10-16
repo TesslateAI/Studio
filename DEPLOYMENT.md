@@ -43,15 +43,14 @@ Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment 
 
 1. **Docker Mode** (`DEPLOYMENT_MODE=docker`)
    - User dev environments run as Docker containers
-   - Uses Traefik reverse proxy for hostname-based routing
-   - **Local dev**: `http://user{id}-project{id}.localhost`
-   - **Production**: `https://user{id}-project{id}.yourdomain.com` (with wildcard DNS)
-   - Storage: Volume mounts to `users/{user_id}/{project_id}/`
+   - Uses Traefik reverse proxy for routing
+   - Routing: `user{id}-project{id}.localhost`
+   - Storage: Volume mounts to `users/{user_id}/projects/{project_id}/`
 
 2. **Kubernetes Mode** (`DEPLOYMENT_MODE=kubernetes`)
    - User dev environments run as Kubernetes Pods/Deployments
-   - Uses NGINX Ingress Controller with hostname-based routing
-   - Routing: `https://user{id}-project{id}.studio-test.tesslate.com`
+   - Uses NGINX Ingress Controller
+   - Routing: `user{id}-project{id}.studio-test.tesslate.com`
    - Storage: Shared PVC with subPath isolation
 
 ### Why Traefik is Required in Docker Mode
@@ -291,25 +290,11 @@ Single Server:
    docker compose -f docker-compose.prod.yml logs -f
    ```
 
-4. **Configure wildcard DNS** (for user dev containers)
-
-   **Option A: Using Cloudflare (Recommended)**
-   - Add DNS record: `*.studio-demo.tesslate.com` → Your server IP
-   - Enable Cloudflare proxy (orange cloud)
-   - SSL is handled automatically by Cloudflare
-
-   **Option B: Using Let's Encrypt**
-   - Traefik automatically obtains wildcard SSL certificates
+4. **SSL Certificate**
+   - Traefik automatically obtains Let's Encrypt SSL certificates
    - Certificates stored in `traefik/acme.json`
-   - Requires DNS challenge configuration
 
-5. **Update environment configuration**
-   ```bash
-   # In .env file
-   DEV_SERVER_BASE_URL=https://studio-demo.tesslate.com
-   ```
-
-6. **Access the application**
+5. **Access the application**
    - Frontend: https://studio-demo.tesslate.com
    - User Projects: https://user{id}-project{id}.studio-demo.tesslate.com
 
@@ -333,9 +318,6 @@ Single Server:
 - [ ] Firewall configured (ports 80, 443, 22 only)
 - [ ] Monitoring setup (logs, metrics)
 - [ ] SSL certificates auto-renewing
-- [ ] **Wildcard DNS configured**: `*.yourdomain.com` → server IP
-- [ ] **Cloudflare or Let's Encrypt wildcard SSL** configured
-- [ ] `DEV_SERVER_BASE_URL` set to production domain (e.g., `https://studio-demo.tesslate.com`)
 
 ---
 
@@ -446,26 +428,6 @@ DEPLOYMENT_MODE=docker
 DATABASE_URL=sqlite+aiosqlite:///./builder.db
 SECRET_KEY=your-secret-key
 OPENAI_API_KEY=your-openai-api-key
-
-# Dev Container URL Configuration (optional)
-# Leave empty for local development (uses .localhost domains)
-# DEV_SERVER_BASE_URL=
-```
-
-#### Docker Mode (Production with Wildcard DNS)
-```env
-# .env (for production Docker deployment)
-DEPLOYMENT_MODE=docker
-DATABASE_URL=postgresql+asyncpg://user:pass@postgres:5432/tesslate
-SECRET_KEY=strong-random-key
-OPENAI_API_KEY=your-openai-api-key
-
-# REQUIRED: Set to your production domain
-DEV_SERVER_BASE_URL=https://studio-demo.tesslate.com
-
-# CORS configuration
-CORS_ORIGINS=https://studio-demo.tesslate.com,https://*.studio-demo.tesslate.com
-ALLOWED_HOSTS=studio-demo.tesslate.com,*.studio-demo.tesslate.com
 ```
 
 #### Kubernetes Mode (Production)
@@ -474,10 +436,8 @@ ALLOWED_HOSTS=studio-demo.tesslate.com,*.studio-demo.tesslate.com
 DEPLOYMENT_MODE=kubernetes
 DATABASE_URL=postgresql+asyncpg://user:pass@postgres:5432/tesslate
 SECRET_KEY=strong-random-key
+DEV_SERVER_BASE_URL=https://studio-test.tesslate.com
 OPENAI_API_KEY=your-openai-api-key
-
-# This setting is ignored in Kubernetes mode (always uses hostname routing)
-# DEV_SERVER_BASE_URL=https://studio-test.tesslate.com
 ```
 
 ### Network Ports
@@ -515,31 +475,10 @@ docker network create tesslate-network
 docker ps | grep traefik
 
 # Check container logs
-docker logs builder-dev-user1-project5
+docker logs tesslate-dev-user1-project5
 
 # Check Traefik dashboard
 # Open http://localhost:8080 and verify routes
-
-# Verify hostname resolution
-# Local dev: http://user1-project5.localhost should work automatically
-# Production: Verify DNS is configured correctly
-nslookup user1-project5.yourdomain.com
-```
-
-**Problem:** "Failed to connect" or CORS errors in production
-```bash
-# Check DEV_SERVER_BASE_URL is set correctly
-# In .env or orchestrator/.env:
-echo $DEV_SERVER_BASE_URL  # Should show https://yourdomain.com
-
-# Verify wildcard DNS is configured
-nslookup user1-project5.yourdomain.com  # Should resolve to your server IP
-
-# Check CORS configuration includes wildcard
-# CORS_ORIGINS should include: https://yourdomain.com,https://*.yourdomain.com
-
-# Verify Cloudflare proxy is enabled (orange cloud)
-# Or that Let's Encrypt wildcard certificate is installed
 ```
 
 **Problem:** Port already in use

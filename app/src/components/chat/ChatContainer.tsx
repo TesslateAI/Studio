@@ -84,11 +84,25 @@ export function ChatContainer({
         console.log('[CHAT] Loading chat history from database for project:', projectId);
         const dbMessages = await chatApi.getProjectMessages(projectId);
         console.log('[CHAT] Loaded', dbMessages.length, 'messages from database');
-        setMessages(dbMessages.map((msg, idx) => ({
-          id: `msg-${idx}`,
-          type: msg.role as 'user' | 'ai',
-          content: msg.content
-        })));
+        setMessages(dbMessages.map((msg, idx) => {
+          const message: Message = {
+            id: `msg-${idx}`,
+            type: msg.role as 'user' | 'ai',
+            content: msg.content
+          };
+
+          // Restore agent data from metadata if available
+          if (msg.metadata && msg.metadata.agent_mode) {
+            message.agentData = {
+              steps: msg.metadata.steps,
+              iterations: msg.metadata.iterations,
+              tool_calls_made: msg.metadata.tool_calls_made,
+              completion_reason: msg.metadata.completion_reason
+            };
+          }
+
+          return message;
+        }));
       } catch (error) {
         console.error('[CHAT] Failed to load chat history:', error);
         setMessages([]);
