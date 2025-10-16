@@ -88,8 +88,10 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   let output = '';
   if (hasResult && result.result) {
     if (typeof result.result === 'object') {
-      // Handle different result types
-      if (result.result.stdout || result.result.stderr) {
+      // Prefer showing the 'message' field if available (cleaner output)
+      if (result.result.message) {
+        output = result.result.message;
+      } else if (result.result.stdout || result.result.stderr) {
         // Command execution result
         output = result.result.stdout || result.result.stderr || '';
       } else if (result.result.content !== undefined) {
@@ -99,9 +101,12 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         // Directory listing - handle both string arrays and object arrays
         if (Array.isArray(result.result.files)) {
           output = result.result.files.map((file: any) => {
-            // If file is an object with file_path property, extract it
-            if (typeof file === 'object' && file.file_path) {
-              return `${file.file_path} (${file.size || 0} bytes)`;
+            // If file is an object, format it properly
+            if (typeof file === 'object' && file !== null) {
+              const name = file.name || file.file_path || 'unknown';
+              const type = file.type ? `[${file.type}]` : '';
+              const size = file.size ? ` (${file.size} bytes)` : '';
+              return `${type} ${name}${size}`.trim();
             }
             // Otherwise treat it as a string
             return String(file);
@@ -119,6 +124,9 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   } else if (hasResult && result.error) {
     output = result.error;
   }
+
+  // Remove TASK_COMPLETE markers from output
+  output = output.replace(/TASK_COMPLETE[^\n]*/gi, '').trim();
 
   const shouldTruncate = shouldTruncateOutput(output);
   const displayOutput = shouldTruncate && !showFullOutput

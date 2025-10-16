@@ -481,7 +481,7 @@ async def agent_chat(
                     ],
                     "response_text": step.response_text,
                     "is_complete": step.is_complete,
-                    "timestamp": step.timestamp
+                    "timestamp": step.timestamp  # Already an ISO string from steps_response
                 }
                 for step in steps_response
             ]
@@ -523,39 +523,75 @@ async def agent_chat(
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: dict[int, WebSocket] = {}
+        # Use (user_id, project_id) tuple as key to support multiple projects per user
+        self.active_connections: dict[tuple[int, int], WebSocket] = {}
 
-    async def connect(self, websocket: WebSocket, user_id: int):
-        await websocket.accept()
-        self.active_connections[user_id] = websocket
+    def disconnect(self, user_id: int, project_id: int):
+        connection_key = (user_id, project_id)
+        if connection_key in self.active_connections:
+            del self.active_connections[connection_key]
+            logger.info(f"WebSocket disconnected: user {user_id}, project {project_id}")
 
-    def disconnect(self, user_id: int):
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
-
-    async def send_personal_message(self, message: str, user_id: int):
-        if user_id in self.active_connections:
-            await self.active_connections[user_id].send_text(message)
+    async def send_personal_message(self, message: str, user_id: int, project_id: int):
+        connection_key = (user_id, project_id)
+        if connection_key in self.active_connections:
+            await self.active_connections[connection_key].send_text(message)
 
 manager = ConnectionManager()
 
 @router.websocket("/ws/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession = Depends(get_db)):
     user = None
+    project_id = None
     try:
         # Verify token and get user
         from ..auth import jwt, settings, JWTError
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         username = payload.get("sub")
-        
+
         result = await db.execute(select(User).where(User.username == username))
         user = result.scalar_one_or_none()
         if not user:
             await websocket.close(code=1008)
             return
-        
-        await manager.connect(websocket, user.id)
-        
+
+        # Accept connection first (required before receiving messages)
+        await websocket.accept()
+
+        # Wait for first message to get project_id
+        try:
+            first_message = await websocket.receive_json()
+            project_id = first_message.get("project_id")
+
+            if not project_id:
+                logger.error("WebSocket: No project_id in first message")
+                await websocket.close(code=1008, reason="project_id required")
+                return
+
+            # Now register the connection with user_id and project_id
+            # Note: We already called accept() above, so we need to update connect() logic
+            connection_key = (user.id, project_id)
+
+            # Close any existing connection for this user+project combination
+            if connection_key in manager.active_connections:
+                try:
+                    old_ws = manager.active_connections[connection_key]
+                    await old_ws.close(code=1000, reason="New connection established")
+                except Exception as e:
+                    logger.warning(f"Failed to close old WebSocket for user {user.id}, project {project_id}: {e}")
+
+            manager.active_connections[connection_key] = websocket
+            logger.info(f"WebSocket connected: user {user.id}, project {project_id}")
+
+            # Process the first message
+            await handle_chat_message(first_message, user, db, websocket)
+
+        except Exception as e:
+            logger.error(f"Error processing first WebSocket message: {e}")
+            await websocket.close(code=1011, reason="Failed to initialize connection")
+            return
+
+        # Continue processing messages
         while True:
             try:
                 data = await websocket.receive_json()
@@ -563,7 +599,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                print(f"Error handling message: {e}")
+                logger.error(f"Error handling message: {e}")
                 try:
                     await websocket.send_json({
                         "type": "error",
@@ -571,12 +607,12 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
                     })
                 except:
                     break
-                    
+
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}")
     finally:
-        if user:
-            manager.disconnect(user.id)
+        if user and project_id:
+            manager.disconnect(user.id, project_id)
 
 async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocket: WebSocket):
     message_content = data.get("message")

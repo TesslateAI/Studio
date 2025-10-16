@@ -83,12 +83,15 @@ async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) 
             # Docker mode: Execute via docker exec
             container_name = f"builder-dev-user{user_id}-project{project_id}"
 
-            # Construct docker exec command
+            # Construct docker exec command with proper working directory
+            # Note: Docker exec handles shell wrapping differently than K8s,
+            # so we use the original command instead of validation.sanitized_command
+            working_path = f"/app/{working_dir}" if working_dir != "." else "/app"
             docker_cmd = [
                 "docker", "exec",
-                "-w", f"/app/{working_dir}" if working_dir != "." else "/app",
+                "-w", working_path,
                 container_name,
-                "sh", "-c", validation.sanitized_command
+                "sh", "-c", command  # Use original command, not sanitized (which is a list)
             ]
 
             result = subprocess.run(

@@ -9,7 +9,7 @@ Works with ANY language model by using text-based tool calling instead of functi
 import logging
 from typing import List, Dict, Any, Optional, AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .models import ModelAdapter
 from .parser import AgentResponseParser, ToolCall
@@ -27,7 +27,7 @@ class AgentStep:
     tool_calls: List[ToolCall]
     tool_results: List[Dict[str, Any]]
     response_text: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     is_complete: bool = False
 
 
@@ -277,12 +277,23 @@ class UniversalAgent:
                 # Format result based on content
                 if isinstance(tool_result, dict):
                     for key, value in tool_result.items():
+                        # Skip preview for now, we'll show it specially
+                        if key == "preview":
+                            continue
+
                         if isinstance(value, str) and len(value) > 500:
                             formatted.append(f"   {key}: {value[:500]}... (truncated)")
                         elif isinstance(value, list) and len(value) > 10:
                             formatted.append(f"   {key}: [{len(value)} items]")
                         else:
                             formatted.append(f"   {key}: {value}")
+
+                    # Show preview last if it exists (for write_file)
+                    if "preview" in tool_result:
+                        formatted.append(f"   Content Preview:")
+                        preview_lines = tool_result["preview"].split('\n')
+                        for line in preview_lines:
+                            formatted.append(f"   | {line}")
                 else:
                     formatted.append(f"   {tool_result}")
             else:

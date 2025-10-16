@@ -114,6 +114,15 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     project_id = str(context["project_id"])
     settings = get_settings()
 
+    # Show a preview of what was written (first and last few lines)
+    lines = content.split('\n')
+    preview_lines = 5
+
+    if len(lines) <= preview_lines * 2:
+        preview = content
+    else:
+        preview = '\n'.join(lines[:preview_lines]) + '\n\n... (' + str(len(lines) - preview_lines * 2) + ' lines omitted) ...\n\n' + '\n'.join(lines[-preview_lines:])
+
     if settings.deployment_mode == "kubernetes":
         # Kubernetes mode: Write to pod
         from ...k8s_client import get_k8s_manager
@@ -129,7 +138,9 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             "success": success,
             "file_path": file_path,
             "size": len(content),
-            "message": f"Successfully wrote {len(content)} bytes to {file_path}"
+            "lines": len(lines),
+            "preview": preview,
+            "message": f"Successfully wrote {len(lines)} lines ({len(content)} bytes) to {file_path}"
         }
     else:
         # Docker mode: Write to local filesystem
@@ -154,7 +165,9 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 "success": True,
                 "file_path": file_path,
                 "size": len(content),
-                "message": f"Successfully wrote {len(content)} bytes to {file_path}"
+                "lines": len(lines),
+                "preview": preview,
+                "message": f"Successfully wrote {len(lines)} lines ({len(content)} bytes) to {file_path}"
             }
         except Exception as e:
             return {
