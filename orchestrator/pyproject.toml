@@ -1,7 +1,7 @@
 [project]
-name = "backend"
+name = "tesslate-studio-orchestrator"
 version = "0.1.0"
-description = "AI Application Builder Backend"
+description = "Tesslate Studio - Open source full stack software builder - Backend Orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

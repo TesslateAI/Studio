@@ -137,7 +137,15 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         full_path = os.path.join(project_dir, file_path)
 
         try:
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            # Create parent directory (with safety check for Windows Docker volumes)
+            parent_dir = os.path.dirname(full_path)
+            if parent_dir:
+                try:
+                    os.makedirs(parent_dir, exist_ok=True)
+                except FileExistsError:
+                    # Handle race condition on Windows Docker volumes - verify it exists
+                    if not os.path.exists(parent_dir):
+                        raise
 
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(content)

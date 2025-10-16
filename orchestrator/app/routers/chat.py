@@ -891,7 +891,16 @@ async def save_file(file_path: str, code: str, project_id: int, user_id: int, db
             try:
                 project_dir = f"users/{user_id}/{project_id}"
                 full_path = os.path.join(project_dir, file_path)
-                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+                # Create parent directory (with safety check for Windows Docker volumes)
+                parent_dir = os.path.dirname(full_path)
+                if parent_dir:
+                    try:
+                        os.makedirs(parent_dir, exist_ok=True)
+                    except FileExistsError:
+                        # Handle race condition on Windows Docker volumes - verify it exists
+                        if not os.path.exists(parent_dir):
+                            raise
 
                 async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
                     await f.write(code)
