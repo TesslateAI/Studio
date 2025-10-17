@@ -42,8 +42,15 @@ def get_password_hash(password):
             password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
         return pwd_context.hash(password)
 
-async def authenticate_user(db: AsyncSession, username: str, password: str):
-    result = await db.execute(select(User).where(User.username == username))
+async def authenticate_user(db: AsyncSession, username_or_email: str, password: str):
+    """Authenticate user by username or email and password."""
+    # Try to find user by username or email
+    from sqlalchemy import or_
+    result = await db.execute(
+        select(User).where(
+            or_(User.username == username_or_email, User.email == username_or_email)
+        )
+    )
     user = result.scalar_one_or_none()
     if not user:
         return False

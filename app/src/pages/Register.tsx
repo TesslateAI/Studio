@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 export default function Register() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    name: '',
     username: '',
     email: '',
     password: '',
@@ -25,9 +26,16 @@ export default function Register() {
     setLoading(true);
 
     try {
-      await authApi.register(formData.username, formData.email, formData.password);
-      toast.success('Registration successful! Please login.');
-      navigate('/login');
+      const response = await authApi.register(formData.name, formData.username, formData.email, formData.password);
+
+      // Store tokens from registration (auto-login)
+      localStorage.setItem('token', response.access_token);
+      if (response.refresh_token) {
+        localStorage.setItem('refreshToken', response.refresh_token);
+      }
+
+      toast.success('Account created successfully!');
+      navigate('/dashboard');
     } catch (error: any) {
       // Handle validation errors (array format from FastAPI/Pydantic)
       if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
@@ -52,7 +60,7 @@ export default function Register() {
       }}
     >
       {/* Centered floating container */}
-      <div className="flex w-full max-w-6xl rounded-xl sm:rounded-3xl overflow-hidden shadow-2xl border-2 sm:border-4 border-black/50">
+      <div className="flex w-full max-w-6xl rounded-lg sm:rounded-xl lg:rounded-3xl overflow-hidden shadow-2xl border border-black/30 sm:border-2 lg:border-4 border-black/50">
         {/* Left side - Image */}
         <div
           className="hidden lg:block lg:w-1/2 bg-cover bg-center"
@@ -62,47 +70,61 @@ export default function Register() {
         />
 
         {/* Right side - Form */}
-        <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-8 lg:p-16 bg-[#0a0a0a]">
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-4 sm:p-6 lg:p-16 bg-[#0a0a0a]">
         <div className="w-full max-w-md">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2">
+          <div className="mb-6 sm:mb-8">
+            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
               Create your account
             </h1>
-            <p className="text-gray-400 text-sm">
+            <p className="text-gray-400 text-xs sm:text-sm">
               Experience next-generation artificial intelligence tools designed to boost productivity and automate tasks.
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-white text-sm font-medium mb-2">
-                Full name*
+                Full Name*
+              </label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full bg-transparent border border-gray-700 text-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
+                placeholder="Andrew Gonzales"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-white text-sm font-medium mb-2">
+                Username*
               </label>
               <input
                 type="text"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                className="w-full bg-transparent border border-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
-                placeholder="Andrew Gonzales |"
+                className="w-full bg-transparent border border-gray-700 text-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
+                placeholder="andrewg"
                 required
               />
             </div>
 
             <div>
               <label className="block text-white text-sm font-medium mb-2">
-                Email address*
+                Email Address*
               </label>
               <input
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full bg-transparent border border-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
-                placeholder="andrew.gonzales@example.com |"
+                className="w-full bg-transparent border border-gray-700 text-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
+                placeholder="andrew@example.com"
                 required
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-white text-sm font-medium mb-2">
                   Password*
@@ -111,8 +133,8 @@ export default function Register() {
                   type="password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full bg-transparent border border-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
-                  placeholder="••••••• |"
+                  className="w-full bg-transparent border border-gray-700 text-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
+                  placeholder="•••••••"
                   required
                   minLength={6}
                 />
@@ -120,14 +142,14 @@ export default function Register() {
 
               <div>
                 <label className="block text-white text-sm font-medium mb-2">
-                  Confirm Password*
+                  Confirm*
                 </label>
                 <input
                   type="password"
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                  className="w-full bg-transparent border border-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
-                  placeholder="••••••• |"
+                  className="w-full bg-transparent border border-gray-700 text-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
+                  placeholder="•••••••"
                   required
                   minLength={6}
                 />
@@ -141,12 +163,12 @@ export default function Register() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#FF6B00] text-white py-3 px-4 rounded-lg hover:bg-[#ff7a1a] disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:shadow-lg mt-6"
+              className="w-full bg-[#FF6B00] text-white py-2.5 sm:py-3 px-4 rounded-lg hover:bg-[#ff7a1a] disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:shadow-lg mt-4 sm:mt-6 text-sm sm:text-base"
             >
               {loading ? (
                 <div className="flex items-center justify-center gap-2">
-                  <PulsingGridSpinner size={20} />
-                  <span>Creating account...</span>
+                  <PulsingGridSpinner size={18} />
+                  <span className="text-sm sm:text-base">Creating account...</span>
                 </div>
               ) : (
                 'Create Account'
@@ -156,12 +178,12 @@ export default function Register() {
 
           <div className="mt-6 text-center">
             <p className="text-gray-400 text-sm">
-              Don't have an account?{' '}
+              Already have an account?{' '}
               <Link
                 to="/login"
                 className="text-white hover:text-gray-300 font-semibold transition-colors"
               >
-                Sign Up
+                Sign in instead
               </Link>
             </p>
           </div>

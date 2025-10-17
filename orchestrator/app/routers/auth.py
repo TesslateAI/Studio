@@ -19,8 +19,13 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter()
 
-@router.post("/register", response_model=UserSchema)
+@router.post("/register", response_model=Token)
 async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
+    """
+    Register a new user and automatically log them in.
+
+    Returns access and refresh tokens so the user doesn't need to login separately.
+    """
     # Check if user exists
     result = await db.execute(
         select(User).where((User.username == user.username) | (User.email == user.email))
@@ -31,10 +36,11 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
             status_code=400,
             detail="Username or email already registered"
         )
-    
+
     # Create new user
     hashed_password = get_password_hash(user.password)
     db_user = User(
+        name=user.name,
         username=user.username,
         email=user.email,
         hashed_password=hashed_password
@@ -60,25 +66,44 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
         logger.error(f"Failed to create LiteLLM key for user {db_user.username}: {e}")
         # Don't fail registration if LiteLLM is down - can be added later
 
-    return db_user
+    # Auto-login: Create tokens for the new user
+    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+    access_token = create_access_token(
+        data={"sub": db_user.username}, expires_delta=access_token_expires
+    )
+
+    # Create refresh token
+    refresh_token = await create_refresh_token(db_user, db)
+
+    logger.info(f"User {db_user.username} registered and auto-logged in")
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token
+    }
 
 @router.post("/token", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
     """
     Login endpoint that returns both access and refresh tokens.
 
+    Note: OAuth2 requires the field to be called "username", but we accept username OR email.
+
     Best practice token lifecycle:
     - Access token: Short-lived (30 minutes) for API requests
     - Refresh token: Long-lived (14 days) for obtaining new access tokens
     """
     try:
-        logger.info(f"Login attempt for username: {form_data.username}")
-        user = await authenticate_user(db, form_data.username, form_data.password)
+        # OAuth2 spec requires field name "username", but we accept username or email
+        username_or_email = form_data.username
+        logger.info(f"Login attempt for: {username_or_email}")
+        user = await authenticate_user(db, username_or_email, form_data.password)
         if not user:
-            logger.warning(f"Authentication failed for username: {form_data.username}")
+            logger.warning(f"Authentication failed for: {username_or_email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
+                detail="Incorrect username/email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
@@ -91,7 +116,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
         # Create refresh token (long-lived)
         refresh_token = await create_refresh_token(user, db)
 
-        logger.info(f"Login successful for username: {form_data.username}")
+        logger.info(f"Login successful for: {username_or_email}")
         return {
             "access_token": access_token,
             "token_type": "bearer",

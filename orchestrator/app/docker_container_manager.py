@@ -648,13 +648,21 @@ docker-compose*
                 "--label", f"com.builder.devserver.project_id={project_id}",
                 "--label", "com.builder.devserver.type=devserver",
                 "--label", f"com.builder.devserver.hostname={hostname}",
-                # Environment variables for Vite HMR (Hot Module Replacement)
-                "-e", "VITE_HMR_HOST=0.0.0.0",                          # HMR WebSocket host
-                "-e", "VITE_HMR_PORT=5173",                             # HMR WebSocket port (internal container port)
-                "-e", "VITE_HMR_PROTOCOL=ws",                           # WebSocket protocol
+            ]
+
+            # Determine HMR protocol and port based on deployment
+            settings = get_settings()
+            is_https = settings.dev_server_base_url.startswith('https://')
+            hmr_protocol = 'wss' if is_https else 'ws'
+            hmr_port = '443' if is_https else '80'
+
+            # Environment variables for Vite HMR (Hot Module Replacement)
+            run_cmd.extend([
+                "-e", f"VITE_HMR_PROTOCOL={hmr_protocol}",              # WebSocket protocol (ws or wss)
+                "-e", f"VITE_HMR_PORT={hmr_port}",                      # HMR WebSocket port (80 for HTTP, 443 for HTTPS)
                 "-e", "CHOKIDAR_USEPOLLING=true",                       # Enable polling for file watching
                 "-e", "CHOKIDAR_INTERVAL=1000",                         # Polling interval (1 second)
-            ]
+            ])
             
             # Calculate base path for routing
             user_project = hostname.replace('.localhost', '')

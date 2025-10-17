@@ -22,7 +22,7 @@ certificatesResolvers:
     acme:
       httpChallenge:
         entryPoint: web
-      email: dev@localhost
+      email: admin@tesslate.com
       storage: acme.json
 
 log:

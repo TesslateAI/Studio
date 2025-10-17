@@ -38,7 +38,7 @@ class LiteLLMService:
         """
         if models is None:
             # Default models available to new users
-            models = ["UIGEN-FX-SMALL", "WEBGEN-SMALL"]
+            models = ["cerebras/qwen-3-coder-480b"]
 
         # Generate unique user ID for LiteLLM
         litellm_user_id = f"user_{user_id}_{username}"
@@ -75,6 +75,7 @@ class LiteLLMService:
                     "user_id": litellm_user_id,
                     "key_alias": f"{username}_key",
                     "models": models,
+                    "team_id": "internal",  # Access group for cerebras models
                     "max_budget": 10.0,  # Initial budget in USD
                     "duration": "365d",  # Key valid for 1 year
                     "metadata": {
@@ -94,6 +95,32 @@ class LiteLLMService:
                         raise Exception(f"Failed to generate API key: {error_text}")
 
                     key_response = await resp.json()
+
+                # Add user to the internal team as a member
+                try:
+                    member_data = {
+                        "team_id": "internal",
+                        "member": {
+                            "user_id": litellm_user_id,
+                            "role": "user"
+                        }
+                    }
+
+                    async with session.post(
+                        f"{self.base_url}/team/member_add",
+                        headers=self.headers,
+                        json=member_data
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.info(f"Added {litellm_user_id} to internal team")
+                        else:
+                            error_text = await resp.text()
+                            logger.warning(f"Could not add user to internal team: {error_text}")
+                            # Don't fail - the team_id in the key might be enough
+
+                except Exception as e:
+                    logger.warning(f"Error adding user to team: {e}")
+                    # Don't fail the whole key creation
 
                 return {
                     "api_key": key_response.get("key"),
@@ -133,6 +160,42 @@ class LiteLLMService:
 
             except Exception as e:
                 logger.error(f"Error updating user models: {e}")
+                return False
+
+    async def update_user_team(self, api_key: str, team_id: str, models: List[str] = None) -> bool:
+        """
+        Update the team/access group for a user's key.
+
+        Args:
+            api_key: User's LiteLLM API key
+            team_id: Team/access group ID (e.g., "internal")
+            models: Optional list of models to set simultaneously
+
+        Returns:
+            True if successful, False otherwise
+        """
+        async with aiohttp.ClientSession() as session:
+            try:
+                update_data = {
+                    "key": api_key,
+                    "team_id": team_id
+                }
+
+                if models:
+                    update_data["models"] = models
+
+                async with session.post(
+                    f"{self.base_url}/key/update",
+                    headers=self.headers,
+                    json=update_data
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(f"Failed to update user team: {error_text}")
+                    return resp.status == 200
+
+            except Exception as e:
+                logger.error(f"Error updating user team: {e}")
                 return False
 
     async def add_user_budget(self, api_key: str, amount: float) -> bool:

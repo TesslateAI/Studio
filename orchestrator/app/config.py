@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_api_base: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-3.5-turbo"
+
+    # LiteLLM Configuration (for per-user API keys and usage tracking)
+    litellm_api_base: str = "https://apin.tesslate.com/v1"
+    litellm_master_key: str = ""
+
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14

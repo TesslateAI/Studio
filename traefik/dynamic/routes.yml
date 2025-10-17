@@ -15,7 +15,7 @@ http:
       entryPoints:
         - websecure
       tls:
-        certResolver: cloudflare
+        certResolver: letsencrypt
       priority: 1
 
     # API HTTP router
@@ -33,7 +33,7 @@ http:
       entryPoints:
         - websecure
       tls:
-        certResolver: cloudflare
+        certResolver: letsencrypt
       priority: 10
 
     # Preview containers routing - handled by Docker provider auto-discovery

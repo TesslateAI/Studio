@@ -17,13 +17,12 @@ export default defineConfig({
     hmr: {
       // CRITICAL: Configure HMR to work through Traefik proxy
       // The WebSocket connects to the same host as the page URL
-      protocol: 'ws',
+      protocol: process.env.VITE_HMR_PROTOCOL || 'ws',
       // Use the page's hostname for WebSocket connection
-      host: undefined,
-      // Use port 80 (Traefik) instead of 5173
-      clientPort: 80,
-      // Use the base path for WebSocket connection
-      path: (process.env.VITE_BASE_PATH || '/').replace(/\/$/, '') + '/',
+      host: process.env.VITE_HMR_HOST || undefined,
+      // Use port from environment (80 for HTTP, 443 for HTTPS)
+      clientPort: process.env.VITE_HMR_PORT ? parseInt(process.env.VITE_HMR_PORT) : 80,
+      // Vite automatically uses the base path for WebSocket, no need to duplicate it
     },
     watch: {
       // Use polling for reliable file watching in Docker containers

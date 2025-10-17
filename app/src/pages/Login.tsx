@@ -51,7 +51,7 @@ export default function Login() {
       }}
     >
       {/* Centered floating container */}
-      <div className="flex w-full max-w-6xl rounded-xl sm:rounded-3xl overflow-hidden shadow-2xl border-2 sm:border-4 border-black/50">
+      <div className="flex w-full max-w-6xl rounded-lg sm:rounded-xl lg:rounded-3xl overflow-hidden shadow-2xl border border-black/30 sm:border-2 lg:border-4 border-black/50">
         {/* Left side - Image */}
         <div
           className="hidden lg:block lg:w-1/2 bg-cover bg-center"
@@ -61,28 +61,28 @@ export default function Login() {
         />
 
         {/* Right side - Form */}
-        <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-8 lg:p-16 bg-[#0a0a0a]">
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-4 sm:p-6 lg:p-16 bg-[#0a0a0a]">
         <div className="w-full max-w-md">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2">
+          <div className="mb-6 sm:mb-8">
+            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
               Welcome back
             </h1>
-            <p className="text-gray-400 text-sm">
+            <p className="text-gray-400 text-xs sm:text-sm">
               Sign in to your account to continue building amazing apps
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-white text-sm font-medium mb-2">
-                Username
+                Username or Email
               </label>
               <input
                 type="text"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                className="w-full bg-transparent border border-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
-                placeholder="Enter your username"
+                className="w-full bg-transparent border border-gray-700 text-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500 text-sm sm:text-base"
+                placeholder="Enter your username or email"
                 required
               />
             </div>
@@ -95,7 +95,7 @@ export default function Login() {
                 type="password"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full bg-transparent border border-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500"
+                className="w-full bg-transparent border border-gray-700 text-white px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-transparent transition-all placeholder:text-gray-500 text-sm sm:text-base"
                 placeholder="Enter your password"
                 required
               />
@@ -108,12 +108,12 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#FF6B00] text-white py-3 px-4 rounded-lg hover:bg-[#ff7a1a] disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:shadow-lg mt-6"
+              className="w-full bg-[#FF6B00] text-white py-2.5 sm:py-3 px-4 rounded-lg hover:bg-[#ff7a1a] disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:shadow-lg mt-4 sm:mt-6 text-sm sm:text-base"
             >
               {loading ? (
                 <div className="flex items-center justify-center gap-2">
-                  <PulsingGridSpinner size={20} />
-                  <span>Signing in...</span>
+                  <PulsingGridSpinner size={18} />
+                  <span className="text-sm sm:text-base">Signing in...</span>
                 </div>
               ) : (
                 'Sign In'

@@ -367,8 +367,19 @@ async def agent_chat(
             except Exception as e:
                 logger.error(f"Error loading agent configuration: {e}")
 
-        # Create model adapter
-        model_adapter = get_model_adapter_from_settings(settings)
+        # Create model adapter using user's LiteLLM key
+        if not current_user.litellm_api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="User does not have a LiteLLM API key. Please contact support."
+            )
+
+        from ..agent.models import create_model_adapter
+        model_adapter = create_model_adapter(
+            model_name=settings.openai_model,  # Default model (cerebras/qwen-3-coder-480b)
+            api_key=current_user.litellm_api_key,  # Use user's LiteLLM key for tracking
+            api_base=settings.litellm_api_base  # LiteLLM proxy endpoint
+        )
 
         # Create agent with optional system prompt
         agent = UniversalAgent(
@@ -654,6 +665,8 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         # Get project context if available
         context = ""
         has_existing_files = False
+        selected_files_content = ""
+
         if project_id:
             result = await db.execute(
                 select(ProjectFile).where(ProjectFile.project_id == project_id)
@@ -661,12 +674,77 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             files = result.scalars().all()
             if files:
                 has_existing_files = True
-                # CONTEXT REDUCTION: Only include file list, not full content
-                # This prevents token limit errors (65k token limit for Cerebras)
-                context = "\n\nProject has existing files - the AI can read them if needed.\n"
-                # context = "\n\nProject files:\n"
-                # for file in files:
-                #     context += f"\nFile: {file.file_path}\n{file.content}\n"
+
+                # Build file list for the AI to see
+                file_list = "\n\nExisting files in project:"
+                for file in files:
+                    file_size = len(file.content) if file.content else 0
+                    file_list += f"\n- {file.file_path} ({file_size} chars)"
+
+                context = file_list
+
+                # Selective file reading: Use AI to decide which files are relevant
+                # This prevents token limit errors while still providing context
+                # Maximum context size: ~15k tokens (~60k chars) to stay well under 65k limit
+                MAX_CONTEXT_CHARS = 60000
+
+                # First, try to identify obviously relevant files based on user message
+                message_lower = message_content.lower()
+                relevant_files = []
+
+                for file in files:
+                    file_path_lower = file.file_path.lower()
+
+                    # Check if file is explicitly mentioned
+                    if file.file_path in message_content or any(part in message_lower for part in file_path_lower.split('/')):
+                        relevant_files.append(file)
+                        continue
+
+                    # Include key configuration files
+                    if file_path_lower in ['package.json', 'vite.config.js', 'tsconfig.json', '.env', 'readme.md']:
+                        relevant_files.append(file)
+                        continue
+
+                    # Include main entry points
+                    if 'main' in file_path_lower or 'index' in file_path_lower or 'app' in file_path_lower:
+                        relevant_files.append(file)
+
+                # Get the most recent assistant response to include related files
+                if chat_id:
+                    last_msg_result = await db.execute(
+                        select(Message).where(
+                            Message.chat_id == chat_id,
+                            Message.role == "assistant"
+                        ).order_by(Message.created_at.desc()).limit(1)
+                    )
+                    last_assistant_msg = last_msg_result.scalar_one_or_none()
+
+                    # If there's a previous response, try to identify files mentioned in it
+                    if last_assistant_msg and last_assistant_msg.content:
+                        for file in files:
+                            if file not in relevant_files and file.file_path in last_assistant_msg.content:
+                                relevant_files.append(file)
+
+                # Limit total context size
+                total_chars = 0
+                selected_files = []
+
+                for file in relevant_files:
+                    file_chars = len(file.content) if file.content else 0
+                    if total_chars + file_chars < MAX_CONTEXT_CHARS:
+                        selected_files.append(file)
+                        total_chars += file_chars
+                    else:
+                        break
+
+                # Build context with selected files
+                if selected_files:
+                    selected_files_content = "\n\nRelevant files for context:"
+                    for file in selected_files:
+                        selected_files_content += f"\n\n{'='*60}\nFile: {file.file_path}\n{'='*60}\n{file.content}\n"
+
+                    context += selected_files_content
+                    logger.info(f"Selected {len(selected_files)} files for context ({total_chars} chars total)")
     except Exception as e:
         await db.rollback()
         logger.error(f"Database error in initial chat setup: {e}", exc_info=True)
@@ -677,11 +755,19 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         return
     
     # WebSocket is already connected if we got here
-    
-    # Stream response from OpenAI
+
+    # Check if user has LiteLLM API key
+    if not user.litellm_api_key:
+        await websocket.send_json({
+            "type": "error",
+            "content": "User does not have a LiteLLM API key. Please contact support."
+        })
+        return
+
+    # Stream response using user's LiteLLM key for usage tracking
     client = AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_api_base
+        api_key=user.litellm_api_key,  # Use user's LiteLLM key for per-user tracking
+        base_url=settings.litellm_api_base  # LiteLLM proxy endpoint
     )
     
     full_response = ""

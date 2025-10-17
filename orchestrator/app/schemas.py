@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 class UserBase(BaseModel):
+    name: str
     username: str
     email: EmailStr
 
@@ -19,14 +20,14 @@ class UserCreate(UserBase):
         return v
 
 class UserLogin(BaseModel):
-    username: str
+    username_or_email: str  # Can be either username or email
     password: str
 
 class User(UserBase):
     id: int
     is_active: bool
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
