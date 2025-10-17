@@ -28,7 +28,7 @@ if [ ! -f .env ]; then
     echo "Creating root .env file..."
     cp .env.example .env
     echo -e "${GREEN}✓ Created .env${NC}"
-    echo -e "${YELLOW}⚠ IMPORTANT: Edit .env and set your SECRET_KEY and OPENAI_API_KEY${NC}"
+    echo -e "${YELLOW}⚠ IMPORTANT: Edit .env and set your SECRET_KEY and LITELLM_MASTER_KEY${NC}"
 else
     echo -e "${GREEN}✓ Root .env already exists${NC}"
 fi
@@ -61,8 +61,8 @@ if grep -q "your-secret-key-here-change-this-in-production" .env 2>/dev/null; th
     NEEDS_CONFIG=true
 fi
 
-if grep -q "your-openai-api-key-here" .env 2>/dev/null; then
-    echo -e "${YELLOW}⚠ WARNING: OPENAI_API_KEY is not configured in .env${NC}"
+if grep -q "your-litellm-master-key-here" .env 2>/dev/null; then
+    echo -e "${YELLOW}⚠ WARNING: LITELLM_MASTER_KEY is not configured in .env${NC}"
     NEEDS_CONFIG=true
 fi
 
@@ -70,7 +70,7 @@ if [ "$NEEDS_CONFIG" = true ]; then
     echo ""
     echo -e "${YELLOW}Please edit .env and set:${NC}"
     echo "  1. SECRET_KEY (must be at least 32 characters)"
-    echo "  2. OPENAI_API_KEY (get from https://platform.openai.com/api-keys)"
+    echo "  2. LITELLM_MASTER_KEY (for your LiteLLM proxy)"
     echo ""
     read -p "Press Enter when you've updated .env, or Ctrl+C to exit..."
 fi

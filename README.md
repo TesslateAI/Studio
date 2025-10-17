@@ -10,7 +10,7 @@ AI-powered web application builder with natural language code generation and liv
 ```bash
 # 1. Configure environment
 cp .env.example .env
-# Edit .env and set SECRET_KEY and OPENAI_API_KEY
+# Edit .env and set SECRET_KEY and LITELLM_MASTER_KEY
 
 # 2. Start all services
 docker compose up -d
@@ -248,7 +248,8 @@ cp .env.example .env
 **Root `.env` (Docker Compose):**
 ```env
 SECRET_KEY=your-secret-key-here-change-this-in-production
-OPENAI_API_KEY=your-openai-api-key-here
+LITELLM_MASTER_KEY=your-litellm-master-key-here
+LITELLM_API_BASE=http://localhost:4000/v1
 ```
 
 **`orchestrator/.env` (Individual Services):**
@@ -256,9 +257,10 @@ OPENAI_API_KEY=your-openai-api-key-here
 SECRET_KEY=your-secret-key-here
 DATABASE_URL=sqlite+aiosqlite:///./builder.db
 DEPLOYMENT_MODE=docker  # or "kubernetes"
-OPENAI_API_KEY=your-openai-api-key
-OPENAI_API_BASE=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4
+LITELLM_API_BASE=http://localhost:4000/v1
+LITELLM_MASTER_KEY=your-litellm-master-key
+OPENAI_API_BASE=http://localhost:4000/v1  # Points to LiteLLM proxy
+OPENAI_MODEL=gpt-4  # Model available in your LiteLLM instance
 
 # CORS and Security (optional - has sensible defaults)
 CORS_ORIGINS=http://localhost:5173,http://localhost:3000
@@ -276,7 +278,7 @@ Configure secrets in `k8s/manifests/security/app-secrets.yaml`:
 ```yaml
 SECRET_KEY: <base64-encoded>
 JWT_SECRET: <base64-encoded>
-OPENAI_API_KEY: <base64-encoded>
+LITELLM_MASTER_KEY: <base64-encoded>
 DATABASE_URL: <base64-encoded>
 CORS_ORIGINS: "https://studio-test.tesslate.com,https://studio-demo.tesslate.com"
 ALLOWED_HOSTS: "studio-test.tesslate.com,*.studio-test.tesslate.com"

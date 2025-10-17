@@ -286,18 +286,3 @@ def create_model_adapter(
         raise ValueError(f"Unsupported provider: {provider}")
 
 
-def get_model_adapter_from_settings(settings) -> ModelAdapter:
-    """
-    Create a model adapter from application settings.
-
-    Args:
-        settings: Settings object with openai_model, openai_api_key, openai_api_base
-
-    Returns:
-        ModelAdapter instance
-    """
-    return create_model_adapter(
-        model_name=settings.openai_model,
-        api_key=settings.openai_api_key,
-        api_base=settings.openai_api_base if settings.openai_api_base != "https://api.openai.com/v1" else None
-    )

@@ -55,9 +55,10 @@ The orchestrator supports two deployment modes configured via `DEPLOYMENT_MODE`:
    - `SECRET_KEY`: JWT secret key for authentication
    - `DATABASE_URL`: Database connection (SQLite or PostgreSQL)
    - `DEPLOYMENT_MODE`: `docker` or `kubernetes`
-   - `OPENAI_API_KEY`: Your OpenAI API key
-   - `OPENAI_API_BASE`: API base URL (default: https://api.openai.com/v1)
-   - `OPENAI_MODEL`: Model to use (e.g., gpt-4, gpt-3.5-turbo)
+   - `LITELLM_API_BASE`: LiteLLM proxy URL (e.g., http://localhost:4000/v1)
+   - `LITELLM_MASTER_KEY`: LiteLLM master API key for managing user keys
+   - `OPENAI_API_BASE`: Points to LiteLLM proxy (same as LITELLM_API_BASE)
+   - `OPENAI_MODEL`: Model to use via LiteLLM (e.g., gpt-4, cerebras/llama3.1-8b)
 
 ## 🏃 Running the Service
 

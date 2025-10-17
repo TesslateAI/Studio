@@ -16,13 +16,23 @@ class LiteLLMService:
     """Service for interacting with LiteLLM proxy for user management and usage tracking."""
 
     def __init__(self):
-        # Get configuration from environment variables
-        self.base_url = os.getenv("LITELLM_API_BASE", "https://apin.tesslate.com")
-        self.master_key = os.getenv("LITELLM_MASTER_KEY", "REDACTED_LITELLM_MASTER_KEY")
+        # Import settings to get configuration
+        from ..config import get_settings
+        settings = get_settings()
+
+        # Get configuration from settings (which reads from environment)
+        self.base_url = settings.litellm_api_base
+        self.master_key = settings.litellm_master_key
+        self.default_models = settings.litellm_default_models.split(",") if settings.litellm_default_models else []
+        self.team_id = settings.litellm_team_id
+        self.email_domain = settings.litellm_email_domain
+        self.initial_budget = settings.litellm_initial_budget
+
+        # Only set headers if we have a master key
         self.headers = {
             "Authorization": f"Bearer {self.master_key}",
             "Content-Type": "application/json"
-        }
+        } if self.master_key else {}
 
     async def create_user_key(self, user_id: int, username: str, models: List[str] = None) -> Dict[str, Any]:
         """
@@ -37,8 +47,8 @@ class LiteLLMService:
             Dictionary containing the API key and user details
         """
         if models is None:
-            # Default models available to new users
-            models = ["cerebras/qwen-3-coder-480b"]
+            # Use default models from configuration
+            models = self.default_models if self.default_models else []
 
         # Generate unique user ID for LiteLLM
         litellm_user_id = f"user_{user_id}_{username}"
@@ -48,7 +58,7 @@ class LiteLLMService:
                 # Create user in LiteLLM
                 user_data = {
                     "user_id": litellm_user_id,
-                    "user_email": f"{username}@tesslate.internal",
+                    "user_email": f"{username}@{self.email_domain}",
                     "user_role": "internal_user",
                     "max_parallel_requests": 10,
                     "metadata": {
@@ -75,8 +85,8 @@ class LiteLLMService:
                     "user_id": litellm_user_id,
                     "key_alias": f"{username}_key",
                     "models": models,
-                    "team_id": "internal",  # Access group for cerebras models
-                    "max_budget": 10.0,  # Initial budget in USD
+                    "team_id": self.team_id,  # Access group from configuration
+                    "max_budget": self.initial_budget,  # Initial budget from configuration
                     "duration": "365d",  # Key valid for 1 year
                     "metadata": {
                         "tesslate_user_id": user_id,
@@ -96,10 +106,10 @@ class LiteLLMService:
 
                     key_response = await resp.json()
 
-                # Add user to the internal team as a member
+                # Add user to the configured team as a member
                 try:
                     member_data = {
-                        "team_id": "internal",
+                        "team_id": self.team_id,
                         "member": {
                             "user_id": litellm_user_id,
                             "role": "user"
@@ -112,10 +122,10 @@ class LiteLLMService:
                         json=member_data
                     ) as resp:
                         if resp.status == 200:
-                            logger.info(f"Added {litellm_user_id} to internal team")
+                            logger.info(f"Added {litellm_user_id} to team {self.team_id}")
                         else:
                             error_text = await resp.text()
-                            logger.warning(f"Could not add user to internal team: {error_text}")
+                            logger.warning(f"Could not add user to team {self.team_id}: {error_text}")
                             # Don't fail - the team_id in the key might be enough
 
                 except Exception as e:

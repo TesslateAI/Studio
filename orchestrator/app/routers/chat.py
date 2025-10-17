@@ -20,7 +20,6 @@ import logging
 
 # Agent imports
 from ..agent import UniversalAgent, get_tool_registry
-from ..agent.models import get_model_adapter_from_settings
 
 settings = get_settings()
 router = APIRouter()

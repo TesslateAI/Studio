@@ -8,9 +8,9 @@ services:
     container_name: tesslate-traefik
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"  # Traefik dashboard
+      - "${APP_PORT:-80}:80"
+      - "${APP_SECURE_PORT:-443}:443"
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"  # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik:/etc/traefik
@@ -18,7 +18,13 @@ services:
       - tesslate-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
+      # Traefik dashboard at /traefik
+      - "traefik.http.routers.traefik.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik.priority=200"
+      - "traefik.http.routers.traefik.middlewares=traefik-stripprefix,traefik-auth"
+      - "traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes=/traefik"
+      # Optional: Add basic auth for security (remove if not needed)
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH:-admin:REDACTED_TRAEFIK_BCRYPT}"
       - "traefik.http.services.traefik.loadbalancer.server.port=8080"
     command:
       - "--api.dashboard=true"
@@ -39,7 +45,7 @@ services:
     container_name: tesslate-orchestrator
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./orchestrator/app:/app/app
       - ./orchestrator/pyproject.toml:/app/pyproject.toml
@@ -49,19 +55,24 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:///./orchestrator.db
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
       - DEPLOYMENT_MODE=docker
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_API_BASE=${OPENAI_API_BASE}
       - OPENAI_MODEL=${OPENAI_MODEL}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,*.localhost}
+      - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-studio.localhost}}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
+      - DEV_SERVER_BASE_URL=${DEV_SERVER_BASE_URL:-}
       - PYTHONUNBUFFERED=1
       - WATCHFILES_FORCE_POLLING=true
     networks:
       - tesslate-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.orchestrator.rule=Host(`api.localhost`)"
+      # API routes - handle both /api and websocket paths
+      - "traefik.http.routers.orchestrator.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      - "traefik.http.routers.orchestrator.priority=100"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
+      # Enable websocket support
+      - "traefik.http.middlewares.orchestrator-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
+      - "traefik.http.routers.orchestrator.middlewares=orchestrator-headers"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -74,7 +85,7 @@ services:
     container_name: tesslate-app
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
     volumes:
       - ./app/src:/app/src
       - ./app/public:/app/public
@@ -86,16 +97,22 @@ services:
       - ./app/tailwind.config.ts:/app/tailwind.config.ts
       - ./app/package.json:/app/package.json
     environment:
+      # Leave empty to use relative paths (recommended for path-based routing)
       - VITE_API_URL=${VITE_API_URL:-}
-      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-your-domain.com,studio-test.tesslate.com,studio-demo.tesslate.com,localhost,host.docker.internal,.localhost}
+      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     networks:
       - tesslate-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.app.rule=Host(`studio.localhost`)"
+      # Frontend routes - everything except /api, /ws, and /preview
+      - "traefik.http.routers.app.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
+      - "traefik.http.routers.app.priority=10"
       - "traefik.http.services.app.loadbalancer.server.port=5173"
+      # Handle websocket upgrade for HMR
+      - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
+      - "traefik.http.routers.app.middlewares=app-headers"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5173/"]
       interval: 10s

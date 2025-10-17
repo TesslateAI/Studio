@@ -21,7 +21,7 @@ if not exist ".env" (
     echo Creating root .env file...
     copy .env.example .env >nul
     echo [OK] Created .env
-    echo [WARNING] IMPORTANT: Edit .env and set your SECRET_KEY and OPENAI_API_KEY
+    echo [WARNING] IMPORTANT: Edit .env and set your SECRET_KEY and LITELLM_MASTER_KEY
 ) else (
     echo [OK] Root .env already exists
 )
@@ -54,9 +54,9 @@ if not errorlevel 1 (
     set NEEDS_CONFIG=true
 )
 
-findstr /C:"your-openai-api-key-here" .env >nul 2>&1
+findstr /C:"your-litellm-master-key-here" .env >nul 2>&1
 if not errorlevel 1 (
-    echo [WARNING] OPENAI_API_KEY is not configured in .env
+    echo [WARNING] LITELLM_MASTER_KEY is not configured in .env
     set NEEDS_CONFIG=true
 )
 
@@ -64,7 +64,7 @@ if defined NEEDS_CONFIG (
     echo.
     echo Please edit .env and set:
     echo   1. SECRET_KEY ^(must be at least 32 characters^)
-    echo   2. OPENAI_API_KEY ^(get from https://platform.openai.com/api-keys^)
+    echo   2. LITELLM_MASTER_KEY ^(for your LiteLLM proxy^)
     echo.
     pause
 )

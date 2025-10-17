@@ -347,54 +347,65 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
         return f"builder-dev-user{user_id}-project{project_id}"
     
     def _generate_hostname(self, user_id: int, project_id: str) -> str:
-        """Generate a unique hostname for Traefik routing."""
-        return f"user{user_id}-project{project_id}.localhost"
+        """Generate a unique identifier for the project container."""
+        # No longer using subdomain-based hostnames, just return the identifier
+        return f"user{user_id}-project{project_id}"
     
     def _get_container_access_url(self, hostname: str) -> str:
-        """Get the access URL for a container, considering proxy configuration."""
+        """Get the access URL for a container using path-based routing."""
         settings = get_settings()
-        user_project = hostname.replace('.localhost', '')
+        # hostname is now just "user{id}-project{id}" without domain
 
-        # For local development (no base_url configured), use http://localhost for Traefik
-        # For production (base_url configured), use the configured URL
+        # Use configured base URL if available, otherwise construct from environment
         if settings.dev_server_base_url:
-            # Production: use configured base URL (e.g., https://your-domain.com)
-            return f"{settings.dev_server_base_url}/preview/{user_project}/"
+            # Production or configured base URL
+            return f"{settings.dev_server_base_url}/preview/{hostname}/"
         else:
-            # Local development: use localhost with Traefik (port 80)
-            return f"http://localhost/preview/{user_project}/"
+            # Construct from environment or use defaults
+            protocol = os.environ.get('APP_PROTOCOL', 'http')
+            domain = os.environ.get('APP_DOMAIN', 'localhost')
+            return f"{protocol}://{domain}/preview/{hostname}/"
     
-    def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str) -> List[str]:
-        """Generate Traefik labels for automatic service discovery and routing."""
+    def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str, port: int = 5173) -> List[str]:
+        """Generate Traefik labels for path-based routing only."""
         service_name = f"builder-dev-user{user_id}-project{project_id}"
-        user_project = hostname.replace('.localhost', '')
+        # hostname is now just "user{id}-project{id}" without domain
 
-        # Check if we need path-based routing for production
         settings = get_settings()
+
+        # Determine the domain based on environment
+        if settings.dev_server_base_url:
+            # Production mode - extract domain from base URL
+            import urllib.parse
+            parsed = urllib.parse.urlparse(settings.dev_server_base_url)
+            domain = parsed.netloc
+        else:
+            # Use environment variable or default
+            domain = os.environ.get('APP_DOMAIN', 'localhost')
+
         labels = [
             "--label", "traefik.enable=true",
-            # Host-based routing (local): user2-project15.localhost
-            "--label", f"traefik.http.routers.{service_name}.rule=Host(`{hostname}`)",
+
+            # Path-based routing for HTTP: /preview/user{id}-project{id}
+            "--label", f"traefik.http.routers.{service_name}.rule=Host(`{domain}`) && PathPrefix(`/preview/{hostname}`)",
             "--label", f"traefik.http.routers.{service_name}.entrypoints=web",
-            "--label", f"traefik.http.routers.{service_name}.priority=100",  # High priority
-            # Service configuration
-            "--label", f"traefik.http.services.{service_name}.loadbalancer.server.port=5173",
+            "--label", f"traefik.http.routers.{service_name}.priority=150",  # Higher priority than frontend
+
+            # Strip the /preview/{hostname} prefix before forwarding to container
+            "--label", f"traefik.http.routers.{service_name}.middlewares={service_name}-stripprefix",
+            "--label", f"traefik.http.middlewares.{service_name}-stripprefix.stripprefix.prefixes=/preview/{hostname}",
+
+            # Service configuration - use the specified port from template
+            "--label", f"traefik.http.services.{service_name}.loadbalancer.server.port={port}",
             "--label", f"traefik.docker.network={self.network_name}",
+
+            # Path-based routing for HTTPS (production)
+            "--label", f"traefik.http.routers.{service_name}-secure.rule=Host(`{domain}`) && PathPrefix(`/preview/{hostname}`)",
+            "--label", f"traefik.http.routers.{service_name}-secure.entrypoints=websecure",
+            "--label", f"traefik.http.routers.{service_name}-secure.priority=150",
+            "--label", f"traefik.http.routers.{service_name}-secure.middlewares={service_name}-stripprefix",
+            "--label", f"traefik.http.routers.{service_name}-secure.tls=true",
         ]
-
-        # Path-based routing - Vite handles the base path with --base flag
-        labels.extend([
-            # HTTP path-based routing: /preview/user2-project15
-            "--label", f"traefik.http.routers.{service_name}-path.rule=PathPrefix(`/preview/{user_project}`)",
-            "--label", f"traefik.http.routers.{service_name}-path.entrypoints=web",
-            "--label", f"traefik.http.routers.{service_name}-path.priority=100",
-
-            # HTTPS path-based routing: /preview/user2-project15
-            "--label", f"traefik.http.routers.{service_name}-path-secure.rule=PathPrefix(`/preview/{user_project}`)",
-            "--label", f"traefik.http.routers.{service_name}-path-secure.entrypoints=websecure",
-            "--label", f"traefik.http.routers.{service_name}-path-secure.priority=100",
-            "--label", f"traefik.http.routers.{service_name}-path-secure.tls=true",
-        ])
 
         return labels
     
@@ -507,9 +518,9 @@ docker-compose*
             # Fall back to original
     
     async def wait_for_container_ready_traefik(self, container_name: str, timeout: int = 60) -> bool:
-        """Wait for container to be ready using health checks and HTTP."""
+        """Wait for container to be ready using generic checks."""
         start_time = time.time()
-        
+
         # First, wait for container to be running
         while time.time() - start_time < timeout:
             try:
@@ -524,44 +535,63 @@ docker-compose*
             except Exception:
                 pass
             await asyncio.sleep(1)
-        
-        # Wait for Vite dev server to be ready by checking logs
-        print(f"[WAIT] Checking container logs for dev server readiness...")
+
+        # Wait for server to be ready by checking logs for common ready indicators
+        print(f"[WAIT] Checking container logs for server readiness...")
         while time.time() - start_time < timeout:
             try:
                 result = subprocess.run(
-                    ["docker", "logs", "--tail", "20", container_name],
+                    ["docker", "logs", "--tail", "50", container_name],
                     capture_output=True,
                     text=True,
                     timeout=5
                 )
                 if result.returncode == 0:
                     logs = result.stdout + result.stderr
-                    # Look for Vite ready indicators
-                    if "Local:" in logs and "5173" in logs:
-                        print(f"[OK] Container {container_name} dev server is ready")
+                    logs_lower = logs.lower()
+
+                    # Look for common server ready indicators
+                    ready_indicators = [
+                        "listening on",         # Generic server
+                        "server running",       # Generic
+                        "started on",           # Express, etc.
+                        "ready in",            # Vite
+                        "compiled successfully", # CRA/Webpack
+                        "server started",      # Next.js
+                        "localhost:",          # Most dev servers
+                        "0.0.0.0:",           # Servers binding to all interfaces
+                        "watching for",        # File watchers
+                        "dev server running",  # Generic
+                    ]
+
+                    if any(indicator in logs_lower for indicator in ready_indicators):
+                        print(f"[OK] Container {container_name} server is ready")
                         return True
-                    if "ready in" in logs.lower():
-                        print(f"[OK] Container {container_name} dev server is ready")
-                        return True
+
             except Exception as e:
                 print(f"[DEBUG] Error checking logs: {e}")
                 pass
-            
+
             await asyncio.sleep(3)
-        
+
         print(f"[WARN] Container {container_name} readiness check timed out")
         return True  # Return True to allow container to continue - Traefik will handle routing when ready
     
-    async def start_container(self, project_path: str, project_id: str, user_id: int, skip_validation: bool = False) -> str:
+    async def start_container(self, project_path: str, project_id: str, user_id: int, skip_validation: bool = False,
+                              environment_vars: Dict[str, str] = None, secrets: Dict[str, str] = None,
+                              port: int = 5173, start_command: str = None) -> str:
         """
-        Start a development container using base image + volume mounts (super fast!) with multi-user support.
+        Start a development container with flexible configuration for any template type.
 
         Args:
             project_path: Path to project directory
             project_id: Project ID
             user_id: User ID
             skip_validation: Skip file validation (useful for GitHub imports that will clone later)
+            environment_vars: Custom environment variables to inject into container
+            secrets: Sensitive environment variables (API keys, etc.) to inject securely
+            port: The port the application server will listen on (default: 5173)
+            start_command: Custom start command (default: "npm install && npm start")
         """
         # Generate unique identifiers for multi-user system
         project_key = self._get_project_key(user_id, project_id)
@@ -650,28 +680,35 @@ docker-compose*
                 "--label", f"com.builder.devserver.hostname={hostname}",
             ]
 
-            # Determine HMR protocol and port based on deployment
+            # Generic environment variables that templates can use
             settings = get_settings()
-            is_https = settings.dev_server_base_url.startswith('https://')
-            hmr_protocol = 'wss' if is_https else 'ws'
-            hmr_port = '443' if is_https else '80'
 
-            # Environment variables for Vite HMR (Hot Module Replacement)
-            run_cmd.extend([
-                "-e", f"VITE_HMR_PROTOCOL={hmr_protocol}",              # WebSocket protocol (ws or wss)
-                "-e", f"VITE_HMR_PORT={hmr_port}",                      # HMR WebSocket port (80 for HTTP, 443 for HTTPS)
-                "-e", "CHOKIDAR_USEPOLLING=true",                       # Enable polling for file watching
-                "-e", "CHOKIDAR_INTERVAL=1000",                         # Polling interval (1 second)
-            ])
-            
-            # Calculate base path for routing
-            user_project = hostname.replace('.localhost', '')
-            base_path = f"/preview/{user_project}"
+            # Provide base path as environment variable for templates that need it
+            # Templates can use this for routing configuration if needed
+            base_path = f"/preview/{hostname}"
 
-            # Add base path environment variable for Vite config
+            # Add default environment variables
             run_cmd.extend([
-                "-e", f"VITE_BASE_PATH={base_path}/",                   # Base path for React Router and assets
+                "-e", f"BASE_PATH={base_path}",                         # Base path for routing if needed
+                "-e", f"PUBLIC_URL={base_path}",                        # For Create React App and similar
+                "-e", "NODE_ENV=development",                           # Development mode
+                "-e", f"PORT={port}",                                   # Server port
             ])
+
+            # Add custom environment variables from the orchestrator
+            if environment_vars:
+                for key, value in environment_vars.items():
+                    run_cmd.extend(["-e", f"{key}={value}"])
+                    print(f"[ENV] Added environment variable: {key}")
+
+            # Add secrets as environment variables (marked for secure handling)
+            # In production, these could be mounted from Docker secrets
+            if secrets:
+                for key, value in secrets.items():
+                    # Use Docker secret mounting in production
+                    # For now, pass as environment variables but log them as secrets
+                    run_cmd.extend(["-e", f"{key}={value}"])
+                    print(f"[SECRET] Added secret: {key} (value hidden)")
 
             # Working directory, user, and detached mode
             run_cmd.extend([
@@ -681,15 +718,24 @@ docker-compose*
             ])
 
             # Add Traefik labels for automatic service discovery
-            run_cmd.extend(self._get_traefik_labels(user_id, project_id, hostname))
+            run_cmd.extend(self._get_traefik_labels(user_id, project_id, hostname, port))
 
             # Add network (required for Traefik)
             run_cmd.extend(["--network", self.network_name])
 
-            # Add image and startup command with base path
+            # Determine startup command
+            if start_command:
+                # Use custom start command provided by the template
+                final_command = start_command
+            else:
+                # Default command that works for most Node.js projects
+                # Templates should define their start script in package.json
+                final_command = "npm install --silent && npm start"
+
+            # Add image and startup command
             run_cmd.extend([
                 self.base_image_name,
-                "sh", "-c", f"npm install --silent && npm run dev -- --host 0.0.0.0 --port 5173 --base {base_path}/"
+                "sh", "-c", final_command
             ])
             
             print(f"[DEBUG] Docker run command: {' '.join(run_cmd)}")

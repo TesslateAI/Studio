@@ -123,7 +123,8 @@ Docker:
    SECRET_KEY=your-secret-key-here
    DATABASE_URL=sqlite+aiosqlite:///./builder.db
    DEPLOYMENT_MODE=docker
-   OPENAI_API_KEY=your-openai-api-key
+   LITELLM_MASTER_KEY=your-litellm-master-key
+   LITELLM_API_BASE=http://localhost:4000/v1
    ```
 
 2. **Start services**
@@ -188,7 +189,8 @@ All services in Docker containers:
    Edit `.env`:
    ```env
    SECRET_KEY=your-secret-key-here
-   OPENAI_API_KEY=your-openai-api-key
+   LITELLM_MASTER_KEY=your-litellm-master-key
+   LITELLM_API_BASE=http://localhost:4000/v1
    ```
 
 2. **Start all services**
@@ -277,7 +279,8 @@ Single Server:
    ```env
    SECRET_KEY=generate-strong-random-key-here
    POSTGRES_PASSWORD=generate-strong-db-password
-   OPENAI_API_KEY=your-openai-api-key
+   LITELLM_MASTER_KEY=your-litellm-master-key
+   LITELLM_API_BASE=https://your-litellm-proxy.com/v1
    CF_DNS_API_TOKEN=your-cloudflare-token  # If using Cloudflare
    ```
 
@@ -427,7 +430,8 @@ kubectl get ingress -n tesslate -o wide
 DEPLOYMENT_MODE=docker
 DATABASE_URL=sqlite+aiosqlite:///./builder.db
 SECRET_KEY=your-secret-key
-OPENAI_API_KEY=your-openai-api-key
+LITELLM_MASTER_KEY=your-litellm-master-key
+LITELLM_API_BASE=http://localhost:4000/v1
 ```
 
 #### Kubernetes Mode (Production)
@@ -437,7 +441,8 @@ DEPLOYMENT_MODE=kubernetes
 DATABASE_URL=postgresql+asyncpg://user:pass@postgres:5432/tesslate
 SECRET_KEY=strong-random-key
 DEV_SERVER_BASE_URL=https://studio-test.tesslate.com
-OPENAI_API_KEY=your-openai-api-key
+LITELLM_MASTER_KEY=your-litellm-master-key
+LITELLM_API_BASE=https://your-litellm-proxy.com/v1
 ```
 
 ### Network Ports

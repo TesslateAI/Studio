@@ -1,40 +1,15 @@
+# Note: This file is used for production deployments.
+# The domain should be configured via Docker labels in docker-compose.prod.yml
+# This file is kept for reference but the actual routing is handled via Docker provider
 http:
   routers:
-    # Frontend HTTP router (lowest priority - catch-all)
-    frontend-http:
-      rule: "Host(`studio-demo.tesslate.com`) && !PathPrefix(`/api`) && !PathPrefix(`/preview`)"
-      service: frontend
-      entryPoints:
-        - web
-      priority: 1
+    # Routes are now configured via Docker labels in docker-compose.prod.yml
+    # This ensures consistency and allows environment variable substitution
 
-    # Frontend HTTPS router (lowest priority - catch-all)
-    frontend-https:
-      rule: "Host(`studio-demo.tesslate.com`) && !PathPrefix(`/api`) && !PathPrefix(`/preview`)"
-      service: frontend
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: letsencrypt
-      priority: 1
-
-    # API HTTP router
-    backend-http:
-      rule: "Host(`studio-demo.tesslate.com`) && PathPrefix(`/api`)"
-      service: backend
-      entryPoints:
-        - web
-      priority: 10
-
-    # API HTTPS router
-    backend-https:
-      rule: "Host(`studio-demo.tesslate.com`) && PathPrefix(`/api`)"
-      service: backend
-      entryPoints:
-        - websecure
-      tls:
-        certResolver: letsencrypt
-      priority: 10
+    # Preview containers routing - handled by Docker provider auto-discovery
+    # Individual preview containers register themselves with labels
+    # Priority 100 ensures preview routes take precedence
+    # Format: /preview/user{N}-project{M}/
 
     # Preview containers routing - handled by Docker provider auto-discovery
     # Individual preview containers register themselves with labels
