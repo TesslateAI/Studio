@@ -180,9 +180,13 @@ def check_configuration():
     return not has_errors
 
 if __name__ == '__main__':
-    # Change to project root directory if running from scripts folder
+    # Change to project root directory if running from scripts/deployment folder
     script_dir = Path(__file__).parent
-    if script_dir.name == 'scripts':
+    if script_dir.name == 'deployment':
+        # We're in scripts/deployment, go up two levels to project root
+        os.chdir(script_dir.parent.parent)
+    elif script_dir.name == 'scripts':
+        # Legacy path handling in case script is moved back to scripts/
         os.chdir(script_dir.parent)
 
     success = check_configuration()

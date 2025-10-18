@@ -23,6 +23,9 @@ fi
 
 echo -e "${GREEN}✓ Docker is running${NC}"
 
+# Change to project root directory
+cd "$(dirname "$0")/../.."
+
 # Create root .env if it doesn't exist
 if [ ! -f .env ]; then
     echo "Creating .env file..."

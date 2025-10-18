@@ -80,9 +80,9 @@ REM Start Traefik using docker-compose
 echo.
 echo [3/6] Starting Traefik reverse proxy...
 echo     (Required for user dev container routing)
-cd ..
+cd ..\..
 docker-compose up -d traefik
-cd scripts
+cd scripts\deployment
 echo ✅ Traefik started
 
 REM Wait for Traefik to be ready
@@ -96,7 +96,7 @@ echo.
 echo [5/6] Starting backend service...
 echo.
 echo Starting Orchestrator (Backend API with built-in AI)...
-start "Orchestrator Service" cmd /k "cd ..\orchestrator && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+start "Orchestrator Service" cmd /k "cd ..\..\..\orchestrator && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 timeout /t 3 /nobreak > nul
 
 echo ✅ Backend service starting...
@@ -104,7 +104,7 @@ echo ✅ Backend service starting...
 REM Start frontend dev server
 echo.
 echo [6/6] Starting frontend...
-start "Frontend Dev Server" cmd /k "cd ..\app && npm run dev"
+start "Frontend Dev Server" cmd /k "cd ..\..\..\app && npm run dev"
 
 echo.
 echo ============================================================================

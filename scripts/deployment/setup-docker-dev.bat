@@ -16,6 +16,9 @@ if errorlevel 1 (
 
 echo [OK] Docker is running
 
+REM Change to project root directory
+cd ..\..
+
 REM Create root .env if it doesn't exist
 if not exist ".env" (
     echo Creating root .env file...
