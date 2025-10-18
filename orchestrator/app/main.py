@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from .database import engine, Base
-from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin
+from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin, shell
 from .config import get_settings
 import os
 import logging
@@ -95,6 +95,28 @@ async def seed_default_agents():
             raise
 
 
+async def shell_session_cleanup_loop():
+    """Background task to clean up idle shell sessions."""
+    import asyncio
+    from .services.shell_session_manager import get_shell_session_manager
+    from .database import AsyncSessionLocal
+
+    logger.info("Shell session cleanup task started")
+
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                session_manager = get_shell_session_manager()
+                closed_count = await session_manager.cleanup_idle_sessions(db)
+                if closed_count > 0:
+                    logger.info(f"Auto-closed {closed_count} idle shell sessions")
+        except Exception as e:
+            logger.error(f"Session cleanup error: {e}", exc_info=True)
+
+        # Run every 5 minutes
+        await asyncio.sleep(300)
+
+
 # Add security headers middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -181,6 +203,9 @@ async def startup():
     # Seed default agents if they don't exist
     await seed_default_agents()
 
+    # Start background cleanup task for idle shell sessions
+    asyncio.create_task(shell_session_cleanup_loop())
+
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods
 # app.mount("/preview", StaticFiles(directory="users"), name="preview")
@@ -195,6 +220,7 @@ app.include_router(marketplace.router, prefix="/api", tags=["marketplace"])
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
+app.include_router(shell.router, prefix="/api/shell", tags=["shell"])
 
 @app.get("/")
 async def root():

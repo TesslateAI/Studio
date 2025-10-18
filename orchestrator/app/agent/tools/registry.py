@@ -183,7 +183,7 @@ def get_tool_registry() -> ToolRegistry:
 
 def _register_all_tools(registry: ToolRegistry):
     """Register all available tools."""
-    from . import file_tools, command_tools, project_tools
+    from . import file_tools, command_tools, project_tools, shell_tools
 
     # Register file operation tools
     file_tools.register_tools(registry)
@@ -193,5 +193,8 @@ def _register_all_tools(registry: ToolRegistry):
 
     # Register project operation tools
     project_tools.register_tools(registry)
+
+    # Register shell operation tools
+    shell_tools.register_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")

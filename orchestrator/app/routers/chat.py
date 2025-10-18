@@ -324,6 +324,7 @@ async def agent_chat(
     Returns:
         Agent execution result with steps and final response
     """
+    logger.info(f"[AGENT-CHAT-DEBUG] Starting agent chat - user: {current_user.id}, project: {request.project_id}")
     try:
         # Verify project ownership
         result = await db.execute(
@@ -367,20 +368,24 @@ async def agent_chat(
                 logger.error(f"Error loading agent configuration: {e}")
 
         # Create model adapter using user's LiteLLM key
+        logger.info(f"[AGENT-CHAT-DEBUG] Checking LiteLLM API key for user {current_user.id}")
         if not current_user.litellm_api_key:
             raise HTTPException(
                 status_code=500,
                 detail="User does not have a LiteLLM API key. Please contact support."
             )
 
+        logger.info(f"[AGENT-CHAT-DEBUG] Creating model adapter")
         from ..agent.models import create_model_adapter
         model_adapter = create_model_adapter(
             model_name=settings.openai_model,  # Default model (cerebras/qwen-3-coder-480b)
             api_key=current_user.litellm_api_key,  # Use user's LiteLLM key for tracking
             api_base=settings.litellm_api_base  # LiteLLM proxy endpoint
         )
+        logger.info(f"[AGENT-CHAT-DEBUG] Model adapter created successfully")
 
         # Create agent with optional system prompt
+        logger.info(f"[AGENT-CHAT-DEBUG] Creating UniversalAgent")
         agent = UniversalAgent(
             model=model_adapter,
             tool_registry=get_tool_registry(),
@@ -388,6 +393,7 @@ async def agent_chat(
             minimal_prompts=request.minimal_prompts,
             system_prompt=agent_system_prompt  # Pass the agent's system prompt if available
         )
+        logger.info(f"[AGENT-CHAT-DEBUG] UniversalAgent created successfully")
 
         # Prepare context for tool execution
         context = {
@@ -524,7 +530,10 @@ async def agent_chat(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Agent chat error: {e}", exc_info=True)
+        import traceback
+        error_traceback = traceback.format_exc()
+        logger.error(f"Agent chat error: {e}")
+        logger.error(f"Full traceback:\n{error_traceback}")
         raise HTTPException(
             status_code=500,
             detail=f"Agent execution failed: {str(e)}"

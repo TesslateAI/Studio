@@ -5,8 +5,8 @@ class Settings(BaseSettings):
     # Security - MUST be set via environment
     secret_key: str = ""
 
-    # Database - defaults to SQLite for easy setup
-    database_url: str = "sqlite+aiosqlite:///./builder.db"
+    # Database - PostgreSQL required
+    database_url: str
 
     # AI Configuration - points to LiteLLM proxy
     openai_api_base: str = ""  # This will be the LiteLLM proxy URL

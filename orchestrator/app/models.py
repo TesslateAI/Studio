@@ -139,6 +139,38 @@ class PodAccessLog(Base):
     user = relationship("User")
 
 
+class ShellSession(Base):
+    """Track active shell sessions for audit and resource management."""
+    __tablename__ = "shell_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, unique=True, index=True, nullable=False)  # UUID
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    container_name = Column(String, nullable=False)  # Docker container or K8s pod name
+
+    # Session metadata
+    command = Column(String, default="/bin/bash")  # Shell command
+    working_dir = Column(String, default="/app/project")
+    terminal_rows = Column(Integer, default=24)
+    terminal_cols = Column(Integer, default=80)
+
+    # Lifecycle tracking
+    status = Column(String, default="initializing")  # initializing, active, idle, closed, failed
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_activity_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Resource tracking
+    bytes_read = Column(Integer, default=0)  # PTY output buffered
+    bytes_written = Column(Integer, default=0)  # Client input sent to PTY
+    total_reads = Column(Integer, default=0)  # Number of read requests
+
+    # Relationships
+    user = relationship("User")
+    project = relationship("Project")
+
+
 class Agent(Base):
     """AI Agent configurations with custom system prompts."""
     __tablename__ = "agents"
