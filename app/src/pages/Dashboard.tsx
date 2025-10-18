@@ -30,7 +30,8 @@ import {
   GithubLogo,
   GitBranch,
   ShoppingCart,
-  DiscordLogo
+  DiscordLogo,
+  SignOut
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -239,9 +240,9 @@ export default function Dashboard() {
       onClick: () => toast('Components library coming soon!')
     },
     {
-      icon: <Gear className="w-5 h-5" weight="fill" />,
-      title: 'Settings',
-      onClick: () => toast('Settings coming soon!')
+      icon: <SignOut className="w-5 h-5" weight="fill" />,
+      title: 'Logout',
+      onClick: logout
     }
   ];
 
@@ -314,19 +315,19 @@ export default function Dashboard() {
       </div>
 
       {/* Projects Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"}>
         {/* Create New Project Card */}
         <button
           onClick={() => setShowCreateModal(true)}
-          className="
-            group bg-[var(--surface)] rounded-2xl p-8
+          className={`
+            group bg-white/[0.01] dark:bg-white/[0.01] rounded-2xl p-8
             border-2 border-dashed border-[rgba(255,107,0,0.3)]
             hover:border-[rgba(255,107,0,0.6)]
             transition-all duration-300
             hover:transform hover:-translate-y-1
             flex flex-col items-center justify-center gap-4
-            min-h-[280px]
-          "
+            ${filteredProjects.length === 0 ? 'w-full min-h-[400px]' : 'min-h-[280px]'}
+          `}
         >
           <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(255,107,0,0.3)] transition-colors">
             <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
@@ -360,24 +361,6 @@ export default function Dashboard() {
       {/* Empty State */}
       {filteredProjects.length === 0 && (
         <div className="text-center py-16">
-          <div className="w-20 h-20 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <FolderOpen className="w-10 h-10 text-gray-500" weight="fill" />
-          </div>
-          <h3 className="text-lg font-semibold text-[var(--text)] mb-2">
-            {activeTab === 'all' ? 'No projects yet' : `No ${activeTab} projects`}
-          </h3>
-          <p className="text-gray-500 mb-6">
-            {activeTab === 'all'
-              ? 'Create your first project to get started'
-              : `No projects in ${activeTab} phase`
-            }
-          </p>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-6 py-3 bg-[var(--primary)] hover:bg-orange-600 text-white rounded-xl font-semibold transition-all"
-          >
-            Create Project
-          </button>
         </div>
       )}
 

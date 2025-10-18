@@ -101,7 +101,6 @@ export function ProjectCard({
             trigger={
               <button
                 className="text-gray-400 hover:text-white transition-colors p-1"
-                onClick={(e) => e.stopPropagation()}
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 256 256">
                   <path d="M156,128a28,28,0,1,1-28-28A28,28,0,0,1,156,128ZM48,100a28,28,0,1,0,28,28A28,28,0,0,0,48,100Zm160,0a28,28,0,1,0,28,28A28,28,0,0,0,208,100Z" />
@@ -139,7 +138,7 @@ export function ProjectCard({
               {
                 icon: (
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-                    <path d="M216,48H40a16,16,0,0,0-16,16V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V64A16,16,0,0,0,216,48ZM40,192V64H216V192Z" />
+                    <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
                   </svg>
                 ),
                 label: 'Delete',

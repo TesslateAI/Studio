@@ -182,3 +182,24 @@ python scripts/utilities/cleanup-local.py
 3. Always use **`scripts/kubernetes/manage-k8s.sh`** for production operations (not kubectl directly)
 4. **Backup before cleanup** - cleanups are destructive and irreversible!
 5. **Script paths have changed** - all scripts are now organized into subdirectories by category
+
+## 🔨 Building Docker Images
+
+### Dev Server Image
+The development server image contains pre-installed dependencies for user project containers:
+
+```bash
+# Build for local development
+./scripts/deployment/build-dev-image.sh
+
+# Build and push to DigitalOcean Container Registry (production)
+./scripts/deployment/build-dev-image.sh --push
+
+# Force rebuild without cache
+./scripts/deployment/build-dev-image.sh --no-cache
+
+# Windows
+scripts\deployment\build-dev-image.bat --push
+```
+
+This image is used by both Docker (local) and Kubernetes (production) deployment modes.
