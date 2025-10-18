@@ -10,7 +10,8 @@ export const PulsingGridSpinner: React.FC<PulsingGridSpinnerProps> = ({
   className = ''
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationIdRef = useRef<number>();
+  const animationIdRef = useRef<number | undefined>(undefined);
+  const lastTimeRef = useRef<number>(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -19,14 +20,17 @@ export const PulsingGridSpinner: React.FC<PulsingGridSpinnerProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const scale = size / 60; // Base size is 60px
-    canvas.width = size;
-    canvas.height = size;
+    // Store canvas and ctx in constants that TypeScript knows are non-null
+    const canvasElement = canvas;
+    const context = ctx;
 
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
+    const scale = size / 60; // Base size is 60px
+    canvasElement.width = size;
+    canvasElement.height = size;
+
+    const centerX = canvasElement.width / 2;
+    const centerY = canvasElement.height / 2;
     let time = 0;
-    let lastTime = 0;
 
     // Grid parameters
     const gridSize = 5; // 5x5 grid
@@ -53,21 +57,21 @@ export const PulsingGridSpinner: React.FC<PulsingGridSpinnerProps> = ({
     };
 
     function animate(timestamp: number) {
-      if (!lastTime) lastTime = timestamp;
-      const deltaTime = timestamp - lastTime;
-      lastTime = timestamp;
+      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
+      const deltaTime = timestamp - lastTimeRef.current;
+      lastTimeRef.current = timestamp;
       time += deltaTime * 0.001;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      context.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
       // Calculate breathing effect - grid expands and contracts
       const breathingFactor = Math.sin(time * breathingSpeed) * 0.2 + 1.0; // 0.8 to 1.2
 
       // Draw center dot
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, 1.5 * scale, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255, 107, 0, 0.9)"; // Orange center
-      ctx.fill();
+      context.beginPath();
+      context.arc(centerX, centerY, 1.5 * scale, 0, Math.PI * 2);
+      context.fillStyle = "rgba(255, 107, 0, 0.9)"; // Orange center
+      context.fill();
 
       // Draw pulsing grid pattern
       for (let row = 0; row < gridSize; row++) {
@@ -144,22 +148,22 @@ export const PulsingGridSpinner: React.FC<PulsingGridSpinnerProps> = ({
               const lineDistance = Math.sqrt(Math.pow(col - neighbor.c, 2) + Math.pow(row - neighbor.r, 2));
               const lineOpacity = 0.05 + Math.sin(time * 1.5 + lineDistance * 2) * 0.03;
 
-              ctx.beginPath();
-              ctx.moveTo(waveX, waveY);
-              ctx.lineTo(centerX + nBreathingX, centerY + nBreathingY);
-              ctx.strokeStyle = isMiddle && isMiddleEight(neighbor.r, neighbor.c)
+              context.beginPath();
+              context.moveTo(waveX, waveY);
+              context.lineTo(centerX + nBreathingX, centerY + nBreathingY);
+              context.strokeStyle = isMiddle && isMiddleEight(neighbor.r, neighbor.c)
                 ? `rgba(255, 107, 0, ${lineOpacity})`
                 : `rgba(255, 255, 255, ${lineOpacity})`;
-              ctx.lineWidth = 0.3 * scale;
-              ctx.stroke();
+              context.lineWidth = 0.3 * scale;
+              context.stroke();
             }
           }
 
           // Draw dot
-          ctx.beginPath();
-          ctx.arc(waveX, waveY, dotSize, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${opacity})`;
-          ctx.fill();
+          context.beginPath();
+          context.arc(waveX, waveY, dotSize, 0, Math.PI * 2);
+          context.fillStyle = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+          context.fill();
         }
       }
       animationIdRef.current = requestAnimationFrame(animate);

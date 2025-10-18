@@ -316,99 +316,102 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
 
       // Initialize the pulsing grid animation
       const canvas = document.getElementById('pulsing-grid-spinner') as HTMLCanvasElement;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const centerX = canvas.width / 2;
-          const centerY = canvas.height / 2;
-          let time = 0;
-          let lastTime = 0;
-          let animationId: number;
+      if (!canvas) return;
 
-          const gridSize = 5;
-          const spacing = 6;
-          const breathingSpeed = 0.5;
-          const colorPulseSpeed = 1.0;
+      const context = canvas.getContext('2d');
+      if (!context) return;
 
-          const middleEight = [
-            { row: 1, col: 2 }, { row: 2, col: 1 }, { row: 2, col: 3 }, { row: 3, col: 2 },
-            { row: 1, col: 1 }, { row: 1, col: 3 }, { row: 3, col: 1 }, { row: 3, col: 3 }
-          ];
+      // Store as non-nullable for use in nested function
+      const ctx: CanvasRenderingContext2D = context;
 
-          const isMiddleEight = (row: number, col: number) => {
-            return middleEight.some(pos => pos.row === row && pos.col === col);
-          };
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      let time = 0;
+      let lastTime = 0;
+      let animationId: number;
 
-          function animate(timestamp: number) {
-            if (!lastTime) lastTime = timestamp;
-            const deltaTime = timestamp - lastTime;
-            lastTime = timestamp;
-            time += deltaTime * 0.001;
+      const gridSize = 5;
+      const spacing = 6;
+      const breathingSpeed = 0.5;
+      const colorPulseSpeed = 1.0;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const middleEight = [
+        { row: 1, col: 2 }, { row: 2, col: 1 }, { row: 2, col: 3 }, { row: 3, col: 2 },
+        { row: 1, col: 1 }, { row: 1, col: 3 }, { row: 3, col: 1 }, { row: 3, col: 3 }
+      ];
 
-            const breathingFactor = Math.sin(time * breathingSpeed) * 0.2 + 1.0;
+      const isMiddleEight = (row: number, col: number) => {
+        return middleEight.some(pos => pos.row === row && pos.col === col);
+      };
 
-            // Draw center dot (orange)
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(255, 107, 0, 0.9)";
-            ctx.fill();
+      function animate(timestamp: number) {
+        if (!lastTime) lastTime = timestamp;
+        const deltaTime = timestamp - lastTime;
+        lastTime = timestamp;
+        time += deltaTime * 0.001;
 
-            // Draw grid
-            for (let row = 0; row < gridSize; row++) {
-              for (let col = 0; col < gridSize; col++) {
-                if (row === Math.floor(gridSize / 2) && col === Math.floor(gridSize / 2)) continue;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                const baseX = (col - (gridSize - 1) / 2) * spacing;
-                const baseY = (row - (gridSize - 1) / 2) * spacing;
-                const distance = Math.sqrt(baseX * baseX + baseY * baseY);
-                const maxDistance = (spacing * Math.sqrt(2) * (gridSize - 1)) / 2;
-                const normalizedDistance = distance / maxDistance;
-                const angle = Math.atan2(baseY, baseX);
+        const breathingFactor = Math.sin(time * breathingSpeed) * 0.2 + 1.0;
 
-                const radialPhase = (time - normalizedDistance) % 1;
-                const radialWave = Math.sin(radialPhase * Math.PI * 2) * 3;
-                const breathingX = baseX * breathingFactor;
-                const breathingY = baseY * breathingFactor;
+        // Draw center dot (orange)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 2, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 107, 0, 0.9)";
+        ctx.fill();
 
-                const waveX = centerX + breathingX + Math.cos(angle) * radialWave;
-                const waveY = centerY + breathingY + Math.sin(angle) * radialWave;
+        // Draw grid
+        for (let row = 0; row < gridSize; row++) {
+          for (let col = 0; col < gridSize; col++) {
+            if (row === Math.floor(gridSize / 2) && col === Math.floor(gridSize / 2)) continue;
 
-                const baseSize = 1.2 + (1 - normalizedDistance) * 1;
-                const pulseFactor = Math.sin(time * 2 + normalizedDistance * 5) * 0.6 + 1;
-                const dotSize = baseSize * pulseFactor;
+            const baseX = (col - (gridSize - 1) / 2) * spacing;
+            const baseY = (row - (gridSize - 1) / 2) * spacing;
+            const distance = Math.sqrt(baseX * baseX + baseY * baseY);
+            const maxDistance = (spacing * Math.sqrt(2) * (gridSize - 1)) / 2;
+            const normalizedDistance = distance / maxDistance;
+            const angle = Math.atan2(baseY, baseX);
 
-                const isMiddle = isMiddleEight(row, col);
-                let r, g, b;
-                if (isMiddle) {
-                  const orangePulse = Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.2 + 0.8;
-                  r = 255;
-                  g = Math.floor(107 * orangePulse);
-                  b = 0;
-                } else {
-                  const blueAmount = Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.3 + 0.3;
-                  const whiteness = 1 - blueAmount;
-                  r = Math.floor(255 * whiteness + 200 * blueAmount);
-                  g = Math.floor(255 * whiteness + 220 * blueAmount);
-                  b = 255;
-                }
+            const radialPhase = (time - normalizedDistance) % 1;
+            const radialWave = Math.sin(radialPhase * Math.PI * 2) * 3;
+            const breathingX = baseX * breathingFactor;
+            const breathingY = baseY * breathingFactor;
 
-                const opacity = 0.5 + Math.sin(time * 1.5 + angle * 3) * 0.2 + normalizedDistance * 0.3;
-                ctx.beginPath();
-                ctx.arc(waveX, waveY, dotSize, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(' + r + ', ' + g + ', ' + b + ', ' + opacity + ')';
-                ctx.fill();
-              }
+            const waveX = centerX + breathingX + Math.cos(angle) * radialWave;
+            const waveY = centerY + breathingY + Math.sin(angle) * radialWave;
+
+            const baseSize = 1.2 + (1 - normalizedDistance) * 1;
+            const pulseFactor = Math.sin(time * 2 + normalizedDistance * 5) * 0.6 + 1;
+            const dotSize = baseSize * pulseFactor;
+
+            const isMiddle = isMiddleEight(row, col);
+            let r, g, b;
+            if (isMiddle) {
+              const orangePulse = Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.2 + 0.8;
+              r = 255;
+              g = Math.floor(107 * orangePulse);
+              b = 0;
+            } else {
+              const blueAmount = Math.sin(time * colorPulseSpeed + normalizedDistance * 3) * 0.3 + 0.3;
+              const whiteness = 1 - blueAmount;
+              r = Math.floor(255 * whiteness + 200 * blueAmount);
+              g = Math.floor(255 * whiteness + 220 * blueAmount);
+              b = 255;
             }
-            animationId = requestAnimationFrame(animate);
-          }
-          animationId = requestAnimationFrame(animate);
 
-          // Store animation ID for cleanup
-          (container as any).__animationId = animationId;
+            const opacity = 0.5 + Math.sin(time * 1.5 + angle * 3) * 0.2 + normalizedDistance * 0.3;
+            ctx.beginPath();
+            ctx.arc(waveX, waveY, dotSize, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(' + r + ', ' + g + ', ' + b + ', ' + opacity + ')';
+            ctx.fill();
+          }
         }
+        animationId = requestAnimationFrame(animate);
       }
+      animationId = requestAnimationFrame(animate);
+
+      // Store animation ID for cleanup
+      (container as any).__animationId = animationId;
     }
     // Cleanup function
     return () => {

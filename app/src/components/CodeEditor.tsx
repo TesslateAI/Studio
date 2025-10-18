@@ -61,8 +61,8 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
     sortedFiles.forEach(file => {
       const parts = file.file_path.split('/').filter(Boolean);
       let currentPath = '';
-      
-      parts.forEach((part, index) => {
+
+      parts.forEach((part: string, index: number) => {
         const fullPath = currentPath ? `${currentPath}/${part}` : part;
         const isFile = index === parts.length - 1;
         

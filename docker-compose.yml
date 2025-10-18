@@ -40,6 +40,27 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
       - "--log.level=INFO"
 
+  postgres:
+    image: postgres:15-alpine
+    container_name: tesslate-postgres-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-tesslate_dev}
+      - POSTGRES_USER=${POSTGRES_USER:-tesslate_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_password_change_me}
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    networks:
+      - tesslate-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tesslate_user} -d ${POSTGRES_DB:-tesslate_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"  # Expose for debugging with pgAdmin/DBeaver
+
   orchestrator:
     build: ./orchestrator
     container_name: tesslate-orchestrator
@@ -52,17 +73,17 @@ services:
       - ./orchestrator/users:/app/users
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./orchestrator.db
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
       - DEPLOYMENT_MODE=docker
       - OPENAI_API_BASE=${OPENAI_API_BASE}
       - OPENAI_MODEL=${OPENAI_MODEL}
       - LITELLM_API_BASE=${LITELLM_API_BASE}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
-      - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS:-gpt-4o-mini}
-      - LITELLM_TEAM_ID=${LITELLM_TEAM_ID:-default}
-      - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN:-localhost}
-      - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET:-10.0}
+      - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS}
+      - LITELLM_TEAM_ID=${LITELLM_TEAM_ID}
+      - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN}
+      - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET}
       - APP_PROTOCOL=${APP_PROTOCOL:-http}
       - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
       - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-studio.localhost}}
@@ -70,6 +91,9 @@ services:
       - DEV_SERVER_BASE_URL=${DEV_SERVER_BASE_URL:-}
       - PYTHONUNBUFFERED=1
       - WATCHFILES_FORCE_POLLING=true
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - tesslate-network
     labels:
@@ -105,7 +129,6 @@ services:
       - ./app/tailwind.config.ts:/app/tailwind.config.ts
       - ./app/package.json:/app/package.json
     environment:
-      # Leave empty to use relative paths (recommended for path-based routing)
       - VITE_API_URL=${VITE_API_URL:-}
       - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
       - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
@@ -143,10 +166,13 @@ services:
     pull_policy: build
     profiles:
       - build-only
-    # This service is only for building the image, not running
     command: ["echo", "Dev server image built successfully"]
 
 networks:
   tesslate-network:
     name: tesslate-network
     driver: bridge
+
+volumes:
+  postgres-dev-data:
+    name: tesslate-postgres-dev-data

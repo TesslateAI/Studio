@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { File, Folder, ChevronRight, ChevronDown } from 'lucide-react';
+import { File, Folder, ChevronRight, ChevronDown, FileText } from 'lucide-react';
 
 interface FileNode {
   name: string;
@@ -32,8 +32,8 @@ export default function FileExplorer({ projectId, files, onFileUpdate, streaming
     sortedFiles.forEach(file => {
       const parts = file.file_path.split('/').filter(Boolean);
       let currentPath = '';
-      
-      parts.forEach((part, index) => {
+
+      parts.forEach((part: string, index: number) => {
         const fullPath = currentPath ? `${currentPath}/${part}` : part;
         const isFile = index === parts.length - 1;
         

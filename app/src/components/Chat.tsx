@@ -54,7 +54,7 @@ export default function Chat({ projectId, onFileUpdate }: ChatProps) {
         console.log('[CHAT] Loading chat history from database for project:', projectId);
         const messages = await chatApi.getProjectMessages(projectId);
         console.log('[CHAT] Loaded', messages.length, 'messages from database for project', projectId);
-        setMessages(messages.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })));
+        setMessages(messages.map((msg: any) => ({ role: msg.role as 'user' | 'assistant', content: msg.content })));
       } catch (error) {
         console.error('[CHAT] Failed to load chat history from database:', error);
         console.log('[CHAT] Starting fresh for project', projectId);
