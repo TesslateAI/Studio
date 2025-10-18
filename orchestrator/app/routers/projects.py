@@ -662,7 +662,7 @@ async def get_dev_server_url(
             # Docker mode - use Docker-specific status check
             from ..dev_server_manager import get_container_manager
             docker_manager = get_container_manager()
-            status = docker_manager.get_container_status(str(project_id), current_user.id)
+            status = await docker_manager.get_container_status(str(project_id), current_user.id)
 
             if status.get("running"):
                 url = docker_manager.get_container_url(str(project_id), current_user.id)
@@ -823,7 +823,7 @@ async def get_container_status(
             # Docker mode
             from ..dev_server_manager import get_container_manager
             docker_manager = get_container_manager()
-            status = docker_manager.get_container_status(str(project_id), current_user.id)
+            status = await docker_manager.get_container_status(str(project_id), current_user.id)
             url = docker_manager.get_container_url(str(project_id), current_user.id)
 
             return {
@@ -1030,7 +1030,7 @@ async def get_all_dev_containers(
     try:
         from ..dev_server_manager import get_container_manager
         container_manager = get_container_manager()
-        containers = container_manager.get_all_containers()
+        containers = await container_manager.get_all_containers()
         # Filter to show only containers for current user unless admin
         user_containers = [c for c in containers if c.get('user_id') == current_user.id]
         return {

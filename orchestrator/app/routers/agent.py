@@ -173,7 +173,7 @@ async def execute_command(
             # Docker mode - check if container is running
             from ..dev_server_manager import get_container_manager
             docker_manager = get_container_manager()
-            status_info = docker_manager.get_container_status(str(request.project_id), current_user.id)
+            status_info = await docker_manager.get_container_status(str(request.project_id), current_user.id)
 
             if not status_info.get("running"):
                 raise HTTPException(

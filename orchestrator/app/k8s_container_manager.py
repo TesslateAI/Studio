@@ -4,12 +4,13 @@ import time
 from typing import Dict, Optional, List, Any
 from .config import get_settings
 from .k8s_client import get_k8s_manager
+from .base_container_manager import BaseContainerManager
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class KubernetesContainerManager:
+class KubernetesContainerManager(BaseContainerManager):
     """
     Kubernetes-native development environment manager for multi-user, multi-project environments.
     - Uses Kubernetes Deployments, Services, and Ingresses for isolation

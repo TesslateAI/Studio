@@ -12,21 +12,23 @@ Both implementations expose the same interface, so the rest of the application
 doesn't need to know which deployment mode is being used.
 """
 
+from typing import Optional
 from .config import get_settings
+from .base_container_manager import BaseContainerManager
 import logging
 
 logger = logging.getLogger(__name__)
 
 # Lazy import to avoid loading unused dependencies
-_container_manager_instance = None
+_container_manager_instance: Optional[BaseContainerManager] = None
 
 
-def get_container_manager():
+def get_container_manager() -> BaseContainerManager:
     """
     Get the appropriate container manager based on deployment mode.
 
     Returns:
-        DockerContainerManager or KubernetesContainerManager instance
+        BaseContainerManager instance (either Docker or Kubernetes implementation)
     """
     global _container_manager_instance
 
@@ -58,7 +60,7 @@ def get_container_manager():
 
 # Global instance - lazy initialization based on deployment mode
 # This maintains backward compatibility with existing code that imports dev_container_manager
-dev_container_manager = None
+dev_container_manager: Optional[BaseContainerManager] = None
 
 
 def __getattr__(name):

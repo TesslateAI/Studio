@@ -4,14 +4,15 @@ import os
 import json
 import shutil
 import time
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 import socket
 from contextlib import closing
 import aiohttp
 from .config import get_settings
+from .base_container_manager import BaseContainerManager
 
 
-class DockerContainerManager:
+class DockerContainerManager(BaseContainerManager):
     """
     Docker + Traefik development container manager for multi-user, multi-project environments.
     - Uses a single base image with project files mounted as volumes
@@ -728,9 +729,26 @@ docker-compose*
                 # Use custom start command provided by the template
                 final_command = start_command
             else:
-                # Default command that works for most Node.js projects
-                # Templates should define their start script in package.json
-                final_command = "npm install --silent && npm start"
+                # Auto-detect framework and use appropriate dev command
+                try:
+                    package_json_path = os.path.join(abs_project_path, "package.json")
+                    if os.path.exists(package_json_path):
+                        with open(package_json_path, 'r', encoding='utf-8') as f:
+                            package_json_content = f.read()
+
+                        from .services.framework_detector import FrameworkDetector
+                        framework, config = FrameworkDetector.detect_from_package_json(package_json_content)
+                        dev_command = FrameworkDetector.get_dev_server_command(framework, port)
+
+                        print(f"[FRAMEWORK] Detected {framework}, using command: {dev_command}")
+                        final_command = f"npm install --silent && {dev_command}"
+                    else:
+                        # Fallback if package.json doesn't exist
+                        print("[WARN] package.json not found, using default npm run dev")
+                        final_command = "npm install --silent && npm run dev"
+                except Exception as e:
+                    print(f"[WARN] Framework detection failed: {e}, using default npm run dev")
+                    final_command = "npm install --silent && npm run dev"
 
             # Add image and startup command
             run_cmd.extend([
@@ -922,7 +940,7 @@ docker-compose*
             return self._get_container_access_url(container_info['hostname'])
         return None
     
-    def get_container_status(self, project_id: str, user_id: int = None) -> Dict[str, any]:
+    async def get_container_status(self, project_id: str, user_id: int = None) -> Dict[str, Any]:
         """Get detailed status of a development container with multi-user support."""
         container_info = None
         
@@ -968,7 +986,7 @@ docker-compose*
         
         return {"status": "error", "running": False}
     
-    def get_all_containers(self) -> List[Dict]:
+    async def get_all_containers(self) -> List[Dict[str, Any]]:
         """Returns a list of all running containers with their metadata."""
         all_containers = []
         
@@ -1112,7 +1130,7 @@ docker-compose*
         self.activity_tracker[project_key] = time.time()
         print(f"[DEBUG] Activity tracked for {project_key}")
 
-    async def cleanup_idle_containers(self, idle_timeout_minutes: int = 30) -> List[str]:
+    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
         """
         Cleanup containers that have been idle for longer than the timeout.
 
