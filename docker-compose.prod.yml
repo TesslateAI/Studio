@@ -68,6 +68,8 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL}
       - LITELLM_API_BASE=${LITELLM_API_BASE}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - APP_PROTOCOL=${APP_PROTOCOL}
+      - APP_DOMAIN=${APP_DOMAIN}
       - DEV_SERVER_BASE_URL=${APP_PROTOCOL}://${APP_DOMAIN}
       - CORS_ORIGINS=${APP_PROTOCOL}://${APP_DOMAIN}
       - ALLOWED_HOSTS=${APP_DOMAIN}
@@ -106,12 +108,14 @@ services:
 
   # Dev server base image - Used for user project containers
   # This service doesn't run, it just builds the image
-  # Rebuild after template changes: docker compose -f docker-compose.prod.yml build dev-server
+  # Automatically rebuilds from scratch on every compose up
   dev-server:
     build:
       context: ./orchestrator
       dockerfile: Dockerfile.devserver
+      no_cache: true
     image: builder-devserver:latest
+    pull_policy: build
     profiles:
       - build-only
     # This service is only for building the image, not running

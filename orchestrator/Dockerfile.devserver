@@ -1,6 +1,7 @@
 # Tesslate Dev Server Image
-# Custom Alpine-based image with pre-installed dependencies for fast user pod startup
-# This eliminates the need for npm install on every pod creation
+# Custom Alpine-based image with pre-installed dependencies for fast user environment startup
+# This eliminates the need for npm install on every container/pod creation
+# Used by both Docker (local) and Kubernetes (production) deployment modes
 
 FROM node:20-alpine
 
@@ -29,7 +30,8 @@ COPY template/ ./
 RUN test -f node_modules/.bin/vite || (echo "ERROR: Vite not found" && exit 1)
 RUN test -f node_modules/.bin/eslint || (echo "ERROR: ESLint not found" && exit 1)
 
-# Set ownership for non-root user (uid 1000, same as K8s pod security context)
+# Set ownership for non-root user (uid 1000)
+# This matches the security context used in both Docker and K8s deployments
 RUN chown -R 1000:1000 /template
 
 # Switch to non-root user for security
@@ -44,5 +46,5 @@ LABEL version="1.0"
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD node --version || exit 1
 
-# Default command (will be overridden by K8s pod spec)
+# Default command (will be overridden by deployment configuration)
 CMD ["sh", "-c", "echo 'Tesslate dev server ready' && sleep infinity"]

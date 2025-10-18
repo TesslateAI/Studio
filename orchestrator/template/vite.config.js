@@ -4,9 +4,9 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // Base path is set via command line when needed (--base flag)
-  // This allows dynamic configuration without rebuilding
-  // In Tesslate Studio, this should match the preview URL path
+  // Base path for the application
+  // This will be preprocessed during project creation for Docker deployment
+  // Kubernetes: Uses '/' since each project has its own hostname
   base: process.env.VITE_BASE_PATH || '/',
   server: {
     host: '0.0.0.0', // Allow external connections (required for Docker)
@@ -15,14 +15,15 @@ export default defineConfig({
     // Allow requests from any host (needed for production access)
     allowedHosts: ['.localhost', 'your-domain.com', 'studio-demo.tesslate.com'],
     hmr: {
-      // CRITICAL: Configure HMR to work through Traefik proxy
-      // The WebSocket connects to the same host as the page URL
+      // Configure HMR WebSocket for proxy environments
+      // Protocol: ws for HTTP, wss for HTTPS
       protocol: process.env.VITE_HMR_PROTOCOL || 'ws',
-      // Use the page's hostname for WebSocket connection
+      // Host: Use current page hostname (undefined = same as page)
       host: process.env.VITE_HMR_HOST || undefined,
-      // Use port from environment (80 for HTTP, 443 for HTTPS)
+      // Port: 80 for HTTP, 443 for HTTPS (proxy port, not Vite's internal port)
       clientPort: process.env.VITE_HMR_PORT ? parseInt(process.env.VITE_HMR_PORT) : 80,
-      // Vite automatically uses the base path for WebSocket, no need to duplicate it
+      // Path: Vite will automatically prepend the base path
+      // e.g., if base="/preview/user1-project3/", HMR path becomes "/preview/user1-project3/@vite/client"
     },
     watch: {
       // Use polling for reliable file watching in Docker containers

@@ -57,6 +57,8 @@ services:
       - DEPLOYMENT_MODE=docker
       - OPENAI_API_BASE=${OPENAI_API_BASE}
       - OPENAI_MODEL=${OPENAI_MODEL}
+      - APP_PROTOCOL=${APP_PROTOCOL:-http}
+      - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
       - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-studio.localhost}}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
       - DEV_SERVER_BASE_URL=${DEV_SERVER_BASE_URL:-}
@@ -100,6 +102,9 @@ services:
       # Leave empty to use relative paths (recommended for path-based routing)
       - VITE_API_URL=${VITE_API_URL:-}
       - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
+      - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
+      - FRONTEND_PORT=${FRONTEND_PORT:-5173}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-docker}
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
     networks:
@@ -122,12 +127,14 @@ services:
 
   # Dev server base image - Used for user project containers
   # This service doesn't run, it just builds the image
-  # Rebuild after template changes: docker compose build dev-server
+  # Automatically rebuilds from scratch on every compose up
   dev-server:
     build:
       context: ./orchestrator
       dockerfile: Dockerfile.devserver
+      no_cache: true
     image: builder-devserver:latest
+    pull_policy: build
     profiles:
       - build-only
     # This service is only for building the image, not running

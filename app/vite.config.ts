@@ -12,6 +12,10 @@ console.log('Vite allowed hosts:', allowedHosts)
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Expose DEPLOYMENT_MODE to the browser as import.meta.env.DEPLOYMENT_MODE
+  define: {
+    'import.meta.env.DEPLOYMENT_MODE': JSON.stringify(process.env.DEPLOYMENT_MODE || 'docker'),
+  },
   server: {
     host: true,
     allowedHosts: allowedHosts,
@@ -20,10 +24,14 @@ export default defineConfig({
       interval: 300,
     },
     hmr: {
-      // Use domain from environment for HMR
+      // HMR WebSocket configuration
+      // When behind Traefik (studio.localhost), use the proxied domain
+      // Otherwise use localhost for direct access
       host: process.env.APP_DOMAIN || 'localhost',
       protocol: 'ws',
-      port: parseInt(process.env.APP_PORT || '80'),
+      // Use the frontend port (5173) for HMR, not the Traefik port (80)
+      // Traefik will proxy WebSocket connections to the correct port
+      port: parseInt(process.env.FRONTEND_PORT || '5173'),
     },
     proxy: {
       '/api': {

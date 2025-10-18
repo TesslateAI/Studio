@@ -362,9 +362,9 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
             # Production or configured base URL
             return f"{settings.dev_server_base_url}/preview/{hostname}/"
         else:
-            # Construct from environment or use defaults
+            # Construct from environment or use defaults (studio.localhost for local dev)
             protocol = os.environ.get('APP_PROTOCOL', 'http')
-            domain = os.environ.get('APP_DOMAIN', 'localhost')
+            domain = os.environ.get('APP_DOMAIN', 'studio.localhost')
             return f"{protocol}://{domain}/preview/{hostname}/"
     
     def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str, port: int = 5173) -> List[str]:
@@ -381,8 +381,8 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
             parsed = urllib.parse.urlparse(settings.dev_server_base_url)
             domain = parsed.netloc
         else:
-            # Use environment variable or default
-            domain = os.environ.get('APP_DOMAIN', 'localhost')
+            # Use environment variable or default to studio.localhost for local dev
+            domain = os.environ.get('APP_DOMAIN', 'studio.localhost')
 
         labels = [
             "--label", "traefik.enable=true",
@@ -392,10 +392,6 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
             "--label", f"traefik.http.routers.{service_name}.entrypoints=web",
             "--label", f"traefik.http.routers.{service_name}.priority=150",  # Higher priority than frontend
 
-            # Strip the /preview/{hostname} prefix before forwarding to container
-            "--label", f"traefik.http.routers.{service_name}.middlewares={service_name}-stripprefix",
-            "--label", f"traefik.http.middlewares.{service_name}-stripprefix.stripprefix.prefixes=/preview/{hostname}",
-
             # Service configuration - use the specified port from template
             "--label", f"traefik.http.services.{service_name}.loadbalancer.server.port={port}",
             "--label", f"traefik.docker.network={self.network_name}",
@@ -404,7 +400,6 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
             "--label", f"traefik.http.routers.{service_name}-secure.rule=Host(`{domain}`) && PathPrefix(`/preview/{hostname}`)",
             "--label", f"traefik.http.routers.{service_name}-secure.entrypoints=websecure",
             "--label", f"traefik.http.routers.{service_name}-secure.priority=150",
-            "--label", f"traefik.http.routers.{service_name}-secure.middlewares={service_name}-stripprefix",
             "--label", f"traefik.http.routers.{service_name}-secure.tls=true",
         ]
 
@@ -688,12 +683,19 @@ docker-compose*
             # Templates can use this for routing configuration if needed
             base_path = f"/preview/{hostname}"
 
+            # Determine HMR WebSocket protocol and port based on deployment
+            protocol = os.environ.get('APP_PROTOCOL', 'http')
+            hmr_protocol = 'wss' if protocol == 'https' else 'ws'
+            hmr_port = '443' if protocol == 'https' else '80'
+
             # Add default environment variables
             run_cmd.extend([
-                "-e", f"BASE_PATH={base_path}",                         # Base path for routing if needed
+                "-e", f"VITE_BASE_PATH={base_path}",                    # Base path for Vite routing
                 "-e", f"PUBLIC_URL={base_path}",                        # For Create React App and similar
                 "-e", "NODE_ENV=development",                           # Development mode
                 "-e", f"PORT={port}",                                   # Server port
+                "-e", f"VITE_HMR_PROTOCOL={hmr_protocol}",              # WebSocket protocol (ws/wss)
+                "-e", f"VITE_HMR_PORT={hmr_port}",                      # WebSocket port (80/443)
             ])
 
             # Add custom environment variables from the orchestrator

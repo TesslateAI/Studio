@@ -46,9 +46,18 @@ The orchestrator supports two deployment modes configured via `DEPLOYMENT_MODE`:
    ```
 
 2. **Configure environment:**
+
+   For Docker Compose (recommended):
    ```bash
+   # From project root
    cp .env.example .env
    # Edit .env with your configuration
+   ```
+
+   For native development:
+   ```bash
+   # Export environment variables or use a .env loader at project root
+   # The orchestrator reads from environment variables
    ```
 
 3. **Required environment variables:**

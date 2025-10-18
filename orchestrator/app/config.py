@@ -51,8 +51,12 @@ class Settings(BaseSettings):
     github_token_encryption_key: str = ""
 
     class Config:
-        env_file = ".env"
+        # For Docker Compose: environment variables are passed directly
+        # For native development: looks for .env in parent directory (project root)
+        env_file = "../.env"
+        env_file_encoding = "utf-8"
         extra = "ignore"  # Ignore extra fields from .env file
+        case_sensitive = False  # Allow lowercase env vars to match uppercase field names
 
 @lru_cache()
 def get_settings():

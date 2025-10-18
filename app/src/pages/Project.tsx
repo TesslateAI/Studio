@@ -168,12 +168,14 @@ export default function Project() {
     try {
       const response = await projectsApi.getDevServerUrl(projectId);
       const token = localStorage.getItem('token');
+      const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
 
       if (response.status === 'ready' && response.url) {
         toast.dismiss('dev-server');
         toast.success('Development server ready!', { id: 'dev-server', duration: 2000 });
         setDevServerUrl(response.url);
-        if (token) {
+        // Only add auth_token for Kubernetes deployment (NGINX Ingress auth)
+        if (token && deploymentMode === 'kubernetes') {
           const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
         } else {
@@ -184,7 +186,8 @@ export default function Project() {
         setTimeout(() => loadDevServerUrl(), 3000);
       } else if (response.url) {
         setDevServerUrl(response.url);
-        if (token) {
+        // Only add auth_token for Kubernetes deployment (NGINX Ingress auth)
+        if (token && deploymentMode === 'kubernetes') {
           const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
         } else {

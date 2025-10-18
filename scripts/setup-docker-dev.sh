@@ -25,21 +25,12 @@ echo -e "${GREEN}✓ Docker is running${NC}"
 
 # Create root .env if it doesn't exist
 if [ ! -f .env ]; then
-    echo "Creating root .env file..."
+    echo "Creating .env file..."
     cp .env.example .env
     echo -e "${GREEN}✓ Created .env${NC}"
     echo -e "${YELLOW}⚠ IMPORTANT: Edit .env and set your SECRET_KEY and LITELLM_MASTER_KEY${NC}"
 else
-    echo -e "${GREEN}✓ Root .env already exists${NC}"
-fi
-
-# Create app .env if it doesn't exist
-if [ ! -f app/.env ]; then
-    echo "Creating frontend .env file..."
-    cp app/.env.example app/.env
-    echo -e "${GREEN}✓ Created app/.env${NC}"
-else
-    echo -e "${GREEN}✓ Frontend .env already exists${NC}"
+    echo -e "${GREEN}✓ .env already exists${NC}"
 fi
 
 # Create traefik acme.json if it doesn't exist

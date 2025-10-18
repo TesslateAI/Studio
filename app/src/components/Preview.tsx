@@ -78,9 +78,15 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     const container = document.getElementById('preview-container');
     if (!container || !devServerUrl) return;
 
-    // Get token for authenticated iframe loading
+    // Auth token handling based on deployment mode:
+    // - Kubernetes: NGINX Ingress uses auth-url with query parameter for iframe authentication
+    // - Docker: Traefik proxies requests, authentication happens at backend API level (no token needed)
     const token = localStorage.getItem('token');
-    const authenticatedUrl = token ? `${devServerUrl}?auth_token=${encodeURIComponent(token)}` : devServerUrl;
+    const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
+    console.log('[DEBUG] Deployment mode:', deploymentMode, 'All env:', import.meta.env);
+    const authenticatedUrl = token && deploymentMode === 'kubernetes'
+      ? `${devServerUrl}?auth_token=${encodeURIComponent(token)}`
+      : devServerUrl;
 
     container.innerHTML = `
       <div class="h-full flex flex-col rounded-t-3xl overflow-hidden bg-gray-900/50 backdrop-blur-sm">
@@ -391,7 +397,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
                 const opacity = 0.5 + Math.sin(time * 1.5 + angle * 3) * 0.2 + normalizedDistance * 0.3;
                 ctx.beginPath();
                 ctx.arc(waveX, waveY, dotSize, 0, Math.PI * 2);
-                ctx.fillStyle = \`rgba(\${r}, \${g}, \${b}, \${opacity})\`;
+                ctx.fillStyle = 'rgba(' + r + ', ' + g + ', ' + b + ', ' + opacity + ')';
                 ctx.fill();
               }
             }

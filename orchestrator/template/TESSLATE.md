@@ -10,33 +10,30 @@
 - **Routing**: React Router DOM v6
 - **Port**: 5173 (Vite default)
 
-## Dev Server Configuration
-
-### Routing & Access
-
-- **Local Development**: `http://localhost:5173`
-- **Tesslate Studio Preview**: `https://user{USER_ID}-project{PROJECT_ID}.studio-test.tesslate.com`
-- **Hot Module Replacement**: Enabled via Vite
-
-### Application Routing
+## Application Routing
 
 **React Router Setup:**
 
 This template includes React Router DOM v6 pre-configured for client-side navigation with automatic base path handling:
 
 - **Router Location**: `BrowserRouter` is configured inside `src/App.jsx` with dynamic `basename` support
-- **Base Path**: Automatically configured for Tesslate Studio preview (e.g., `/preview/user1-project1/`)
+- **Base Path**: Automatically configured via `import.meta.env.BASE_URL` (set by Vite from the `base` config)
 - **Routes**: Define routes in `src/App.jsx` using `<Routes>` and `<Route>` components
 - **Navigation**: Use `<Link>` components instead of `<a>` tags to prevent page reloads
 - **Programmatic Navigation**: Use the `useNavigate()` hook
 
-**How Base Path Works:**
+**Configuration:**
 
-When your app runs in Tesslate Studio, it's served at a path like `/preview/user1-project1/`:
-- The `VITE_BASE_PATH` environment variable is automatically set by the dev server
-- Vite's `base` config uses this value to prefix all assets (JS, CSS, images)
-- React Router's `basename` is set from `import.meta.env.BASE_URL` to handle navigation
-- All your routes work relative to this base path automatically
+The `vite.config.js` file is pre-configured to use the `VITE_BASE_PATH` environment variable:
+
+```javascript
+export default defineConfig({
+  base: process.env.VITE_BASE_PATH || '/',
+  // ... other config
+})
+```
+
+This allows the application to work correctly regardless of where it's deployed (root path or subpath).
 
 **Adding New Routes:**
 
@@ -46,13 +43,6 @@ When your app runs in Tesslate Studio, it's served at a path like `/preview/user
    ```jsx
    <Route path="/your-path" element={<YourComponent />} />
    ```
-
-**Important for Tesslate Studio Preview:**
-
-- The app automatically communicates URL changes to the parent Tesslate Studio window
-- Back/forward navigation from the Studio UI is supported via `postMessage`
-- URL changes strip the base path before sending to parent (e.g., `/preview/user1-project1/about` becomes `/about`)
-- This communication is handled automatically - no additional setup needed
 
 **Example:**
 
@@ -90,9 +80,9 @@ function App() {
 
 **Routing Best Practices:**
 
-- Always use `<Link to="/path">` instead of `<a href="/path">` for internal navigation
-- Use `useNavigate()` for programmatic navigation, not `window.location`
-- All routes are relative to the base path - write them as if base path doesn't exist
+- Always use `<Link to="/path">` for internal navigation instead of `<a href="/path">`
+- Use `useNavigate()` for programmatic navigation instead of `window.location`
+- All routes are relative to the base path - write them as absolute paths starting with `/`
 - For external links, use regular `<a href="https://...">` tags
 
 ## File Structure
@@ -153,19 +143,17 @@ npm run preview
 ```
 Preview production build locally.
 
-## Container Environment
+## Development Server
 
-This project runs in a Tesslate Studio development container:
+This project uses Vite's built-in development server with Hot Module Replacement (HMR).
 
-- **Base Image**: Node.js with Vite pre-installed
-- **Working Directory**: `/app/project`
-- **Storage**: Persistent volume with user isolation
-- **Resources**: Memory and CPU limits managed by Tesslate Studio
-- **Networking**: HTTPS ingress with authentication
+**Starting the server:**
+```bash
+npm run dev
+```
 
-### File Persistence
-
-Files are automatically saved:
-1. **Database** - Version history and backup
-2. **Dev Container** - Live development environment
-3. Changes persist across restarts
+**Key features:**
+- Instant server start
+- Hot Module Replacement - changes appear instantly
+- Optimized dependency pre-bundling
+- Runs on port 5173 by default
