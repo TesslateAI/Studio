@@ -148,12 +148,21 @@ class UniversalAgent:
                     self.tool_calls_count += len(tool_calls)
 
                 # Record this step
+                # For steps without tool calls, use conversational text for response_text
+                # This ensures the user sees meaningful output even when agent is just thinking
+                display_text = response
+                if not tool_calls and not is_complete:
+                    # Extract conversational text for display
+                    conversational = self.parser.get_conversational_text(response)
+                    if conversational:
+                        display_text = conversational
+
                 step = AgentStep(
                     iteration=iteration,
                     thought=thought,
                     tool_calls=tool_calls,
                     tool_results=tool_results,
-                    response_text=response,
+                    response_text=display_text,
                     is_complete=is_complete
                 )
                 self.steps.append(step)

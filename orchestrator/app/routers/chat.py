@@ -327,18 +327,28 @@ async def agent_chat(
     logger.info(f"[AGENT-CHAT-DEBUG] Starting agent chat - user: {current_user.id}, project: {request.project_id}")
     try:
         # Verify project ownership
-        result = await db.execute(
-            select(Project).where(
-                Project.id == request.project_id,
-                Project.owner_id == current_user.id
+        try:
+            result = await db.execute(
+                select(Project).where(
+                    Project.id == request.project_id,
+                    Project.owner_id == current_user.id
+                )
             )
-        )
-        project = result.scalar_one_or_none()
+            project = result.scalar_one_or_none()
 
-        if not project:
+            if not project:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Project not found or access denied"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Database error during project verification: {e}", exc_info=True)
             raise HTTPException(
-                status_code=404,
-                detail="Project not found or access denied"
+                status_code=500,
+                detail=f"Database error: {str(e)}"
             )
 
         logger.info(
@@ -365,7 +375,8 @@ async def agent_chat(
                 else:
                     logger.warning(f"Agent ID {request.agent_id} not found or inactive, using default agent")
             except Exception as e:
-                logger.error(f"Error loading agent configuration: {e}")
+                await db.rollback()
+                logger.error(f"Error loading agent configuration: {e}", exc_info=True)
 
         # Create model adapter using user's LiteLLM key
         logger.info(f"[AGENT-CHAT-DEBUG] Checking LiteLLM API key for user {current_user.id}")
@@ -455,27 +466,35 @@ async def agent_chat(
 
         # Save to chat history
         # Get or create chat for this project
-        chat_result = await db.execute(
-            select(Chat).where(
-                Chat.user_id == current_user.id,
-                Chat.project_id == request.project_id
+        try:
+            chat_result = await db.execute(
+                select(Chat).where(
+                    Chat.user_id == current_user.id,
+                    Chat.project_id == request.project_id
+                )
             )
-        )
-        chat = chat_result.scalar_one_or_none()
+            chat = chat_result.scalar_one_or_none()
 
-        if not chat:
-            chat = Chat(user_id=current_user.id, project_id=request.project_id)
-            db.add(chat)
-            await db.commit()
-            await db.refresh(chat)
+            if not chat:
+                chat = Chat(user_id=current_user.id, project_id=request.project_id)
+                db.add(chat)
+                await db.commit()
+                await db.refresh(chat)
 
-        # Save user message
-        user_message = Message(
-            chat_id=chat.id,
-            role="user",
-            content=request.message
-        )
-        db.add(user_message)
+            # Save user message
+            user_message = Message(
+                chat_id=chat.id,
+                role="user",
+                content=request.message
+            )
+            db.add(user_message)
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Database error during chat history setup: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database error while saving chat: {str(e)}"
+            )
 
         # Save agent response with metadata for UI restoration
         agent_metadata = {

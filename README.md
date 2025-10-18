@@ -255,7 +255,7 @@ LITELLM_API_BASE=http://localhost:4000/v1
 **`orchestrator/.env` (Individual Services):**
 ```env
 SECRET_KEY=your-secret-key-here
-DATABASE_URL=sqlite+aiosqlite:///./builder.db
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/tesslate
 DEPLOYMENT_MODE=docker  # or "kubernetes"
 LITELLM_API_BASE=http://localhost:4000/v1
 LITELLM_MASTER_KEY=your-litellm-master-key
@@ -415,8 +415,9 @@ cd k8s
 
 **Problem: "Database connection failed"**
 ```bash
-# Docker mode - check file exists
-ls orchestrator/tesslate.db
+# Docker mode - check PostgreSQL connection
+docker compose ps postgres
+docker compose logs postgres
 
 # K8s mode - check PostgreSQL
 kubectl get pods -n tesslate | grep postgres

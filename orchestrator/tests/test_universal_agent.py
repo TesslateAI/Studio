@@ -6,7 +6,9 @@ Tests the agent's ability to parse tool calls and work with different models.
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
+
+# Add parent directory (orchestrator) to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.agent.parser import AgentResponseParser
 from app.agent.tools.registry import get_tool_registry
@@ -82,6 +84,15 @@ Based on the error, the issue is with the import statement. You need to update
 the import to use the correct path.
             """,
             0
+        ),
+        (
+            "TASK_COMPLETE Removal Test",
+            """
+I've successfully created all the requested components and updated the routing.
+
+TASK_COMPLETE
+            """,
+            0
         )
     ]
 
@@ -106,6 +117,84 @@ the import to use the correct path.
             for tc in tool_calls:
                 print(f"    - {tc.name}: {tc.parameters}")
         print(f"  Complete: {is_complete}")
+
+    print("\n" + "=" * 80)
+    print(f"RESULTS: {passed} passed, {failed} failed out of {len(test_cases)} tests")
+    print("=" * 80)
+
+    return failed == 0
+
+
+def test_conversational_text_extraction():
+    """Test that conversational text extraction removes TASK_COMPLETE and tool calls."""
+    print("\n" + "=" * 80)
+    print("TESTING CONVERSATIONAL TEXT EXTRACTION")
+    print("=" * 80)
+
+    parser = AgentResponseParser()
+
+    test_cases = [
+        (
+            "TASK_COMPLETE Removal",
+            """
+I've successfully created the Header component with all the requested features.
+
+TASK_COMPLETE
+            """,
+            "I've successfully created the Header component with all the requested features."
+        ),
+        (
+            "Tool Call Removal",
+            """
+THOUGHT: I need to read the file first
+
+<tool_call>
+<tool_name>read_file</tool_name>
+<parameters>{"file_path": "src/App.jsx"}</parameters>
+</tool_call>
+
+Let me check the current structure.
+            """,
+            "THOUGHT: I need to read the file first\n\nLet me check the current structure."
+        ),
+        (
+            "Mixed Content",
+            """
+I've analyzed the code and found the issue.
+
+<tool_call>
+<tool_name>write_file</tool_name>
+<parameters>{"file_path": "src/fix.js", "content": "fixed code"}</parameters>
+</tool_call>
+
+The fix has been applied successfully.
+
+TASK_COMPLETE
+            """,
+            "I've analyzed the code and found the issue.\n\nThe fix has been applied successfully."
+        )
+    ]
+
+    passed = 0
+    failed = 0
+
+    for name, response, expected_output in test_cases:
+        conversational_text = parser.get_conversational_text(response)
+
+        # Normalize whitespace for comparison
+        conversational_text = conversational_text.strip()
+        expected_output = expected_output.strip()
+
+        success = conversational_text == expected_output
+
+        if success:
+            print(f"\n[PASS] {name}")
+            passed += 1
+        else:
+            print(f"\n[FAIL] {name}")
+            print(f"  Expected: {repr(expected_output)}")
+            print(f"  Got:      {repr(conversational_text)}")
+            failed += 1
 
     print("\n" + "=" * 80)
     print(f"RESULTS: {passed} passed, {failed} failed out of {len(test_cases)} tests")
@@ -323,6 +412,7 @@ if __name__ == "__main__":
 
     # Run tests
     parser_ok = test_parser()
+    conversational_ok = test_conversational_text_extraction()
     registry_ok = test_tool_registry()
     prompt_ok = test_system_prompt()
 
@@ -330,7 +420,7 @@ if __name__ == "__main__":
     print_usage_guide()
 
     # Summary
-    if parser_ok and registry_ok and prompt_ok:
+    if parser_ok and conversational_ok and registry_ok and prompt_ok:
         print("\n[SUCCESS] All tests passed! Universal Agent is ready.")
         print("\nNext steps:")
         print("1. Start orchestrator: cd orchestrator && uv run uvicorn app.main:app --reload")

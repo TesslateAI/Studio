@@ -121,7 +121,7 @@ Docker:
    Edit `orchestrator/.env`:
    ```env
    SECRET_KEY=your-secret-key-here
-   DATABASE_URL=sqlite+aiosqlite:///./builder.db
+   DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/tesslate
    DEPLOYMENT_MODE=docker
    LITELLM_MASTER_KEY=your-litellm-master-key
    LITELLM_API_BASE=http://localhost:4000/v1
@@ -428,7 +428,7 @@ kubectl get ingress -n tesslate -o wide
 ```env
 # orchestrator/.env
 DEPLOYMENT_MODE=docker
-DATABASE_URL=sqlite+aiosqlite:///./builder.db
+DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/tesslate
 SECRET_KEY=your-secret-key
 LITELLM_MASTER_KEY=your-litellm-master-key
 LITELLM_API_BASE=http://localhost:4000/v1
@@ -536,8 +536,9 @@ kubectl get secret docr-secret -n tesslate
 
 **Problem:** Database connection errors
 ```bash
-# Docker mode: Check database file exists
-ls orchestrator/builder.db
+# Docker mode: Check PostgreSQL connection
+docker compose ps postgres
+docker compose logs postgres
 
 # K8s mode: Check PostgreSQL pod
 kubectl get pods -n tesslate | grep postgres

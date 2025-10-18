@@ -258,6 +258,11 @@ class AgentResponseParser:
         # Remove bash blocks
         text = re.sub(self.BASH_PATTERN, '', text, flags=re.DOTALL)
 
+        # Remove completion signals
+        for signal in self.COMPLETION_SIGNALS:
+            # Case-insensitive removal
+            text = re.sub(re.escape(signal), '', text, flags=re.IGNORECASE)
+
         # Clean up extra whitespace
         text = re.sub(r'\n\s*\n', '\n\n', text)
         text = text.strip()

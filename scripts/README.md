@@ -178,7 +178,7 @@ python scripts/utilities/cleanup-local.py
 ## ⚠️ Important Notes
 
 1. **Traefik is required** for user development containers, even in hybrid mode
-2. **PostgreSQL** is used in Kubernetes, **SQLite** in local development
+2. **PostgreSQL** is used in all deployment modes (Docker and Kubernetes)
 3. Always use **`scripts/kubernetes/manage-k8s.sh`** for production operations (not kubectl directly)
 4. **Backup before cleanup** - cleanups are destructive and irreversible!
 5. **Script paths have changed** - all scripts are now organized into subdirectories by category

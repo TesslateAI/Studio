@@ -90,8 +90,7 @@ API will be available at:
 
 The orchestrator uses SQLAlchemy with async support:
 
-- **Development**: SQLite (`sqlite+aiosqlite:///./builder.db`)
-- **Production**: PostgreSQL (`postgresql+asyncpg://...`)
+- **All Environments**: PostgreSQL (`postgresql+asyncpg://...`)
 
 Database tables are automatically created on startup with retry logic for resilience.
 

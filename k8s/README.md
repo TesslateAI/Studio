@@ -437,10 +437,10 @@ For production, consider using Velero for complete cluster backup.
 
 If migrating from the existing Docker Compose setup:
 
-1. Export data from SQLite
+1. Backup PostgreSQL data from Docker environment
 2. Build and push Docker images
 3. Deploy to Kubernetes
-4. Import data to PostgreSQL
+4. Restore data to Kubernetes PostgreSQL
 5. Update DNS/proxy settings
 
 ## Local Development
