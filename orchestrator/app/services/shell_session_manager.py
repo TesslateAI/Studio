@@ -39,8 +39,7 @@ class ShellSessionManager:
         user_id: int,
         project_id: int,
         db: AsyncSession,
-        command: str = "/bin/bash",
-        cwd: str = "/app/project",
+        command: str = "/bin/sh",
     ) -> Dict[str, Any]:
         """
         Create a new shell session with validation and resource limits.
@@ -98,7 +97,6 @@ class ShellSessionManager:
                 project_id=project_id,
                 container_name=container_name,
                 command=command,
-                cwd=cwd,
             )
         except Exception as e:
             logger.error(f"Failed to create PTY session: {e}")
@@ -114,7 +112,7 @@ class ShellSessionManager:
             project_id=project_id,
             container_name=container_name,
             command=command,
-            working_dir=cwd,
+            working_dir=pty_session.cwd,  # Get from PTYSession (already configured for deployment mode)
             status="active",
         )
         db.add(db_session)

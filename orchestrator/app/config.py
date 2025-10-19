@@ -31,6 +31,19 @@ class Settings(BaseSettings):
     # Deployment mode: "docker" (local with Docker+Traefik) or "kubernetes" (K8s cluster)
     deployment_mode: str = "docker"
 
+    @property
+    def container_project_path(self) -> str:
+        """
+        Get the project directory path inside containers.
+
+        - Docker: Project mounted at /app
+        - Kubernetes: Project mounted at /app/project (with /app as working dir)
+        """
+        if self.deployment_mode == "kubernetes":
+            return "/app/project"
+        else:
+            return "/app"
+
     # CORS Configuration
     # Comma-separated list of allowed origins for CORS requests
     # Default is empty - should be configured via environment variables

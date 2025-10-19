@@ -9,6 +9,7 @@ from typing import Dict, Any
 from sqlalchemy import select
 from .registry import Tool, ToolRegistry, ToolCategory
 from ...models import Project, ProjectFile
+from .output_formatter import success_output, error_output, format_file_size, pluralize
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +34,23 @@ async def get_project_info_tool(params: Dict[str, Any], context: Dict[str, Any])
     project = result.scalar_one_or_none()
 
     if not project:
-        return {
-            "exists": False,
-            "error": f"Project {project_id} not found"
-        }
+        return error_output(
+            message=f"Project {project_id} not found",
+            suggestion="Check if the project exists or you have access to it",
+            exists=False
+        )
 
-    return {
-        "exists": True,
-        "id": project.id,
-        "name": project.name,
-        "description": project.description,
-        "owner_id": project.owner_id,
-        "created_at": project.created_at.isoformat() if project.created_at else None,
-        "updated_at": project.updated_at.isoformat() if project.updated_at else None
-    }
+    return success_output(
+        message=f"Project: {project.name}",
+        id=project.id,
+        name=project.name,
+        description=project.description,
+        details={
+            "owner_id": project.owner_id,
+            "created_at": project.created_at.isoformat() if project.created_at else None,
+            "updated_at": project.updated_at.isoformat() if project.updated_at else None
+        }
+    )
 
 
 async def get_file_tree_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -78,11 +82,12 @@ async def get_file_tree_tool(params: Dict[str, Any], context: Dict[str, Any]) ->
         for f in files
     ]
 
-    return {
-        "project_id": project_id,
-        "total_files": len(file_list),
-        "files": file_list
-    }
+    return success_output(
+        message=f"Found {pluralize(len(file_list), 'file')} in project",
+        project_id=project_id,
+        files=file_list,
+        details={"total_files": len(file_list)}
+    )
 
 
 async def get_file_summary_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,22 +119,32 @@ async def get_file_summary_tool(params: Dict[str, Any], context: Dict[str, Any])
     file = result.scalar_one_or_none()
 
     if not file:
-        return {
-            "exists": False,
-            "message": f"File not found in database: {file_path}"
-        }
+        return error_output(
+            message=f"File '{file_path}' not found in database",
+            suggestion="Use get_file_tree to see available files, or read_file to read from filesystem",
+            exists=False,
+            file_path=file_path
+        )
 
     content_preview = file.content[:500] if file.content else ""
     truncated = len(file.content) > 500 if file.content else False
+    total_size = len(file.content) if file.content else 0
 
-    return {
-        "exists": True,
-        "file_path": file.file_path,
-        "total_size": len(file.content) if file.content else 0,
-        "preview": content_preview,
-        "truncated": truncated,
-        "lines": content_preview.count('\n') + 1 if content_preview else 0
-    }
+    if truncated:
+        message = f"Preview of '{file_path}' ({format_file_size(total_size)}, truncated)"
+    else:
+        message = f"Preview of '{file_path}' ({format_file_size(total_size)})"
+
+    return success_output(
+        message=message,
+        file_path=file.file_path,
+        preview=content_preview,
+        details={
+            "total_size_bytes": total_size,
+            "truncated": truncated,
+            "preview_lines": content_preview.count('\n') + 1 if content_preview else 0
+        }
+    )
 
 
 def register_tools(registry: ToolRegistry):

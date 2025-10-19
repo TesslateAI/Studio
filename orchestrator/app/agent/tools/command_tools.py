@@ -12,6 +12,7 @@ from typing import Dict, Any
 from .registry import Tool, ToolRegistry, ToolCategory
 from ...config import get_settings
 from ...services.command_validator import get_command_validator
+from .output_formatter import success_output, error_output, pluralize
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +54,12 @@ async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) 
     validation = validator.validate(command, working_dir)
 
     if not validation.is_valid:
-        return {
-            "success": False,
-            "error": f"Command validation failed: {validation.reason}",
-            "risk_level": validation.risk_level.value
-        }
+        return error_output(
+            message=f"Cannot execute command: {validation.reason}",
+            suggestion="Avoid dangerous commands. Use file operations tools like delete_file instead of rm commands",
+            command=command,
+            details={"risk_level": validation.risk_level.value}
+        )
 
     try:
         if settings.deployment_mode == "kubernetes":
@@ -72,13 +74,12 @@ async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) 
                 timeout=timeout
             )
 
-            return {
-                "success": True,
-                "command": command,
-                "stdout": output,
-                "risk_level": validation.risk_level.value,
-                "message": "Command executed successfully"
-            }
+            return success_output(
+                message=f"Executed '{command}' successfully",
+                command=command,
+                stdout=output,
+                details={"risk_level": validation.risk_level.value}
+            )
         else:
             # Docker mode: Execute via docker exec
             container_name = f"builder-dev-user{user_id}-project{project_id}"
@@ -102,38 +103,39 @@ async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) 
             )
 
             if result.returncode == 0:
-                return {
-                    "success": True,
-                    "command": command,
-                    "stdout": result.stdout,
-                    "risk_level": validation.risk_level.value,
-                    "message": "Command executed successfully"
-                }
+                return success_output(
+                    message=f"Executed '{command}' successfully",
+                    command=command,
+                    stdout=result.stdout,
+                    details={"risk_level": validation.risk_level.value}
+                )
             else:
-                return {
-                    "success": False,
-                    "command": command,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                    "exit_code": result.returncode,
-                    "risk_level": validation.risk_level.value,
-                    "error": f"Command failed with exit code {result.returncode}"
-                }
+                return error_output(
+                    message=f"Command '{command}' failed",
+                    suggestion="Check the error output below for details",
+                    command=command,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    details={
+                        "exit_code": result.returncode,
+                        "risk_level": validation.risk_level.value
+                    }
+                )
 
     except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "command": command,
-            "error": f"Command timed out after {timeout} seconds",
-            "risk_level": validation.risk_level.value
-        }
+        return error_output(
+            message=f"Command '{command}' timed out after {timeout} seconds",
+            suggestion="The command may be hanging or taking too long. Try increasing the timeout or simplifying the command",
+            command=command,
+            details={"timeout": timeout}
+        )
     except Exception as e:
-        return {
-            "success": False,
-            "command": command,
-            "error": str(e),
-            "risk_level": validation.risk_level.value
-        }
+        return error_output(
+            message=f"Error executing '{command}': {str(e)}",
+            suggestion="Check if the development environment is running",
+            command=command,
+            details={"error": str(e)}
+        )
 
 
 async def execute_multiple_commands_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -186,13 +188,30 @@ async def execute_multiple_commands_tool(params: Dict[str, Any], context: Dict[s
     successful = sum(1 for r in results if r["success"])
     failed = len(results) - successful
 
-    return {
-        "total_commands": len(commands),
-        "executed": len(results),
-        "successful": successful,
-        "failed": failed,
-        "results": results
-    }
+    # Create user-friendly message
+    if failed == 0:
+        message = f"All {pluralize(successful, 'command')} completed successfully"
+    elif successful == 0:
+        message = f"All {pluralize(len(results), 'command')} failed"
+    else:
+        message = f"Executed {len(results)} commands: {successful} succeeded, {failed} failed"
+
+    # Remove "index" from individual results for cleaner output
+    clean_results = []
+    for r in results:
+        result_copy = {k: v for k, v in r.items() if k != "index"}
+        clean_results.append(result_copy)
+
+    return success_output(
+        message=message,
+        results=clean_results,
+        details={
+            "total_commands": len(commands),
+            "executed": len(results),
+            "successful": successful,
+            "failed": failed
+        }
+    )
 
 
 def register_tools(registry: ToolRegistry):

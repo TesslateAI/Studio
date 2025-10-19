@@ -130,8 +130,8 @@ export function ChatContainer({
 
         setAgents(uiAgents);
 
-        // Set first agent as default if no current agent
-        if (uiAgents.length > 0 && !currentAgent) {
+        // Always set first agent as default
+        if (uiAgents.length > 0) {
           const defaultAgent = uiAgents[0];
           setCurrentAgent(defaultAgent);
           onSelectAgent(defaultAgent);

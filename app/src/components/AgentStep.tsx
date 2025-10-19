@@ -30,8 +30,8 @@ export default function AgentStep({ step, totalSteps }: AgentStepProps) {
         </span>
       </div>
 
-      {/* Thought Process */}
-      {step.thought && (
+      {/* Thought Process - Only show if there ARE tool calls */}
+      {step.thought && step.tool_calls && step.tool_calls.length > 0 && (
         <div className="flex items-start gap-2 p-2.5 bg-[var(--text)]/5 rounded-lg mb-3 border border-[var(--border-color)]">
           <Brain size={14} className="text-[hsl(var(--hue2)_60%_50%)] mt-0.5 flex-shrink-0" />
           <div className="flex-1">
@@ -42,12 +42,28 @@ export default function AgentStep({ step, totalSteps }: AgentStepProps) {
       )}
 
       {/* Tool Calls */}
-      {step.tool_calls && step.tool_calls.length > 0 && (
+      {step.tool_calls && step.tool_calls.length > 0 ? (
         <div className="space-y-2">
           {step.tool_calls.map((toolCall, idx) => (
             <ToolCallDisplay key={idx} toolCall={toolCall} />
           ))}
         </div>
+      ) : (
+        /* No tool calls - show the thought instead */
+        step.thought ? (
+          <div className="flex items-start gap-2 p-2.5 bg-[var(--text)]/5 rounded-lg border border-[var(--border-color)]">
+            <Brain size={14} className="text-[hsl(var(--hue2)_60%_50%)] mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <span className="text-xs text-[var(--text)]/90 leading-relaxed">{step.thought}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="p-2.5 bg-[var(--text)]/5 rounded-lg border border-[var(--border-color)]">
+            <span className="text-xs text-[var(--text)]/60 italic">
+              No output for this iteration
+            </span>
+          </div>
+        )
       )}
     </div>
   );

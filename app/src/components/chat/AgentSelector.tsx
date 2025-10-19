@@ -33,6 +33,32 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
     setIsOpen(false);
   };
 
+  // Show placeholder if no agent selected
+  if (!currentAgent || !currentAgent.name) {
+    return (
+      <div className="relative" ref={dropdownRef}>
+        <button
+          disabled
+          className="
+            agent-pill
+            bg-[var(--primary)]/50 text-white/50
+            px-3.5 py-2.5
+            flex items-center gap-1.5
+            transition-all
+            text-xs font-medium
+            flex-shrink-0
+            rounded-l-2xl
+            -ml-px -my-px
+            relative z-[10000]
+            cursor-wait
+          "
+        >
+          <span className="text-xs">Loading agents...</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="relative" ref={dropdownRef}>
       <button

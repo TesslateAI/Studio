@@ -10,6 +10,7 @@ import os
 from typing import Dict, Any
 from .registry import Tool, ToolRegistry, ToolCategory
 from ...config import get_settings
+from .output_formatter import success_output, error_output, format_file_size, pluralize
 
 logger = logging.getLogger(__name__)
 
@@ -48,43 +49,55 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
         )
 
         if content is None:
-            return {
-                "exists": False,
-                "message": f"File not found: {file_path}"
-            }
+            return error_output(
+                message=f"File '{file_path}' does not exist",
+                suggestion="Use list_files to browse available files in the directory",
+                exists=False,
+                file_path=file_path
+            )
 
-        return {
-            "exists": True,
-            "file_path": file_path,
-            "content": content,
-            "size": len(content)
-        }
+        return success_output(
+            message=f"Read {format_file_size(len(content))} from '{file_path}'",
+            file_path=file_path,
+            content=content,
+            details={
+                "size_bytes": len(content),
+                "lines": len(content.split('\n'))
+            }
+        )
     else:
         # Docker mode: Read from local filesystem
         project_dir = f"users/{user_id}/{project_id}"
         full_path = os.path.join(project_dir, file_path)
 
         if not os.path.exists(full_path):
-            return {
-                "exists": False,
-                "message": f"File not found: {file_path}"
-            }
+            return error_output(
+                message=f"File '{file_path}' does not exist",
+                suggestion="Use list_files to browse available files in the directory",
+                exists=False,
+                file_path=file_path
+            )
 
         try:
             with open(full_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            return {
-                "exists": True,
-                "file_path": file_path,
-                "content": content,
-                "size": len(content)
-            }
+            return success_output(
+                message=f"Read {format_file_size(len(content))} from '{file_path}'",
+                file_path=file_path,
+                content=content,
+                details={
+                    "size_bytes": len(content),
+                    "lines": len(content.split('\n'))
+                }
+            )
         except Exception as e:
-            return {
-                "exists": False,
-                "message": f"Error reading file: {str(e)}"
-            }
+            return error_output(
+                message=f"Could not read '{file_path}': {str(e)}",
+                suggestion="Check if the file has read permissions or is a binary file",
+                file_path=file_path,
+                details={"error": str(e)}
+            )
 
 
 async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,14 +147,22 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             content=content
         )
 
-        return {
-            "success": success,
-            "file_path": file_path,
-            "size": len(content),
-            "lines": len(lines),
-            "preview": preview,
-            "message": f"Successfully wrote {len(lines)} lines ({len(content)} bytes) to {file_path}"
-        }
+        if not success:
+            return error_output(
+                message=f"Failed to write to '{file_path}' in pod",
+                suggestion="Check if the pod has write permissions and sufficient disk space",
+                file_path=file_path
+            )
+
+        return success_output(
+            message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
+            file_path=file_path,
+            preview=preview,
+            details={
+                "size_bytes": len(content),
+                "line_count": len(lines)
+            }
+        )
     else:
         # Docker mode: Write to local filesystem
         project_dir = f"users/{user_id}/{project_id}"
@@ -161,20 +182,22 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(content)
 
-            return {
-                "success": True,
-                "file_path": file_path,
-                "size": len(content),
-                "lines": len(lines),
-                "preview": preview,
-                "message": f"Successfully wrote {len(lines)} lines ({len(content)} bytes) to {file_path}"
-            }
+            return success_output(
+                message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
+                file_path=file_path,
+                preview=preview,
+                details={
+                    "size_bytes": len(content),
+                    "line_count": len(lines)
+                }
+            )
         except Exception as e:
-            return {
-                "success": False,
-                "file_path": file_path,
-                "message": f"Error writing file: {str(e)}"
-            }
+            return error_output(
+                message=f"Could not write to '{file_path}': {str(e)}",
+                suggestion="Check if the directory exists and you have write permissions",
+                file_path=file_path,
+                details={"error": str(e)}
+            )
 
 
 async def list_files_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -208,23 +231,24 @@ async def list_files_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             directory=directory
         )
 
-        return {
-            "directory": directory,
-            "files": files,
-            "count": len(files)
-        }
+        return success_output(
+            message=f"Found {pluralize(len(files), 'item')} in '{directory}'",
+            directory=directory,
+            files=files,
+            details={"count": len(files)}
+        )
     else:
         # Docker mode: List from local filesystem
         project_dir = f"users/{user_id}/{project_id}"
         target_dir = os.path.join(project_dir, directory) if directory != "." else project_dir
 
         if not os.path.exists(target_dir):
-            return {
-                "directory": directory,
-                "files": [],
-                "count": 0,
-                "message": "Directory not found"
-            }
+            return error_output(
+                message=f"Directory '{directory}' does not exist",
+                suggestion="Check the directory path or use '.' to list the project root",
+                directory=directory,
+                files=[]
+            )
 
         try:
             files = []
@@ -239,18 +263,20 @@ async def list_files_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                     "size": os.path.getsize(item_path) if os.path.isfile(item_path) else 0
                 })
 
-            return {
-                "directory": directory,
-                "files": files,
-                "count": len(files)
-            }
+            return success_output(
+                message=f"Found {pluralize(len(files), 'item')} in '{directory}'",
+                directory=directory,
+                files=files,
+                details={"count": len(files)}
+            )
         except Exception as e:
-            return {
-                "directory": directory,
-                "files": [],
-                "count": 0,
-                "message": f"Error listing directory: {str(e)}"
-            }
+            return error_output(
+                message=f"Could not list directory '{directory}': {str(e)}",
+                suggestion="Check if you have read permissions for this directory",
+                directory=directory,
+                files=[],
+                details={"error": str(e)}
+            )
 
 
 async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -310,22 +336,22 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 current_content = f.read()
 
     if current_content is None:
-        return {
-            "success": False,
-            "file_path": file_path,
-            "message": f"File not found: {file_path}. Use write_file to create new files."
-        }
+        return error_output(
+            message=f"File '{file_path}' does not exist",
+            suggestion="Use write_file to create new files, or list_files to check available files",
+            file_path=file_path
+        )
 
     # 2. Apply search/replace with fuzzy matching
     result = apply_search_replace(current_content, search, replace, fuzzy=True)
 
     if not result.success:
-        return {
-            "success": False,
-            "file_path": file_path,
-            "message": f"Failed to apply patch: {result.error}",
-            "hint": "Make sure the search block matches existing code exactly (including indentation)"
-        }
+        return error_output(
+            message=f"Could not find matching code in '{file_path}'",
+            suggestion="Make sure the search block matches existing code exactly (including indentation and whitespace)",
+            file_path=file_path,
+            details={"error": result.error}
+        )
 
     # 3. Write the patched content back
     if settings.deployment_mode == "kubernetes":
@@ -339,11 +365,11 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         )
 
         if not success:
-            return {
-                "success": False,
-                "file_path": file_path,
-                "message": "Failed to write patched file to pod"
-            }
+            return error_output(
+                message=f"Failed to save patched file '{file_path}' to pod",
+                suggestion="Check pod write permissions and disk space",
+                file_path=file_path
+            )
     else:
         # Docker mode: Write to local filesystem
         project_dir = f"users/{user_id}/{project_id}"
@@ -353,19 +379,21 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(result.content)
         except Exception as e:
-            return {
-                "success": False,
-                "file_path": file_path,
-                "message": f"Error writing file: {str(e)}"
-            }
+            return error_output(
+                message=f"Could not save patched file '{file_path}': {str(e)}",
+                suggestion="Check if you have write permissions",
+                file_path=file_path,
+                details={"error": str(e)}
+            )
 
-    return {
-        "success": True,
-        "file_path": file_path,
-        "match_method": result.match_method,
-        "message": f"Successfully patched {file_path} using {result.match_method} matching",
-        "bytes_written": len(result.content)
-    }
+    return success_output(
+        message=f"Successfully patched '{file_path}'",
+        file_path=file_path,
+        details={
+            "match_method": result.match_method,
+            "size_bytes": len(result.content)
+        }
+    )
 
 
 async def delete_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -393,11 +421,17 @@ async def delete_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> D
         file_path=file_path
     )
 
-    return {
-        "success": success,
-        "file_path": file_path,
-        "message": f"Successfully deleted {file_path}"
-    }
+    if not success:
+        return error_output(
+            message=f"Could not delete '{file_path}'",
+            suggestion="Check if the file exists and you have delete permissions",
+            file_path=file_path
+        )
+
+    return success_output(
+        message=f"Deleted '{file_path}'",
+        file_path=file_path
+    )
 
 
 def register_tools(registry: ToolRegistry):

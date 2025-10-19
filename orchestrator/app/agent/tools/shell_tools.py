@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any
 
 from .registry import Tool, ToolCategory
+from .output_formatter import success_output, error_output, truncate_session_id, pluralize, strip_ansi_codes
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,8 @@ async def shell_open_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     """Open a new shell session."""
     from ...services.shell_session_manager import get_shell_session_manager
 
-    project_id = params["project_id"]
-    command = params.get("command", "/bin/bash")
-    cwd = params.get("cwd", "/app/project")
+    project_id = context["project_id"]  # Get from context, not params
+    command = params.get("command", "/bin/sh")  # Alpine-based containers use sh, not bash
     user_id = context["user_id"]
     db = context["db"]
 
@@ -31,14 +31,17 @@ async def shell_open_executor(params: Dict[str, Any], context: Dict[str, Any]) -
         project_id=project_id,
         db=db,
         command=command,
-        cwd=cwd,
     )
 
-    return {
-        "success": True,
-        "session_id": session_info["session_id"],
-        "message": f"Shell session opened: {session_info['session_id'][:8]}",
-    }
+    session_id = session_info["session_id"]
+
+    return success_output(
+        message=f"Opened shell session {truncate_session_id(session_id)}",
+        session_id=session_id,
+        details={
+            "command": command
+        }
+    )
 
 
 async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,15 +69,19 @@ async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     # Read output
     output_data = await session_manager.read_output(session_id, db)
 
-    # Decode base64 output
+    # Decode base64 output and strip control characters
     output_text = base64.b64decode(output_data["output"]).decode('utf-8', errors='replace')
+    output_text = strip_ansi_codes(output_text)
 
-    return {
-        "success": True,
-        "output": output_text,
-        "bytes": output_data["bytes"],
-        "is_eof": output_data["is_eof"],
-    }
+    return success_output(
+        message=f"Executed '{command.strip()}' in session {truncate_session_id(session_id)}",
+        output=output_text,
+        session_id=session_id,
+        details={
+            "bytes": output_data["bytes"],
+            "is_eof": output_data["is_eof"]
+        }
+    )
 
 
 async def shell_write_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -90,10 +97,11 @@ async def shell_write_executor(params: Dict[str, Any], context: Dict[str, Any]) 
     data_bytes = data.encode('utf-8')
     await session_manager.write_to_session(session_id, data_bytes, db)
 
-    return {
-        "success": True,
-        "bytes_written": len(data_bytes),
-    }
+    return success_output(
+        message=f"Wrote data to session {truncate_session_id(session_id)}",
+        session_id=session_id,
+        details={"bytes_written": len(data_bytes)}
+    )
 
 
 async def shell_read_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -106,15 +114,19 @@ async def shell_read_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     session_manager = get_shell_session_manager()
     output_data = await session_manager.read_output(session_id, db)
 
-    # Decode base64 output
+    # Decode base64 output and strip control characters
     output_text = base64.b64decode(output_data["output"]).decode('utf-8', errors='replace')
+    output_text = strip_ansi_codes(output_text)
 
-    return {
-        "success": True,
-        "output": output_text,
-        "bytes": output_data["bytes"],
-        "is_eof": output_data["is_eof"],
-    }
+    return success_output(
+        message=f"Read output from session {truncate_session_id(session_id)}",
+        output=output_text,
+        session_id=session_id,
+        details={
+            "bytes": output_data["bytes"],
+            "is_eof": output_data["is_eof"]
+        }
+    )
 
 
 async def shell_list_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -122,7 +134,7 @@ async def shell_list_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     from ...services.shell_session_manager import get_shell_session_manager
 
     user_id = context["user_id"]
-    project_id = params.get("project_id")
+    project_id = params.get("project_id", context.get("project_id"))  # Default to current project
     db = context["db"]
 
     session_manager = get_shell_session_manager()
@@ -133,11 +145,16 @@ async def shell_list_executor(params: Dict[str, Any], context: Dict[str, Any]) -
         db=db,
     )
 
-    return {
-        "success": True,
-        "sessions": sessions,
-        "count": len(sessions),
-    }
+    if len(sessions) == 0:
+        message = "No active shell sessions"
+    else:
+        message = f"Found {pluralize(len(sessions), 'active shell session')}"
+
+    return success_output(
+        message=message,
+        sessions=sessions,
+        details={"count": len(sessions)}
+    )
 
 
 async def shell_close_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -150,10 +167,10 @@ async def shell_close_executor(params: Dict[str, Any], context: Dict[str, Any]) 
     session_manager = get_shell_session_manager()
     await session_manager.close_session(session_id, db)
 
-    return {
-        "success": True,
-        "message": f"Closed session {session_id[:8]}",
-    }
+    return success_output(
+        message=f"Closed shell session {truncate_session_id(session_id)}",
+        session_id=session_id
+    )
 
 
 def register_tools(registry):
@@ -161,47 +178,39 @@ def register_tools(registry):
 
     registry.register(Tool(
         name="shell_open",
-        description="Open an interactive shell session in a development environment. Returns session_id for subsequent operations.",
+        description="Open an interactive shell session in the current project directory. Returns session_id for subsequent operations. MUST be called before shell_exec, shell_write, or shell_read. The shell remains open until explicitly closed with shell_close.",
         category=ToolCategory.SHELL,
         parameters={
             "type": "object",
             "properties": {
-                "project_id": {
-                    "type": "integer",
-                    "description": "Project ID to open shell in",
-                },
                 "command": {
                     "type": "string",
-                    "description": "Shell command to run (default: /bin/bash)",
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Working directory (default: /app/project)",
+                    "description": "Shell command to run (default: /bin/sh). The shell starts in the project directory with all your source files.",
                 },
             },
-            "required": ["project_id"],
+            "required": [],
         },
         executor=shell_open_executor,
         examples=[
-            'shell_open({"project_id": 123})',
-            'shell_open({"project_id": 123, "command": "/bin/bash", "cwd": "/app/project"})'
+            'shell_open({})',
+            'shell_open({"command": "/bin/sh"})'
         ]
     ))
 
     registry.register(Tool(
         name="shell_exec",
-        description="Execute a command in an open shell session and wait for output. Convenience wrapper around shell_write + shell_read.",
+        description="Execute a command in an open shell session and wait for output. REQUIRES session_id from shell_open first. DO NOT use 'exit' or close the shell - it stays open for multiple commands. Convenience wrapper around shell_write + shell_read.",
         category=ToolCategory.SHELL,
         parameters={
             "type": "object",
             "properties": {
                 "session_id": {
                     "type": "string",
-                    "description": "Shell session ID from shell_open",
+                    "description": "Shell session ID obtained from shell_open",
                 },
                 "command": {
                     "type": "string",
-                    "description": "Command to execute (automatically adds \\n)",
+                    "description": "Command to execute (automatically adds \\n). DO NOT include 'exit' - the shell stays open.",
                 },
                 "wait_seconds": {
                     "type": "number",
@@ -213,7 +222,7 @@ def register_tools(registry):
         executor=shell_exec_executor,
         examples=[
             'shell_exec({"session_id": "abc123", "command": "npm install"})',
-            'shell_exec({"session_id": "abc123", "command": "npm test", "wait_seconds": 5})'
+            'shell_exec({"session_id": "abc123", "command": "echo \'Hello\'"})'
         ]
     ))
 
@@ -263,14 +272,14 @@ def register_tools(registry):
 
     registry.register(Tool(
         name="shell_list",
-        description="List all active shell sessions for the current user",
+        description="List all active shell sessions for the current user. Defaults to current project sessions.",
         category=ToolCategory.SHELL,
         parameters={
             "type": "object",
             "properties": {
                 "project_id": {
                     "type": "integer",
-                    "description": "Filter by project ID (optional)",
+                    "description": "Filter by project ID (optional, defaults to current project)",
                 },
             },
             "required": [],

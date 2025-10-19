@@ -84,38 +84,59 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   // Extract the main parameter to display (command, file_path, etc.)
   const mainParam = parameters.command || parameters.file_path || parameters.path || parameters.query || '';
 
-  // Get output from result
+  // Get primary output and additional details
   let output = '';
+  let additionalOutput = '';
+  let suggestion = '';
+  let technicalDetails: any = null;
+
   if (hasResult && result.result) {
     if (typeof result.result === 'object') {
-      // Prefer showing the 'message' field if available (cleaner output)
+      // PRIORITY 1: Show the message field (user-friendly summary)
       if (result.result.message) {
         output = result.result.message;
-      } else if (result.result.stdout || result.result.stderr) {
-        // Command execution result
-        output = result.result.stdout || result.result.stderr || '';
+      }
+
+      // PRIORITY 2: Show suggestion if available (for errors)
+      if (result.result.suggestion) {
+        suggestion = result.result.suggestion;
+      }
+
+      // PRIORITY 3: Show relevant data fields (stdout, content, output, preview, etc.)
+      if (result.result.stdout) {
+        additionalOutput = result.result.stdout;
+      } else if (result.result.stderr) {
+        additionalOutput = result.result.stderr;
+      } else if (result.result.output) {
+        additionalOutput = result.result.output;
       } else if (result.result.content !== undefined) {
-        // File read result
-        output = result.result.content;
+        additionalOutput = result.result.content;
+      } else if (result.result.preview) {
+        additionalOutput = result.result.preview;
       } else if (result.result.files) {
         // Directory listing - handle both string arrays and object arrays
         if (Array.isArray(result.result.files)) {
-          output = result.result.files.map((file: any) => {
-            // If file is an object, format it properly
+          additionalOutput = result.result.files.map((file: any) => {
             if (typeof file === 'object' && file !== null) {
               const name = file.name || file.file_path || 'unknown';
               const type = file.type ? `[${file.type}]` : '';
               const size = file.size ? ` (${file.size} bytes)` : '';
               return `${type} ${name}${size}`.trim();
             }
-            // Otherwise treat it as a string
             return String(file);
           }).join('\n');
         } else {
-          output = String(result.result.files);
+          additionalOutput = String(result.result.files);
         }
-      } else {
-        // Generic object result
+      }
+
+      // PRIORITY 4: Collect technical details if available
+      if (result.result.details) {
+        technicalDetails = result.result.details;
+      }
+
+      // Fallback: If no message, show generic JSON (shouldn't happen with new format)
+      if (!output && !additionalOutput) {
         output = JSON.stringify(result.result, null, 2);
       }
     } else {
@@ -127,14 +148,15 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
 
   // Remove TASK_COMPLETE markers from output
   output = output.replace(/TASK_COMPLETE[^\n]*/gi, '').trim();
+  additionalOutput = additionalOutput.replace(/TASK_COMPLETE[^\n]*/gi, '').trim();
 
-  const shouldTruncate = shouldTruncateOutput(output);
-  const displayOutput = shouldTruncate && !showFullOutput
-    ? output.slice(0, 500) + '...'
-    : output;
+  const shouldTruncate = shouldTruncateOutput(additionalOutput);
+  const displayAdditionalOutput = shouldTruncate && !showFullOutput
+    ? additionalOutput.slice(0, 500) + '...'
+    : additionalOutput;
 
-  const outputLines = displayOutput.split('\n').length;
-  const totalLines = output.split('\n').length;
+  const outputLines = displayAdditionalOutput.split('\n').length;
+  const totalLines = additionalOutput.split('\n').length;
 
   return (
     <div className={`tool-call-display rounded-lg border ${getToolColor(name)} overflow-hidden`}>
@@ -177,13 +199,38 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         </details>
       )}
 
-      {/* Output */}
+      {/* Primary Message */}
       {output && (
+        <div className="border-t border-current/10">
+          <div className="px-3 py-2 bg-[var(--text)]/5">
+            <div className={`text-sm ${success ? 'opacity-90' : 'text-red-600 dark:text-red-400 font-medium'}`}>
+              {output}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Suggestion (for errors) */}
+      {suggestion && !success && (
+        <div className="border-t border-current/10">
+          <div className="px-3 py-2 bg-yellow-500/10">
+            <div className="text-xs font-medium text-yellow-700 dark:text-yellow-400 mb-1">
+              💡 Suggestion
+            </div>
+            <div className="text-xs text-yellow-800 dark:text-yellow-300">
+              {suggestion}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Additional Output (stdout, content, preview, etc.) */}
+      {additionalOutput && (
         <div className="border-t border-current/10">
           <div className="px-3 py-2 bg-[var(--text)]/5">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs font-medium opacity-70">
-                {success ? 'Output' : 'Error'}
+                {success ? 'Output' : 'Error Details'}
               </span>
               {shouldTruncate && (
                 <button
@@ -205,7 +252,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
               )}
             </div>
             <pre className={`text-xs font-mono overflow-x-auto ${success ? 'opacity-80' : 'text-red-600 dark:text-red-400'} ${shouldTruncate && !showFullOutput ? 'max-h-48' : 'max-h-96'} overflow-y-auto`}>
-              {displayOutput}
+              {displayAdditionalOutput}
             </pre>
             {shouldTruncate && !showFullOutput && (
               <div className="text-xs opacity-50 mt-1">
@@ -214,6 +261,27 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
             )}
           </div>
         </div>
+      )}
+
+      {/* Technical Details (collapsible) */}
+      {technicalDetails && Object.keys(technicalDetails).length > 0 && (
+        <details className="group border-t border-current/10">
+          <summary className="px-3 py-2 text-xs font-medium cursor-pointer hover:bg-[var(--text)]/5 flex items-center gap-2">
+            <ChevronDown size={12} className="group-open:hidden" />
+            <ChevronUp size={12} className="hidden group-open:block" />
+            Technical Details
+          </summary>
+          <div className="px-3 py-2 bg-[var(--text)]/5 space-y-1">
+            {Object.entries(technicalDetails).map(([key, value]) => (
+              <div key={key} className="text-xs">
+                <span className="font-medium opacity-70">{key}:</span>{' '}
+                <span className="font-mono opacity-90">
+                  {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );

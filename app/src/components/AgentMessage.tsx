@@ -13,9 +13,14 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
 
+  // Filter out steps with no meaningful content (no tool calls AND no thought)
+  const meaningfulSteps = agentData.steps.filter(step =>
+    (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim().length > 0)
+  );
+
   // Progressive display: show steps one by one with animation
   useEffect(() => {
-    if (agentData.steps.length === 0) return;
+    if (meaningfulSteps.length === 0) return;
 
     // Reset when agentData changes
     setVisibleSteps(0);
@@ -24,7 +29,7 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
 
     // Show steps progressively with a slight delay
     const showNextStep = (index: number) => {
-      if (index < agentData.steps.length) {
+      if (index < meaningfulSteps.length) {
         setTimeout(() => {
           setVisibleSteps(index + 1);
           showNextStep(index + 1);
@@ -33,9 +38,9 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
     };
 
     showNextStep(0);
-  }, [agentData.steps.length]);
+  }, [meaningfulSteps.length]);
 
-  const stepsToShow = showAllSteps ? agentData.steps : agentData.steps.slice(0, visibleSteps);
+  const stepsToShow = showAllSteps ? meaningfulSteps : meaningfulSteps.slice(0, visibleSteps);
 
   return (
     <div className="message my-4 flex gap-3">
@@ -65,7 +70,7 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
         </div>
 
         {/* Execution Steps - Progressive Display */}
-        {agentData.steps && agentData.steps.length > 0 && (
+        {meaningfulSteps && meaningfulSteps.length > 0 && (
           <div className="mb-3">
             <button
               onClick={() => setIsExpanded(!isExpanded)}
@@ -91,12 +96,12 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
                 ))}
 
                 {/* Show More button if there are hidden steps */}
-                {!showAllSteps && visibleSteps < agentData.steps.length && (
+                {!showAllSteps && visibleSteps < meaningfulSteps.length && (
                   <button
                     onClick={() => setShowAllSteps(true)}
                     className="w-full text-xs font-medium text-[var(--text)]/60 hover:text-[var(--text)] transition-colors py-2 border border-dashed border-[var(--border-color)] rounded-lg hover:bg-[var(--text)]/5"
                   >
-                    Show all {agentData.steps.length} steps
+                    Show all {meaningfulSteps.length} steps
                   </button>
                 )}
               </div>

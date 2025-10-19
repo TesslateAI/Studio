@@ -93,8 +93,7 @@ class BasePTYBroker(ABC):
         user_id: int,
         project_id: int,
         container_name: str,
-        command: str = "/bin/bash",
-        cwd: str = "/app/project",
+        command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
     ) -> PTYSession:
@@ -125,8 +124,7 @@ class DockerPTYBroker(BasePTYBroker):
         user_id: int,
         project_id: int,
         container_name: str,
-        command: str = "/bin/bash -l",
-        cwd: str = "/app/project",
+        command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
     ) -> PTYSession:
@@ -134,8 +132,9 @@ class DockerPTYBroker(BasePTYBroker):
 
         session_id = str(uuid.uuid4())
 
-        # Wrap shell command with working directory
-        full_command = ["/bin/sh", "-c", f"cd {cwd} && {command}"]
+        # Run command directly - container already starts in /app
+        # Agent can use 'cd' commands if they need to change directories
+        full_command = ["/bin/sh", "-c", command]
 
         # Create exec instance with PTY
         exec_id = self.client.api.exec_create(
@@ -151,6 +150,12 @@ class DockerPTYBroker(BasePTYBroker):
             },
         )["Id"]
 
+        # Resize terminal BEFORE starting (prevents "cannot resize stopped container" error)
+        try:
+            self.client.api.exec_resize(exec_id, height=rows, width=cols)
+        except Exception as e:
+            logger.warning(f"Failed to resize exec before start (non-fatal): {e}")
+
         # Start exec and get socket
         sock = self.client.api.exec_start(
             exec_id,
@@ -159,8 +164,9 @@ class DockerPTYBroker(BasePTYBroker):
             demux=False,  # Don't separate stdout/stderr with PTY
         )
 
-        # Resize terminal
-        self.client.api.exec_resize(exec_id, height=rows, width=cols)
+        # Get configured project path (differs between Docker and K8s)
+        from ..config import get_settings
+        project_path = get_settings().container_project_path
 
         # Create session object
         session = PTYSession(
@@ -169,7 +175,7 @@ class DockerPTYBroker(BasePTYBroker):
             project_id=project_id,
             container_name=container_name,
             command=command,
-            cwd=cwd,
+            cwd=project_path,  # Docker: /app, K8s: /app/project
             rows=rows,
             cols=cols,
         )
@@ -274,8 +280,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         user_id: int,
         project_id: int,
         pod_name: str,
-        command: str = "/bin/bash -l",
-        cwd: str = "/app/project",
+        command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
         namespace: str = "tesslate-user-environments",
@@ -287,8 +292,9 @@ class KubernetesPTYBroker(BasePTYBroker):
 
         session_id = str(uuid.uuid4())
 
-        # Wrap shell command with working directory
-        full_command = ["/bin/sh", "-c", f"cd {cwd} && {command}"]
+        # Run command directly - pods already start in /app
+        # Agent can use 'cd' commands if they need to change directories
+        full_command = ["/bin/sh", "-c", command]
 
         # Create exec stream with PTY
         ws_stream = stream(
@@ -304,6 +310,10 @@ class KubernetesPTYBroker(BasePTYBroker):
             _preload_content=False,  # Required for streaming
         )
 
+        # Get configured project path (differs between Docker and K8s)
+        from ..config import get_settings
+        project_path = get_settings().container_project_path
+
         # Create session object
         session = PTYSession(
             session_id=session_id,
@@ -311,7 +321,7 @@ class KubernetesPTYBroker(BasePTYBroker):
             project_id=project_id,
             container_name=pod_name,
             command=command,
-            cwd=cwd,
+            cwd=project_path,  # Docker: /app, K8s: /app/project
             rows=rows,
             cols=cols,
         )
