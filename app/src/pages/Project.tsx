@@ -21,8 +21,10 @@ import {
 } from '@phosphor-icons/react';
 import { FloatingSidebar } from '../components/ui/FloatingSidebar';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
+import { MobileMenu } from '../components/ui/MobileMenu';
 import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import { MobileWarning } from '../components/MobileWarning';
 import {
   GitHubPanel,
   ArchitecturePanel,
@@ -247,118 +249,122 @@ export default function Project() {
     );
   }
 
+  const leftSidebarItems = [
+    {
+      icon: <Monitor size={20} />,
+      title: 'Preview',
+      onClick: () => setActiveView('preview'),
+      active: activeView === 'preview'
+    },
+    {
+      icon: <Code size={20} />,
+      title: 'Code',
+      onClick: () => setActiveView('code'),
+      active: activeView === 'code'
+    },
+    {
+      icon: <Folder size={20} />,
+      title: 'Files',
+      onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
+    },
+    {
+      icon: <Cube size={20} />,
+      title: 'Components',
+      onClick: () => toast('Components library coming soon!', { icon: '🧩' })
+    },
+    {
+      icon: <GitBranch size={20} />,
+      title: 'Architecture',
+      onClick: () => togglePanel('architecture'),
+      active: activePanel === 'architecture'
+    },
+    {
+      icon: <BookOpen size={20} />,
+      title: 'Notes & Tasks',
+      onClick: () => togglePanel('notes'),
+      active: activePanel === 'notes'
+    }
+  ];
+
+  const rightSidebarItems = [
+    {
+      icon: theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />,
+      title: 'Toggle Theme',
+      onClick: toggleTheme
+    },
+    {
+      icon: <GitBranch size={20} />,
+      title: 'GitHub Sync',
+      onClick: () => togglePanel('github'),
+      active: activePanel === 'github'
+    },
+    {
+      icon: <Image size={20} />,
+      title: 'Assets',
+      onClick: () => togglePanel('assets'),
+      active: activePanel === 'assets'
+    },
+    {
+      icon: <Storefront size={20} />,
+      title: 'Agent Marketplace',
+      onClick: () => navigate('/marketplace')
+    },
+    {
+      icon: <Gear size={20} />,
+      title: 'Settings',
+      onClick: () => togglePanel('settings'),
+      active: activePanel === 'settings'
+    },
+    {
+      icon: <Rocket size={20} />,
+      title: 'Deploy',
+      onClick: () => toast('Deploy feature coming soon!', { icon: '🚀' })
+    },
+    {
+      icon: <ShareNetwork size={20} />,
+      title: 'Share',
+      onClick: () => toast('Share feature coming soon!', { icon: '🔗' })
+    }
+  ];
+
   return (
     <div className="h-screen flex flex-col overflow-hidden relative">
+      {/* Mobile Warning */}
+      <MobileWarning />
+
+      {/* Mobile Menu - Shows on mobile only */}
+      <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
 
       {/* Back Button */}
-      <div className="absolute top-6 left-6 z-50">
+      <div className="absolute top-4 left-4 md:top-6 md:left-6 z-50">
         <button
           onClick={() => navigate('/dashboard')}
-          className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-[var(--text)]/80 hover:text-[var(--text)] transition-all"
+          className="flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-[var(--text)]/80 hover:text-[var(--text)] transition-all"
         >
-          <ArrowLeft size={20} />
-          <span className="font-medium hidden sm:inline">Back to Projects</span>
+          <ArrowLeft size={18} className="md:w-5 md:h-5" />
+          <span className="font-medium text-sm md:text-base hidden sm:inline">Back to Projects</span>
         </button>
       </div>
 
-      {/* Project Title */}
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3">
-        <h1 className="font-heading text-xl sm:text-2xl font-bold text-[var(--text)]">{project.name}</h1>
-        <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-lg text-xs text-green-400">
-          <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <GitBranch size={14} />
-          <span>Synced</span>
-        </div>
+      {/* Project Title - Hidden on mobile */}
+      <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 hidden md:flex items-center gap-3">
+        <h1 className="font-heading text-xl lg:text-2xl font-bold text-[var(--text)]">{project.name}</h1>
       </div>
 
-      {/* Left Sidebar */}
+      {/* Left Sidebar - Desktop only */}
       <FloatingSidebar
         position="left"
-        items={[
-          {
-            icon: <Monitor size={20} />,
-            title: 'Preview',
-            onClick: () => setActiveView('preview'),
-            active: activeView === 'preview'
-          },
-          {
-            icon: <Code size={20} />,
-            title: 'Code',
-            onClick: () => setActiveView('code'),
-            active: activeView === 'code'
-          },
-          {
-            icon: <Folder size={20} />,
-            title: 'Files',
-            onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
-          },
-          {
-            icon: <Cube size={20} />,
-            title: 'Components',
-            onClick: () => toast('Components library coming soon!', { icon: '🧩' })
-          },
-          {
-            icon: <GitBranch size={20} />,
-            title: 'Architecture',
-            onClick: () => togglePanel('architecture'),
-            active: activePanel === 'architecture'
-          },
-          {
-            icon: <BookOpen size={20} />,
-            title: 'Notes & Tasks',
-            onClick: () => togglePanel('notes'),
-            active: activePanel === 'notes'
-          }
-        ]}
+        items={leftSidebarItems}
       />
 
-      {/* Right Sidebar */}
+      {/* Right Sidebar - Desktop only */}
       <FloatingSidebar
         position="right"
-        items={[
-          {
-            icon: theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />,
-            title: 'Toggle Theme',
-            onClick: toggleTheme
-          },
-          {
-            icon: <GitBranch size={20} />,
-            title: 'GitHub Sync',
-            onClick: () => togglePanel('github'),
-            active: activePanel === 'github'
-          },
-          {
-            icon: <Image size={20} />,
-            title: 'Assets',
-            onClick: () => togglePanel('assets'),
-            active: activePanel === 'assets'
-          },
-          {
-            icon: <Storefront size={20} />,
-            title: 'Agent Marketplace',
-            onClick: () => navigate('/marketplace')
-          },
-          {
-            icon: <Gear size={20} />,
-            title: 'Settings',
-            onClick: () => togglePanel('settings'),
-            active: activePanel === 'settings'
-          },
-          {
-            icon: <Rocket size={20} />,
-            title: 'Deploy',
-            onClick: () => toast('Deploy feature coming soon!', { icon: '🚀' })
-          },
-          {
-            icon: <ShareNetwork size={20} />,
-            title: 'Share',
-            onClick: () => toast('Share feature coming soon!', { icon: '🔗' })
-          }
-        ]}
+        items={rightSidebarItems}
       />
 
       {/* Main Preview/Code Container */}
-      <div className="h-screen w-screen flex items-center justify-center px-20 sm:px-32 py-20 sm:py-24 transition-all duration-500 relative z-10">
+      <div className="h-screen w-screen flex items-center justify-center px-2 sm:px-8 md:px-20 lg:px-32 py-16 sm:py-20 md:py-24 transition-all duration-500 relative z-10">
         <div className="w-full h-full relative bg-[var(--surface)] rounded-[20px] overflow-hidden border border-white/8 transition-all duration-500 shadow-2xl">
           {/* Preview View */}
           <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>

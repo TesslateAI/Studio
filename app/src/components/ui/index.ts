@@ -1,5 +1,6 @@
 export { FloatingSidebar } from './FloatingSidebar';
 export { FloatingPanel } from './FloatingPanel';
+export { MobileMenu } from './MobileMenu';
 export { GlassContainer } from './GlassContainer';
 export { StatusBadge } from './StatusBadge';
 export type { Status } from './StatusBadge';

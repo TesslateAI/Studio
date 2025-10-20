@@ -16,9 +16,10 @@ export function FloatingSidebar({ position, items }: FloatingSidebarProps) {
   return (
     <div
       className={`
-        fixed ${position === 'left' ? 'left-4 sm:left-6' : 'right-4 sm:right-6'}
+        hidden md:flex
+        fixed ${position === 'left' ? 'left-4 md:left-6' : 'right-4 md:right-6'}
         top-1/2 -translate-y-1/2
-        flex flex-col gap-3
+        flex-col gap-3
         z-40
       `}
     >

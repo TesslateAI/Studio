@@ -99,20 +99,22 @@ export function ChatInput({
   ];
 
   return (
-    <form className="chat-input-wrapper px-5 py-4 flex-shrink-0" onSubmit={handleSubmit}>
-      <div className="input-container flex items-center gap-2">
-        {/* Tools dropdown */}
-        <ToolDropdown
-          icon={
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M224,152v56a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V152a8,8,0,0,1,16,0v56H208V152a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,132.69V40a8,8,0,0,0-16,0v92.69L93.66,106.34a8,8,0,0,0-11.32,11.32Z" />
-            </svg>
-          }
-          tools={tools}
-        />
+    <form className="chat-input-wrapper px-2 sm:px-5 py-2 sm:py-4 flex-shrink-0" onSubmit={handleSubmit}>
+      <div className="input-container flex items-center gap-1.5 sm:gap-2">
+        {/* Tools dropdown - hidden on mobile for more space */}
+        <div className="hidden sm:block">
+          <ToolDropdown
+            icon={
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+                <path d="M224,152v56a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V152a8,8,0,0,1,16,0v56H208V152a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,132.69V40a8,8,0,0,0-16,0v92.69L93.66,106.34a8,8,0,0,0-11.32,11.32Z" />
+              </svg>
+            }
+            tools={tools}
+          />
+        </div>
 
         {/* Chat input container with agent pill */}
-        <div className="chat-input-container relative flex-1 flex items-center bg-[var(--text)]/5 border border-[var(--border-color)] rounded-2xl overflow-visible transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)]">
+        <div className="chat-input-container relative flex-1 flex items-center bg-[var(--text)]/5 border border-[var(--border-color)] rounded-xl sm:rounded-2xl overflow-visible transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)]">
           <AgentSelector
             agents={agents}
             currentAgent={currentAgent}
@@ -126,7 +128,7 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled}
-            className="chat-input bg-transparent border-none px-4 py-2.5 text-[var(--text)] flex-1 text-sm outline-none placeholder:text-[var(--text)]/40"
+            className="chat-input bg-transparent border-none px-2 sm:px-4 py-2 sm:py-2.5 text-[var(--text)] flex-1 text-xs sm:text-sm outline-none placeholder:text-[var(--text)]/40"
           />
         </div>
 
@@ -134,9 +136,9 @@ export function ChatInput({
         <button
           type="submit"
           disabled={!message.trim() || disabled}
-          className="send-btn w-9 h-9 bg-gradient-to-br from-[var(--primary)] to-orange-400 rounded-xl border-none text-white flex items-center justify-center flex-shrink-0 transition-all hover:scale-105 hover:shadow-[0_4px_12px_rgba(255,107,0,0.4)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+          className="send-btn w-8 h-8 sm:w-9 sm:h-9 bg-gradient-to-br from-[var(--primary)] to-orange-400 rounded-lg sm:rounded-xl border-none text-white flex items-center justify-center flex-shrink-0 transition-all hover:scale-105 hover:shadow-[0_4px_12px_rgba(255,107,0,0.4)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
         >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+          <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="currentColor" viewBox="0 0 256 256">
             <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z" />
           </svg>
         </button>

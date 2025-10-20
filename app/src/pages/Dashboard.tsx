@@ -5,12 +5,14 @@ import { githubApi } from '../lib/github-api';
 import { useTheme } from '../theme/ThemeContext';
 import {
   FloatingSidebar,
+  MobileMenu,
   ProjectCard,
   MarketplaceCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
 import { GitHubConnectModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import { MobileWarning } from '../components/MobileWarning';
 import toast from 'react-hot-toast';
 import {
   Atom,
@@ -268,19 +270,25 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen px-20 sm:px-32 py-20 sm:py-24 relative">
-      {/* Floating Sidebars */}
+    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24 relative">
+      {/* Mobile Warning */}
+      <MobileWarning />
+
+      {/* Mobile Menu - Shows on mobile only */}
+      <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
+
+      {/* Floating Sidebars - Desktop only */}
       <FloatingSidebar position="left" items={leftSidebarItems} />
       <FloatingSidebar position="right" items={rightSidebarItems} />
 
       {/* Header */}
-      <div className="mb-10">
+      <div className="mb-6 md:mb-10">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="font-heading text-4xl font-bold text-[var(--text)]">My Projects</h1>
+          <h1 className="font-heading text-2xl sm:text-3xl md:text-4xl font-bold text-[var(--text)]">My Projects</h1>
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
           {[
             { key: 'all', label: 'All Projects' },
             { key: 'idea', label: 'Idea' },
@@ -291,7 +299,7 @@ export default function Dashboard() {
               key={tab.key}
               onClick={() => setActiveTab(tab.key as TabFilter)}
               className={`
-                font-heading text-xl pb-2 border-b-2 transition-all
+                font-heading text-sm sm:text-lg md:text-xl pb-2 border-b-2 transition-all whitespace-nowrap
                 ${activeTab === tab.key
                   ? 'text-[var(--primary)] border-[var(--primary)]'
                   : 'text-gray-400 border-transparent hover:text-[var(--text)]'
@@ -551,7 +559,7 @@ export default function Dashboard() {
       />
 
       {/* Discord Support Bubble */}
-      <div className="fixed bottom-8 right-8 z-40 group">
+      <div className="fixed bottom-4 right-4 md:bottom-8 md:right-8 z-40 group">
         <a
           href="https://discord.gg/WgXabcN2r2"
           target="_blank"
@@ -559,14 +567,14 @@ export default function Dashboard() {
           className="flex flex-col items-center gap-2"
         >
           <div className="
-            w-16 h-16 bg-[#5865F2] rounded-full
+            w-12 h-12 md:w-16 md:h-16 bg-[#5865F2] rounded-full
             flex items-center justify-center
             shadow-lg hover:shadow-xl
             transition-all duration-300
             hover:scale-110
             relative
           ">
-            <DiscordLogo className="w-8 h-8 text-white" weight="fill" />
+            <DiscordLogo className="w-6 h-6 md:w-8 md:h-8 text-white" weight="fill" />
 
             {/* Hover tooltip */}
             <div className="
@@ -581,7 +589,7 @@ export default function Dashboard() {
               Join our Discord for support
             </div>
           </div>
-          <span className="text-sm font-medium text-[var(--text)]">Support</span>
+          <span className="text-xs md:text-sm font-medium text-[var(--text)] hidden sm:block">Support</span>
         </a>
       </div>
     </div>
