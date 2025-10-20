@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
-from ..models import User, Chat, Message, Project, ProjectFile, Agent as AgentModel
+from ..models import User, Chat, Message, Project, ProjectFile, MarketplaceAgent
 from ..schemas import (
     Chat as ChatSchema, Message as MessageSchema, MessageCreate,
     AgentChatRequest, AgentChatResponse, AgentStepResponse
@@ -18,8 +18,9 @@ import re
 import asyncio
 import logging
 
-# Agent imports
-from ..agent import UniversalAgent, get_tool_registry
+# Agent imports - new factory-based system
+from ..agent import create_agent_from_db_model
+from ..agent.models import create_model_adapter
 
 settings = get_settings()
 router = APIRouter()
@@ -308,23 +309,26 @@ async def agent_chat(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Agent mode chat - uses Universal Agent with tool calling.
+    HTTP Agent Chat - uses IterativeAgent via factory system.
 
+    This endpoint demonstrates the factory-based agent system with HTTP.
     The agent can read/write files, execute commands, and manage the project
-    autonomously using any language model (Cerebras, GPT, Claude, etc.)
+    autonomously using any language model.
 
-    This is an alternative to the streaming WebSocket chat that gives the AI
-    more autonomy and tool access.
+    **Key Difference from WebSocket:**
+    - Returns complete result after all iterations finish
+    - No real-time streaming
+    - Better for non-interactive use cases
 
     Args:
-        request: Agent chat request with project_id and message
+        request: Agent chat request with project_id, message, agent_id
         current_user: Authenticated user
         db: Database session
 
     Returns:
-        Agent execution result with steps and final response
+        Complete agent execution result with all steps and final response
     """
-    logger.info(f"[AGENT-CHAT-DEBUG] Starting agent chat - user: {current_user.id}, project: {request.project_id}")
+    logger.info(f"[HTTP-AGENT] Starting agent chat - user: {current_user.id}, project: {request.project_id}")
     try:
         # Verify project ownership
         try:
@@ -352,59 +356,80 @@ async def agent_chat(
             )
 
         logger.info(
-            f"Agent chat started - user: {current_user.id}, "
+            f"[HTTP-AGENT] Agent chat started - user: {current_user.id}, "
             f"project: {request.project_id}, message: {request.message[:100]}..."
         )
 
-        # Load agent configuration if agent_id is provided
-        agent_system_prompt = None
-        agent_name = "Universal Agent"
-        if request.agent_id:
-            try:
-                agent_result = await db.execute(
-                    select(AgentModel).where(
-                        AgentModel.id == request.agent_id,
-                        AgentModel.is_active == True
-                    )
-                )
-                db_agent = agent_result.scalar_one_or_none()
-                if db_agent:
-                    agent_system_prompt = db_agent.system_prompt
-                    agent_name = db_agent.name
-                    logger.info(f"Using agent '{agent_name}' (ID: {request.agent_id}) with custom system prompt")
-                else:
-                    logger.warning(f"Agent ID {request.agent_id} not found or inactive, using default agent")
-            except Exception as e:
-                await db.rollback()
-                logger.error(f"Error loading agent configuration: {e}", exc_info=True)
+        # ============================================================================
+        # NEW: Factory-Based Agent Creation
+        # ============================================================================
 
-        # Create model adapter using user's LiteLLM key
-        logger.info(f"[AGENT-CHAT-DEBUG] Checking LiteLLM API key for user {current_user.id}")
+        # 1. Fetch agent from database (prefer IterativeAgent for HTTP)
+        agent_model = None
+        if request.agent_id:
+            agent_result = await db.execute(
+                select(MarketplaceAgent).where(
+                    MarketplaceAgent.id == request.agent_id,
+                    MarketplaceAgent.is_active == True
+                )
+            )
+            agent_model = agent_result.scalar_one_or_none()
+
+            if not agent_model:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Agent with ID {request.agent_id} not found or inactive"
+                )
+        else:
+            # Default: Use first IterativeAgent available
+            agent_result = await db.execute(
+                select(MarketplaceAgent).where(
+                    MarketplaceAgent.is_active == True,
+                    MarketplaceAgent.agent_type == 'IterativeAgent'
+                ).limit(1)
+            )
+            agent_model = agent_result.scalar_one_or_none()
+
+            if not agent_model:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No IterativeAgent found. Please configure an agent."
+                )
+
+        logger.info(
+            f"[HTTP-AGENT] Using agent: {agent_model.name} "
+            f"(type: {agent_model.agent_type}, slug: {agent_model.slug})"
+        )
+
+        # 2. Check user has LiteLLM key
         if not current_user.litellm_api_key:
             raise HTTPException(
                 status_code=500,
                 detail="User does not have a LiteLLM API key. Please contact support."
             )
 
-        logger.info(f"[AGENT-CHAT-DEBUG] Creating model adapter")
-        from ..agent.models import create_model_adapter
+        # 3. Create model adapter for IterativeAgent
+        logger.info(f"[HTTP-AGENT] Creating model adapter")
         model_adapter = create_model_adapter(
-            model_name=settings.openai_model,  # Default model (cerebras/qwen-3-coder-480b)
-            api_key=current_user.litellm_api_key,  # Use user's LiteLLM key for tracking
-            api_base=settings.litellm_api_base  # LiteLLM proxy endpoint
+            model_name=settings.openai_model,
+            api_key=current_user.litellm_api_key,
+            api_base=settings.litellm_api_base
         )
-        logger.info(f"[AGENT-CHAT-DEBUG] Model adapter created successfully")
 
-        # Create agent with optional system prompt
-        logger.info(f"[AGENT-CHAT-DEBUG] Creating UniversalAgent")
-        agent = UniversalAgent(
-            model=model_adapter,
-            tool_registry=get_tool_registry(),
-            max_iterations=request.max_iterations,
-            minimal_prompts=request.minimal_prompts,
-            system_prompt=agent_system_prompt  # Pass the agent's system prompt if available
+        # 4. Create agent via factory
+        logger.info(f"[HTTP-AGENT] Creating agent via factory")
+        agent_instance = await create_agent_from_db_model(
+            agent_model=agent_model,
+            model_adapter=model_adapter
         )
-        logger.info(f"[AGENT-CHAT-DEBUG] UniversalAgent created successfully")
+
+        # Set max_iterations for IterativeAgent
+        if hasattr(agent_instance, 'max_iterations'):
+            agent_instance.max_iterations = request.max_iterations
+        if hasattr(agent_instance, 'minimal_prompts'):
+            agent_instance.minimal_prompts = request.minimal_prompts
+
+        logger.info(f"[HTTP-AGENT] Agent created successfully")
 
         # Prepare context for tool execution
         context = {
@@ -430,38 +455,74 @@ async def agent_chat(
         if git_context:
             project_context["git_context"] = git_context
 
-        # Run agent
-        agent_result = await agent.run(
-            user_request=request.message,
-            context=context,
-            project_context=project_context
-        )
+        # ============================================================================
+        # NEW: Run Agent and Collect Events (HTTP Adapter for AsyncIterator)
+        # ============================================================================
 
-        # Convert steps to response format with complete tool call details and results
-        from ..schemas import ToolCallDetail
+        logger.info(f"[HTTP-AGENT] Running agent (collecting all events for HTTP response)")
 
+        # Collect all events from the async generator
         steps_response = []
-        for step in agent_result.steps:
-            # Combine tool calls with their results
-            tool_call_details = []
-            for i, tc in enumerate(step.tool_calls):
-                # Get the corresponding result if available
-                result = step.tool_results[i] if i < len(step.tool_results) else None
+        final_response = ""
+        success = False
+        iterations = 0
+        tool_calls_made = 0
+        completion_reason = "unknown"
+        error = None
 
-                tool_call_details.append(ToolCallDetail(
-                    name=tc.name,
-                    parameters=tc.parameters,
-                    result=result
-                ))
+        try:
+            async for event in agent_instance.run(request.message, context):
+                event_type = event.get('type')
 
-            steps_response.append(AgentStepResponse(
-                iteration=step.iteration,
-                thought=step.thought,
-                tool_calls=tool_call_details,
-                response_text=step.response_text,
-                is_complete=step.is_complete,
-                timestamp=step.timestamp.isoformat()
-            ))
+                if event_type == 'agent_step':
+                    # Collect step data
+                    step_data = event.get('data', {})
+
+                    # Convert tool calls to ToolCallDetail format
+                    from ..schemas import ToolCallDetail
+                    tool_call_details = []
+                    for tc_data in step_data.get('tool_calls', []):
+                        # Get corresponding result from tool_results
+                        tc_index = len(tool_call_details)
+                        result = step_data.get('tool_results', [])[tc_index] if tc_index < len(step_data.get('tool_results', [])) else None
+
+                        tool_call_details.append(ToolCallDetail(
+                            name=tc_data.get('name'),
+                            parameters=tc_data.get('parameters'),
+                            result=result
+                        ))
+
+                    steps_response.append(AgentStepResponse(
+                        iteration=step_data.get('iteration', 0),
+                        thought=step_data.get('thought'),
+                        tool_calls=tool_call_details,
+                        response_text=step_data.get('response_text', ''),
+                        is_complete=step_data.get('is_complete', False),
+                        timestamp=step_data.get('timestamp', '')
+                    ))
+
+                elif event_type == 'complete':
+                    # Extract final result data
+                    data = event.get('data', {})
+                    success = data.get('success', True)
+                    iterations = data.get('iterations', 0)
+                    final_response = data.get('final_response', '')
+                    tool_calls_made = data.get('tool_calls_made', 0)
+                    completion_reason = data.get('completion_reason', 'complete')
+
+                elif event_type == 'error':
+                    error = event.get('content', 'Unknown error')
+                    success = False
+
+        except Exception as e:
+            logger.error(f"[HTTP-AGENT] Error during agent execution: {e}", exc_info=True)
+            error = str(e)
+            success = False
+
+        logger.info(
+            f"[HTTP-AGENT] Agent execution complete - "
+            f"success: {success}, iterations: {iterations}, tool_calls: {tool_calls_made}"
+        )
 
 
         # Save to chat history
@@ -499,9 +560,10 @@ async def agent_chat(
         # Save agent response with metadata for UI restoration
         agent_metadata = {
             "agent_mode": True,
-            "iterations": agent_result.iterations,
-            "tool_calls_made": agent_result.tool_calls_made,
-            "completion_reason": agent_result.completion_reason,
+            "agent_type": agent_model.agent_type,
+            "iterations": iterations,
+            "tool_calls_made": tool_calls_made,
+            "completion_reason": completion_reason,
             "steps": [
                 {
                     "iteration": step.iteration,
@@ -516,7 +578,7 @@ async def agent_chat(
                     ],
                     "response_text": step.response_text,
                     "is_complete": step.is_complete,
-                    "timestamp": step.timestamp  # Already an ISO string from steps_response
+                    "timestamp": step.timestamp
                 }
                 for step in steps_response
             ]
@@ -525,25 +587,25 @@ async def agent_chat(
         assistant_message = Message(
             chat_id=chat.id,
             role="assistant",
-            content=agent_result.final_response,
+            content=final_response,
             message_metadata=agent_metadata
         )
         db.add(assistant_message)
         await db.commit()
 
         logger.info(
-            f"Agent chat completed - success: {agent_result.success}, "
-            f"iterations: {agent_result.iterations}, tool_calls: {agent_result.tool_calls_made}"
+            f"[HTTP-AGENT] Agent chat completed - success: {success}, "
+            f"iterations: {iterations}, tool_calls: {tool_calls_made}"
         )
 
         return AgentChatResponse(
-            success=agent_result.success,
-            iterations=agent_result.iterations,
-            final_response=agent_result.final_response,
-            tool_calls_made=agent_result.tool_calls_made,
-            completion_reason=agent_result.completion_reason,
+            success=success,
+            iterations=iterations,
+            final_response=final_response,
+            tool_calls_made=tool_calls_made,
+            completion_reason=completion_reason,
             steps=steps_response,
-            error=agent_result.error
+            error=error
         )
 
     except HTTPException:
@@ -653,6 +715,13 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
             manager.disconnect(user.id, project_id)
 
 async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocket: WebSocket):
+    """
+    Handle chat message using the unified agent factory system.
+
+    This function now uses the agent factory to instantiate any type of agent
+    (StreamAgent, IterativeAgent, or future agent types) based on the database
+    configuration.
+    """
     message_content = data.get("message")
     project_id = data.get("project_id")
     agent_id = data.get("agent_id")  # Get agent_id from request
@@ -689,8 +758,50 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         db.add(user_message)
         await db.commit()
 
-        # Get project context if available
-        context = ""
+        # ============================================================================
+        # NEW: Unified Agent Factory System
+        # ============================================================================
+
+        # 1. Fetch the agent configuration from the database
+        agent_model = None
+        if agent_id:
+            # Use the specified agent
+            agent_result = await db.execute(
+                select(MarketplaceAgent).where(
+                    MarketplaceAgent.id == agent_id,
+                    MarketplaceAgent.is_active == True
+                )
+            )
+            agent_model = agent_result.scalar_one_or_none()
+            if not agent_model:
+                await websocket.send_json({
+                    "type": "error",
+                    "content": f"Agent with ID {agent_id} not found or inactive"
+                })
+                return
+        else:
+            # Fallback to default agent (first active agent or create a default)
+            agent_result = await db.execute(
+                select(MarketplaceAgent).where(
+                    MarketplaceAgent.is_active == True
+                ).limit(1)
+            )
+            agent_model = agent_result.scalar_one_or_none()
+
+            if not agent_model:
+                await websocket.send_json({
+                    "type": "error",
+                    "content": "No active agents available. Please configure an agent."
+                })
+                return
+
+        logger.info(
+            f"[UNIFIED-CHAT] Using agent: {agent_model.name} "
+            f"(type: {agent_model.agent_type}, slug: {agent_model.slug})"
+        )
+
+        # 2. Build project context
+        project_context_str = ""
         has_existing_files = False
         selected_files_content = ""
 
@@ -770,204 +881,164 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
                     for file in selected_files:
                         selected_files_content += f"\n\n{'='*60}\nFile: {file.file_path}\n{'='*60}\n{file.content}\n"
 
-                    context += selected_files_content
+                    project_context_str += selected_files_content
                     logger.info(f"Selected {len(selected_files)} files for context ({total_chars} chars total)")
+
+        # 3. Get project metadata (for TESSLATE.md and Git context)
+        project = None
+        if project_id:
+            project_result = await db.execute(select(Project).where(Project.id == project_id))
+            project = project_result.scalar_one_or_none()
+
+        # Build TESSLATE context
+        tesslate_context = None
+        if project:
+            tesslate_context = await _build_tesslate_context(project, user.id, db)
+
+        # Build Git context
+        git_context = None
+        if project:
+            git_context = await _build_git_context(project, user.id, db)
+
+        # Combine all context
+        if tesslate_context:
+            project_context_str += tesslate_context
+        if git_context:
+            project_context_str += git_context
+
     except Exception as e:
         await db.rollback()
-        logger.error(f"Database error in initial chat setup: {e}", exc_info=True)
+        logger.error(f"[UNIFIED-CHAT] Error building context: {e}", exc_info=True)
         await websocket.send_json({
             "type": "error",
-            "content": f"Database error: {str(e)}"
-        })
-        return
-    
-    # WebSocket is already connected if we got here
-
-    # Check if user has LiteLLM API key
-    if not user.litellm_api_key:
-        await websocket.send_json({
-            "type": "error",
-            "content": "User does not have a LiteLLM API key. Please contact support."
+            "content": f"Error building context: {str(e)}"
         })
         return
 
-    # Stream response using user's LiteLLM key for usage tracking
-    client = AsyncOpenAI(
-        api_key=user.litellm_api_key,  # Use user's LiteLLM key for per-user tracking
-        base_url=settings.litellm_api_base  # LiteLLM proxy endpoint
-    )
-    
-    full_response = ""
-    processed_files = set()
-    
-    # Get agent and use its system prompt
-    agent = None
-    base_system_prompt = """You are an expert React developer. Generate clean, modern React code for Vite applications using Tailwind CSS.
+    # 3. Create the agent instance using the factory
+    try:
+        logger.info(f"[UNIFIED-CHAT] Creating agent instance via factory")
 
-CRITICAL RULES:
-1. DO EXACTLY WHAT IS ASKED.
-2. USE STANDARD TAILWIND CLASSES ONLY. No `bg-background` or `text-foreground`. Use `bg-white`, `text-black`, `bg-blue-500`, etc.
-3. FILE COUNT LIMITS: A simple change should only modify 1-2 files.
-4. NO ROUTING LIBRARIES like `react-router-dom` unless explicitly asked. Use `<a>` tags.
-5. PRESERVATION IS KEY (for edits): Do not rewrite entire components. Integrate your changes surgically. Preserve all existing logic, props, and state.
-6. COMPLETENESS: Each file must be COMPLETE from the first line to the last. NO "..." or truncation.
-7. NO CONVERSATION: Your output must contain ONLY code wrapped in the specified format.
-8. When providing code, ALWAYS specify the filename at the top of the code block like:
-```javascript
-// File: path/to/file.js
-<code>
-9. ALWAYS PLAN AND MAKE A MULTIPAGE WEB APPLICATION. DO NOT CREATE SINGLE PAGE APPS. THEY SHOULD ALL BE CONNECTED.
-```"""
-
-    # Fetch agent if agent_id is provided
-    if agent_id:
-        try:
-            agent_result = await db.execute(
-                select(AgentModel).where(AgentModel.id == agent_id, AgentModel.is_active == True)
+        # For IterativeAgent, we need to create a model adapter
+        model_adapter = None
+        if agent_model.agent_type == "IterativeAgent":
+            model_adapter = create_model_adapter(
+                model_name=settings.openai_model,
+                api_key=user.litellm_api_key,
+                api_base=settings.litellm_api_base
             )
-            agent = agent_result.scalar_one_or_none()
-            if agent:
-                base_system_prompt = agent.system_prompt
-                logger.info(f"Using agent '{agent.name}' (ID: {agent.id}) with custom system prompt")
-            else:
-                logger.warning(f"Agent ID {agent_id} not found or inactive, using default system prompt")
-        except Exception as e:
-            logger.error(f"Error fetching agent: {e}")
-            # Continue with default prompt
+            logger.info(f"[UNIFIED-CHAT] Created model adapter for IterativeAgent")
 
-    surgical_edit_prompt = """
+        # Create the agent
+        agent_instance = await create_agent_from_db_model(
+            agent_model=agent_model,
+            model_adapter=model_adapter
+        )
 
-CRITICAL: THIS IS AN EDIT TO AN EXISTING APPLICATION.
+        logger.info(
+            f"[UNIFIED-CHAT] Successfully created {agent_model.agent_type} "
+            f"for agent '{agent_model.name}'"
+        )
 
-You MUST follow these rules:
-1. DO NOT regenerate the entire application.
-2. ONLY edit the EXACT files needed for the requested change.
-3. If the user says "update the header", ONLY edit the Header component.
-4. When adding a new component:
-   - Create the new component file.
-   - UPDATE ONLY the parent component that will use it.
-5. NEVER TRUNCATE FILES. Always return COMPLETE files with ALL content. No "..." ellipsis.
-6. You are a SURGEON making a precise incision, not an artist repainting the canvas. 99% of the original code should remain untouched."""
+    except Exception as e:
+        logger.error(f"[UNIFIED-CHAT] Failed to create agent: {e}", exc_info=True)
+        await websocket.send_json({
+            "type": "error",
+            "content": f"Failed to create agent: {str(e)}"
+        })
+        return
 
-    system_prompt = base_system_prompt
-    if has_existing_files:
-        system_prompt += surgical_edit_prompt
+    # 4. Prepare execution context
+    execution_context = {
+        'user': user,
+        'user_id': user.id,
+        'project_id': project_id,
+        'db': db,
+        'project_context_str': project_context_str,
+        'has_existing_files': has_existing_files,
+        'model': settings.openai_model,
+        'api_base': settings.litellm_api_base
+    }
+
+    if project:
+        execution_context['project_context'] = {
+            "project_name": project.name,
+            "project_description": project.description
+        }
+
+    # 5. Run the agent and stream events back to the client
+    full_response = ""
+    agent_metadata = None
 
     try:
-        print(f"Calling AI API with model: {settings.openai_model}")
-        print(f"API Base: {settings.openai_api_base}")
-        
-        stream = await client.chat.completions.create(
-            model=settings.openai_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"{context}\n\nUser request: {message_content}"}
-            ],
-            stream=True,
-            temperature=0.7
-        )
-        
-        async for chunk in stream:
-            if chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
-                full_response += content
-                
-                # Send stream chunk
-                try:
-                    await websocket.send_json({
-                        "type": "stream",
-                        "content": content
-                    })
-                except Exception as e:
-                    print(f"WebSocket error during streaming: {e}")
-                    return
-        
-        # Process all files at the end when response is complete
-        if project_id:
-            code_blocks = extract_complete_code_blocks(full_response)
-            print(f"Processing {len(code_blocks)} files from completed response")
+        logger.info(f"[UNIFIED-CHAT] Running agent for user request: {message_content[:100]}...")
 
-            package_json_modified = False
+        async for event in agent_instance.run(message_content, execution_context):
+            event_type = event.get('type')
 
-            for i, (file_path, code) in enumerate(code_blocks):
-                if file_path not in processed_files:
-                    print(f"📁 Saving file {i+1}/{len(code_blocks)}: {file_path}")
-                    processed_files.add(file_path)
-                    await save_file(file_path, code, project_id, user.id, db, websocket)
+            # Send event to WebSocket
+            try:
+                await websocket.send_json(event)
+            except Exception as e:
+                logger.error(f"[UNIFIED-CHAT] WebSocket error: {e}")
+                return
 
-                    # Track if package.json was modified
-                    if file_path == "package.json":
-                        package_json_modified = True
+            # Track response for saving to database
+            if event_type == 'stream':
+                full_response += event.get('content', '')
+            elif event_type == 'complete':
+                data = event.get('data', {})
+                final_response = data.get('final_response', '')
+                if final_response:
+                    full_response = final_response
 
-                    # Small delay between files to prevent overwhelming dev server
-                    if i < len(code_blocks) - 1:  # Don't delay after the last file
-                        await asyncio.sleep(0.2)
+                # For IterativeAgent, save metadata
+                if agent_model.agent_type == 'IterativeAgent':
+                    agent_metadata = {
+                        "agent_mode": True,
+                        "agent_type": agent_model.agent_type,
+                        "iterations": data.get('iterations', 0),
+                        "tool_calls_made": data.get('tool_calls_made', 0),
+                        "completion_reason": data.get('completion_reason', 'unknown')
+                    }
+            elif event_type == 'agent_step':
+                # Collect steps for metadata
+                if agent_metadata is None:
+                    agent_metadata = {
+                        "agent_mode": True,
+                        "agent_type": agent_model.agent_type,
+                        "steps": []
+                    }
+                agent_metadata.setdefault('steps', []).append(event.get('data', {}))
 
-            # Run npm install if package.json was modified (K8s only - Docker handles this automatically)
-            if package_json_modified and settings.deployment_mode == "kubernetes":
-                print("[NPM] package.json was modified, running npm install...")
-                try:
-                    from ..k8s_client import get_k8s_manager
-                    k8s_manager = get_k8s_manager()
+        logger.info(f"[UNIFIED-CHAT] Agent execution completed successfully")
 
-                    await websocket.send_json({
-                        "type": "status",
-                        "content": "📦 Installing dependencies..."
-                    })
-
-                    output = await k8s_manager.execute_command_in_pod(
-                        user_id=user.id,
-                        project_id=str(project_id),
-                        command=["npm", "install"],
-                        timeout=180  # 3 minutes for npm install
-                    )
-
-                    print(f"[NPM] ✅ npm install completed")
-                    print(f"[NPM] Output: {output[:500]}")  # Log first 500 chars
-
-                    await websocket.send_json({
-                        "type": "status",
-                        "content": "✅ Dependencies installed successfully"
-                    })
-
-                except Exception as e:
-                    print(f"[NPM] ⚠️ Failed to run npm install: {e}")
-                    await websocket.send_json({
-                        "type": "warning",
-                        "content": f"⚠️ Failed to install dependencies: {str(e)}"
-                    })
-                
     except Exception as e:
-        print(f"Error during AI stream: {e}")
-        await websocket.send_json({
-            "type": "error",
-            "content": f"Error: {str(e)}"
-        })
+        logger.error(f"[UNIFIED-CHAT] Error during agent execution: {e}", exc_info=True)
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "content": f"Agent error: {str(e)}"
+            })
+        except:
+            pass
         return
-    
-    # Save assistant message
+
+    # 6. Save assistant message to database
     try:
         assistant_message = Message(
             chat_id=chat_id,
             role="assistant",
-            content=full_response
+            content=full_response,
+            message_metadata=agent_metadata  # Save agent metadata if available
         )
         db.add(assistant_message)
         await db.commit()
+        logger.info(f"[UNIFIED-CHAT] Saved assistant message to database")
     except Exception as e:
         await db.rollback()
-        logger.error(f"Database error saving assistant message: {e}", exc_info=True)
-        # Continue anyway - the AI response was already sent to the user
-
-    # Send completion message
-    try:
-        await websocket.send_json({
-            "type": "complete",
-            "content": full_response
-        })
-        print("✅ Sent completion message to WebSocket")
-    except Exception as e:
-        print(f"❌ Error sending completion message: {e}")
+        logger.error(f"[UNIFIED-CHAT] Error saving message: {e}", exc_info=True)
+        # Continue anyway - the response was already sent to user
 
 def extract_complete_code_blocks(content: str):
     """Extract only complete code blocks with file paths"""

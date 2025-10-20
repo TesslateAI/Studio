@@ -16,6 +16,7 @@ import {
   X
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 
 interface MarketplaceAgent {
@@ -74,19 +75,8 @@ export default function Marketplace() {
 
   const loadMarketplaceAgents = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/marketplace/agents', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load marketplace');
-      }
-
-      const data = await response.json();
-      setAgents(data.agents);
+      const data = await marketplaceApi.getAllAgents();
+      setAgents(data.agents || []);
     } catch (error) {
       console.error('Failed to load marketplace:', error);
       toast.error('Failed to load marketplace');
@@ -152,20 +142,7 @@ export default function Marketplace() {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/marketplace/agents/${agent.id}/purchase`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to purchase agent');
-      }
-
-      const data = await response.json();
+      const data = await marketplaceApi.purchaseAgent(agent.id);
 
       if (data.checkout_url) {
         // Redirect to Stripe checkout for paid agents

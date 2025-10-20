@@ -68,6 +68,31 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
         await db.commit()
         logger.warning(f"User {db_user.username} registered WITHOUT LiteLLM key. Run fix_user_keys.py to add it later.")
 
+    # Auto-add Stream Builder agent to new users
+    try:
+        from ..models import MarketplaceAgent, UserPurchasedAgent
+
+        result = await db.execute(
+            select(MarketplaceAgent).where(MarketplaceAgent.slug == "stream-builder")
+        )
+        stream_agent = result.scalar_one_or_none()
+
+        if stream_agent:
+            purchase = UserPurchasedAgent(
+                user_id=db_user.id,
+                agent_id=stream_agent.id,
+                purchase_type="free",
+                is_active=True
+            )
+            db.add(purchase)
+            await db.commit()
+            logger.info(f"Auto-added Stream Builder to user {db_user.username}")
+        else:
+            logger.warning("Stream Builder not found - user registered without default agent")
+    except Exception as e:
+        logger.error(f"Failed to add Stream Builder to user {db_user.username}: {e}")
+        # Don't fail registration if agent assignment fails
+
     # Auto-login: Create tokens for the new user
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(

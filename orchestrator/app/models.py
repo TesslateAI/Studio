@@ -171,22 +171,6 @@ class ShellSession(Base):
     project = relationship("Project")
 
 
-class Agent(Base):
-    """AI Agent configurations with custom system prompts."""
-    __tablename__ = "agents"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)  # "Full Stack Builder"
-    slug = Column(String, unique=True, nullable=False)  # "fullstack-builder"
-    description = Column(Text)
-    system_prompt = Column(Text, nullable=False)
-    icon = Column(String, default="🤖")  # emoji or icon identifier
-    mode = Column(String, default="stream")  # "stream" or "agent"
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
 class GitHubCredential(Base):
     """Store encrypted GitHub OAuth credentials for users."""
     __tablename__ = "github_credentials"
@@ -262,7 +246,9 @@ class MarketplaceAgent(Base):
     long_description = Column(Text, nullable=True)
     category = Column(String, nullable=False)  # builder, frontend, fullstack, data, etc
     system_prompt = Column(Text, nullable=False)
-    mode = Column(String, nullable=False)  # "stream" or "agent"
+    mode = Column(String, nullable=False)  # "stream" or "agent" (deprecated, use agent_type)
+    agent_type = Column(String, nullable=False, default="StreamAgent")  # StreamAgent, IterativeAgent, etc.
+    tools = Column(JSON, nullable=True)  # List of tool names: ["read_file", "write_file", ...]
     icon = Column(String, default="🤖")  # emoji or phosphor icon name
     preview_image = Column(String, nullable=True)
 

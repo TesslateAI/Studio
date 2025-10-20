@@ -18,7 +18,7 @@ from ..models import (
 from ..schemas import MarketplaceAgentResponse, AgentPurchaseRequest
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/marketplace", tags=["marketplace"])
+router = APIRouter()
 
 
 # ============================================================================
@@ -96,6 +96,7 @@ async def get_marketplace_agents(
             "description": agent.description,
             "category": agent.category,
             "mode": agent.mode,
+            "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
             "icon": agent.icon,
             "pricing_type": agent.pricing_type,
             "price": agent.price / 100.0 if agent.price else 0,  # Convert cents to dollars
@@ -162,6 +163,7 @@ async def get_agent_details(
         "long_description": agent.long_description,
         "category": agent.category,
         "mode": agent.mode,
+        "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
         "icon": agent.icon,
         "preview_image": agent.preview_image,
         "pricing_type": agent.pricing_type,
@@ -307,6 +309,7 @@ async def get_user_agents(
             "description": agent.description,
             "category": agent.category,
             "mode": agent.mode,
+            "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
             "icon": agent.icon,
             "pricing_type": agent.pricing_type,
             "features": agent.features,
@@ -374,6 +377,7 @@ async def get_available_agents_for_project(
                 "description": agent.description,
                 "category": agent.category,
                 "mode": agent.mode,
+                "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
                 "icon": agent.icon,
                 "features": agent.features
             })
@@ -531,6 +535,7 @@ async def get_project_agents(
             "description": agent.description,
             "category": agent.category,
             "mode": agent.mode,
+            "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
             "icon": agent.icon,
             "system_prompt": agent.system_prompt,  # Include for actual usage
             "features": agent.features,

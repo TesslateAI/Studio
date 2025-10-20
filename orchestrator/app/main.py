@@ -59,40 +59,39 @@ def load_agents_config():
 
 
 async def seed_default_agents():
-    """Seed the database with default agents if they don't exist."""
-    from .models import Agent
+    """
+    Seed the database with default marketplace agents if they don't exist.
+
+    NOTE: This now uses MarketplaceAgent (factory system).
+    Agents require:  name, slug, description, category, system_prompt, mode,
+                    agent_type, pricing_type, source_type, etc.
+    """
+    from .models import MarketplaceAgent
     from .database import AsyncSessionLocal
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
         try:
             # Check if agents already exist
-            result = await session.execute(select(Agent))
+            result = await session.execute(select(MarketplaceAgent))
             existing_agents = result.scalars().all()
 
             if existing_agents:
-                logger.info(f"Agents already seeded ({len(existing_agents)} agents found)")
+                logger.info(f"Agents already seeded ({len(existing_agents)} marketplace agents found)")
                 return
 
-            # Load agent definitions from config file
-            agent_configs = load_agents_config()
-            if not agent_configs:
-                logger.warning("No agent configurations found, skipping seed")
-                return
+            # For now, skip seeding - agents should be added via marketplace or migration
+            logger.info("No agents found. Add marketplace agents via migration scripts or admin panel.")
+            logger.info("Skipping automatic seed - using new marketplace agent system")
 
-            # Create new agents
-            logger.info(f"Seeding {len(agent_configs)} default agents...")
-            for agent_data in agent_configs:
-                agent = Agent(**agent_data)
-                session.add(agent)
-                logger.info(f"  Created: {agent_data['name']} ({agent_data['slug']})")
+            # Future: Load from marketplace_agents_config.json
+            # agent_configs = load_agents_config()
+            # ...
 
-            await session.commit()
-            logger.info(f"Successfully seeded {len(agent_configs)} default agents")
         except Exception as e:
-            logger.error(f"Error seeding agents: {e}")
-            await session.rollback()
-            raise
+            logger.error(f"Error checking agents: {e}")
+            # Don't fail startup if agents aren't seeded
+            logger.warning("Continuing without seeding agents")
 
 
 async def shell_session_cleanup_loop():
@@ -216,7 +215,7 @@ app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
-app.include_router(marketplace.router, prefix="/api", tags=["marketplace"])
+app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])

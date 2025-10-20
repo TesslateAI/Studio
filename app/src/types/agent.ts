@@ -48,11 +48,14 @@ export interface Agent {
   name: string;
   slug: string;
   description?: string;
-  system_prompt: string;
+  system_prompt?: string;
   icon: string;
   mode: 'stream' | 'agent';
-  is_active: boolean;
-  created_at: string;
+  agent_type?: string;  // StreamAgent, IterativeAgent, etc.
+  category?: string;
+  features?: string[];
+  is_active?: boolean;
+  created_at?: string;
   updated_at?: string;
 }
 

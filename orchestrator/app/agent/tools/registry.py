@@ -198,3 +198,45 @@ def _register_all_tools(registry: ToolRegistry):
     shell_tools.register_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")
+
+
+def create_scoped_tool_registry(tool_names: List[str]) -> ToolRegistry:
+    """
+    Create a ToolRegistry containing only the specified tools.
+
+    This enables agents to have restricted tool access, improving security
+    and making agents more focused on their specific tasks.
+
+    Args:
+        tool_names: List of tool names to include in the scoped registry
+
+    Returns:
+        A new ToolRegistry instance with only the specified tools
+
+    Example:
+        >>> registry = create_scoped_tool_registry(["read_file", "write_file"])
+        >>> # This registry only has file reading/writing tools
+    """
+    scoped_registry = ToolRegistry()
+    global_registry = get_tool_registry()
+
+    missing_tools = []
+    for name in tool_names:
+        tool = global_registry.get(name)
+        if tool:
+            scoped_registry.register(tool)
+        else:
+            missing_tools.append(name)
+            logger.warning(f"Tool '{name}' not found in global registry")
+
+    if missing_tools:
+        logger.warning(
+            f"Could not add {len(missing_tools)} tools to scoped registry: {missing_tools}"
+        )
+
+    logger.info(
+        f"Created scoped tool registry with {len(scoped_registry._tools)} tools: "
+        f"{list(scoped_registry._tools.keys())}"
+    )
+
+    return scoped_registry

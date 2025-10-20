@@ -84,10 +84,16 @@ class LiteLLMService:
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
-                        logger.error(f"Failed to create LiteLLM user: {error_text}")
-                        raise Exception(f"Failed to create LiteLLM user: {error_text}")
 
-                    user_response = await resp.json()
+                        # If user already exists, that's OK - we'll just create a key for them
+                        if "already exists" in error_text.lower():
+                            logger.info(f"LiteLLM user {litellm_user_id} already exists, creating key...")
+                        else:
+                            logger.error(f"Failed to create LiteLLM user: {error_text}")
+                            raise Exception(f"Failed to create LiteLLM user: {error_text}")
+                    else:
+                        user_response = await resp.json()
+                        logger.info(f"Created LiteLLM user {litellm_user_id}")
 
                 # Generate API key for the user
                 # Use timestamp to ensure unique alias (in case of re-creation)

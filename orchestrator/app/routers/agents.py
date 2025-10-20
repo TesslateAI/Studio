@@ -3,113 +3,77 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
-from ..models import Agent as AgentModel, User
-from ..schemas import Agent, AgentCreate, AgentUpdate
+from ..models import MarketplaceAgent, User
 from ..auth import get_current_active_user
 
 router = APIRouter()
 
-@router.get("/", response_model=List[Agent])
+@router.get("/")
 async def get_agents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get all active agents."""
+    """
+    Get all active marketplace agents.
+
+    This endpoint now uses MarketplaceAgent (the new factory system).
+    All agents go through the unified factory interface.
+    """
     result = await db.execute(
-        select(AgentModel).where(AgentModel.is_active == True).order_by(AgentModel.created_at.asc())
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.is_active == True
+        ).order_by(MarketplaceAgent.created_at.asc())
     )
     agents = result.scalars().all()
-    return agents
+
+    # Return simplified response
+    return [
+        {
+            "id": agent.id,
+            "name": agent.name,
+            "slug": agent.slug,
+            "description": agent.description,
+            "agent_type": agent.agent_type,
+            "mode": agent.mode,  # Deprecated but kept for compatibility
+            "icon": agent.icon,
+            "category": agent.category
+        }
+        for agent in agents
+    ]
 
 
-@router.get("/{agent_id}", response_model=Agent)
+@router.get("/{agent_id}")
 async def get_agent(
     agent_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get a specific agent by ID."""
+    """Get a specific marketplace agent by ID."""
     result = await db.execute(
-        select(AgentModel).where(AgentModel.id == agent_id)
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
     )
     agent = result.scalar_one_or_none()
 
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    return agent
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "slug": agent.slug,
+        "description": agent.description,
+        "long_description": agent.long_description,
+        "agent_type": agent.agent_type,
+        "mode": agent.mode,
+        "system_prompt": agent.system_prompt,
+        "tools": agent.tools,
+        "icon": agent.icon,
+        "category": agent.category,
+        "features": agent.features,
+        "tags": agent.tags
+    }
 
 
-@router.post("/", response_model=Agent)
-async def create_agent(
-    agent_data: AgentCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Create a new agent (admin only for now)."""
-    # Check if agent with same name or slug exists
-    result = await db.execute(
-        select(AgentModel).where(
-            (AgentModel.name == agent_data.name) | (AgentModel.slug == agent_data.slug)
-        )
-    )
-    existing = result.scalar_one_or_none()
-
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail="Agent with this name or slug already exists"
-        )
-
-    db_agent = AgentModel(**agent_data.model_dump())
-    db.add(db_agent)
-    await db.commit()
-    await db.refresh(db_agent)
-    return db_agent
-
-
-@router.put("/{agent_id}", response_model=Agent)
-async def update_agent(
-    agent_id: int,
-    agent_data: AgentUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Update an existing agent."""
-    result = await db.execute(
-        select(AgentModel).where(AgentModel.id == agent_id)
-    )
-    agent = result.scalar_one_or_none()
-
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    # Update only provided fields
-    update_data = agent_data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(agent, field, value)
-
-    await db.commit()
-    await db.refresh(agent)
-    return agent
-
-
-@router.delete("/{agent_id}")
-async def delete_agent(
-    agent_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Soft delete an agent by setting is_active to False."""
-    result = await db.execute(
-        select(AgentModel).where(AgentModel.id == agent_id)
-    )
-    agent = result.scalar_one_or_none()
-
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    agent.is_active = False
-    await db.commit()
-
-    return {"message": "Agent deleted successfully"}
+# Note: Create, Update, Delete endpoints removed
+# Marketplace agents should be managed through the marketplace system
+# For development, create agents directly in the database or via migration scripts

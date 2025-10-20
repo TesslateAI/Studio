@@ -33,11 +33,19 @@ import {
   AssetsPanel
 } from '../components/panels';
 import CodeEditor from '../components/CodeEditor';
-import { projectsApi } from '../lib/api';
+import { projectsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
 
 type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | 'assets' | null;
+
+interface UIAgent {
+  id: string;
+  name: string;
+  icon: string;
+  backendId: number;
+  mode: 'stream' | 'agent';
+}
 
 export default function Project() {
   const { id } = useParams<{ id: string }>();
@@ -45,6 +53,7 @@ export default function Project() {
   const { theme, toggleTheme } = useTheme();
   const [project, setProject] = useState<any>(null);
   const [files, setFiles] = useState<any[]>([]);
+  const [agents, setAgents] = useState<UIAgent[]>([]);
   const [activeView, setActiveView] = useState<'preview' | 'code'>('preview');
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
@@ -58,6 +67,7 @@ export default function Project() {
   useEffect(() => {
     loadProject();
     loadDevServerUrl();
+    loadAgents();
   }, [projectId]);
 
   useEffect(() => {
@@ -126,6 +136,26 @@ export default function Project() {
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
+    }
+  };
+
+  const loadAgents = async () => {
+    try {
+      const agentsData = await marketplaceApi.getProjectAgents(projectId);
+
+      // Convert backend agents to UI format
+      const uiAgents = agentsData.map(agent => ({
+        id: agent.slug,
+        name: agent.name,
+        icon: agent.icon || '🤖',
+        backendId: agent.id,
+        mode: agent.mode
+      }));
+
+      setAgents(uiAgents);
+    } catch (error) {
+      console.error('Failed to load agents:', error);
+      toast.error('Failed to load agents');
     }
   };
 
@@ -234,12 +264,6 @@ export default function Project() {
   const togglePanel = (panel: PanelType) => {
     setActivePanel(activePanel === panel ? null : panel);
   };
-
-
-  const agents = [
-    { id: 'builder', name: 'Builder AI', icon: <Cube className="w-4 h-4" />, active: true },
-    { id: 'react', name: 'React Expert', icon: <Code className="w-4 h-4" /> },
-  ];
 
   if (!project) {
     return (
@@ -483,15 +507,17 @@ export default function Project() {
       </FloatingPanel>
 
       {/* Chat Interface */}
-      <ChatContainer
-        projectId={projectId}
-        agents={agents}
-        currentAgent={agents[0]}
-        onSelectAgent={(agent) => console.log('Selected agent:', agent)}
-        onFileUpdate={handleFileUpdate}
-        projectFiles={files}
-        projectName={project?.name}
-      />
+      {agents.length > 0 && (
+        <ChatContainer
+          projectId={projectId}
+          agents={agents}
+          currentAgent={agents[0]}
+          onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+          onFileUpdate={handleFileUpdate}
+          projectFiles={files}
+          projectName={project?.name}
+        />
+      )}
     </div>
   );
 }

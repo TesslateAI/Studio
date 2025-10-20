@@ -200,6 +200,32 @@ export const chatApi = {
   },
 };
 
+export const marketplaceApi = {
+  // Get all marketplace agents
+  getAllAgents: async () => {
+    const response = await api.get('/api/marketplace/agents');
+    return response.data;
+  },
+
+  // Get user's purchased agents
+  getMyAgents: async () => {
+    const response = await api.get('/api/marketplace/my-agents');
+    return response.data;
+  },
+
+  // Get available agents for a specific project
+  getProjectAgents: async (projectId: number): Promise<Agent[]> => {
+    const response = await api.get(`/api/marketplace/projects/${projectId}/available-agents`);
+    return response.data.available_agents || [];
+  },
+
+  // Purchase/add agent to account
+  purchaseAgent: async (agentId: number) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/purchase`);
+    return response.data;
+  },
+};
+
 export const agentsApi = {
   getAll: async (): Promise<Agent[]> => {
     const response = await api.get('/api/agents/');

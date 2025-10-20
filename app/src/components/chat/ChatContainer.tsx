@@ -112,38 +112,19 @@ export function ChatContainer({
     loadChatHistory();
   }, [projectId]);
 
-  // Load agents from backend
+  // Update agents when initialAgents prop changes
   useEffect(() => {
-    const loadAgents = async () => {
-      try {
-        const fetchedAgents = await agentsApi.getAll();
-        setBackendAgents(fetchedAgents);
+    if (initialAgents.length > 0) {
+      setAgents(initialAgents);
 
-        // Convert backend agents to UI agents
-        const uiAgents = fetchedAgents.map(agent => ({
-          id: agent.slug,
-          name: agent.name,
-          icon: agent.icon,
-          backendId: agent.id,
-          mode: agent.mode
-        }));
-
-        setAgents(uiAgents);
-
-        // Always set first agent as default
-        if (uiAgents.length > 0) {
-          const defaultAgent = uiAgents[0];
-          setCurrentAgent(defaultAgent);
-          onSelectAgent(defaultAgent);
-        }
-      } catch (error) {
-        console.error('Failed to load agents:', error);
-        toast.error('Failed to load AI agents');
+      // Set first agent as default if current agent not in list
+      if (!initialAgents.find(a => a.id === currentAgent.id)) {
+        const defaultAgent = initialAgents[0];
+        setCurrentAgent(defaultAgent);
+        onSelectAgent(defaultAgent);
       }
-    };
-
-    loadAgents();
-  }, []);
+    }
+  }, [initialAgents]);
 
   // WebSocket connection
   useEffect(() => {
@@ -184,10 +165,13 @@ export function ChatContainer({
             setStreamingFiles(prev => new Map(prev).set(fileName, { fileName, isStreaming: true }));
           }
         } else if (data.type === 'complete') {
+          // Handle complete event from both StreamAgent and IterativeAgent
+          const finalResponse = data.data?.final_response || data.content || currentStream;
+
           setMessages(prev => [...prev, {
             id: `msg-${Date.now()}`,
             type: 'ai',
-            content: data.content
+            content: finalResponse
           }]);
           setCurrentStream('');
           setIsStreaming(false);
@@ -391,6 +375,11 @@ export function ChatContainer({
   };
 
   const renderMessageContent = (content: string, isCurrentlyStreaming: boolean = false) => {
+    // Safety check: handle undefined/null content
+    if (!content) {
+      return <span className="text-gray-400 italic">No content available</span>;
+    }
+
     let processedContent = content;
 
     if (isCurrentlyStreaming) {
