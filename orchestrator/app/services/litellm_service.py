@@ -22,6 +22,15 @@ class LiteLLMService:
 
         # Get configuration from settings (which reads from environment)
         self.base_url = settings.litellm_api_base
+
+        # Management API is at root level (without /v1), chat API is at /v1
+        # Strip /v1 from base_url for management endpoints (works whether user includes /v1 or not)
+        base_url_clean = self.base_url.rstrip('/')
+        if base_url_clean.endswith('/v1'):
+            self.management_base_url = base_url_clean[:-3]  # Remove /v1
+        else:
+            self.management_base_url = base_url_clean
+
         self.master_key = settings.litellm_master_key
         self.default_models = settings.litellm_default_models.split(",") if settings.litellm_default_models else []
         self.team_id = settings.litellm_team_id
@@ -69,7 +78,7 @@ class LiteLLMService:
                 }
 
                 async with session.post(
-                    f"{self.base_url}/user/new",
+                    f"{self.management_base_url}/user/new",
                     headers=self.headers,
                     json=user_data
                 ) as resp:
@@ -81,9 +90,11 @@ class LiteLLMService:
                     user_response = await resp.json()
 
                 # Generate API key for the user
+                # Use timestamp to ensure unique alias (in case of re-creation)
+                timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
                 key_data = {
                     "user_id": litellm_user_id,
-                    "key_alias": f"{username}_key",
+                    "key_alias": f"{username}_key_{timestamp}",
                     "models": models,
                     "team_id": self.team_id,  # Access group from configuration
                     "max_budget": self.initial_budget,  # Initial budget from configuration
@@ -95,7 +106,7 @@ class LiteLLMService:
                 }
 
                 async with session.post(
-                    f"{self.base_url}/key/generate",
+                    f"{self.management_base_url}/key/generate",
                     headers=self.headers,
                     json=key_data
                 ) as resp:
@@ -117,7 +128,7 @@ class LiteLLMService:
                     }
 
                     async with session.post(
-                        f"{self.base_url}/team/member_add",
+                        f"{self.management_base_url}/team/member_add",
                         headers=self.headers,
                         json=member_data
                     ) as resp:
@@ -162,7 +173,7 @@ class LiteLLMService:
                 }
 
                 async with session.post(
-                    f"{self.base_url}/key/update",
+                    f"{self.management_base_url}/key/update",
                     headers=self.headers,
                     json=update_data
                 ) as resp:
@@ -195,7 +206,7 @@ class LiteLLMService:
                     update_data["models"] = models
 
                 async with session.post(
-                    f"{self.base_url}/key/update",
+                    f"{self.management_base_url}/key/update",
                     headers=self.headers,
                     json=update_data
                 ) as resp:
@@ -228,7 +239,7 @@ class LiteLLMService:
                 }
 
                 async with session.post(
-                    f"{self.base_url}/key/update",
+                    f"{self.management_base_url}/key/update",
                     headers=self.headers,
                     json=update_data
                 ) as resp:
@@ -260,7 +271,7 @@ class LiteLLMService:
                 }
 
                 async with session.get(
-                    f"{self.base_url}/spend/key",
+                    f"{self.management_base_url}/spend/key",
                     headers=self.headers,
                     params=params
                 ) as resp:
@@ -295,7 +306,7 @@ class LiteLLMService:
                 }
 
                 async with session.get(
-                    f"{self.base_url}/spend/users",
+                    f"{self.management_base_url}/spend/users",
                     headers=self.headers,
                     params=params
                 ) as resp:
@@ -320,7 +331,7 @@ class LiteLLMService:
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(
-                    f"{self.base_url}/global/spend",
+                    f"{self.management_base_url}/global/spend",
                     headers=self.headers
                 ) as resp:
                     if resp.status != 200:
@@ -356,7 +367,7 @@ class LiteLLMService:
                 }
 
                 async with session.post(
-                    f"{self.base_url}/key/update",
+                    f"{self.management_base_url}/key/update",
                     headers=self.headers,
                     json=update_data
                 ) as resp:
@@ -383,7 +394,7 @@ class LiteLLMService:
                 }
 
                 async with session.post(
-                    f"{self.base_url}/key/delete",
+                    f"{self.management_base_url}/key/delete",
                     headers=self.headers,
                     json=delete_data
                 ) as resp:

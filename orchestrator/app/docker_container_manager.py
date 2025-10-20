@@ -696,6 +696,10 @@ docker-compose*
                 "-e", f"PORT={port}",                                   # Server port
                 "-e", f"VITE_HMR_PROTOCOL={hmr_protocol}",              # WebSocket protocol (ws/wss)
                 "-e", f"VITE_HMR_PORT={hmr_port}",                      # WebSocket port (80/443)
+                # File watching settings from .env (required for hot reload in Docker)
+                "-e", f"CHOKIDAR_USEPOLLING={os.environ.get('CHOKIDAR_USEPOLLING', 'true')}",
+                "-e", f"CHOKIDAR_INTERVAL={os.environ.get('CHOKIDAR_INTERVAL', '1000')}",
+                "-e", f"WATCHPACK_POLLING={os.environ.get('WATCHPACK_POLLING', 'true')}",
             ])
 
             # Add custom environment variables from the orchestrator

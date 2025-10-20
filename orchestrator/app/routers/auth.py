@@ -64,7 +64,9 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
         logger.info(f"Created LiteLLM key for user {db_user.username}")
     except Exception as e:
         logger.error(f"Failed to create LiteLLM key for user {db_user.username}: {e}")
-        # Don't fail registration if LiteLLM is down - can be added later
+        # Commit the user without LiteLLM key - they can get one added later via script
+        await db.commit()
+        logger.warning(f"User {db_user.username} registered WITHOUT LiteLLM key. Run fix_user_keys.py to add it later.")
 
     # Auto-login: Create tokens for the new user
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
