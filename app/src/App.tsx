@@ -9,6 +9,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Project from './pages/Project';
 import Marketplace from './pages/Marketplace';
+import Library from './pages/Library';
 import AdminDashboard from './pages/AdminDashboard';
 import AuthCallback from './pages/AuthCallback';
 import Logout from './pages/Logout';
@@ -99,6 +100,14 @@ function App() {
             element={
               <PrivateRoute>
                 <Marketplace />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/library"
+            element={
+              <PrivateRoute>
+                <Library />
               </PrivateRoute>
             }
           />

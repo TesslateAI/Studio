@@ -236,7 +236,7 @@ class GitRepository(Base):
 # ============================================================================
 
 class MarketplaceAgent(Base):
-    """Agent listings in the marketplace."""
+    """Marketplace items: agents, bases, tools, integrations."""
     __tablename__ = "marketplace_agents"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -245,10 +245,23 @@ class MarketplaceAgent(Base):
     description = Column(Text, nullable=False)
     long_description = Column(Text, nullable=True)
     category = Column(String, nullable=False)  # builder, frontend, fullstack, data, etc
-    system_prompt = Column(Text, nullable=False)
-    mode = Column(String, nullable=False)  # "stream" or "agent" (deprecated, use agent_type)
-    agent_type = Column(String, nullable=False, default="StreamAgent")  # StreamAgent, IterativeAgent, etc.
+
+    # Item type
+    item_type = Column(String, nullable=False, default="agent")  # agent, base, tool, integration
+
+    # Agent-specific fields (NULL for non-agents)
+    system_prompt = Column(Text, nullable=True)
+    mode = Column(String, nullable=True)  # "stream" or "agent" (deprecated, use agent_type)
+    agent_type = Column(String, nullable=True)  # StreamAgent, IterativeAgent, etc.
     tools = Column(JSON, nullable=True)  # List of tool names: ["read_file", "write_file", ...]
+    model = Column(String, nullable=True)  # Specific model for this agent (e.g., "cerebras/llama3.1-8b")
+
+    # Forking (for open source agents)
+    is_forkable = Column(Boolean, default=False)
+    parent_agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=True)
+    forked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    config = Column(JSON, nullable=True)  # Editable configuration for forked agents
+
     icon = Column(String, default="🤖")  # emoji or phosphor icon name
     preview_image = Column(String, nullable=True)
 
@@ -266,6 +279,7 @@ class MarketplaceAgent(Base):
     downloads = Column(Integer, default=0)
     rating = Column(Float, default=5.0)
     reviews_count = Column(Integer, default=0)
+    usage_count = Column(Integer, default=0)  # Number of messages sent to this agent
 
     # Features & requirements
     features = Column(JSON)  # ["Code generation", "File editing", etc]
@@ -274,10 +288,13 @@ class MarketplaceAgent(Base):
 
     is_featured = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
+    is_published = Column(Boolean, default=True)  # For user-created forked agents
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
+    parent_agent = relationship("MarketplaceAgent", remote_side=[id], foreign_keys=[parent_agent_id])
+    forked_by_user = relationship("User", foreign_keys=[forked_by_user_id])
     purchased_by = relationship("UserPurchasedAgent", back_populates="agent", cascade="all, delete-orphan")
     project_assignments = relationship("ProjectAgent", back_populates="agent", cascade="all, delete-orphan")
     reviews = relationship("AgentReview", back_populates="agent", cascade="all, delete-orphan")

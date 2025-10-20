@@ -38,9 +38,13 @@ async def get_marketplace_agents(
 ):
     """
     Browse marketplace agents with filtering and sorting.
+    Shows official Tesslate agents and published community agents.
     """
-    # Base query
-    query = select(MarketplaceAgent).where(MarketplaceAgent.is_active == True)
+    # Base query - show official agents AND published community agents
+    query = select(MarketplaceAgent).where(
+        MarketplaceAgent.is_active == True,
+        (MarketplaceAgent.forked_by_user_id == None) | (MarketplaceAgent.is_published == True)
+    )
 
     # Apply filters
     if category:
@@ -89,24 +93,43 @@ async def get_marketplace_agents(
     # Format response
     response = []
     for agent in agents:
+        # Determine creator info
+        creator_type = "official"  # Tesslate
+        creator_name = "Tesslate"
+
+        if agent.forked_by_user_id:
+            creator_type = "community"
+            # Get creator's name
+            if agent.forked_by_user:
+                creator_name = agent.forked_by_user.email.split('@')[0]  # Use email username as display name
+
         agent_dict = {
             "id": agent.id,
             "name": agent.name,
             "slug": agent.slug,
             "description": agent.description,
+            "long_description": agent.long_description,
             "category": agent.category,
+            "item_type": agent.item_type,
             "mode": agent.mode,
             "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
+            "model": agent.model,
+            "source_type": agent.source_type,
+            "is_forkable": agent.is_forkable,
+            "is_active": agent.is_active,
             "icon": agent.icon,
             "pricing_type": agent.pricing_type,
             "price": agent.price / 100.0 if agent.price else 0,  # Convert cents to dollars
+            "usage_count": agent.usage_count or 0,  # Number of messages sent to this agent
             "downloads": agent.downloads,
             "rating": agent.rating,
             "reviews_count": agent.reviews_count,
             "features": agent.features,
             "tags": agent.tags,
             "is_featured": agent.is_featured,
-            "is_purchased": agent.id in purchased_agent_ids
+            "is_purchased": agent.id in purchased_agent_ids,
+            "creator_type": creator_type,  # "official" or "community"
+            "creator_name": creator_name  # "Tesslate" or username
         }
         response.append(agent_dict)
 
@@ -164,6 +187,8 @@ async def get_agent_details(
         "category": agent.category,
         "mode": agent.mode,
         "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
+        "system_prompt": agent.system_prompt,  # Include system prompt for forking
+        "model": agent.model,
         "icon": agent.icon,
         "preview_image": agent.preview_image,
         "pricing_type": agent.pricing_type,
@@ -175,6 +200,8 @@ async def get_agent_details(
         "required_models": agent.required_models,
         "tags": agent.tags,
         "is_featured": agent.is_featured,
+        "is_forkable": agent.is_forkable,
+        "source_type": agent.source_type,
         "is_purchased": is_purchased,
         "reviews": [
             {
@@ -279,6 +306,296 @@ async def purchase_agent(
         raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 
+@router.post("/agents/{agent_id}/fork")
+async def fork_agent(
+    agent_id: int,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    model: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Fork an open source agent to create a custom version with optional customizations.
+    """
+    # Get the parent agent
+    result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+    )
+    parent_agent = result.scalar_one_or_none()
+
+    if not parent_agent or not parent_agent.is_active:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if not parent_agent.is_forkable:
+        raise HTTPException(status_code=403, detail="This agent cannot be forked")
+
+    # Create a forked agent
+    forked_slug = f"{parent_agent.slug}-fork-{current_user.id}-{datetime.now(timezone.utc).timestamp()}"
+
+    forked_agent = MarketplaceAgent(
+        name=name or f"{parent_agent.name} (My Fork)",
+        slug=forked_slug,
+        description=description or parent_agent.description,
+        long_description=parent_agent.long_description,
+        category=parent_agent.category,
+        item_type=parent_agent.item_type,
+        system_prompt=system_prompt or parent_agent.system_prompt,
+        mode=parent_agent.mode,
+        agent_type=parent_agent.agent_type,
+        tools=parent_agent.tools,
+        model=model or parent_agent.model,
+        is_forkable=False,  # Forked agents can't be forked again
+        parent_agent_id=parent_agent.id,
+        forked_by_user_id=current_user.id,
+        config={},  # User can customize this later
+        icon=parent_agent.icon,
+        preview_image=parent_agent.preview_image,
+        pricing_type="free",
+        price=0,
+        source_type="open",
+        requires_user_keys=parent_agent.requires_user_keys,
+        downloads=0,
+        rating=5.0,
+        reviews_count=0,
+        features=parent_agent.features,
+        required_models=[model] if model else parent_agent.required_models,
+        tags=parent_agent.tags,
+        is_featured=False,
+        is_active=True,
+        is_published=False  # Not published to marketplace by default
+    )
+
+    db.add(forked_agent)
+    await db.commit()
+    await db.refresh(forked_agent)
+
+    # Automatically add to user's library
+    purchase = UserPurchasedAgent(
+        user_id=current_user.id,
+        agent_id=forked_agent.id,
+        purchase_type="free",
+        is_active=True
+    )
+    db.add(purchase)
+    await db.commit()
+
+    return {
+        "message": "Agent forked successfully",
+        "agent_id": forked_agent.id,
+        "slug": forked_agent.slug,
+        "success": True
+    }
+
+
+@router.post("/agents/create")
+async def create_custom_agent(
+    name: str,
+    description: str,
+    system_prompt: str,
+    mode: str = "stream",
+    agent_type: str = "StreamAgent",
+    model: str = "cerebras/qwen-3-coder-480b",
+    category: str = "custom",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Create a custom agent from scratch.
+    """
+    # Generate slug from name
+    import re
+    slug_base = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    slug = f"{slug_base}-{current_user.id}-{datetime.now(timezone.utc).timestamp()}"
+
+    # Create custom agent
+    custom_agent = MarketplaceAgent(
+        name=name,
+        slug=slug,
+        description=description,
+        long_description=description,
+        category=category,
+        item_type="agent",
+        system_prompt=system_prompt,
+        mode=mode,
+        agent_type=agent_type,
+        tools=None,
+        model=model,
+        is_forkable=False,
+        parent_agent_id=None,
+        forked_by_user_id=current_user.id,
+        config={},
+        icon="🤖",
+        preview_image=None,
+        pricing_type="free",
+        price=0,
+        source_type="open",
+        requires_user_keys=False,
+        downloads=0,
+        rating=5.0,
+        reviews_count=0,
+        features=["Custom agent"],
+        required_models=[model],
+        tags=["custom"],
+        is_featured=False,
+        is_active=True,
+        is_published=False
+    )
+
+    db.add(custom_agent)
+    await db.commit()
+    await db.refresh(custom_agent)
+
+    # Automatically add to user's library
+    purchase = UserPurchasedAgent(
+        user_id=current_user.id,
+        agent_id=custom_agent.id,
+        purchase_type="free",
+        is_active=True
+    )
+    db.add(purchase)
+    await db.commit()
+
+    return {
+        "message": "Custom agent created successfully",
+        "agent_id": custom_agent.id,
+        "slug": custom_agent.slug,
+        "success": True
+    }
+
+
+@router.patch("/agents/{agent_id}")
+async def update_custom_agent(
+    agent_id: int,
+    update_data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Update a custom or forked agent.
+    For open source agents not owned by user, creates a fork with the changes.
+    """
+    # Get the agent
+    result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+    )
+    agent = result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Check if user owns this agent (created/forked by them)
+    is_owner = agent.forked_by_user_id == current_user.id
+
+    # Check if agent is open source and user has it in library
+    if not is_owner:
+        # Check if user has purchased this agent
+        purchase_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.agent_id == agent_id,
+                UserPurchasedAgent.is_active == True
+            )
+        )
+        has_agent = purchase_result.scalar_one_or_none() is not None
+
+        if not has_agent:
+            raise HTTPException(status_code=403, detail="You don't have this agent in your library")
+
+        # If agent is open source but not owned by user, create a fork instead
+        if agent.source_type == 'open':
+            # Create a forked copy with the updates
+            forked_slug = f"{agent.slug}-fork-{current_user.id}-{datetime.now(timezone.utc).timestamp()}"
+
+            forked_agent = MarketplaceAgent(
+                name=update_data.get('name', agent.name),
+                slug=forked_slug,
+                description=update_data.get('description', agent.description),
+                long_description=agent.long_description,
+                category=agent.category,
+                item_type=agent.item_type,
+                system_prompt=update_data.get('system_prompt', agent.system_prompt),
+                mode=agent.mode,
+                agent_type=agent.agent_type,
+                tools=agent.tools,
+                model=update_data.get('model', agent.model),
+                is_forkable=False,
+                parent_agent_id=agent.id,
+                forked_by_user_id=current_user.id,
+                config={},
+                icon=agent.icon,
+                preview_image=agent.preview_image,
+                pricing_type="free",
+                price=0,
+                source_type="open",
+                requires_user_keys=agent.requires_user_keys,
+                downloads=0,
+                rating=5.0,
+                reviews_count=0,
+                features=agent.features,
+                required_models=[update_data.get('model', agent.model)],
+                tags=agent.tags,
+                is_featured=False,
+                is_active=True,
+                is_published=False
+            )
+
+            db.add(forked_agent)
+            await db.flush()  # Get the ID
+
+            # Add to user's library
+            purchase = UserPurchasedAgent(
+                user_id=current_user.id,
+                agent_id=forked_agent.id,
+                purchase_type="free",
+                is_active=True
+            )
+            db.add(purchase)
+
+            # Remove original from active library
+            original_purchase_result = await db.execute(
+                select(UserPurchasedAgent).where(
+                    UserPurchasedAgent.user_id == current_user.id,
+                    UserPurchasedAgent.agent_id == agent_id
+                )
+            )
+            original_purchase = original_purchase_result.scalar_one_or_none()
+            if original_purchase:
+                original_purchase.is_active = False
+
+            await db.commit()
+
+            return {
+                "message": "Created a custom fork with your changes",
+                "agent_id": forked_agent.id,
+                "forked": True,
+                "success": True
+            }
+        else:
+            raise HTTPException(status_code=403, detail="You can only edit open source agents or your own custom agents")
+
+    # User owns this agent, update it directly
+    if update_data.get('name'):
+        agent.name = update_data['name']
+    if update_data.get('description'):
+        agent.description = update_data['description']
+        agent.long_description = update_data['description']
+    if update_data.get('system_prompt'):
+        agent.system_prompt = update_data['system_prompt']
+    if update_data.get('model'):
+        agent.model = update_data['model']
+        agent.required_models = [update_data['model']]
+
+    await db.commit()
+
+    return {
+        "message": "Agent updated successfully",
+        "agent_id": agent.id,
+        "success": True
+    }
+
+
 @router.get("/my-agents")
 async def get_user_agents(
     db: AsyncSession = Depends(get_db),
@@ -310,15 +627,139 @@ async def get_user_agents(
             "category": agent.category,
             "mode": agent.mode,
             "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
+            "model": agent.model,
+            "source_type": agent.source_type,
+            "is_forkable": agent.is_forkable,
+            "system_prompt": agent.system_prompt,  # Include for editing
             "icon": agent.icon,
             "pricing_type": agent.pricing_type,
             "features": agent.features,
             "purchase_date": purchase.purchase_date.isoformat(),
             "purchase_type": purchase.purchase_type,
-            "expires_at": purchase.expires_at.isoformat() if purchase.expires_at else None
+            "expires_at": purchase.expires_at.isoformat() if purchase.expires_at else None,
+            "is_custom": agent.forked_by_user_id == current_user.id,
+            "parent_agent_id": agent.parent_agent_id,
+            "is_enabled": purchase.is_active,  # Using is_active as is_enabled
+            "is_published": agent.is_published,  # Whether agent is published to marketplace
+            "usage_count": agent.usage_count or 0  # Number of messages sent
         })
 
     return {"agents": response}
+
+
+@router.post("/agents/{agent_id}/toggle")
+async def toggle_agent(
+    agent_id: int,
+    enabled: bool,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Toggle an agent enabled/disabled in user's library.
+    """
+    # Find the purchase record
+    result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == agent_id
+        )
+    )
+    purchase = result.scalar_one_or_none()
+
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Agent not in your library")
+
+    # Update enabled status
+    purchase.is_active = enabled
+    await db.commit()
+
+    return {
+        "message": f"Agent {'enabled' if enabled else 'disabled'} successfully",
+        "agent_id": agent_id,
+        "enabled": enabled,
+        "success": True
+    }
+
+
+@router.post("/agents/{agent_id}/publish")
+async def publish_agent(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Publish a user's custom/forked agent to the community marketplace.
+    """
+    # Get the agent
+    result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+    )
+    agent = result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify ownership
+    if agent.forked_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only publish your own custom agents")
+
+    # Check if user has this agent in library
+    purchase_result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == agent_id,
+            UserPurchasedAgent.is_active == True
+        )
+    )
+    if not purchase_result.scalar_one_or_none():
+        raise HTTPException(status_code=403, detail="Agent not in your library")
+
+    # Publish the agent
+    agent.is_published = True
+    agent.source_type = "open"  # Published community agents are open source
+    agent.is_forkable = True  # Allow others to fork it
+
+    await db.commit()
+
+    return {
+        "message": "Agent published successfully to the community marketplace!",
+        "agent_id": agent_id,
+        "success": True
+    }
+
+
+@router.post("/agents/{agent_id}/unpublish")
+async def unpublish_agent(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Unpublish a user's agent from the community marketplace.
+    """
+    # Get the agent
+    result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+    )
+    agent = result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify ownership
+    if agent.forked_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only unpublish your own agents")
+
+    # Unpublish the agent
+    agent.is_published = False
+
+    await db.commit()
+
+    return {
+        "message": "Agent unpublished successfully",
+        "agent_id": agent_id,
+        "success": True
+    }
 
 
 # ============================================================================

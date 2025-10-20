@@ -224,6 +224,65 @@ export const marketplaceApi = {
     const response = await api.post(`/api/marketplace/agents/${agentId}/purchase`);
     return response.data;
   },
+
+  // Get agent details including system prompt
+  getAgentDetails: async (slug: string) => {
+    const response = await api.get(`/api/marketplace/agents/${slug}`);
+    return response.data;
+  },
+
+  // Fork an open source agent
+  forkAgent: async (agentId: number, customizations?: {
+    name?: string;
+    description?: string;
+    system_prompt?: string;
+    model?: string;
+  }) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/fork`, customizations || {});
+    return response.data;
+  },
+
+  // Create a custom agent from scratch
+  createCustomAgent: async (data: {
+    name: string;
+    description: string;
+    system_prompt: string;
+    mode: string;
+    agent_type: string;
+    model: string;
+  }) => {
+    const response = await api.post('/api/marketplace/agents/create', data);
+    return response.data;
+  },
+
+  // Update a custom/forked agent
+  updateAgent: async (agentId: number, data: {
+    name?: string;
+    description?: string;
+    system_prompt?: string;
+    model?: string;
+  }) => {
+    const response = await api.patch(`/api/marketplace/agents/${agentId}`, data);
+    return response.data;
+  },
+
+  // Toggle agent enabled/disabled status
+  toggleAgent: async (agentId: number, enabled: boolean) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/toggle`, { enabled });
+    return response.data;
+  },
+
+  // Publish agent to community marketplace
+  publishAgent: async (agentId: number) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/publish`);
+    return response.data;
+  },
+
+  // Unpublish agent from community marketplace
+  unpublishAgent: async (agentId: number) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/unpublish`);
+    return response.data;
+  },
 };
 
 export const agentsApi = {
