@@ -2,6 +2,25 @@
 
 > This file provides context and guidelines for AI agents working on this project.
 
+## Framework Configuration
+
+**Framework**: Vite + React
+**Version**: React 18
+**Port**: 5173
+
+## Development Server
+
+**Start Command**:
+```bash
+npm install
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+**Stop Command**:
+```bash
+pkill -f "vite"
+```
+
 ## Project Overview
 
 - **Framework**: React 18 with Vite

@@ -153,8 +153,8 @@ class TesslateParser:
     @staticmethod
     def _extract_start_command(content: str) -> str:
         """Extract start command from TESSLATE.md."""
-        # Look for "### Start Command" section with bash code block
-        pattern = r'###\s*Start\s+Command\s*```(?:bash)?\\s*(.+?)\\s*```'
+        # Look for "**Start Command**:" section with bash code block
+        pattern = r'\*\*Start\s+Command\*\*:\s*```(?:bash)?\s*(.+?)\s*```'
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
 
         if match:
@@ -175,8 +175,8 @@ class TesslateParser:
     @staticmethod
     def _extract_stop_command(content: str) -> Optional[str]:
         """Extract stop command from TESSLATE.md (optional)."""
-        # Look for "### Stop Command" section
-        pattern = r'###\s*Stop\s+Command\s*```(?:bash)?\\s*(.+?)\\s*```'
+        # Look for "**Stop Command**:" section
+        pattern = r'\*\*Stop\s+Command\*\*:\s*```(?:bash)?\s*(.+?)\s*```'
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
 
         if match:
@@ -196,20 +196,17 @@ class TesslateParser:
         """Extract environment variables from TESSLATE.md (optional)."""
         env_vars = {}
 
-        # Look for "### Environment Variables" section
-        pattern = r'###\s*Environment\s+Variables\s*(.+?)(?=###|\Z)'
+        # Look for "## Environment Variables" section with code block
+        pattern = r'##\s*Environment\s+Variables\s*```(?:env)?\s*(.+?)\s*```'
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
 
         if match:
-            env_section = match.group(1)
-            # Look for KEY=value or KEY: value patterns
+            env_section = match.group(1).strip()
+            # Look for KEY=value patterns
             for line in env_section.split('\n'):
                 line = line.strip()
-                if '=' in line:
+                if '=' in line and not line.startswith('#'):
                     key, value = line.split('=', 1)
-                    env_vars[key.strip()] = value.strip()
-                elif ':' in line and not line.startswith('-'):
-                    key, value = line.split(':', 1)
                     env_vars[key.strip()] = value.strip()
 
         return env_vars

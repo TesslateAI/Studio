@@ -312,18 +312,29 @@ class DockerContainerManager(BaseContainerManager):
             return False
     
     def _create_base_dockerfile(self) -> str:
-        """Create the base Dockerfile with all common dependencies."""
-        return """# Fast Base Development Image - Built Once, Reused for All Projects
+        """Create universal base Dockerfile supporting Node.js, Python, and Go."""
+        return """# Universal Base Development Image - Supports Node.js, Python, and Go
 FROM node:20-alpine
 
-# Install essential system tools only
+# Install system dependencies for Node.js, Python, and Go development
 RUN apk add --no-cache \\
     git \\
     curl \\
     python3 \\
+    py3-pip \\
     make \\
     g++ \\
+    go \\
+    bash \\
     libc6-compat
+
+# Set up Go environment
+ENV GOPATH=/go
+ENV PATH=$PATH:/go/bin
+RUN mkdir -p /go/bin
+
+# Install Air for Go hot reloading (use v1.61.5 compatible with Go 1.22+)
+RUN go install github.com/air-verse/air@v1.61.5
 
 # Create app directory
 WORKDIR /app
@@ -332,11 +343,11 @@ WORKDIR /app
 RUN mkdir -p /root/.npm-cache
 ENV npm_config_cache=/root/.npm-cache
 
-# Expose development server port
-EXPOSE 5173
+# Expose common development server ports
+EXPOSE 3000 5173 8000 8001 8080
 
-# Default command - projects will install their own dependencies on volume mount
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+# Default command - will be overridden by start command from TESSLATE.md
+CMD ["sh", "-c", "echo 'Waiting for startup command...' && sleep infinity"]
 """
     
     def _get_project_key(self, user_id: int, project_id: str) -> str:
@@ -513,6 +524,98 @@ docker-compose*
             print(f"[WARN] Could not create container package.json: {e}")
             # Fall back to original
     
+    def _extract_start_command_from_tesslate(self, tesslate_content: str) -> str:
+        """
+        Extract start command from TESSLATE.md file.
+
+        Handles both simple commands and multi-server setups with background processes.
+        Example formats:
+        - Simple: npm install && npm run dev
+        - Multi-server: cd backend && uvicorn main:app &\ncd frontend && npm run dev
+        """
+        import re
+
+        # Look for "Start Command" section with bash code block
+        # Pattern matches: **Start Command**: followed by ```bash...``` block
+        pattern = r'\*\*Start Command\*\*:\s*```(?:bash)?\s*(.*?)\s*```'
+        match = re.search(pattern, tesslate_content, re.DOTALL)
+
+        if match:
+            commands = match.group(1).strip()
+
+            # Remove comment lines and empty lines, preserving command structure
+            command_lines = []
+            for line in commands.split('\n'):
+                # Strip leading/trailing whitespace
+                line = line.strip()
+                # Skip empty lines and pure comment lines
+                if line and not line.startswith('#'):
+                    command_lines.append(line)
+
+            if not command_lines:
+                return None
+
+            # For multi-line commands with background processes (&):
+            # Just join with spaces - the & and && already provide proper shell separation
+            # Example: "cd backend && uvicorn ... &" followed by "cd frontend && npm run dev"
+            # Becomes: "cd backend && uvicorn ... & cd frontend && npm run dev"
+            if any('&' in line for line in command_lines):
+                final_command = ' '.join(command_lines)
+            else:
+                # Simple sequential commands - join with &&
+                final_command = ' && '.join(command_lines)
+
+            return final_command if final_command else None
+
+        return None
+
+    def _extract_port_from_tesslate(self, tesslate_content: str) -> int:
+        """Extract primary port from TESSLATE.md file."""
+        import re
+
+        # Look for "Port:" in the Framework Configuration section
+        # Pattern: **Port**: 3000 or **Port**: 5173
+        pattern = r'\*\*Port\*\*:\s*(\d+)'
+        match = re.search(pattern, tesslate_content)
+
+        if match:
+            return int(match.group(1))
+
+        # Fallback: default Vite port
+        return 5173
+
+    def _parse_tesslate_startup_config(self, project_path: str) -> tuple[str, int]:
+        """
+        Parse TESSLATE.md to extract startup command and port.
+
+        Returns:
+            tuple: (start_command, port) or (None, 5173) if parsing fails
+        """
+        tesslate_path = os.path.join(project_path, "TESSLATE.md")
+
+        if not os.path.exists(tesslate_path):
+            print(f"[WARN] No TESSLATE.md found at {tesslate_path}")
+            return None, 5173
+
+        try:
+            with open(tesslate_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            start_command = self._extract_start_command_from_tesslate(content)
+            port = self._extract_port_from_tesslate(content)
+
+            if start_command:
+                print(f"[TESSLATE] Parsed start command: {start_command[:100]}...")
+                print(f"[TESSLATE] Parsed port: {port}")
+            else:
+                print(f"[TESSLATE] No start command found, will use auto-detection")
+
+            return start_command, port
+
+        except Exception as e:
+            print(f"[WARN] Failed to parse TESSLATE.md: {e}")
+            return None, 5173
+
     async def wait_for_container_ready_traefik(self, container_name: str, timeout: int = 60) -> bool:
         """Wait for container to be ready using generic checks."""
         start_time = time.time()
@@ -614,6 +717,13 @@ docker-compose*
 
         abs_project_path = os.path.abspath(project_path)
 
+        # Parse TESSLATE.md for startup configuration (command + port)
+        tesslate_command, tesslate_port = self._parse_tesslate_startup_config(abs_project_path)
+
+        # Use TESSLATE.md port if available, otherwise use provided port parameter
+        if tesslate_port:
+            port = tesslate_port
+
         # Ensure users directory structure exists
         # Extract user_id directory from project_path (e.g., "users/6/123" -> "users/6")
         if project_path.startswith("users/"):
@@ -639,13 +749,19 @@ docker-compose*
         # Convert container path to host path for Docker-in-Docker
         host_project_path = self._convert_to_host_path(abs_project_path)
 
-        # Validate required files (skip for GitHub imports - files will be cloned later)
-        if not skip_validation:
+        # Validate required files (skip for GitHub imports or TESSLATE.md-based projects)
+        tesslate_md_path = os.path.join(abs_project_path, "TESSLATE.md")
+        has_tesslate = os.path.exists(tesslate_md_path)
+
+        if not skip_validation and not has_tesslate:
+            # Only validate Vite files for non-TESSLATE projects
             required_files = ["package.json", "vite.config.js", "index.html"]
             missing_files = [f for f in required_files if not os.path.exists(os.path.join(abs_project_path, f))]
 
             if missing_files:
                 raise FileNotFoundError(f"Missing required files: {', '.join(missing_files)}")
+        elif has_tesslate:
+            print(f"[INFO] TESSLATE.md found, skipping Vite-specific file validation")
         else:
             print(f"[INFO] Skipping file validation (GitHub import mode)")
         
@@ -666,6 +782,7 @@ docker-compose*
             run_cmd = [
                 "docker", "run",
                 "--rm",                                                  # Remove on exit
+                "--user", "root",                                        # Run as root to avoid permission issues with Windows volumes
                 "--name", container_name,                                # Multi-user container name
                 "-v", f"{host_project_path}:/app",                      # Source code volume (live sync!)
                 # Docker labels for organization and tracking
@@ -730,12 +847,17 @@ docker-compose*
             # Add network (required for Traefik)
             run_cmd.extend(["--network", self.network_name])
 
-            # Determine startup command
-            if start_command:
-                # Use custom start command provided by the template
+            # Determine startup command (priority order: TESSLATE.md > start_command param > start.sh > auto-detect)
+            if tesslate_command:
+                # Use command from TESSLATE.md (highest priority)
+                print(f"[STARTUP] Using command from TESSLATE.md")
+                final_command = tesslate_command
+            elif start_command:
+                # Use custom start command provided by parameter
+                print(f"[STARTUP] Using custom start command parameter")
                 final_command = start_command
             else:
-                # Check for generated start.sh script (from TESSLATE.md parsing)
+                # Check for generated start.sh script
                 start_sh_path = os.path.join(abs_project_path, "start.sh")
                 if os.path.exists(start_sh_path):
                     print(f"[STARTUP] Found start.sh script, using dynamic startup")

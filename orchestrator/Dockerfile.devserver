@@ -1,16 +1,28 @@
 # Tesslate Dev Server Image
-# Custom Alpine-based image with pre-installed dependencies for fast user environment startup
-# This eliminates the need for npm install on every container/pod creation
+# Universal Alpine-based image supporting Node.js, Python, and Go
+# Pre-installed dependencies for fast user environment startup
 # Used by both Docker (local) and Kubernetes (production) deployment modes
 
 FROM node:20-alpine
 
-# Install required system dependencies for some npm packages
+# Install system dependencies for Node.js, Python, and Go development
 RUN apk add --no-cache \
     git \
+    curl \
     python3 \
+    py3-pip \
     make \
-    g++
+    g++ \
+    go \
+    bash
+
+# Set up Go environment
+ENV GOPATH=/go
+ENV PATH=$PATH:/go/bin
+RUN mkdir -p /go/bin
+
+# Install Air for Go hot reloading (use v1.61.5 compatible with Go 1.22+)
+RUN go install github.com/air-verse/air@v1.61.5
 
 WORKDIR /template
 

@@ -250,7 +250,7 @@ class MarketplaceAgent(Base):
     # Item type
     item_type = Column(String, nullable=False, default="agent")  # agent, base, tool, integration
 
-    # Agent-specific fields (NULL for non-agents)
+    # Agent-specific fields
     system_prompt = Column(Text, nullable=True)
     mode = Column(String, nullable=True)  # "stream" or "agent" (deprecated, use agent_type)
     agent_type = Column(String, nullable=True)  # StreamAgent, IterativeAgent, etc.
