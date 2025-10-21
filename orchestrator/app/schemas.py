@@ -47,15 +47,16 @@ class ProjectBase(BaseModel):
     description: Optional[str] = None
 
 class ProjectCreate(ProjectBase):
-    source_type: str = "template"  # "template" or "github"
+    source_type: str = "template"  # "template", "github", or "base"
     github_repo_url: Optional[str] = None
     github_branch: Optional[str] = "main"
+    base_id: Optional[int] = None
 
     @field_validator('source_type')
     @classmethod
     def validate_source_type(cls, v):
-        if v not in ['template', 'github']:
-            raise ValueError('source_type must be either "template" or "github"')
+        if v not in ['template', 'github', 'base']:
+            raise ValueError('source_type must be "template", "github", or "base"')
         return v
 
     @field_validator('github_repo_url')
@@ -67,6 +68,14 @@ class ProjectCreate(ProjectBase):
             if 'github.com' not in v:
                 raise ValueError('Only GitHub repositories are supported')
         return v.strip() if v else None
+
+    @field_validator('base_id')
+    @classmethod
+    def validate_base_id(cls, v, info):
+        if info.data.get('source_type') == 'base':
+            if not v:
+                raise ValueError('base_id is required when source_type is "base"')
+        return v
 
 class Project(ProjectBase):
     id: int
@@ -507,3 +516,30 @@ class AgentPurchaseResponse(BaseModel):
     agent_id: int
     checkout_url: Optional[str] = None  # For paid agents
     session_id: Optional[str] = None  # Stripe session ID
+
+
+class MarketplaceBaseResponse(BaseModel):
+    """Response schema for marketplace base."""
+    id: int
+    name: str
+    slug: str
+    description: str
+    long_description: Optional[str] = None
+    git_repo_url: str
+    default_branch: str
+    category: str
+    icon: str
+    preview_image: Optional[str] = None
+    pricing_type: str
+    price: float
+    downloads: int
+    rating: float
+    reviews_count: int
+    features: Optional[List[str]] = []
+    tech_stack: Optional[List[str]] = []
+    tags: Optional[List[str]] = []
+    is_featured: bool
+    is_purchased: bool = False
+
+    class Config:
+        from_attributes = True

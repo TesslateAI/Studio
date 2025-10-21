@@ -104,8 +104,26 @@ export default function Marketplace() {
 
   const loadMarketplaceItems = async () => {
     try {
-      const data = await marketplaceApi.getAllAgents();
-      setItems(data.agents || []);
+      // Load both agents and bases
+      const [agentsData, basesData] = await Promise.all([
+        marketplaceApi.getAllAgents(),
+        marketplaceApi.getAllBases()
+      ]);
+
+      const agents = (agentsData.agents || []).map((agent: any) => ({
+        ...agent,
+        item_type: 'agent'
+      }));
+
+      const bases = (basesData.bases || []).map((base: any) => ({
+        ...base,
+        item_type: 'base',
+        mode: 'base', // Compatibility
+        creator_type: 'official' // All bases are official for now
+      }));
+
+      // Combine both into a single items array
+      setItems([...agents, ...bases]);
     } catch (error) {
       console.error('Failed to load marketplace:', error);
       toast.error('Failed to load marketplace');
@@ -184,14 +202,25 @@ export default function Marketplace() {
     }
 
     try {
-      const data = await marketplaceApi.purchaseAgent(item.id);
+      // Call appropriate API based on item type
+      const data = item.item_type === 'base'
+        ? await marketplaceApi.purchaseBase(item.id)
+        : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         // Redirect to Stripe checkout for paid items
         window.location.href = data.checkout_url;
       } else {
         // Free item added successfully
-        toast.success(`${item.name} added to your library!`);
+        if (item.item_type === 'base') {
+          toast.success(`${item.name} added to your library! Create a project to use it.`, {
+            duration: 4000
+          });
+          // Redirect to dashboard after a moment
+          setTimeout(() => navigate('/dashboard'), 2000);
+        } else {
+          toast.success(`${item.name} added to your library!`);
+        }
 
         // Update local state
         setItems(prev => prev.map(i =>

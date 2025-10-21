@@ -13,7 +13,8 @@ from ..database import get_db
 from ..auth import get_current_active_user
 from ..models import (
     User, MarketplaceAgent, UserPurchasedAgent,
-    ProjectAgent, AgentReview, Project
+    ProjectAgent, AgentReview, Project,
+    MarketplaceBase, UserPurchasedBase, BaseReview
 )
 from ..schemas import MarketplaceAgentResponse, AgentPurchaseRequest
 
@@ -1055,3 +1056,254 @@ async def create_agent_review(
     await db.commit()
 
     return {"message": "Review submitted successfully", "rating": rating}
+
+
+# ============================================================================
+# Marketplace Bases Endpoints
+# ============================================================================
+
+@router.get("/bases")
+async def get_marketplace_bases(
+    category: Optional[str] = None,
+    pricing_type: Optional[str] = None,
+    search: Optional[str] = None,
+    sort: str = Query(default="featured", regex="^(featured|popular|newest|price_asc|price_desc)$"),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=12, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Browse marketplace bases with filtering and sorting."""
+    query = select(MarketplaceBase).where(MarketplaceBase.is_active == True)
+
+    # Apply filters
+    if category:
+        query = query.where(MarketplaceBase.category == category)
+    if pricing_type:
+        query = query.where(MarketplaceBase.pricing_type == pricing_type)
+    if search:
+        search_filter = f"%{search}%"
+        query = query.where(
+            func.lower(MarketplaceBase.name).like(func.lower(search_filter)) |
+            func.lower(MarketplaceBase.description).like(func.lower(search_filter))
+        )
+
+    # Apply sorting
+    if sort == "featured":
+        query = query.order_by(MarketplaceBase.is_featured.desc(), MarketplaceBase.downloads.desc())
+    elif sort == "popular":
+        query = query.order_by(MarketplaceBase.downloads.desc())
+    elif sort == "newest":
+        query = query.order_by(MarketplaceBase.created_at.desc())
+    elif sort == "price_asc":
+        query = query.order_by(MarketplaceBase.price.asc())
+    elif sort == "price_desc":
+        query = query.order_by(MarketplaceBase.price.desc())
+
+    # Pagination
+    offset = (page - 1) * limit
+    query = query.offset(offset).limit(limit)
+    result = await db.execute(query)
+    bases = result.scalars().all()
+
+    # Get user's purchased bases
+    purchased_result = await db.execute(
+        select(UserPurchasedBase.base_id).where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.is_active == True
+        )
+    )
+    purchased_base_ids = [row[0] for row in purchased_result.fetchall()]
+
+    # Format response
+    response = []
+    for base in bases:
+        response.append({
+            "id": base.id,
+            "name": base.name,
+            "slug": base.slug,
+            "description": base.description,
+            "long_description": base.long_description,
+            "git_repo_url": base.git_repo_url,
+            "default_branch": base.default_branch,
+            "category": base.category,
+            "icon": base.icon,
+            "preview_image": base.preview_image,
+            "pricing_type": base.pricing_type,
+            "price": base.price / 100.0 if base.price else 0,
+            "downloads": base.downloads,
+            "rating": base.rating,
+            "reviews_count": base.reviews_count,
+            "features": base.features,
+            "tech_stack": base.tech_stack,
+            "tags": base.tags,
+            "is_featured": base.is_featured,
+            "is_purchased": base.id in purchased_base_ids
+        })
+
+    return {
+        "bases": response,
+        "page": page,
+        "limit": limit,
+        "has_more": len(bases) == limit
+    }
+
+
+@router.get("/bases/{slug}")
+async def get_base_details(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get detailed information about a specific base."""
+    result = await db.execute(
+        select(MarketplaceBase).where(MarketplaceBase.slug == slug)
+    )
+    base = result.scalar_one_or_none()
+
+    if not base:
+        raise HTTPException(status_code=404, detail="Base not found")
+
+    # Check if user has purchased this base
+    purchased_result = await db.execute(
+        select(UserPurchasedBase).where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.base_id == base.id,
+            UserPurchasedBase.is_active == True
+        )
+    )
+    is_purchased = purchased_result.scalar_one_or_none() is not None
+
+    # Get recent reviews
+    reviews_result = await db.execute(
+        select(BaseReview).where(BaseReview.base_id == base.id)
+        .order_by(BaseReview.created_at.desc())
+        .limit(5)
+    )
+    reviews = reviews_result.scalars().all()
+
+    return {
+        "id": base.id,
+        "name": base.name,
+        "slug": base.slug,
+        "description": base.description,
+        "long_description": base.long_description,
+        "git_repo_url": base.git_repo_url,
+        "default_branch": base.default_branch,
+        "category": base.category,
+        "icon": base.icon,
+        "preview_image": base.preview_image,
+        "pricing_type": base.pricing_type,
+        "price": base.price / 100.0 if base.price else 0,
+        "downloads": base.downloads,
+        "rating": base.rating,
+        "reviews_count": base.reviews_count,
+        "features": base.features,
+        "tech_stack": base.tech_stack,
+        "tags": base.tags,
+        "is_featured": base.is_featured,
+        "is_purchased": is_purchased,
+        "reviews": [
+            {
+                "id": review.id,
+                "rating": review.rating,
+                "comment": review.comment,
+                "created_at": review.created_at.isoformat()
+            }
+            for review in reviews
+        ]
+    }
+
+
+@router.post("/bases/{base_id}/purchase")
+async def purchase_base(
+    base_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Purchase or add a free base to user's library."""
+    # Get base
+    result = await db.execute(
+        select(MarketplaceBase).where(MarketplaceBase.id == base_id)
+    )
+    base = result.scalar_one_or_none()
+
+    if not base or not base.is_active:
+        raise HTTPException(status_code=404, detail="Base not found")
+
+    # Check if already purchased
+    existing_result = await db.execute(
+        select(UserPurchasedBase).where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.base_id == base_id
+        )
+    )
+    existing_purchase = existing_result.scalar_one_or_none()
+
+    if existing_purchase and existing_purchase.is_active:
+        return {"message": "Base already in your library", "base_id": base_id}
+
+    # Handle free bases
+    if base.pricing_type == "free":
+        if existing_purchase:
+            existing_purchase.is_active = True
+            existing_purchase.purchase_date = datetime.now(timezone.utc)
+        else:
+            purchase = UserPurchasedBase(
+                user_id=current_user.id,
+                base_id=base_id,
+                purchase_type="free",
+                is_active=True
+            )
+            db.add(purchase)
+
+        base.downloads += 1
+        await db.commit()
+
+        return {
+            "message": "Free base added to your library",
+            "base_id": base_id,
+            "success": True
+        }
+
+    # For paid bases (Stripe integration - similar to agents)
+    raise HTTPException(status_code=501, detail="Paid bases not yet implemented")
+
+
+@router.get("/my-bases")
+async def get_user_bases(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all bases in the user's library."""
+    result = await db.execute(
+        select(MarketplaceBase, UserPurchasedBase)
+        .join(UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id)
+        .where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.is_active == True
+        )
+        .order_by(UserPurchasedBase.purchase_date.desc())
+    )
+
+    bases_data = result.fetchall()
+
+    response = []
+    for base, purchase in bases_data:
+        response.append({
+            "id": base.id,
+            "name": base.name,
+            "slug": base.slug,
+            "description": base.description,
+            "git_repo_url": base.git_repo_url,
+            "default_branch": base.default_branch,
+            "category": base.category,
+            "icon": base.icon,
+            "pricing_type": base.pricing_type,
+            "features": base.features,
+            "tech_stack": base.tech_stack,
+            "purchase_date": purchase.purchase_date.isoformat(),
+            "purchase_type": purchase.purchase_type
+        })
+
+    return {"bases": response}

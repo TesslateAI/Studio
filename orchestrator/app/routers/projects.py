@@ -298,6 +298,190 @@ async def create_project(
 
             logger.info(f"[CREATE] Project {db_project.id} created from GitHub repository successfully")
 
+        elif project.source_type == "base":
+            logger.info(f"[CREATE] Creating from marketplace base: {project.base_id}")
+
+            if not project.base_id:
+                raise HTTPException(status_code=400, detail="base_id is required for source_type 'base'")
+
+            # Verify user has purchased this base
+            from ..models import UserPurchasedBase, MarketplaceBase
+            purchase = await db.scalar(
+                select(UserPurchasedBase).where(
+                    UserPurchasedBase.user_id == current_user.id,
+                    UserPurchasedBase.base_id == project.base_id,
+                    UserPurchasedBase.is_active == True
+                )
+            )
+            if not purchase:
+                raise HTTPException(status_code=403, detail="You have not acquired this project base.")
+
+            # Get the base's repository URL
+            base_repo = await db.get(MarketplaceBase, project.base_id)
+            if not base_repo:
+                raise HTTPException(status_code=404, detail="Project base not found.")
+
+            logger.info(f"[CREATE] Cloning base repository: {base_repo.git_repo_url}")
+
+            try:
+                # Try to clone using the base's Git repository
+                from ..services.git_manager import GitManager
+                from ..services.credential_manager import get_credential_manager
+
+                # Get GitHub credentials (optional for public repos)
+                credential_manager = get_credential_manager()
+                access_token = await credential_manager.get_access_token(db, current_user.id)
+
+                git_manager = GitManager(current_user.id, str(db_project.id))
+                await git_manager.clone_repository(
+                    repo_url=base_repo.git_repo_url,
+                    branch=base_repo.default_branch,
+                    auth_token=access_token,
+                    direct_to_filesystem=(settings.deployment_mode == "docker")
+                )
+
+                logger.info(f"[CREATE] Base cloned successfully from {base_repo.git_repo_url}")
+
+                # Parse TESSLATE.md and generate startup script for dynamic startup
+                try:
+                    from ..services.tesslate_parser import TesslateParser
+                    from ..services.startup_generator import StartupGenerator
+
+                    tesslate_md_path = os.path.join(project_path, "TESSLATE.md")
+
+                    if os.path.exists(tesslate_md_path):
+                        logger.info(f"[CREATE] Found TESSLATE.md, parsing for dynamic startup...")
+
+                        with open(tesslate_md_path, 'r', encoding='utf-8') as f:
+                            tesslate_content = f.read()
+
+                        # Parse configuration
+                        config = TesslateParser.parse(tesslate_content)
+
+                        # Generate startup script
+                        script_path = StartupGenerator.write_script(config, project_path)
+
+                        logger.info(f"[CREATE] Generated startup script for {config.framework} on port {config.port}")
+                    else:
+                        logger.info(f"[CREATE] No TESSLATE.md found, generating default Vite startup script")
+                        StartupGenerator.generate_default_script(project_path, "vite")
+
+                except Exception as parse_error:
+                    logger.warning(f"[CREATE] Failed to parse TESSLATE.md: {parse_error}, using default startup")
+                    # Generate default script as fallback
+                    try:
+                        from ..services.startup_generator import StartupGenerator
+                        StartupGenerator.generate_default_script(project_path, "vite")
+                    except Exception as fallback_error:
+                        logger.error(f"[CREATE] Failed to generate default script: {fallback_error}")
+
+                # Save cloned files to database (similar to GitHub import)
+                if settings.deployment_mode == "docker":
+                    files_saved = 0
+                    for root, dirs, files in os.walk(project_path):
+                        dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
+
+                        for file in files:
+                            if (file.startswith('.') or
+                                file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'))):
+                                continue
+
+                            file_full_path = os.path.join(root, file)
+                            relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
+
+                            try:
+                                with open(file_full_path, 'r', encoding='utf-8', errors='replace') as f:
+                                    content = f.read()
+
+                                db_file = ProjectFile(
+                                    project_id=db_project.id,
+                                    file_path=relative_path,
+                                    content=content
+                                )
+                                db.add(db_file)
+                                files_saved += 1
+                            except Exception as e:
+                                logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
+                                continue
+
+                    logger.info(f"[CREATE] Saved {files_saved} files to database")
+
+                # Mark as having Git repo
+                db_project.has_git_repo = True
+                db_project.git_remote_url = base_repo.git_repo_url
+
+                await db.commit()
+                await db.refresh(db_project)
+
+                logger.info(f"[CREATE] Project {db_project.id} created from base '{base_repo.name}' successfully")
+
+            except Exception as git_error:
+                logger.error(f"[CREATE] Failed to clone base repository: {git_error}", exc_info=True)
+
+                # FALLBACK: Use hardcoded template as safety net
+                logger.warning(f"[CREATE] Falling back to hardcoded template due to Git error")
+
+                template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "template"))
+
+                if not os.path.exists(template_dir):
+                    logger.error(f"[CREATE] Template directory not found: {template_dir}")
+                    await db.delete(db_project)
+                    await db.commit()
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to clone base and fallback template not found"
+                    )
+
+                # Copy template files
+                files_saved = 0
+                for root, dirs, files in os.walk(template_dir):
+                    dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build']]
+
+                    for file in files:
+                        if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+                            continue
+
+                        file_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(file_path, template_dir).replace('\\', '/')
+
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                                content = f.read()
+
+                            db_file = ProjectFile(
+                                project_id=db_project.id,
+                                file_path=relative_path,
+                                content=content
+                            )
+                            db.add(db_file)
+                            files_saved += 1
+                        except Exception as e:
+                            logger.warning(f"[CREATE] Could not read template file {relative_path}: {e}")
+
+                # In Docker mode, also copy to filesystem
+                if settings.deployment_mode == "docker":
+                    try:
+                        for root, dirs, files in os.walk(template_dir):
+                            dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build']]
+
+                            for file in files:
+                                src_path = os.path.join(root, file)
+                                rel_path = os.path.relpath(src_path, template_dir)
+                                dst_path = os.path.join(project_path, rel_path)
+
+                                parent_dir = os.path.dirname(dst_path)
+                                if parent_dir:
+                                    os.makedirs(parent_dir, exist_ok=True)
+
+                                shutil.copy2(src_path, dst_path)
+                    except Exception as copy_error:
+                        logger.error(f"[CREATE] Failed to copy template files: {copy_error}")
+
+                await db.commit()
+                await db.refresh(db_project)
+
+                logger.info(f"[CREATE] Project {db_project.id} created with fallback template after base clone failure")
+
         else:
             # Template mode (default behavior)
             logger.info(f"[CREATE] Initializing from template")

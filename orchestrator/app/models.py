@@ -31,6 +31,7 @@ class User(Base):
     git_repositories = relationship("GitRepository", back_populates="user", cascade="all, delete-orphan")
     purchased_agents = relationship("UserPurchasedAgent", back_populates="user", cascade="all, delete-orphan")
     agent_reviews = relationship("AgentReview", back_populates="user", cascade="all, delete-orphan")
+    purchased_bases = relationship("UserPurchasedBase", back_populates="user", cascade="all, delete-orphan")
 
 
 class RefreshToken(Base):
@@ -349,3 +350,81 @@ class AgentReview(Base):
     # Relationships
     agent = relationship("MarketplaceAgent", back_populates="reviews")
     user = relationship("User", back_populates="agent_reviews")
+
+
+class MarketplaceBase(Base):
+    """Marketplace bases (project templates) available for purchase."""
+    __tablename__ = "marketplace_bases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    long_description = Column(Text, nullable=True)
+
+    # Git repository for template
+    git_repo_url = Column(String(500), nullable=False)
+    default_branch = Column(String(100), default="main")
+
+    # Template metadata
+    category = Column(String, nullable=False)  # fullstack, frontend, backend, mobile, etc.
+    icon = Column(String, default="📦")
+    preview_image = Column(String, nullable=True)
+    tags = Column(JSON)  # ["vite", "react", "fastapi", "python"]
+
+    # Pricing
+    pricing_type = Column(String, nullable=False, default="free")  # free, one_time, monthly
+    price = Column(Integer, default=0)  # In cents
+    stripe_price_id = Column(String, nullable=True)
+    stripe_product_id = Column(String, nullable=True)
+
+    # Stats
+    downloads = Column(Integer, default=0)
+    rating = Column(Float, default=5.0)
+    reviews_count = Column(Integer, default=0)
+
+    # Features & requirements
+    features = Column(JSON)  # ["Hot reload", "API ready", "Database setup"]
+    tech_stack = Column(JSON)  # ["React", "FastAPI", "PostgreSQL"]
+
+    is_featured = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    purchased_by = relationship("UserPurchasedBase", back_populates="base", cascade="all, delete-orphan")
+    reviews = relationship("BaseReview", back_populates="base", cascade="all, delete-orphan")
+
+
+class UserPurchasedBase(Base):
+    """Tracks which bases users have purchased/acquired."""
+    __tablename__ = "user_purchased_bases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    base_id = Column(Integer, ForeignKey("marketplace_bases.id"), nullable=False)
+    purchase_date = Column(DateTime(timezone=True), server_default=func.now())
+    purchase_type = Column(String, nullable=False)  # free, purchased, subscription
+    stripe_payment_intent = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    user = relationship("User", back_populates="purchased_bases")
+    base = relationship("MarketplaceBase", back_populates="purchased_by")
+
+
+class BaseReview(Base):
+    """User reviews for marketplace bases."""
+    __tablename__ = "base_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    base_id = Column(Integer, ForeignKey("marketplace_bases.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rating = Column(Integer, nullable=False)  # 1-5
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    base = relationship("MarketplaceBase", back_populates="reviews")
+    user = relationship("User")

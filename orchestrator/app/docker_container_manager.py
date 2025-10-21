@@ -735,26 +735,32 @@ docker-compose*
                 # Use custom start command provided by the template
                 final_command = start_command
             else:
-                # Auto-detect framework and use appropriate dev command
-                try:
-                    package_json_path = os.path.join(abs_project_path, "package.json")
-                    if os.path.exists(package_json_path):
-                        with open(package_json_path, 'r', encoding='utf-8') as f:
-                            package_json_content = f.read()
+                # Check for generated start.sh script (from TESSLATE.md parsing)
+                start_sh_path = os.path.join(abs_project_path, "start.sh")
+                if os.path.exists(start_sh_path):
+                    print(f"[STARTUP] Found start.sh script, using dynamic startup")
+                    final_command = "sh /app/start.sh"
+                else:
+                    # Auto-detect framework and use appropriate dev command
+                    try:
+                        package_json_path = os.path.join(abs_project_path, "package.json")
+                        if os.path.exists(package_json_path):
+                            with open(package_json_path, 'r', encoding='utf-8') as f:
+                                package_json_content = f.read()
 
-                        from .services.framework_detector import FrameworkDetector
-                        framework, config = FrameworkDetector.detect_from_package_json(package_json_content)
-                        dev_command = FrameworkDetector.get_dev_server_command(framework, port)
+                            from .services.framework_detector import FrameworkDetector
+                            framework, config = FrameworkDetector.detect_from_package_json(package_json_content)
+                            dev_command = FrameworkDetector.get_dev_server_command(framework, port)
 
-                        print(f"[FRAMEWORK] Detected {framework}, using command: {dev_command}")
-                        final_command = f"npm install --silent && {dev_command}"
-                    else:
-                        # Fallback if package.json doesn't exist
-                        print("[WARN] package.json not found, using default npm run dev")
+                            print(f"[FRAMEWORK] Detected {framework}, using command: {dev_command}")
+                            final_command = f"npm install --silent && {dev_command}"
+                        else:
+                            # Fallback if package.json doesn't exist
+                            print("[WARN] package.json not found, using default npm run dev")
+                            final_command = "npm install --silent && npm run dev"
+                    except Exception as e:
+                        print(f"[WARN] Framework detection failed: {e}, using default npm run dev")
                         final_command = "npm install --silent && npm run dev"
-                except Exception as e:
-                    print(f"[WARN] Framework detection failed: {e}, using default npm run dev")
-                    final_command = "npm install --silent && npm run dev"
 
             # Add image and startup command
             run_cmd.extend([

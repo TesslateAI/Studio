@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectsApi } from '../lib/api';
+import { projectsApi, marketplaceApi } from '../lib/api';
 import { githubApi } from '../lib/github-api';
 import { useTheme } from '../theme/ThemeContext';
 import {
@@ -57,12 +57,14 @@ export default function Dashboard() {
   const [newProject, setNewProject] = useState({ name: '', description: '' });
   const [activeTab, setActiveTab] = useState<TabFilter>('all');
   const [isCreating, setIsCreating] = useState(false);
-  const [sourceType, setSourceType] = useState<'template' | 'github'>('template');
+  const [sourceType, setSourceType] = useState<'template' | 'github' | 'base'>('template');
   const [githubRepoUrl, setGithubRepoUrl] = useState('');
   const [githubBranch, setGithubBranch] = useState('main');
   const [githubConnected, setGithubConnected] = useState(false);
   const [checkingGithub, setCheckingGithub] = useState(false);
   const [showGithubConnectModal, setShowGithubConnectModal] = useState(false);
+  const [bases, setBases] = useState<any[]>([]);
+  const [selectedBase, setSelectedBase] = useState<number | null>(null);
 
   useEffect(() => {
     loadProjects();
@@ -71,6 +73,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (showCreateModal) {
       checkGithubConnection();
+      loadUserBases();
     }
   }, [showCreateModal]);
 
@@ -103,6 +106,16 @@ export default function Dashboard() {
     }
   };
 
+  const loadUserBases = async () => {
+    try {
+      const data = await marketplaceApi.getUserBases();
+      setBases(data.bases || []);
+    } catch (error) {
+      console.error('Failed to load bases:', error);
+      setBases([]);
+    }
+  };
+
   const createProject = async () => {
     if (!newProject.name.trim()) {
       toast.error('Project name is required');
@@ -117,10 +130,19 @@ export default function Dashboard() {
       // GitHub connection is optional - works for public repos without authentication
     }
 
+    if (sourceType === 'base') {
+      if (!selectedBase) {
+        toast.error('Please select a base');
+        return;
+      }
+    }
+
     setIsCreating(true);
     const creatingToast = toast.loading(
       sourceType === 'github'
         ? 'Importing from GitHub...'
+        : sourceType === 'base'
+        ? 'Creating from base...'
         : 'Creating your project...'
     );
 
@@ -130,7 +152,8 @@ export default function Dashboard() {
         newProject.description,
         sourceType,
         githubRepoUrl || undefined,
-        githubBranch || 'main'
+        githubBranch || 'main',
+        selectedBase || undefined
       );
       toast.success('Project created successfully!', { id: creatingToast });
       setShowCreateModal(false);
@@ -388,7 +411,7 @@ export default function Dashboard() {
               {/* Source Type Selection */}
               <div>
                 <label className="block text-sm font-medium text-[var(--text)] mb-3">Project Source</label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     onClick={() => setSourceType('template')}
                     disabled={isCreating}
@@ -404,6 +427,22 @@ export default function Dashboard() {
                     <FilePlus className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
                     <div className="text-sm font-semibold text-[var(--text)]">Template</div>
                     <div className="text-xs text-gray-500 mt-1">Start from scratch</div>
+                  </button>
+                  <button
+                    onClick={() => setSourceType('base')}
+                    disabled={isCreating}
+                    className={`
+                      p-4 rounded-xl border-2 transition-all
+                      ${sourceType === 'base'
+                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
+                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                      }
+                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                    `}
+                  >
+                    <Package className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
+                    <div className="text-sm font-semibold text-[var(--text)]">From Base</div>
+                    <div className="text-xs text-gray-500 mt-1">Use template</div>
                   </button>
                   <button
                     onClick={() => setSourceType('github')}
@@ -423,6 +462,63 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
+
+              {/* Base Selection */}
+              {sourceType === 'base' && (
+                <div className="space-y-3">
+                  <p className="text-sm text-white/60">
+                    Select a base from your library:
+                  </p>
+                  {bases.length === 0 ? (
+                    <div className="text-center py-6 bg-white/5 border border-white/10 rounded-xl">
+                      <Package className="w-12 h-12 text-white/40 mx-auto mb-3" weight="fill" />
+                      <p className="text-white/40 mb-3">No bases in your library</p>
+                      <button
+                        onClick={() => {
+                          setShowCreateModal(false);
+                          navigate('/marketplace');
+                        }}
+                        className="text-[var(--primary)] hover:text-orange-400 text-sm font-medium"
+                      >
+                        Browse Marketplace
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 max-h-64 overflow-y-auto">
+                      {bases.map((base: any) => (
+                        <button
+                          key={base.id}
+                          onClick={() => setSelectedBase(base.id)}
+                          disabled={isCreating}
+                          className={`
+                            p-3 rounded-lg border text-left transition-all
+                            ${selectedBase === base.id
+                              ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
+                              : 'border-white/10 hover:border-white/20 bg-white/5'
+                            }
+                            ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                          `}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">{base.icon}</span>
+                            <div className="flex-1">
+                              <div className="font-medium text-[var(--text)]">{base.name}</div>
+                              <div className="text-sm text-white/60">{base.description}</div>
+                              <div className="flex gap-2 mt-1">
+                                {base.tech_stack?.slice(0, 3).map((tech: string, idx: number) => (
+                                  <span key={idx} className="text-xs bg-white/10 px-2 py-0.5 rounded">
+                                    {tech}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* GitHub Connection Status */}
               {sourceType === 'github' && (
@@ -526,13 +622,14 @@ export default function Dashboard() {
                   disabled={
                     isCreating ||
                     !newProject.name.trim() ||
-                    (sourceType === 'github' && !githubRepoUrl.trim())
+                    (sourceType === 'github' && !githubRepoUrl.trim()) ||
+                    (sourceType === 'base' && !selectedBase)
                   }
                   className="flex-1 bg-[var(--primary)] hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
                 >
                   {isCreating
-                    ? sourceType === 'github' ? 'Importing...' : 'Creating...'
-                    : sourceType === 'github' ? 'Import & Create' : 'Create Project'
+                    ? sourceType === 'github' ? 'Importing...' : sourceType === 'base' ? 'Creating...' : 'Creating...'
+                    : sourceType === 'github' ? 'Import & Create' : sourceType === 'base' ? 'Create from Base' : 'Create Project'
                   }
                 </button>
                 <button

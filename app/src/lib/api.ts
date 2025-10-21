@@ -139,17 +139,25 @@ export const projectsApi = {
   create: async (
     name: string,
     description?: string,
-    sourceType?: 'template' | 'github',
+    sourceType?: 'template' | 'github' | 'base',
     githubRepoUrl?: string,
-    githubBranch?: string
+    githubBranch?: string,
+    baseId?: number
   ) => {
-    const response = await api.post('/api/projects/', {
+    const body: any = {
       name,
       description,
-      source_type: sourceType || 'template',
-      github_repo_url: githubRepoUrl,
-      github_branch: githubBranch || 'main'
-    });
+      source_type: sourceType || 'template'
+    };
+
+    if (sourceType === 'github') {
+      body.github_repo_url = githubRepoUrl;
+      body.github_branch = githubBranch || 'main';
+    } else if (sourceType === 'base') {
+      body.base_id = baseId;
+    }
+
+    const response = await api.post('/api/projects/', body);
     return response.data;
   },
   get: async (id: number) => {
@@ -281,6 +289,42 @@ export const marketplaceApi = {
   // Unpublish agent from community marketplace
   unpublishAgent: async (agentId: number) => {
     const response = await api.post(`/api/marketplace/agents/${agentId}/unpublish`);
+    return response.data;
+  },
+
+  // Bases endpoints
+  getAllBases: async (params?: {
+    category?: string;
+    pricing_type?: string;
+    search?: string;
+    sort?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.pricing_type) queryParams.append('pricing_type', params.pricing_type);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.sort) queryParams.append('sort', params.sort);
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+    const response = await api.get(`/api/marketplace/bases?${queryParams}`);
+    return response.data;
+  },
+
+  getBaseDetails: async (slug: string) => {
+    const response = await api.get(`/api/marketplace/bases/${slug}`);
+    return response.data;
+  },
+
+  purchaseBase: async (baseId: number) => {
+    const response = await api.post(`/api/marketplace/bases/${baseId}/purchase`);
+    return response.data;
+  },
+
+  getUserBases: async () => {
+    const response = await api.get('/api/marketplace/my-bases');
     return response.data;
   },
 };
