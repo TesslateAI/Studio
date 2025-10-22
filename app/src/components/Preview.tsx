@@ -21,10 +21,26 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     startDevServer();
   }, [projectId]);
 
-  const startDevServer = async () => {
+  const startDevServer = async (retryCount = 0) => {
+    const maxRetries = 5;
     try {
       setLoading(true);
       const response = await projectsApi.getDevServerUrl(projectId);
+
+      // Check if server is still starting
+      if (response.status === 'starting' && retryCount < maxRetries) {
+        console.log(`[Preview] Server starting, retry ${retryCount + 1}/${maxRetries} in 2s...`);
+        toast.loading('Preview server is starting...', { id: 'dev-server-starting' });
+        setTimeout(() => startDevServer(retryCount + 1), 2000);
+        return;
+      }
+
+      // Server ready or max retries reached
+      if (!response.url) {
+        throw new Error('No URL returned from server');
+      }
+
+      toast.dismiss('dev-server-starting');
 
       // Add JWT token to URL for NGINX auth-url verification
       // The NGINX ingress controller will extract the Authorization header
@@ -41,6 +57,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
       setDevServerUrl(authenticatedUrl);
     } catch (error) {
       console.error('Failed to start dev server:', error);
+      toast.dismiss('dev-server-starting');
       toast.error('Failed to start preview server');
     } finally {
       setLoading(false);
@@ -87,6 +104,10 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     const authenticatedUrl = token && deploymentMode === 'kubernetes'
       ? `${devServerUrl}?auth_token=${encodeURIComponent(token)}`
       : devServerUrl;
+
+    // Track iframe load errors and implement retry logic
+    let loadErrorCount = 0;
+    const maxRetries = 3;
 
     container.innerHTML = `
       <div class="h-full flex flex-col rounded-t-3xl overflow-hidden bg-gray-900/50 backdrop-blur-sm">
@@ -168,8 +189,8 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
             </div>
 
             <div class="flex items-center gap-2">
-              <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span class="text-sm text-gray-300 font-medium px-3 py-1 bg-gray-800/50 rounded-full border border-gray-600/30">Live</span>
+              <div id="live-status-dot" class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+              <span id="live-status-text" class="text-sm text-gray-300 font-medium px-3 py-1 bg-gray-800/50 rounded-full border border-gray-600/30">Live</span>
             </div>
           </div>
         </div>
@@ -193,6 +214,46 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     const tabCode = document.getElementById('tab-code');
     const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
     const urlDisplay = document.getElementById('url-display');
+    const liveStatusDot = document.getElementById('live-status-dot');
+    const liveStatusText = document.getElementById('live-status-text');
+
+    // Handle iframe load errors with retry logic
+    const handleIframeError = () => {
+      loadErrorCount++;
+      console.log(`[Preview] Iframe load attempt ${loadErrorCount} failed`);
+
+      if (loadErrorCount <= maxRetries) {
+        // Update status indicator
+        if (liveStatusDot) liveStatusDot.className = 'w-2 h-2 bg-yellow-400 rounded-full animate-pulse';
+        if (liveStatusText) liveStatusText.textContent = 'Starting...';
+
+        // Retry after a delay
+        const retryDelay = Math.min(2000 * loadErrorCount, 6000); // 2s, 4s, 6s
+        console.log(`[Preview] Retrying in ${retryDelay}ms...`);
+        setTimeout(() => {
+          console.log(`[Preview] Retry attempt ${loadErrorCount}/${maxRetries}`);
+          iframe.src = authenticatedUrl;
+        }, retryDelay);
+      } else {
+        // Max retries reached
+        console.error('[Preview] Max retries reached, preview failed to load');
+        if (liveStatusDot) liveStatusDot.className = 'w-2 h-2 bg-red-400 rounded-full';
+        if (liveStatusText) liveStatusText.textContent = 'Error';
+        toast.error('Preview failed to load. Try restarting the server.');
+      }
+    };
+
+    const handleIframeLoad = () => {
+      // Reset error count on successful load
+      loadErrorCount = 0;
+      console.log('[Preview] Iframe loaded successfully');
+      if (liveStatusDot) liveStatusDot.className = 'w-2 h-2 bg-green-400 rounded-full animate-pulse';
+      if (liveStatusText) liveStatusText.textContent = 'Live';
+    };
+
+    // Attach load/error handlers
+    iframe.addEventListener('load', handleIframeLoad);
+    iframe.addEventListener('error', handleIframeError);
 
     // Navigation handlers
     if (backBtn) {

@@ -1138,6 +1138,10 @@ async def get_marketplace_bases(
             "tech_stack": base.tech_stack,
             "tags": base.tags,
             "is_featured": base.is_featured,
+            "is_active": base.is_active,
+            "is_forkable": False,
+            "source_type": "closed",
+            "usage_count": base.downloads,
             "is_purchased": base.id in purchased_base_ids
         })
 
@@ -1202,6 +1206,10 @@ async def get_base_details(
         "tech_stack": base.tech_stack,
         "tags": base.tags,
         "is_featured": base.is_featured,
+        "is_active": base.is_active,
+        "is_forkable": False,
+        "source_type": "closed",
+        "usage_count": base.downloads,
         "is_purchased": is_purchased,
         "reviews": [
             {

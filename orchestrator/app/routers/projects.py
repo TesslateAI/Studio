@@ -850,11 +850,36 @@ async def get_dev_server_url(
 
             if status.get("running"):
                 url = docker_manager.get_container_url(str(project_id), current_user.id)
-                logger.info(f"[DEV-URL] ✅ Container exists and is running: {url}")
+                logger.info(f"[DEV-URL] Container exists and is running, verifying responsiveness: {url}")
+
+                # Verify the container is actually responsive via HTTP
+                import aiohttp
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            url,
+                            timeout=aiohttp.ClientTimeout(total=3),
+                            allow_redirects=True,
+                            ssl=False
+                        ) as response:
+                            if response.status < 500:
+                                logger.info(f"[DEV-URL] ✅ Container is responsive (HTTP {response.status})")
+                                return {
+                                    "url": url,
+                                    "status": "ready",
+                                    "message": "Development environment is ready"
+                                }
+                            else:
+                                logger.warning(f"[DEV-URL] Container returned HTTP {response.status}, still starting")
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    logger.warning(f"[DEV-URL] Container not responsive yet: {type(e).__name__}")
+
+                # Container exists but not responsive yet - return starting status
                 return {
-                    "url": url,
-                    "status": "ready",
-                    "message": "Development environment is ready"
+                    "url": None,
+                    "status": "starting",
+                    "message": "Development server is starting, please wait...",
+                    "hint": "The container is running but not responsive yet. Try again in a few seconds."
                 }
 
         # Container doesn't exist - create it

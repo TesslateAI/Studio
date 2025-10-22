@@ -30,6 +30,7 @@ services:
       # Add basic auth for security in production
       - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}"
       - "traefik.http.routers.traefik-dashboard.tls=true"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=cloudflare"
       - "traefik.http.routers.traefik-dashboard.priority=200"
 
   postgres:
@@ -86,6 +87,7 @@ services:
       - "traefik.http.routers.orchestrator.entrypoints=web,websecure"
       - "traefik.http.routers.orchestrator.priority=100"
       - "traefik.http.routers.orchestrator.tls=true"
+      - "traefik.http.routers.orchestrator.tls.certresolver=cloudflare"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
 
   app:
@@ -105,10 +107,12 @@ services:
       - "traefik.http.routers.app.entrypoints=web,websecure"
       - "traefik.http.routers.app.priority=10"
       - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=cloudflare"
       - "traefik.http.services.app.loadbalancer.server.port=80"
 
 networks:
   tesslate-network:
+    name: tesslate-network
     driver: bridge
 
 volumes:

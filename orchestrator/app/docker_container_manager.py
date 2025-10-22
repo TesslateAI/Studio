@@ -527,8 +527,8 @@ class DockerContainerManager(BaseContainerManager):
             print(f"[WARN] Failed to parse TESSLATE.md: {e}")
             return None, 5173
 
-    async def wait_for_container_ready_traefik(self, container_name: str, timeout: int = 60) -> bool:
-        """Wait for container to be ready using generic checks."""
+    async def wait_for_container_ready_traefik(self, container_name: str, timeout: int = 60, access_url: str = None) -> bool:
+        """Wait for container to be ready using generic checks and HTTP health check."""
         start_time = time.time()
 
         # First, wait for container to be running
@@ -548,6 +548,7 @@ class DockerContainerManager(BaseContainerManager):
 
         # Wait for server to be ready by checking logs for common ready indicators
         print(f"[WAIT] Checking container logs for server readiness...")
+        logs_ready = False
         while time.time() - start_time < timeout:
             try:
                 result = subprocess.run(
@@ -575,8 +576,9 @@ class DockerContainerManager(BaseContainerManager):
                     ]
 
                     if any(indicator in logs_lower for indicator in ready_indicators):
-                        print(f"[OK] Container {container_name} server is ready")
-                        return True
+                        print(f"[OK] Container {container_name} logs show server is ready")
+                        logs_ready = True
+                        break
 
             except Exception as e:
                 print(f"[DEBUG] Error checking logs: {e}")
@@ -584,7 +586,42 @@ class DockerContainerManager(BaseContainerManager):
 
             await asyncio.sleep(3)
 
-        print(f"[WARN] Container {container_name} readiness check timed out")
+        if not logs_ready:
+            print(f"[WARN] Container {container_name} logs check timed out")
+            return True  # Return True to allow container to continue - Traefik will handle routing when ready
+
+        # If access_url provided, verify the server is actually responding to HTTP requests via Traefik
+        # This works in both development and production
+        if access_url:
+            print(f"[WAIT] Verifying server is responsive via Traefik at {access_url}")
+            http_timeout = min(30, timeout - (time.time() - start_time))  # Use remaining time or 30s max
+            http_start = time.time()
+
+            while time.time() - http_start < http_timeout:
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        # Use a very short timeout for each attempt
+                        async with session.get(
+                            access_url,
+                            timeout=aiohttp.ClientTimeout(total=5),
+                            allow_redirects=True,
+                            ssl=False  # Allow self-signed certs in development
+                        ) as response:
+                            # Accept any response (even 404) as long as server is responding
+                            # This means Traefik is routing and the container is serving requests
+                            if response.status < 500:  # Any non-server-error response means it's working
+                                print(f"[OK] Server is responsive via Traefik (HTTP {response.status})")
+                                # Give it a bit more time to fully initialize
+                                await asyncio.sleep(2)
+                                return True
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    print(f"[DEBUG] Server not ready yet: {type(e).__name__}")
+                    pass
+
+                await asyncio.sleep(2)
+
+            print(f"[WARN] Server HTTP health check timed out after {http_timeout}s, but container is running")
+
         return True  # Return True to allow container to continue - Traefik will handle routing when ready
     
     async def start_container(self, project_path: str, project_id: str, user_id: int, skip_validation: bool = False,
@@ -831,7 +868,8 @@ class DockerContainerManager(BaseContainerManager):
             
             # Wait for container to be ready (check internal port via Docker)
             print(f"[WAIT] Waiting for development server to be ready...")
-            if not await self.wait_for_container_ready_traefik(container_name, timeout=120):
+            access_url = self._get_container_access_url(hostname)
+            if not await self.wait_for_container_ready_traefik(container_name, timeout=120, access_url=access_url):
                 await self.stop_container(project_id, user_id)
                 raise RuntimeError("Development server failed to become ready")
             
