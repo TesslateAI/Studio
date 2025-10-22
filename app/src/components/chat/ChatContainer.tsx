@@ -84,7 +84,7 @@ export function ChatContainer({
         console.log('[CHAT] Loading chat history from database for project:', projectId);
         const dbMessages = await chatApi.getProjectMessages(projectId);
         console.log('[CHAT] Loaded', dbMessages.length, 'messages from database');
-        setMessages(dbMessages.map((msg, idx) => {
+        setMessages(dbMessages.map((msg: any, idx: number) => {
           const message: Message = {
             id: `msg-${idx}`,
             type: msg.role as 'user' | 'ai',
@@ -126,105 +126,172 @@ export function ChatContainer({
     }
   }, [initialAgents]);
 
-  // WebSocket connection
+  // WebSocket connection with auto-reconnect and heartbeat
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
 
     let ws: WebSocket | null = null;
     let isCleaningUp = false;
+    let reconnectAttempts = 0;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    const maxReconnectAttempts = 10;
+    const baseReconnectDelay = 1000;
+    const heartbeatInterval = 30000; // 30 seconds
+
+    const startHeartbeat = () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
+
+      heartbeatTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({ type: 'ping' }));
+            console.log('[WS] Heartbeat ping sent');
+          } catch (error) {
+            console.error('[WS] Heartbeat error:', error);
+          }
+        }
+      }, heartbeatInterval);
+    };
+
+    const stopHeartbeat = () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    };
 
     const connectWebSocket = () => {
+      if (isCleaningUp) return;
+
       if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
         wsRef.current.close();
       }
 
-      ws = createWebSocket(token);
-      wsRef.current = ws;
+      try {
+        ws = createWebSocket(token);
+        wsRef.current = ws;
 
-      ws.onopen = () => {
-        if (!isCleaningUp) {
+        ws.onopen = () => {
+          if (isCleaningUp) return;
+
           console.log('[WS] WebSocket connected');
-        }
-      };
+          reconnectAttempts = 0;
+          startHeartbeat();
+        };
 
-      ws.onmessage = (event) => {
-        if (isCleaningUp) return;
+        ws.onmessage = (event) => {
+          if (isCleaningUp) return;
 
-        const data = JSON.parse(event.data);
-        console.log('[WS] Message:', data.type);
+          const data = JSON.parse(event.data);
 
-        if (data.type === 'stream') {
-          setCurrentStream(prev => prev + data.content);
-
-          // Extract file names from code blocks
-          const codeBlockPattern = /```\w+\s*\n\/\/\s*File:\s*([^\n]+)/g;
-          let match;
-          while ((match = codeBlockPattern.exec(data.content)) !== null) {
-            const fileName = match[1].trim();
-            setStreamingFiles(prev => new Map(prev).set(fileName, { fileName, isStreaming: true }));
+          // Handle pong response
+          if (data.type === 'pong') {
+            console.log('[WS] Heartbeat pong received');
+            return;
           }
-        } else if (data.type === 'complete') {
-          // Handle complete event from both StreamAgent and IterativeAgent
-          const finalResponse = data.data?.final_response || data.content || currentStream;
 
-          setMessages(prev => [...prev, {
-            id: `msg-${Date.now()}`,
-            type: 'ai',
-            content: finalResponse
-          }]);
-          setCurrentStream('');
-          setIsStreaming(false);
-          setStreamingFiles(prev => {
-            const newMap = new Map(prev);
-            newMap.forEach((file, key) => {
-              newMap.set(key, { ...file, isStreaming: false });
-            });
-            return newMap;
-          });
-        } else if (data.type === 'file_ready') {
-          onFileUpdate(data.file_path, data.content);
-          toast.success(`Created ${data.file_path}`, { duration: 2000 });
+          console.log('[WS] Message:', data.type);
 
-          const fileName = data.file_path.replace(/^src\//, '');
-          setStreamingFiles(prev => {
-            const newMap = new Map(prev);
-            if (newMap.has(fileName)) {
-              newMap.set(fileName, { fileName, isStreaming: false });
+          if (data.type === 'stream') {
+            setCurrentStream(prev => prev + data.content);
+
+            // Extract file names from code blocks
+            const codeBlockPattern = /```\w+\s*\n\/\/\s*File:\s*([^\n]+)/g;
+            let match;
+            while ((match = codeBlockPattern.exec(data.content)) !== null) {
+              const fileName = match[1].trim();
+              setStreamingFiles(prev => new Map(prev).set(fileName, { fileName, isStreaming: true }));
             }
-            return newMap;
-          });
-        } else if (data.type === 'error') {
-          toast.error(data.content);
-          setIsStreaming(false);
-          setCurrentStream('');
-          setStreamingFiles(prev => {
-            const newMap = new Map(prev);
-            newMap.forEach((file, key) => {
-              newMap.set(key, { ...file, isStreaming: false });
+          } else if (data.type === 'complete') {
+            // Handle complete event from both StreamAgent and IterativeAgent
+            const finalResponse = data.data?.final_response || data.content || currentStream;
+
+            setMessages(prev => [...prev, {
+              id: `msg-${Date.now()}`,
+              type: 'ai',
+              content: finalResponse
+            }]);
+            setCurrentStream('');
+            setIsStreaming(false);
+            setStreamingFiles(prev => {
+              const newMap = new Map(prev);
+              newMap.forEach((file, key) => {
+                newMap.set(key, { ...file, isStreaming: false });
+              });
+              return newMap;
             });
-            return newMap;
-          });
-        }
-      };
+          } else if (data.type === 'file_ready') {
+            onFileUpdate(data.file_path, data.content);
+            toast.success(`Created ${data.file_path}`, { duration: 2000 });
 
-      ws.onerror = (error) => {
-        if (!isCleaningUp) {
-          console.error('[WS] WebSocket error:', error);
-        }
-      };
+            const fileName = data.file_path.replace(/^src\//, '');
+            setStreamingFiles(prev => {
+              const newMap = new Map(prev);
+              if (newMap.has(fileName)) {
+                newMap.set(fileName, { fileName, isStreaming: false });
+              }
+              return newMap;
+            });
+          } else if (data.type === 'error') {
+            toast.error(data.content);
+            setIsStreaming(false);
+            setCurrentStream('');
+            setStreamingFiles(prev => {
+              const newMap = new Map(prev);
+              newMap.forEach((file, key) => {
+                newMap.set(key, { ...file, isStreaming: false });
+              });
+              return newMap;
+            });
+          }
+        };
 
-      ws.onclose = () => {
-        if (!isCleaningUp) {
+        ws.onerror = (error) => {
+          if (!isCleaningUp) {
+            console.error('[WS] WebSocket error:', error);
+          }
+        };
+
+        ws.onclose = () => {
+          if (isCleaningUp) return;
+
           console.log('[WS] WebSocket disconnected');
-        }
-      };
+          stopHeartbeat();
+
+          // Attempt to reconnect with exponential backoff
+          if (reconnectAttempts < maxReconnectAttempts) {
+            const delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), 30000);
+            reconnectAttempts++;
+
+            console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+
+            reconnectTimer = setTimeout(() => {
+              connectWebSocket();
+            }, delay);
+          } else {
+            console.error('[WS] Max reconnect attempts reached');
+            toast.error('Connection lost. Please refresh the page.', { duration: 5000 });
+          }
+        };
+      } catch (error) {
+        console.error('[WS] Failed to create WebSocket:', error);
+      }
     };
 
     connectWebSocket();
 
     return () => {
       isCleaningUp = true;
+      stopHeartbeat();
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+
       if (ws && ws.readyState !== WebSocket.CLOSED) {
         ws.close();
       }

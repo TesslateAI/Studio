@@ -72,8 +72,108 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <ThemeProvider>
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
       <BrowserRouter>
-        <Toaster position="top-right" />
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            // Default options
+            duration: 4000,
+            className: 'custom-toast',
+            style: {
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              border: '1px solid rgba(255, 107, 0, 0.2)',
+              borderRadius: '16px',
+              padding: '16px',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              backdropFilter: 'blur(12px)',
+              fontSize: '14px',
+              fontWeight: '500',
+            },
+            // Success toast
+            success: {
+              duration: 3000,
+              icon: (
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <circle cx="10" cy="10" r="10" fill="#10b981"/>
+                  <path d="M6 10L8.5 12.5L14 7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              ),
+              style: {
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                borderRadius: '16px',
+                padding: '16px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              },
+            },
+            // Error toast
+            error: {
+              duration: 5000,
+              icon: (
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <circle cx="10" cy="10" r="10" fill="#ef4444"/>
+                  <path d="M7 7L13 13M13 7L7 13" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+              ),
+              style: {
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '16px',
+                padding: '16px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              },
+            },
+            // Loading toast - custom spinner
+            loading: {
+              icon: (
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 50 50"
+                  style={{
+                    animation: 'spin 1s linear infinite'
+                  }}
+                >
+                  <circle
+                    cx="25"
+                    cy="25"
+                    r="20"
+                    fill="none"
+                    stroke="rgba(255, 107, 0, 0.3)"
+                    strokeWidth="5"
+                  />
+                  <circle
+                    cx="25"
+                    cy="25"
+                    r="20"
+                    fill="none"
+                    stroke="#ff6b00"
+                    strokeWidth="5"
+                    strokeDasharray="31.4 94.2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              ),
+              style: {
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                border: '1px solid rgba(255, 107, 0, 0.3)',
+                borderRadius: '16px',
+                padding: '16px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              },
+            },
+          }}
+        />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />

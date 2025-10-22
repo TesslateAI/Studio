@@ -24,6 +24,7 @@ interface ProjectCardProps {
   onDelete: () => void;
   onStatusChange: (status: Status) => void;
   onAddAgent?: () => void;
+  isDeleting?: boolean;
 }
 
 export function ProjectCard({
@@ -31,7 +32,8 @@ export function ProjectCard({
   onOpen,
   onDelete,
   onStatusChange,
-  onAddAgent
+  onAddAgent,
+  isDeleting = false
 }: ProjectCardProps) {
   const getActionIcon = () => {
     if (project.status === 'launch') {
@@ -60,7 +62,7 @@ export function ProjectCard({
     <div
       className="
         project-card relative
-        bg-[var(--surface)] rounded-2xl overflow-hidden
+        bg-[var(--surface)] rounded-2xl
         border border-white/8
         transition-all duration-300 ease-[var(--ease)]
         cursor-pointer
@@ -68,9 +70,44 @@ export function ProjectCard({
         hover:shadow-[0_12px_40px_rgba(0,0,0,0.2)]
         hover:border-[rgba(255,107,0,0.3)]
       "
-      onClick={onOpen}
+      onClick={isDeleting ? undefined : onOpen}
+      style={{ overflow: isDeleting ? 'hidden' : 'visible' }}
     >
-      <div className="p-6">
+      {/* Deleting Overlay */}
+      {isDeleting && (
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center z-10 overflow-hidden">
+          <svg
+            className="w-12 h-12 mb-3"
+            viewBox="0 0 50 50"
+            style={{
+              animation: 'spin 1s linear infinite'
+            }}
+          >
+            <circle
+              cx="25"
+              cy="25"
+              r="20"
+              fill="none"
+              stroke="rgba(255, 107, 0, 0.3)"
+              strokeWidth="4"
+            />
+            <circle
+              cx="25"
+              cy="25"
+              r="20"
+              fill="none"
+              stroke="#ff6b00"
+              strokeWidth="4"
+              strokeDasharray="31.4 94.2"
+              strokeLinecap="round"
+            />
+          </svg>
+          <p className="text-white font-medium text-sm">Deleting project...</p>
+          <p className="text-gray-400 text-xs mt-1">This may take a few seconds</p>
+        </div>
+      )}
+
+      <div className={`p-6 ${isDeleting ? 'pointer-events-none opacity-50' : ''}`}>
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">

@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+@layer base {
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+}
+
 :root {
   --primary: #FF6B00;
   --accent: #00D9FF;
@@ -101,6 +112,11 @@ body {
 }
 
 /* Enhanced animations for smooth UI */
+/* Ensure Tailwind's animate-spin works */
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;

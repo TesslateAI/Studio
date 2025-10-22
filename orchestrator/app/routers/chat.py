@@ -722,6 +722,11 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     (StreamAgent, IterativeAgent, or future agent types) based on the database
     configuration.
     """
+    # Handle heartbeat ping
+    if data.get("type") == "ping":
+        await websocket.send_json({"type": "pong"})
+        return
+
     message_content = data.get("message")
     project_id = data.get("project_id")
     agent_id = data.get("agent_id")  # Get agent_id from request

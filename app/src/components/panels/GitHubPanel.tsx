@@ -14,7 +14,7 @@ import {
 } from '@phosphor-icons/react';
 import { githubApi } from '../../lib/github-api';
 import { gitApi } from '../../lib/git-api';
-import { GitHubConnectModal, GitHubImportModal, GitCommitDialog } from '../modals';
+import { GitHubConnectModal, GitHubImportModal, GitCommitDialog, ConfirmDialog } from '../modals';
 import { GitHistoryViewer } from '../git/GitHistoryViewer';
 import type { GitHubCredentialResponse, GitStatusResponse, GitRepositoryResponse } from '../../types/git';
 import toast from 'react-hot-toast';
@@ -40,6 +40,8 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showCommitDialog, setShowCommitDialog] = useState(false);
+  const [showDisconnectGithubDialog, setShowDisconnectGithubDialog] = useState(false);
+  const [showDisconnectRepoDialog, setShowDisconnectRepoDialog] = useState(false);
 
   // UI state
   const [activeView, setActiveView] = useState<ActiveView>('status');
@@ -104,8 +106,12 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
     }
   };
 
-  const handleDisconnectGitHub = async () => {
-    if (!confirm('Disconnect GitHub account? You can reconnect anytime.')) return;
+  const handleDisconnectGitHub = () => {
+    setShowDisconnectGithubDialog(true);
+  };
+
+  const confirmDisconnectGitHub = async () => {
+    setShowDisconnectGithubDialog(false);
 
     try {
       await githubApi.disconnect();
@@ -117,8 +123,12 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
     }
   };
 
-  const handleDisconnectRepo = async () => {
-    if (!confirm('Disconnect repository? Local files will not be deleted.')) return;
+  const handleDisconnectRepo = () => {
+    setShowDisconnectRepoDialog(true);
+  };
+
+  const confirmDisconnectRepo = async () => {
+    setShowDisconnectRepoDialog(false);
 
     try {
       await gitApi.disconnect(projectId);
@@ -630,6 +640,30 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
         onSuccess={() => {
           loadGitStatus();
         }}
+      />
+
+      {/* Disconnect GitHub Confirmation */}
+      <ConfirmDialog
+        isOpen={showDisconnectGithubDialog}
+        onClose={() => setShowDisconnectGithubDialog(false)}
+        onConfirm={confirmDisconnectGitHub}
+        title="Disconnect GitHub"
+        message="Are you sure you want to disconnect your GitHub account? You can reconnect anytime."
+        confirmText="Disconnect"
+        cancelText="Cancel"
+        variant="warning"
+      />
+
+      {/* Disconnect Repository Confirmation */}
+      <ConfirmDialog
+        isOpen={showDisconnectRepoDialog}
+        onClose={() => setShowDisconnectRepoDialog(false)}
+        onConfirm={confirmDisconnectRepo}
+        title="Disconnect Repository"
+        message="Are you sure you want to disconnect this repository? Your local files will not be deleted."
+        confirmText="Disconnect"
+        cancelText="Cancel"
+        variant="warning"
       />
     </>
   );

@@ -114,7 +114,7 @@ export function ChatInput({
         </div>
 
         {/* Chat input container with agent pill */}
-        <div className="chat-input-container relative flex-1 flex items-center bg-[var(--text)]/5 border border-[var(--border-color)] rounded-xl sm:rounded-2xl overflow-visible transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)]">
+        <div className="chat-input-container relative flex-1 flex items-center bg-[var(--text)]/5 border border-[var(--border-color)] rounded-xl sm:rounded-2xl overflow-visible transition-all focus-within:border-orange-500/50 focus-within:shadow-[0_0_0_3px_rgba(255,107,0,0.1)] focus-within:!outline-none">
           <AgentSelector
             agents={agents}
             currentAgent={currentAgent}
@@ -127,8 +127,7 @@ export function ChatInput({
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            disabled={disabled}
-            className="chat-input bg-transparent border-none px-2 sm:px-4 py-2 sm:py-2.5 text-[var(--text)] flex-1 text-xs sm:text-sm outline-none placeholder:text-[var(--text)]/40"
+            className="chat-input bg-transparent border-none px-2 sm:px-4 py-2 sm:py-2.5 text-[var(--text)] flex-1 text-xs sm:text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40"
           />
         </div>
 

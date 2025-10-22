@@ -10,7 +10,7 @@ import {
   MarketplaceCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
-import { GitHubConnectModal } from '../components/modals';
+import { GitHubConnectModal, ConfirmDialog } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
 import toast from 'react-hot-toast';
@@ -65,6 +65,9 @@ export default function Dashboard() {
   const [showGithubConnectModal, setShowGithubConnectModal] = useState(false);
   const [bases, setBases] = useState<any[]>([]);
   const [selectedBase, setSelectedBase] = useState<number | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
 
   useEffect(() => {
     loadProjects();
@@ -173,16 +176,30 @@ export default function Dashboard() {
     }
   };
 
-  const deleteProject = async (id: number) => {
+  const deleteProject = (id: number) => {
     const project = projects.find(p => p.id === id);
-    if (!confirm(`Delete "${project?.name}"? This cannot be undone.`)) return;
+    if (project) {
+      setProjectToDelete(project);
+      setShowDeleteDialog(true);
+    }
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!projectToDelete) return;
+
+    setShowDeleteDialog(false);
+    setDeletingProjectId(projectToDelete.id);
+    const deletingToast = toast.loading('Deleting project...');
 
     try {
-      await projectsApi.delete(id);
-      toast.success('Project deleted');
+      await projectsApi.delete(projectToDelete.id);
+      toast.success('Project deleted successfully', { id: deletingToast });
       loadProjects();
     } catch (error) {
-      toast.error('Failed to delete project');
+      toast.error('Failed to delete project', { id: deletingToast });
+    } finally {
+      setDeletingProjectId(null);
+      setProjectToDelete(null);
     }
   };
 
@@ -385,6 +402,7 @@ export default function Dashboard() {
             onOpen={() => navigate(`/project/${project.id}`)}
             onDelete={() => deleteProject(project.id)}
             onStatusChange={(status) => updateProjectStatus(project.id, status)}
+            isDeleting={deletingProjectId === project.id}
           />
         ))}
       </div>
@@ -653,6 +671,21 @@ export default function Dashboard() {
           checkGithubConnection();
           setShowGithubConnectModal(false);
         }}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteDialog}
+        onClose={() => {
+          setShowDeleteDialog(false);
+          setProjectToDelete(null);
+        }}
+        onConfirm={confirmDeleteProject}
+        title="Delete Project"
+        message={`Are you sure you want to delete "${projectToDelete?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
       />
 
       {/* Discord Support Bubble */}

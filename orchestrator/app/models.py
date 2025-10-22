@@ -63,6 +63,9 @@ class Project(Base):
     files = relationship("ProjectFile", back_populates="project", cascade="all, delete-orphan")
     git_repository = relationship("GitRepository", back_populates="project", uselist=False, cascade="all, delete-orphan")
     project_agents = relationship("ProjectAgent", back_populates="project", cascade="all, delete-orphan")
+    shell_sessions = relationship("ShellSession", back_populates="project", cascade="all, delete-orphan")
+    chats = relationship("Chat", back_populates="project", cascade="all, delete-orphan")
+    agent_command_logs = relationship("AgentCommandLog", back_populates="project", cascade="all, delete-orphan")
 
 class ProjectFile(Base):
     __tablename__ = "project_files"
@@ -85,6 +88,7 @@ class Chat(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     user = relationship("User", back_populates="chats")
+    project = relationship("Project", back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
 
 class Message(Base):
@@ -119,6 +123,7 @@ class AgentCommandLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="agent_commands")
+    project = relationship("Project", back_populates="agent_command_logs")
 
 
 class PodAccessLog(Base):
@@ -169,7 +174,7 @@ class ShellSession(Base):
 
     # Relationships
     user = relationship("User")
-    project = relationship("Project")
+    project = relationship("Project", back_populates="shell_sessions")
 
 
 class GitHubCredential(Base):
