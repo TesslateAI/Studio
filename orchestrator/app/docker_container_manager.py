@@ -27,8 +27,8 @@ class DockerContainerManager(BaseContainerManager):
         self.activity_tracker: Dict[str, float] = {}  # project_key -> last_activity_timestamp
         # Detect the correct network name by checking which network Traefik is on
         self.network_name = self._detect_traefik_network()
-        self.base_image_name = "builder-devserver:latest"
-        self.container_label = "com.builder.devserver"
+        self.base_image_name = "tesslate-devserver:latest"
+        self.container_label = "com.tesslate.devserver"
         self._docker_available = None  # Lazy check
         self._network_ready = False  # Lazy initialization
         self._base_image_ready = False  # Base image built once
@@ -287,15 +287,18 @@ class DockerContainerManager(BaseContainerManager):
             
             # Build base image only if it doesn't exist
             print(f"[BUILD] Building fast base development image (Node.js 20, ~30 seconds)...")
-            base_dockerfile = self._create_base_dockerfile()
-            
+            dockerfile_path = self._get_dockerfile_path()
+
+            if not os.path.exists(dockerfile_path):
+                raise FileNotFoundError(f"Dockerfile not found at: {dockerfile_path}")
+
             build_result = subprocess.run([
                 "docker", "build",
                 "--pull",  # Pull latest base image
-                "-f", "-",  # Read Dockerfile from stdin
+                "-f", dockerfile_path,  # Use the actual Dockerfile.devserver
                 "-t", self.base_image_name,
-                "."
-            ], input=base_dockerfile, text=True, capture_output=True, timeout=300)
+                os.path.dirname(dockerfile_path)  # Build context is orchestrator directory
+            ], capture_output=True, text=True, timeout=300)
             
             if build_result.returncode != 0:
                 print(f"[ERROR] Base image build failed:")
@@ -310,45 +313,26 @@ class DockerContainerManager(BaseContainerManager):
         except Exception as e:
             print(f"[ERROR] Failed to create base image: {e}")
             return False
-    
-    def _create_base_dockerfile(self) -> str:
-        """Create universal base Dockerfile supporting Node.js, Python, and Go."""
-        return """# Universal Base Development Image - Supports Node.js, Python, and Go
-FROM node:20-alpine
 
-# Install system dependencies for Node.js, Python, and Go development
-RUN apk add --no-cache \\
-    git \\
-    curl \\
-    python3 \\
-    py3-pip \\
-    make \\
-    g++ \\
-    go \\
-    bash \\
-    libc6-compat
+    def _get_dockerfile_path(self) -> str:
+        """Get the path to Dockerfile.devserver."""
+        # The orchestrator code is at /app/app when running in Docker
+        # or ./orchestrator/app when running locally
+        # The Dockerfile.devserver is at /app/Dockerfile.devserver (Docker) or ./orchestrator/Dockerfile.devserver (local)
 
-# Set up Go environment
-ENV GOPATH=/go
-ENV PATH=$PATH:/go/bin
-RUN mkdir -p /go/bin
-
-# Install Air for Go hot reloading (use v1.61.5 compatible with Go 1.22+)
-RUN go install github.com/air-verse/air@v1.61.5
-
-# Create app directory
-WORKDIR /app
-
-# Create npm cache directory for faster installs
-RUN mkdir -p /root/.npm-cache
-ENV npm_config_cache=/root/.npm-cache
-
-# Expose common development server ports
-EXPOSE 3000 5173 8000 8001 8080
-
-# Default command - will be overridden by start command from TESSLATE.md
-CMD ["sh", "-c", "echo 'Waiting for startup command...' && sleep infinity"]
-"""
+        # Try to determine if we're in a container or local
+        if os.path.exists('/app/Dockerfile.devserver'):
+            # Running in Docker container
+            return '/app/Dockerfile.devserver'
+        elif os.path.exists('Dockerfile.devserver'):
+            # Running locally from orchestrator directory
+            return 'Dockerfile.devserver'
+        else:
+            # Fallback: construct path relative to this file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # Go up from app/docker_container_manager.py to orchestrator/
+            orchestrator_dir = os.path.dirname(current_dir)
+            return os.path.join(orchestrator_dir, 'Dockerfile.devserver')
     
     def _get_project_key(self, user_id: int, project_id: str) -> str:
         """Generate a unique project key for container management."""
@@ -356,7 +340,7 @@ CMD ["sh", "-c", "echo 'Waiting for startup command...' && sleep infinity"]
     
     def _get_container_name(self, user_id: int, project_id: str) -> str:
         """Generate a descriptive container name for Docker Desktop visibility."""
-        return f"builder-dev-user{user_id}-project{project_id}"
+        return f"tesslate-user{user_id}-project{project_id}"
     
     def _generate_hostname(self, user_id: int, project_id: str) -> str:
         """Generate a unique identifier for the project container."""
@@ -380,7 +364,7 @@ CMD ["sh", "-c", "echo 'Waiting for startup command...' && sleep infinity"]
     
     def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str, port: int = 5173) -> List[str]:
         """Generate Traefik labels for path-based routing only."""
-        service_name = f"builder-dev-user{user_id}-project{project_id}"
+        service_name = f"tesslate-user{user_id}-project{project_id}"
         # hostname is now just "user{id}-project{id}" without domain
 
         settings = get_settings()
@@ -416,114 +400,6 @@ CMD ["sh", "-c", "echo 'Waiting for startup command...' && sleep infinity"]
 
         return labels
     
-    def _create_dockerfile(self, project_path: str) -> str:
-        """Create optimized Dockerfile for development."""
-        dockerfile_content = """# Development Container for React/Vite Projects
-FROM node:18-alpine
-
-# Install development tools and Python (needed for some native deps)
-RUN apk add --no-cache git curl python3 make g++
-
-# Create app directory
-WORKDIR /app
-
-# Copy container-compatible package.json
-COPY package.container.json ./package.json
-
-# Install dependencies
-RUN npm install --silent && npm cache clean --force
-
-# Copy project files
-COPY . .
-
-# Expose development server port
-EXPOSE 5173
-
-# Health check for container readiness
-HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \\
-    CMD curl -f http://localhost:5173 || exit 1
-
-# Start development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
-"""
-        
-        dockerfile_path = os.path.join(project_path, "Dockerfile.dev")
-        with open(dockerfile_path, 'w', encoding='utf-8') as f:
-            f.write(dockerfile_content)
-        
-        return dockerfile_path
-    
-    def _create_dockerignore(self, project_path: str) -> None:
-        """Create .dockerignore for optimized builds."""
-        dockerignore_content = """# Dependencies
-node_modules
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Production build
-dist
-build
-
-# Environment files
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDE files
-.vscode
-.idea
-*.swp
-*.swo
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Git
-.git
-.gitignore
-
-# Docker files
-Dockerfile*
-docker-compose*
-"""
-        
-        dockerignore_path = os.path.join(project_path, ".dockerignore")
-        with open(dockerignore_path, 'w', encoding='utf-8') as f:
-            f.write(dockerignore_content)
-    
-    def _create_container_package_json(self, project_path: str) -> None:
-        """Create a container-compatible package.json without platform-specific deps."""
-        original_package_path = os.path.join(project_path, "package.json")
-        container_package_path = os.path.join(project_path, "package.container.json")
-        
-        try:
-            with open(original_package_path, 'r', encoding='utf-8') as f:
-                package_data = json.load(f)
-            
-            # Remove Windows-specific dependencies
-            if 'devDependencies' in package_data:
-                deps_to_remove = []
-                for dep_name in package_data['devDependencies']:
-                    if 'win32' in dep_name or 'msvc' in dep_name:
-                        deps_to_remove.append(dep_name)
-                
-                for dep in deps_to_remove:
-                    del package_data['devDependencies'][dep]
-                    print(f"[CLEANUP] Removed platform-specific dependency: {dep}")
-            
-            # Create container-specific package.json
-            with open(container_package_path, 'w', encoding='utf-8') as f:
-                json.dump(package_data, f, indent=2)
-            
-            print(f"[OK] Created container-compatible package.json")
-            
-        except Exception as e:
-            print(f"[WARN] Could not create container package.json: {e}")
-            # Fall back to original
-    
     def _extract_start_command_from_tesslate(self, tesslate_content: str) -> str:
         """
         Extract start command from TESSLATE.md file.
@@ -556,11 +432,46 @@ docker-compose*
                 return None
 
             # For multi-line commands with background processes (&):
-            # Just join with spaces - the & and && already provide proper shell separation
+            # We need to handle directory context properly by wrapping each backgrounded command in a subshell
             # Example: "cd backend && uvicorn ... &" followed by "cd frontend && npm run dev"
-            # Becomes: "cd backend && uvicorn ... & cd frontend && npm run dev"
+            # Becomes: "(cd /app/backend && uvicorn ... &); (cd /app/frontend && npm run dev)"
             if any('&' in line for line in command_lines):
-                final_command = ' '.join(command_lines)
+                # Process each line to ensure proper directory context
+                processed_lines = []
+                for line in command_lines:
+                    # If line starts with 'cd ' followed by a relative path, convert to absolute
+                    if line.startswith('cd ') and not line.startswith('cd /'):
+                        # Extract the directory and rest of command
+                        parts = line.split('&&', 1)
+                        if len(parts) >= 1:
+                            cd_part = parts[0].strip()
+                            # Extract directory name (e.g., "cd backend" -> "backend")
+                            dir_name = cd_part.replace('cd ', '').strip()
+                            # Make it absolute
+                            abs_cd = f'cd /app/{dir_name}'
+                            if len(parts) == 2:
+                                # Reconstruct with absolute path
+                                line = f'{abs_cd} && {parts[1].strip()}'
+                            else:
+                                line = abs_cd
+
+                    # Wrap each command in a subshell for proper isolation
+                    if line.endswith(' &'):
+                        # Background process - wrap in subshell
+                        processed_lines.append(f'({line.rstrip(" &")} ) &')
+                    else:
+                        # Foreground process
+                        processed_lines.append(f'({line})')
+
+                # Join with spaces - background (&) and subshells handle separation
+                # If the last command is a foreground process, it will keep the container alive
+                # If all commands are background, add 'wait' to keep container alive
+                has_foreground = any(not line.endswith(' &') for line in processed_lines)
+                if has_foreground:
+                    final_command = ' '.join(processed_lines)
+                else:
+                    # All background processes - need to wait for them
+                    final_command = ' '.join(processed_lines) + ' wait'
             else:
                 # Simple sequential commands - join with &&
                 final_command = ' && '.join(command_lines)
@@ -786,11 +697,11 @@ docker-compose*
                 "--name", container_name,                                # Multi-user container name
                 "-v", f"{host_project_path}:/app",                      # Source code volume (live sync!)
                 # Docker labels for organization and tracking
-                "--label", "com.builder.devserver=true",
-                "--label", f"com.builder.devserver.user_id={user_id}",
-                "--label", f"com.builder.devserver.project_id={project_id}",
-                "--label", "com.builder.devserver.type=devserver",
-                "--label", f"com.builder.devserver.hostname={hostname}",
+                "--label", "com.tesslate.devserver=true",
+                "--label", f"com.tesslate.devserver.user_id={user_id}",
+                "--label", f"com.tesslate.devserver.project_id={project_id}",
+                "--label", "com.tesslate.devserver.type=devserver",
+                "--label", f"com.tesslate.devserver.hostname={hostname}",
             ]
 
             # Generic environment variables that templates can use

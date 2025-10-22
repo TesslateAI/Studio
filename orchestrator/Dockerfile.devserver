@@ -2,6 +2,8 @@
 # Universal Alpine-based image supporting Node.js, Python, and Go
 # Pre-installed dependencies for fast user environment startup
 # Used by both Docker (local) and Kubernetes (production) deployment modes
+# - K8s: Built and pushed to registry via k8s/scripts/deployment/build-push-images.sh
+# - Docker: Built on-demand by docker_container_manager.py from this file
 
 FROM node:20-alpine
 
@@ -20,6 +22,10 @@ RUN apk add --no-cache \
 ENV GOPATH=/go
 ENV PATH=$PATH:/go/bin
 RUN mkdir -p /go/bin
+
+# Allow pip to install packages globally (needed for FastAPI bases)
+# This is safe because the container is ephemeral
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 # Install Air for Go hot reloading (use v1.61.5 compatible with Go 1.22+)
 RUN go install github.com/air-verse/air@v1.61.5

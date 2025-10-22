@@ -62,7 +62,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Image names
-LOCAL_IMAGE="builder-devserver:latest"
+LOCAL_IMAGE="tesslate-devserver:latest"
 REMOTE_IMAGE="registry.digitalocean.com/finetune/tesslate-dev-server:latest"
 
 echo -e "${BLUE}============================================${NC}"

@@ -59,7 +59,7 @@ exit /b 0
 :end_parse_args
 
 REM Image names
-set LOCAL_IMAGE=builder-devserver:latest
+set LOCAL_IMAGE=tesslate-devserver:latest
 set REMOTE_IMAGE=registry.digitalocean.com/finetune/tesslate-dev-server:latest
 
 echo ============================================

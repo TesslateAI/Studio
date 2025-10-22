@@ -60,6 +60,7 @@ services:
       - ./users:/app/users
       - /var/run/docker.sock:/var/run/docker.sock
       - ./orchestrator/app:/app/app:ro
+      - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver:ro
     environment:
       - DATABASE_URL=postgresql+asyncpg://tesslate_user:${POSTGRES_PASSWORD}@postgres:5432/tesslate
       - SECRET_KEY=${SECRET_KEY}
@@ -105,21 +106,6 @@ services:
       - "traefik.http.routers.app.priority=10"
       - "traefik.http.routers.app.tls=true"
       - "traefik.http.services.app.loadbalancer.server.port=80"
-
-  # Dev server base image - Used for user project containers
-  # This service doesn't run, it just builds the image
-  # Automatically rebuilds from scratch on every compose up
-  dev-server:
-    build:
-      context: ./orchestrator
-      dockerfile: Dockerfile.devserver
-      no_cache: true
-    image: builder-devserver:latest
-    pull_policy: build
-    profiles:
-      - build-only
-    # This service is only for building the image, not running
-    command: ["echo", "Dev server image built successfully"]
 
 networks:
   tesslate-network:
