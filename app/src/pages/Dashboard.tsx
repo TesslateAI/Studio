@@ -33,7 +33,9 @@ import {
   GitBranch,
   ShoppingCart,
   DiscordLogo,
-  SignOut
+  SignOut,
+  CaretDown,
+  Check
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -65,6 +67,7 @@ export default function Dashboard() {
   const [showGithubConnectModal, setShowGithubConnectModal] = useState(false);
   const [bases, setBases] = useState<any[]>([]);
   const [selectedBase, setSelectedBase] = useState<number | null>(null);
+  const [isBaseDropdownOpen, setIsBaseDropdownOpen] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
@@ -437,14 +440,16 @@ export default function Dashboard() {
                       p-4 rounded-xl border-2 transition-all
                       ${sourceType === 'template'
                         ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
-                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                        : theme === 'light'
+                          ? 'border-black/10 bg-black/5 hover:border-black/20'
+                          : 'border-white/10 bg-white/5 hover:border-white/20'
                       }
                       ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                     `}
                   >
                     <FilePlus className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
                     <div className="text-sm font-semibold text-[var(--text)]">Template</div>
-                    <div className="text-xs text-gray-500 mt-1">Start from scratch</div>
+                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Start from scratch</div>
                   </button>
                   <button
                     onClick={() => setSourceType('base')}
@@ -453,14 +458,16 @@ export default function Dashboard() {
                       p-4 rounded-xl border-2 transition-all
                       ${sourceType === 'base'
                         ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
-                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                        : theme === 'light'
+                          ? 'border-black/10 bg-black/5 hover:border-black/20'
+                          : 'border-white/10 bg-white/5 hover:border-white/20'
                       }
                       ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                     `}
                   >
                     <Package className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
                     <div className="text-sm font-semibold text-[var(--text)]">From Base</div>
-                    <div className="text-xs text-gray-500 mt-1">Use template</div>
+                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Use template</div>
                   </button>
                   <button
                     onClick={() => setSourceType('github')}
@@ -469,14 +476,16 @@ export default function Dashboard() {
                       p-4 rounded-xl border-2 transition-all
                       ${sourceType === 'github'
                         ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
-                        : 'border-white/10 bg-white/5 hover:border-white/20'
+                        : theme === 'light'
+                          ? 'border-black/10 bg-black/5 hover:border-black/20'
+                          : 'border-white/10 bg-white/5 hover:border-white/20'
                       }
                       ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                     `}
                   >
                     <GithubLogo className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
                     <div className="text-sm font-semibold text-[var(--text)]">GitHub</div>
-                    <div className="text-xs text-gray-500 mt-1">Import repository</div>
+                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Import repository</div>
                   </button>
                 </div>
               </div>
@@ -502,37 +511,101 @@ export default function Dashboard() {
                       </button>
                     </div>
                   ) : (
-                    <div className="grid gap-2 max-h-64 overflow-y-auto">
-                      {bases.map((base: any) => (
-                        <button
-                          key={base.id}
-                          onClick={() => setSelectedBase(base.id)}
-                          disabled={isCreating}
-                          className={`
-                            p-3 rounded-lg border text-left transition-all
-                            ${selectedBase === base.id
-                              ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
-                              : 'border-white/10 hover:border-white/20 bg-white/5'
-                            }
-                            ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                          `}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="text-2xl">{base.icon}</span>
-                            <div className="flex-1">
-                              <div className="font-medium text-[var(--text)]">{base.name}</div>
-                              <div className="text-sm text-white/60">{base.description}</div>
-                              <div className="flex gap-2 mt-1">
-                                {base.tech_stack?.slice(0, 3).map((tech: string, idx: number) => (
-                                  <span key={idx} className="text-xs bg-white/10 px-2 py-0.5 rounded">
-                                    {tech}
-                                  </span>
-                                ))}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => !isCreating && setIsBaseDropdownOpen(!isBaseDropdownOpen)}
+                        disabled={isCreating}
+                        className={`
+                          w-full px-3 py-3 border rounded-lg text-left
+                          flex items-center justify-between transition-all
+                          ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
+                          ${isBaseDropdownOpen
+                            ? 'border-[var(--primary)]'
+                            : theme === 'light'
+                              ? 'border-black/20 hover:border-black/30'
+                              : 'border-white/10 hover:border-white/20'
+                          }
+                          ${isCreating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                        `}
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {selectedBase ? (
+                            <>
+                              <span className="text-xl flex-shrink-0">
+                                {bases.find(b => b.id === selectedBase)?.icon}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-[var(--text)] truncate">
+                                  {bases.find(b => b.id === selectedBase)?.name}
+                                </div>
+                                <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
+                                  {bases.find(b => b.id === selectedBase)?.description}
+                                </div>
                               </div>
-                            </div>
+                            </>
+                          ) : (
+                            <span className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>Choose a base...</span>
+                          )}
+                        </div>
+                        <CaretDown
+                          className={`flex-shrink-0 ml-2 transition-transform ${isBaseDropdownOpen ? 'rotate-180' : ''}`}
+                          size={16}
+                          weight="bold"
+                        />
+                      </button>
+
+                      {isBaseDropdownOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-10"
+                            onClick={() => setIsBaseDropdownOpen(false)}
+                          />
+                          <div className={`absolute z-20 w-full mt-1 bg-[var(--surface)] border rounded-lg shadow-xl max-h-60 overflow-y-auto ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`}>
+                            {bases.map((base: any) => (
+                              <button
+                                key={base.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedBase(base.id);
+                                  setIsBaseDropdownOpen(false);
+                                }}
+                                className={`
+                                  w-full px-3 py-3 text-left transition-colors
+                                  flex items-center gap-3
+                                  ${selectedBase === base.id
+                                    ? 'bg-[rgba(255,107,0,0.1)]'
+                                    : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
+                                  }
+                                `}
+                              >
+                                <span className="text-xl flex-shrink-0">{base.icon}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className={`font-medium truncate ${selectedBase === base.id ? 'text-[var(--primary)]' : 'text-[var(--text)]'}`}>
+                                    {base.name}
+                                  </div>
+                                  <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
+                                    {base.description}
+                                  </div>
+                                  <div className="flex gap-1 mt-1 flex-wrap">
+                                    {base.tech_stack?.slice(0, 3).map((tech: string, idx: number) => (
+                                      <span
+                                        key={idx}
+                                        className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}
+                                      >
+                                        {tech}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                {selectedBase === base.id && (
+                                  <Check size={20} weight="bold" className="flex-shrink-0 text-[var(--primary)]" />
+                                )}
+                              </button>
+                            ))}
                           </div>
-                        </button>
-                      ))}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -540,7 +613,7 @@ export default function Dashboard() {
 
               {/* GitHub Connection Status */}
               {sourceType === 'github' && (
-                <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                <div className={`border rounded-xl p-3 ${theme === 'light' ? 'bg-black/5 border-black/10' : 'bg-white/5 border-white/10'}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <GithubLogo className="w-4 h-4" weight="fill" />
@@ -585,7 +658,7 @@ export default function Dashboard() {
                       type="text"
                       value={githubRepoUrl}
                       onChange={(e) => setGithubRepoUrl(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500"
+                      className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
                       placeholder="https://github.com/username/repository"
                       disabled={isCreating}
                     />
@@ -599,7 +672,7 @@ export default function Dashboard() {
                         type="text"
                         value={githubBranch}
                         onChange={(e) => setGithubBranch(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 text-[var(--text)] pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500"
+                        className={`w-full border text-[var(--text)] pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
                         placeholder="main"
                         disabled={isCreating}
                       />
@@ -615,7 +688,7 @@ export default function Dashboard() {
                   type="text"
                   value={newProject.name}
                   onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500"
+                  className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
                   placeholder="My Awesome App"
                   disabled={isCreating}
                   autoFocus
@@ -627,7 +700,7 @@ export default function Dashboard() {
                 <textarea
                   value={newProject.description}
                   onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] placeholder-gray-500 resize-none"
+                  className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
                   rows={3}
                   placeholder="Describe your project..."
                   disabled={isCreating}
