@@ -850,37 +850,28 @@ async def get_dev_server_url(
 
             if status.get("running"):
                 url = docker_manager.get_container_url(str(project_id), current_user.id)
-                logger.info(f"[DEV-URL] Container exists and is running, verifying responsiveness: {url}")
 
-                # Verify the container is actually responsive via HTTP
-                import aiohttp
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(
-                            url,
-                            timeout=aiohttp.ClientTimeout(total=3),
-                            allow_redirects=True,
-                            ssl=False
-                        ) as response:
-                            if response.status < 500:
-                                logger.info(f"[DEV-URL] ✅ Container is responsive (HTTP {response.status})")
-                                return {
-                                    "url": url,
-                                    "status": "ready",
-                                    "message": "Development environment is ready"
-                                }
-                            else:
-                                logger.warning(f"[DEV-URL] Container returned HTTP {response.status}, still starting")
-                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                    logger.warning(f"[DEV-URL] Container not responsive yet: {type(e).__name__}")
+                # Check Docker health status instead of making HTTP request
+                # (HTTP requests fail from orchestrator container due to DNS resolution)
+                health_status = status.get("health", "unknown")
 
-                # Container exists but not responsive yet - return starting status
-                return {
-                    "url": None,
-                    "status": "starting",
-                    "message": "Development server is starting, please wait...",
-                    "hint": "The container is running but not responsive yet. Try again in a few seconds."
-                }
+                if health_status == "healthy":
+                    logger.info(f"[DEV-URL] ✅ Container is running and healthy: {url}")
+                    docker_manager.track_activity(current_user.id, str(project_id))
+                    return {
+                        "url": url,
+                        "status": "ready",
+                        "message": "Development environment is ready"
+                    }
+                else:
+                    logger.info(f"[DEV-URL] ⏳ Container is running but health status is: {health_status}")
+                    # Container exists but not healthy yet - return starting status
+                    return {
+                        "url": None,
+                        "status": "starting",
+                        "message": "Development server is starting, please wait...",
+                        "hint": f"The container is running but health check is {health_status}. Try again in a few seconds."
+                    }
 
         # Container doesn't exist - create it
         logger.info(f"[DEV-URL] Container does not exist, creating new environment...")

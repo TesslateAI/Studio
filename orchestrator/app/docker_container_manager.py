@@ -1034,7 +1034,7 @@ class DockerContainerManager(BaseContainerManager):
     async def get_container_status(self, project_id: str, user_id: int = None) -> Dict[str, Any]:
         """Get detailed status of a development container with multi-user support."""
         container_info = None
-        
+
         if user_id is not None:
             # New multi-user mode: use specific user_id and project_id
             project_key = self._get_project_key(user_id, project_id)
@@ -1046,19 +1046,42 @@ class DockerContainerManager(BaseContainerManager):
                 if info.get("project_id") == project_id:
                     container_info = info
                     break
-        
+
+        # If not in tracking dict, check if container exists in Docker
+        if not container_info and user_id is not None:
+            container_name = self._get_container_name(user_id, project_id)
+            hostname = self._generate_hostname(user_id, project_id)
+
+            # Check if this container exists in Docker
+            result = subprocess.run([
+                "docker", "inspect", container_name,
+                "--format", "{{json .State}}"
+            ], capture_output=True, text=True, timeout=10)
+
+            if result.returncode == 0:
+                # Container exists! Add it to tracking
+                project_key = self._get_project_key(user_id, project_id)
+                self.containers[project_key] = {
+                    "container_name": container_name,
+                    "hostname": hostname,
+                    "user_id": user_id,
+                    "project_id": project_id
+                }
+                container_info = self.containers[project_key]
+                print(f"[REDISCOVER] Found existing container: {container_name}")
+
         if not container_info:
             return {"status": "not_found", "running": False}
-        
+
         container_name = container_info["container_name"]
-        
+
         try:
             # Get container status
             result = subprocess.run([
                 "docker", "inspect", container_name,
                 "--format", "{{json .State}}"
             ], capture_output=True, text=True, timeout=10)
-            
+
             if result.returncode == 0:
                 state = json.loads(result.stdout.strip())
                 return {
@@ -1071,10 +1094,10 @@ class DockerContainerManager(BaseContainerManager):
                     "user_id": container_info.get("user_id"),
                     "project_id": container_info.get("project_id")
                 }
-            
+
         except Exception as e:
             print(f"Error getting container status: {e}")
-        
+
         return {"status": "error", "running": False}
     
     async def get_all_containers(self) -> List[Dict[str, Any]]:
