@@ -197,12 +197,23 @@ export default function Library() {
 
   const handleModelChange = async (agent: LibraryAgent, model: string) => {
     try {
+      // Optimistically update the UI
+      setAgents(prevAgents =>
+        prevAgents.map(a =>
+          a.id === agent.id ? { ...a, selected_model: model } : a
+        )
+      );
+
       await marketplaceApi.selectAgentModel(agent.id, model);
       toast.success('Model updated successfully');
-      loadLibraryAgents();
+
+      // Reload to ensure consistency with backend
+      await loadLibraryAgents();
     } catch (error: any) {
       console.error('Model change failed:', error);
       toast.error(error.response?.data?.detail || 'Failed to change model');
+      // Revert on error
+      await loadLibraryAgents();
     }
   };
 
@@ -425,10 +436,14 @@ function ModelsTab({
   onSetupProvider: (provider: string) => void;
 }) {
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
+  const [showAddApiKey, setShowAddApiKey] = useState(false);
   const [customModels, setCustomModels] = useState<Model[]>([]);
   const [systemModels, setSystemModels] = useState<Model[]>([]);
   const [diagramModel, setDiagramModel] = useState<string>('');
   const [loadingPreferences, setLoadingPreferences] = useState(true);
+  const [openRouterKeys, setOpenRouterKeys] = useState<ApiKey[]>([]);
+  const [loadingKeys, setLoadingKeys] = useState(true);
+  const [providers, setProviders] = useState<Provider[]>([]);
 
   useEffect(() => {
     // Separate custom and system models
@@ -439,6 +454,8 @@ function ModelsTab({
   useEffect(() => {
     // Load user preferences
     loadUserPreferences();
+    loadOpenRouterKeys();
+    loadProviders();
   }, []);
 
   const loadUserPreferences = async () => {
@@ -449,6 +466,26 @@ function ModelsTab({
       console.error('Failed to load preferences:', error);
     } finally {
       setLoadingPreferences(false);
+    }
+  };
+
+  const loadOpenRouterKeys = async () => {
+    try {
+      const data = await secretsApi.listApiKeys('openrouter');
+      setOpenRouterKeys(data.api_keys || []);
+    } catch (error) {
+      console.error('Failed to load OpenRouter keys:', error);
+    } finally {
+      setLoadingKeys(false);
+    }
+  };
+
+  const loadProviders = async () => {
+    try {
+      const data = await secretsApi.getProviders();
+      setProviders(data.providers || []);
+    } catch (error) {
+      console.error('Failed to load providers:', error);
     }
   };
 
@@ -475,8 +512,97 @@ function ModelsTab({
     }
   };
 
+  const openRouterProvider = externalProviders.find(p => p.provider === 'openrouter');
+  const hasOpenRouterKey = openRouterProvider?.has_key || openRouterKeys.length > 0;
+
   return (
     <div className="space-y-8">
+      {/* OpenRouter Integration Section */}
+      <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-6">
+        <div className="flex items-start gap-4 mb-4">
+          <div className="p-3 bg-blue-500/20 rounded-lg">
+            <Key size={24} className="text-blue-400" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xl font-bold text-[var(--text)]">OpenRouter Integration</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowAddApiKey(true)}
+                  className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <Plus size={16} />
+                  Add API Key
+                </button>
+                {hasOpenRouterKey && (
+                  <button
+                    onClick={() => setShowAddCustomModel(true)}
+                    className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center gap-2"
+                  >
+                    <Plus size={16} />
+                    Add Custom Model
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="text-[var(--text)]/60 text-sm mb-4">
+              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more.
+            </p>
+
+            {/* API Keys List */}
+            {loadingKeys ? (
+              <div className="px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)]/40">
+                Loading keys...
+              </div>
+            ) : openRouterKeys.length > 0 ? (
+              <div className="space-y-2">
+                {openRouterKeys.map((key) => (
+                  <div
+                    key={key.id}
+                    className="bg-[var(--surface)] border border-white/10 rounded-lg p-3 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-green-500/10 rounded-lg">
+                        <CheckCircle size={16} className="text-green-400" weight="fill" />
+                      </div>
+                      <div>
+                        {key.key_name && (
+                          <div className="text-sm font-medium text-[var(--text)]">{key.key_name}</div>
+                        )}
+                        <div className="text-xs text-[var(--text)]/40 font-mono">{key.key_preview}</div>
+                        <div className="text-xs text-[var(--text)]/40 mt-0.5">
+                          Added {new Date(key.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await secretsApi.deleteApiKey(key.id);
+                          toast.success('API key removed');
+                          loadOpenRouterKeys();
+                        } catch (error) {
+                          console.error('Delete failed:', error);
+                          toast.error('Failed to delete API key');
+                        }
+                      }}
+                      className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
+                    >
+                      <Trash size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-4 py-3 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center gap-2">
+                <Circle size={16} className="text-orange-400" />
+                <span className="text-sm text-orange-400">No API key configured. Add one to get started.</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Diagram Model Selection */}
       <div className="bg-gradient-to-r from-orange-500/10 to-purple-500/10 border border-orange-500/20 rounded-xl p-6">
         <div className="flex items-start gap-4 mb-4">
@@ -689,26 +815,27 @@ function ModelsTab({
                 )}
 
                 {provider.has_key && (
-                  <>
-                    <div className="mt-3 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center justify-center gap-2">
-                      <CheckCircle size={16} className="text-green-400" weight="fill" />
-                      <span className="text-xs text-green-400">Configured</span>
-                    </div>
-                    {provider.provider === 'openrouter' && (
-                      <button
-                        onClick={() => setShowAddCustomModel(true)}
-                        className="w-full mt-2 px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Plus size={16} />
-                        Add Custom Model
-                      </button>
-                    )}
-                  </>
+                  <div className="mt-3 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center justify-center gap-2">
+                    <CheckCircle size={16} className="text-green-400" weight="fill" />
+                    <span className="text-xs text-green-400">Configured</span>
+                  </div>
                 )}
               </div>
             ))}
           </div>
         </div>
+      )}
+
+      {/* Add OpenRouter API Key Modal */}
+      {showAddApiKey && (
+        <AddApiKeyModal
+          providers={providers.filter(p => p.id === 'openrouter')}
+          onClose={() => setShowAddApiKey(false)}
+          onSuccess={() => {
+            setShowAddApiKey(false);
+            loadOpenRouterKeys();
+          }}
+        />
       )}
 
       {/* Add Custom Model Modal */}
@@ -1089,12 +1216,38 @@ function AgentCard({
       {/* Description */}
       <p className="text-[var(--text)]/60 text-sm mb-4 line-clamp-2">{agent.description}</p>
 
-      {/* Model Badge */}
+      {/* Model Selection */}
       <div className="mb-4">
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg w-fit">
-          <Cpu size={14} className="text-blue-400" />
-          <span className="text-xs text-blue-400 font-medium">{currentModel}</span>
-        </div>
+        {canChangeModel ? (
+          <div className="relative">
+            <select
+              value={currentModel}
+              onChange={(e) => onModelChange(e.target.value)}
+              className="w-full px-3 py-2 pl-8 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 text-xs font-medium focus:outline-none focus:border-blue-500/40 hover:bg-blue-500/15 transition-colors cursor-pointer appearance-none pr-8"
+            >
+              {availableModels.length > 0 ? (
+                availableModels.map((modelName) => (
+                  <option key={modelName} value={modelName}>
+                    {modelName}
+                  </option>
+                ))
+              ) : (
+                <option value={currentModel}>{currentModel}</option>
+              )}
+            </select>
+            <Cpu size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none" />
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-blue-400">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg w-fit">
+            <Cpu size={14} className="text-blue-400" />
+            <span className="text-xs text-blue-400 font-medium">{currentModel}</span>
+          </div>
+        )}
       </div>
 
       {/* Features */}
