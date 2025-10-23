@@ -14,7 +14,8 @@ from ..database import get_db
 from ..auth import get_current_active_user
 from ..models import (
     User, Project, Chat, Message, AgentCommandLog,
-    MarketplaceAgent, UserPurchasedAgent, ProjectAgent
+    MarketplaceAgent, UserPurchasedAgent, ProjectAgent,
+    MarketplaceBase, UserPurchasedBase
 )
 from ..services.litellm_service import litellm_service
 
@@ -330,7 +331,13 @@ async def get_token_metrics(
         start_date = datetime.utcnow() - timedelta(days=days)
 
         # Get global statistics from LiteLLM
-        global_stats = await litellm_service.get_global_stats()
+        global_stats_raw = await litellm_service.get_global_stats()
+
+        # Transform global stats to expected format
+        global_stats = {
+            "spend": global_stats_raw.get("spend", 0),
+            "max_budget": global_stats_raw.get("max_budget", 0)
+        }
 
         # Get all users' usage from LiteLLM
         all_users_usage = await litellm_service.get_all_users_usage(start_date)
@@ -342,39 +349,45 @@ async def get_token_metrics(
         user_token_data = []
 
         for user_usage in all_users_usage:
-            if 'total_tokens' in user_usage:
-                total_tokens += user_usage['total_tokens']
+            # LiteLLM returns 'spend' instead of 'total_cost'
+            user_cost = user_usage.get('spend', 0) or 0
+            total_cost += user_cost
 
-            if 'total_cost' in user_usage:
-                total_cost += user_usage['total_cost']
+            # Calculate tokens from model_spend if available
+            user_tokens = 0
+            if 'model_spend' in user_usage and user_usage['model_spend']:
+                for model, spend_data in user_usage['model_spend'].items():
+                    # model_spend contains cost data, estimate tokens if not available
+                    # For now, we'll track cost instead of tokens
+                    pass
 
             # Track per-user data
             user_token_data.append({
                 "user_id": user_usage.get('user_id', 'unknown'),
-                "total_tokens": user_usage.get('total_tokens', 0),
-                "total_cost": user_usage.get('total_cost', 0),
-                "last_used": user_usage.get('last_used', None)
+                "total_tokens": user_tokens,
+                "total_cost": user_cost,
+                "last_used": user_usage.get('updated_at', None)
             })
 
-            # Aggregate by model
-            if 'model_usage' in user_usage:
-                for model, usage in user_usage['model_usage'].items():
+            # Aggregate by model from model_spend
+            if 'model_spend' in user_usage and user_usage['model_spend']:
+                for model, spend_amount in user_usage['model_spend'].items():
                     if model not in tokens_by_model:
                         tokens_by_model[model] = {
                             "tokens": 0,
                             "cost": 0,
                             "requests": 0
                         }
-                    tokens_by_model[model]['tokens'] += usage.get('tokens', 0)
-                    tokens_by_model[model]['cost'] += usage.get('cost', 0)
-                    tokens_by_model[model]['requests'] += usage.get('requests', 0)
+                    # LiteLLM model_spend is just a dict of model: cost
+                    tokens_by_model[model]['cost'] += spend_amount
+                    tokens_by_model[model]['requests'] += 1  # Estimate
 
-        # Sort users by token usage
-        user_token_data.sort(key=lambda x: x['total_tokens'], reverse=True)
+        # Sort users by cost (since we don't have token counts from LiteLLM)
+        user_token_data.sort(key=lambda x: x['total_cost'], reverse=True)
         top_users = user_token_data[:10]  # Top 10 users
 
         # Calculate averages
-        active_users = len([u for u in user_token_data if u['total_tokens'] > 0])
+        active_users = len([u for u in user_token_data if u['total_cost'] > 0])
         avg_tokens_per_user = total_tokens / active_users if active_users > 0 else 0
         avg_cost_per_user = total_cost / active_users if active_users > 0 else 0
 
@@ -425,66 +438,92 @@ async def get_marketplace_metrics(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Get marketplace performance metrics.
+    Get marketplace performance metrics including agents and bases.
     """
     try:
         now = datetime.utcnow()
         start_date = now - timedelta(days=days)
 
-        # Total agents
-        total_agents_query = select(func.count(MarketplaceAgent.id)).where(MarketplaceAgent.is_active == True)
+        # ===== AGENTS METRICS =====
+        # Total agents (official + published community agents)
+        total_agents_query = select(func.count(MarketplaceAgent.id)).where(
+            MarketplaceAgent.is_active == True,
+            (MarketplaceAgent.forked_by_user_id == None) | (MarketplaceAgent.is_published == True)
+        )
         total_agents = await db.scalar(total_agents_query)
 
-        # Total purchases
-        total_purchases_query = select(func.count(UserPurchasedAgent.id))
-        total_purchases = await db.scalar(total_purchases_query)
+        # Total agent purchases
+        total_agent_purchases_query = select(func.count(UserPurchasedAgent.id))
+        total_agent_purchases = await db.scalar(total_agent_purchases_query)
 
-        # Recent purchases
-        recent_purchases_query = select(func.count(UserPurchasedAgent.id)).where(
+        # Recent agent purchases
+        recent_agent_purchases_query = select(func.count(UserPurchasedAgent.id)).where(
             UserPurchasedAgent.purchase_date >= start_date
         )
-        recent_purchases = await db.scalar(recent_purchases_query)
+        recent_agent_purchases = await db.scalar(recent_agent_purchases_query)
 
-        # Revenue calculations
-        # Get all purchased agents with their prices
-        revenue_query = select(UserPurchasedAgent, MarketplaceAgent).join(
+        # Agent revenue calculations
+        agent_revenue_query = select(UserPurchasedAgent, MarketplaceAgent).join(
             MarketplaceAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id
         ).where(UserPurchasedAgent.purchase_date >= start_date)
 
-        result = await db.execute(revenue_query)
-        purchases = result.all()
+        result = await db.execute(agent_revenue_query)
+        agent_purchases = result.all()
 
-        total_revenue = 0
+        agent_revenue = 0
         revenue_by_type = {
             "monthly": 0,
             "one_time": 0,
             "usage": 0
         }
 
-        for purchase, agent in purchases:
+        for purchase, agent in agent_purchases:
             if agent.pricing_type == "monthly":
-                # Monthly subscriptions (count as monthly revenue)
-                total_revenue += agent.price / 100  # Convert from cents
+                agent_revenue += agent.price / 100  # Convert from cents
                 revenue_by_type["monthly"] += agent.price / 100
             elif agent.pricing_type in ["one_time", "usage"]:
-                total_revenue += agent.price / 100
+                agent_revenue += agent.price / 100
                 revenue_by_type["one_time"] += agent.price / 100
 
-        # Popular agents
-        popular_query = select(
+        # Popular agents by purchases
+        popular_agents_query = select(
             MarketplaceAgent.name,
             MarketplaceAgent.slug,
+            MarketplaceAgent.usage_count,
             func.count(UserPurchasedAgent.id).label('purchase_count')
         ).join(
-            UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id
+            UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id, isouter=True
+        ).where(
+            MarketplaceAgent.is_active == True
         ).group_by(MarketplaceAgent.id).order_by(func.count(UserPurchasedAgent.id).desc()).limit(5)
 
-        result = await db.execute(popular_query)
+        result = await db.execute(popular_agents_query)
         popular_agents = [
             {
                 "name": r.name,
                 "slug": r.slug,
-                "purchases": r.purchase_count
+                "purchases": r.purchase_count,
+                "usage_count": r.usage_count or 0
+            }
+            for r in result
+        ]
+
+        # Most used agents (by usage_count - messages sent to agent)
+        most_used_query = select(
+            MarketplaceAgent.name,
+            MarketplaceAgent.slug,
+            MarketplaceAgent.usage_count
+        ).where(
+            MarketplaceAgent.is_active == True,
+            MarketplaceAgent.usage_count > 0
+        ).order_by(MarketplaceAgent.usage_count.desc()).limit(5)
+
+        result = await db.execute(most_used_query)
+        most_used_agents = [
+            {
+                "name": r.name,
+                "slug": r.slug,
+                "usage_count": r.usage_count
             }
             for r in result
         ]
@@ -493,16 +532,77 @@ async def get_marketplace_metrics(
         applied_agents_query = select(func.count(distinct(ProjectAgent.agent_id)))
         applied_agents = await db.scalar(applied_agents_query)
 
-        adoption_rate = (applied_agents / total_agents * 100) if total_agents > 0 else 0
+        agent_adoption_rate = (applied_agents / total_agents * 100) if total_agents > 0 else 0
+
+        # ===== BASES METRICS =====
+        # Total bases
+        total_bases_query = select(func.count(MarketplaceBase.id)).where(MarketplaceBase.is_active == True)
+        total_bases = await db.scalar(total_bases_query)
+
+        # Total base purchases
+        total_base_purchases_query = select(func.count(UserPurchasedBase.id))
+        total_base_purchases = await db.scalar(total_base_purchases_query)
+
+        # Recent base purchases
+        recent_base_purchases_query = select(func.count(UserPurchasedBase.id)).where(
+            UserPurchasedBase.purchase_date >= start_date
+        )
+        recent_base_purchases = await db.scalar(recent_base_purchases_query)
+
+        # Popular bases
+        popular_bases_query = select(
+            MarketplaceBase.name,
+            MarketplaceBase.slug,
+            MarketplaceBase.downloads,
+            func.count(UserPurchasedBase.id).label('purchase_count')
+        ).join(
+            UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id, isouter=True
+        ).where(
+            MarketplaceBase.is_active == True
+        ).group_by(MarketplaceBase.id).order_by(func.count(UserPurchasedBase.id).desc()).limit(5)
+
+        result = await db.execute(popular_bases_query)
+        popular_bases = [
+            {
+                "name": r.name,
+                "slug": r.slug,
+                "purchases": r.purchase_count,
+                "downloads": r.downloads
+            }
+            for r in result
+        ]
+
+        # ===== COMBINED METRICS =====
+        total_revenue = agent_revenue  # Add base revenue when bases have pricing
+        total_purchases = total_agent_purchases + total_base_purchases
+        recent_purchases = recent_agent_purchases + recent_base_purchases
 
         return {
-            "total_agents": total_agents,
+            # Overall metrics
+            "total_items": total_agents + total_bases,
             "total_purchases": total_purchases,
             "recent_purchases": recent_purchases,
             "total_revenue": round(total_revenue, 2),
             "revenue_by_type": revenue_by_type,
-            "popular_agents": popular_agents,
-            "adoption_rate": round(adoption_rate, 2),
+
+            # Agent-specific metrics
+            "agents": {
+                "total": total_agents,
+                "total_purchases": total_agent_purchases,
+                "recent_purchases": recent_agent_purchases,
+                "adoption_rate": round(agent_adoption_rate, 2),
+                "popular": popular_agents,
+                "most_used": most_used_agents
+            },
+
+            # Base-specific metrics
+            "bases": {
+                "total": total_bases,
+                "total_purchases": total_base_purchases,
+                "recent_purchases": recent_base_purchases,
+                "popular": popular_bases
+            },
+
             "period_days": days
         }
 
@@ -554,7 +654,9 @@ async def get_metrics_summary(
                 "avg_per_user": token_metrics["avg_tokens_per_user"]
             },
             "marketplace": {
-                "total_agents": marketplace_metrics["total_agents"],
+                "total_items": marketplace_metrics["total_items"],
+                "total_agents": marketplace_metrics["agents"]["total"],
+                "total_bases": marketplace_metrics["bases"]["total"],
                 "total_revenue": marketplace_metrics["total_revenue"],
                 "recent_purchases": marketplace_metrics["recent_purchases"]
             }

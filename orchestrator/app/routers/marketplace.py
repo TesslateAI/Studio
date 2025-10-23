@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
+from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 import logging
 
@@ -66,7 +67,9 @@ async def get_marketplace_agents(
     Shows official Tesslate agents and published community agents.
     """
     # Base query - show official agents AND published community agents
-    query = select(MarketplaceAgent).where(
+    query = select(MarketplaceAgent).options(
+        selectinload(MarketplaceAgent.forked_by_user)
+    ).where(
         MarketplaceAgent.is_active == True,
         (MarketplaceAgent.forked_by_user_id == None) | (MarketplaceAgent.is_published == True)
     )
@@ -1215,10 +1218,10 @@ async def get_marketplace_bases(
             "tags": base.tags,
             "is_featured": base.is_featured,
             "is_active": base.is_active,
-            "is_forkable": False,
-            "source_type": "closed",
-            "usage_count": base.downloads,
-            "is_purchased": base.id in purchased_base_ids
+            "is_purchased": base.id in purchased_base_ids,
+            "source_type": "open",  # All bases are open source
+            "is_forkable": False,  # Bases can't be forked
+            "usage_count": base.downloads
         })
 
     return {
@@ -1283,10 +1286,10 @@ async def get_base_details(
         "tags": base.tags,
         "is_featured": base.is_featured,
         "is_active": base.is_active,
-        "is_forkable": False,
-        "source_type": "closed",
-        "usage_count": base.downloads,
         "is_purchased": is_purchased,
+        "source_type": "open",
+        "is_forkable": False,
+        "usage_count": base.downloads,
         "reviews": [
             {
                 "id": review.id,

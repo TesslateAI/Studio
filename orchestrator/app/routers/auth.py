@@ -96,7 +96,7 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
     # Auto-login: Create tokens for the new user
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(
-        data={"sub": db_user.username}, expires_delta=access_token_expires
+        data={"sub": db_user.username, "is_admin": db_user.is_admin}, expires_delta=access_token_expires
     )
 
     # Create refresh token
@@ -137,7 +137,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
         # Create access token (short-lived)
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+            data={"sub": user.username, "is_admin": user.is_admin}, expires_delta=access_token_expires
         )
 
         # Create refresh token (long-lived)
@@ -350,7 +350,7 @@ async def refresh_access_token(
         # Create new access token
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+            data={"sub": user.username, "is_admin": user.is_admin}, expires_delta=access_token_expires
         )
 
         # Create new refresh token (rotation)

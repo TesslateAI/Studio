@@ -46,7 +46,9 @@ interface MetricsSummary {
     avg_per_user: number;
   };
   marketplace: {
+    total_items: number;
     total_agents: number;
+    total_bases: number;
     total_revenue: number;
     recent_purchases: number;
   };
@@ -88,11 +90,11 @@ export default function AdminDashboard() {
       return;
     }
 
-    // Decode token to check admin status (you'd normally verify this server-side)
+    // Decode token to check admin status
     try {
       const user = JSON.parse(atob(token.split('.')[1]));
-      // For now, check if username is 'a' (temporary admin check)
-      if (user.sub !== 'a') {
+      // Check if is_admin flag is set in JWT token
+      if (!user.is_admin) {
         toast.error('Admin access required');
         navigate('/');
       }
@@ -350,9 +352,10 @@ export default function AdminDashboard() {
               {renderMetricCard('Token Cost', summary.tokens.total_cost.toFixed(2), undefined, <Coins size={20} />, ' $')}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {renderMetricCard('Marketplace Agents', summary.marketplace.total_agents, undefined, <ShoppingCart size={20} />)}
-              {renderMetricCard('Total Revenue', summary.marketplace.total_revenue.toFixed(2), undefined, <Coins size={20} />, ' $')}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {renderMetricCard('Marketplace Items', summary.marketplace.total_items, undefined, <ShoppingCart size={20} />)}
+              {renderMetricCard('Agents', summary.marketplace.total_agents, undefined, <Users size={20} />)}
+              {renderMetricCard('Bases', summary.marketplace.total_bases, undefined, <Database size={20} />)}
               {renderMetricCard('Recent Purchases', summary.marketplace.recent_purchases, undefined, <TrendingUp size={20} />)}
             </div>
           </>
@@ -367,6 +370,93 @@ export default function AdminDashboard() {
               {renderMetricCard('Retention', detailedMetrics.users.retention_rate, undefined, undefined, '%')}
             </div>
             {renderUserChart()}
+          </div>
+        )}
+
+        {activeTab === 'projects' && detailedMetrics.projects && (
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {renderMetricCard('Total Projects', detailedMetrics.projects.total_projects)}
+              {renderMetricCard('New Projects', detailedMetrics.projects.new_projects)}
+              {renderMetricCard('Avg per User', detailedMetrics.projects.avg_projects_per_user.toFixed(1))}
+              {renderMetricCard('Git Enabled', detailedMetrics.projects.git_enabled_projects)}
+            </div>
+            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+              <h3 className="text-lg font-semibold text-white mb-4">Project Creation Over Time</h3>
+              <div className="h-64 flex items-end space-x-1">
+                {detailedMetrics.projects.daily_projects?.map((d: any, idx: number) => {
+                  const maxCount = Math.max(...detailedMetrics.projects.daily_projects.map((d: any) => d.count), 1);
+                  return (
+                    <div key={idx} className="flex-1 flex flex-col items-center group">
+                      <div
+                        className="w-full bg-blue-500 rounded-t transition-opacity hover:opacity-80"
+                        style={{
+                          height: `${(d.count / maxCount) * 100}%`,
+                          minHeight: d.count > 0 ? '4px' : '2px'
+                        }}
+                        title={`${new Date(d.date).toLocaleDateString()}: ${d.count} projects`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'sessions' && detailedMetrics.sessions && (
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {renderMetricCard('Total Sessions', detailedMetrics.sessions.total_sessions)}
+              {renderMetricCard('Unique Users', detailedMetrics.sessions.unique_users)}
+              {renderMetricCard('Avg per User', detailedMetrics.sessions.avg_sessions_per_user.toFixed(1))}
+              {renderMetricCard('Avg Duration', detailedMetrics.sessions.avg_session_duration.toFixed(0), undefined, undefined, ' min')}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 className="text-lg font-semibold text-white mb-4">Sessions Over Time</h3>
+                <div className="h-64 flex items-end space-x-1">
+                  {detailedMetrics.sessions.daily_sessions?.map((d: any, idx: number) => {
+                    const maxCount = Math.max(...detailedMetrics.sessions.daily_sessions.map((d: any) => d.count), 1);
+                    return (
+                      <div key={idx} className="flex-1 flex flex-col items-center">
+                        <div
+                          className="w-full bg-purple-500 rounded-t"
+                          style={{
+                            height: `${(d.count / maxCount) * 100}%`,
+                            minHeight: d.count > 0 ? '4px' : '2px'
+                          }}
+                          title={`${new Date(d.date).toLocaleDateString()}: ${d.count} sessions`}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 className="text-lg font-semibold text-white mb-4">Session Metrics</h3>
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-gray-400">Avg Messages per Session</span>
+                      <span className="text-white font-medium">{detailedMetrics.sessions.avg_messages_per_session?.toFixed(1) || 0}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-gray-400">Avg Session Duration</span>
+                      <span className="text-white font-medium">{detailedMetrics.sessions.avg_session_duration?.toFixed(0) || 0} min</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-gray-400">Total Sessions</span>
+                      <span className="text-white font-medium">{detailedMetrics.sessions.total_sessions}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -389,6 +479,115 @@ export default function AdminDashboard() {
                       <div className="text-right">
                         <div className="text-white font-medium">{formatNumber(user.total_tokens)}</div>
                         <div className="text-gray-500 text-sm">${user.total_cost.toFixed(2)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'marketplace' && detailedMetrics.marketplace && (
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {renderMetricCard('Total Items', detailedMetrics.marketplace.total_items)}
+              {renderMetricCard('Total Purchases', detailedMetrics.marketplace.total_purchases)}
+              {renderMetricCard('Recent Purchases', detailedMetrics.marketplace.recent_purchases)}
+              {renderMetricCard('Total Revenue', detailedMetrics.marketplace.total_revenue.toFixed(2), undefined, undefined, '$')}
+            </div>
+
+            {/* Agents Section */}
+            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+              <h3 className="text-lg font-semibold text-white mb-4">Agents Marketplace</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div>
+                  <div className="text-gray-400 text-sm">Total Agents</div>
+                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.total || 0}</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 text-sm">Agent Purchases</div>
+                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.total_purchases || 0}</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 text-sm">Adoption Rate</div>
+                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.adoption_rate?.toFixed(1) || 0}%</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 text-sm">Recent Purchases</div>
+                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.agents?.recent_purchases || 0}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-md font-semibold text-white mb-3">Popular Agents (by purchases)</h4>
+                  <div className="space-y-2">
+                    {detailedMetrics.marketplace.agents?.popular?.map((agent: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                        <div>
+                          <div className="text-white font-medium">{agent.name}</div>
+                          <div className="text-gray-400 text-sm">/{agent.slug}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-white font-medium">{agent.purchases} purchases</div>
+                          <div className="text-gray-400 text-sm">{agent.usage_count} uses</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-md font-semibold text-white mb-3">Most Used Agents</h4>
+                  <div className="space-y-2">
+                    {detailedMetrics.marketplace.agents?.most_used && detailedMetrics.marketplace.agents.most_used.length > 0 ? (
+                      detailedMetrics.marketplace.agents.most_used.map((agent: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                          <div>
+                            <div className="text-white font-medium">{agent.name}</div>
+                            <div className="text-gray-400 text-sm">/{agent.slug}</div>
+                          </div>
+                          <div className="text-white font-medium">{agent.usage_count} uses</div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-gray-400 text-sm">No usage data yet</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bases Section */}
+            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+              <h3 className="text-lg font-semibold text-white mb-4">Bases Marketplace</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div>
+                  <div className="text-gray-400 text-sm">Total Bases</div>
+                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.bases?.total || 0}</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 text-sm">Base Purchases</div>
+                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.bases?.total_purchases || 0}</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 text-sm">Recent Purchases</div>
+                  <div className="text-white text-2xl font-bold">{detailedMetrics.marketplace.bases?.recent_purchases || 0}</div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-md font-semibold text-white mb-3">Popular Bases</h4>
+                <div className="space-y-2">
+                  {detailedMetrics.marketplace.bases?.popular?.map((base: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
+                      <div>
+                        <div className="text-white font-medium">{base.name}</div>
+                        <div className="text-gray-400 text-sm">/{base.slug}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-white font-medium">{base.purchases} purchases</div>
+                        <div className="text-gray-400 text-sm">{base.downloads} downloads</div>
                       </div>
                     </div>
                   ))}

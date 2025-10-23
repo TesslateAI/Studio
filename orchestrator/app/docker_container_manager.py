@@ -833,9 +833,17 @@ class DockerContainerManager(BaseContainerManager):
                         final_command = "npm install --silent && npm run dev"
 
             # Add image and startup command
+            # For commands with background processes (&), we need to wrap properly
+            # to ensure the container stays alive
+            if '&' in final_command and not final_command.rstrip().endswith('wait'):
+                # Add wait to keep container alive for background processes
+                wrapped_command = f"{final_command} ; wait"
+            else:
+                wrapped_command = final_command
+
             run_cmd.extend([
                 self.base_image_name,
-                "sh", "-c", final_command
+                "sh", "-c", wrapped_command
             ])
             
             print(f"[DEBUG] Docker run command: {' '.join(run_cmd)}")
