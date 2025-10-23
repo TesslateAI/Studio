@@ -187,6 +187,14 @@ export const projectsApi = {
     });
     return response.data;
   },
+  getSettings: async (id: number) => {
+    const response = await api.get(`/api/projects/${id}/settings`);
+    return response.data;
+  },
+  updateSettings: async (id: number, settings: any) => {
+    const response = await api.patch(`/api/projects/${id}/settings`, { settings });
+    return response.data;
+  },
 };
 
 export const chatApi = {
@@ -426,6 +434,29 @@ export const secretsApi = {
   // List supported providers
   getProviders: async () => {
     const response = await api.get('/api/secrets/providers');
+    return response.data;
+  },
+};
+
+export const usersApi = {
+  // Get user preferences
+  getPreferences: async () => {
+    const response = await api.get('/api/users/preferences');
+    return response.data;
+  },
+
+  // Update user preferences
+  updatePreferences: async (data: { diagram_model?: string }) => {
+    const response = await api.patch('/api/users/preferences', data);
+    return response.data;
+  },
+};
+
+// Add diagram generation to projectsApi
+export const diagramApi = {
+  // Generate architecture diagram for a project
+  generateDiagram: async (projectId: number) => {
+    const response = await api.post(`/api/projects/${projectId}/generate-architecture-diagram`);
     return response.data;
   },
 };

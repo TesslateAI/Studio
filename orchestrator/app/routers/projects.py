@@ -1321,3 +1321,208 @@ async def delete_project(
         await db.rollback()
         logger.error(f"[DELETE] Error during project deletion: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
+
+
+@router.post("/{project_id}/generate-architecture-diagram")
+async def generate_architecture_diagram(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a Mermaid architecture diagram for the project using the user's selected model.
+
+    This endpoint analyzes the project files and generates a Mermaid diagram
+    showing the architecture, component relationships, and data flow.
+    """
+    # Verify project ownership
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check if user has selected a diagram model
+    if not current_user.diagram_model:
+        raise HTTPException(
+            status_code=400,
+            detail="No diagram generation model selected. Please select a model in your Library settings."
+        )
+
+    try:
+        logger.info(f"[DIAGRAM] Generating architecture diagram for project {project_id} using model {current_user.diagram_model}")
+
+        # Get project files from database
+        files_result = await db.execute(
+            select(ProjectFile).where(ProjectFile.project_id == project_id)
+        )
+        project_files = files_result.scalars().all()
+
+        if not project_files:
+            raise HTTPException(status_code=400, detail="Project has no files to analyze")
+
+        # Build a summary of the project structure
+        file_structure = {}
+        for file in project_files:
+            # Skip large files and binary files
+            if len(file.content) > 50000:
+                continue
+            if file.file_path.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf')):
+                continue
+
+            file_structure[file.file_path] = file.content[:5000]  # Limit content to first 5000 chars
+
+        # Create prompt for diagram generation
+        prompt = f"""Analyze this project and generate a Mermaid diagram showing the architecture.
+
+Project Name: {project.name}
+Project Description: {project.description or 'No description'}
+
+Files in the project:
+{chr(10).join(file_structure.keys())}
+
+Key file contents (truncated):
+{chr(10).join([f"--- {path} ---{chr(10)}{content[:500]}" for path, content in list(file_structure.items())[:10]])}
+
+Please generate a Mermaid diagram that shows:
+1. The main components/modules of the application
+2. How they interact with each other
+3. Data flow between components
+4. External dependencies or services if any
+
+Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no explanations or markdown code blocks."""
+
+        # Call LiteLLM to generate the diagram
+        import httpx
+        from ..config import get_settings
+        settings = get_settings()
+
+        # Use the user's LiteLLM API key and selected model
+        if not current_user.litellm_api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="LiteLLM API key not configured for your account"
+            )
+
+        # Use litellm_api_base from settings (same as all other LLM calls)
+        litellm_url = settings.litellm_api_base
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{litellm_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {current_user.litellm_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": current_user.diagram_model,
+                    "messages": [
+                        {"role": "system", "content": "You are an expert software architect. Generate clear, accurate Mermaid diagrams."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "max_tokens": 2000,
+                    "temperature": 0.3
+                }
+            )
+
+        if response.status_code != 200:
+            logger.error(f"[DIAGRAM] LiteLLM API error: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate diagram: {response.text}"
+            )
+
+        result_data = response.json()
+        diagram_code = result_data["choices"][0]["message"]["content"].strip()
+
+        # Clean up the diagram code (remove markdown code blocks if present)
+        if diagram_code.startswith("```mermaid"):
+            diagram_code = diagram_code.replace("```mermaid", "").replace("```", "").strip()
+        elif diagram_code.startswith("```"):
+            diagram_code = diagram_code.replace("```", "").strip()
+
+        # Save diagram to database
+        project.architecture_diagram = diagram_code
+        await db.commit()
+        await db.refresh(project)
+
+        logger.info(f"[DIAGRAM] Successfully generated and saved diagram for project {project_id}")
+
+        return {
+            "diagram": diagram_code,
+            "model_used": current_user.diagram_model,
+            "project_id": project_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[DIAGRAM] Failed to generate diagram: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate diagram: {str(e)}")
+
+
+@router.get("/{project_id}/settings")
+async def get_project_settings(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get project settings."""
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return {
+        "settings": project.settings or {},
+        "architecture_diagram": project.architecture_diagram
+    }
+
+
+@router.patch("/{project_id}/settings")
+async def update_project_settings(
+    project_id: int,
+    settings_data: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update project settings."""
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        # Merge new settings with existing
+        current_settings = project.settings or {}
+        new_settings = settings_data.get('settings', {})
+        current_settings.update(new_settings)
+
+        project.settings = current_settings
+        await db.commit()
+        await db.refresh(project)
+
+        logger.info(f"[SETTINGS] Updated settings for project {project_id}")
+
+        return {
+            "message": "Settings updated successfully",
+            "settings": project.settings
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[SETTINGS] Failed to update settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")

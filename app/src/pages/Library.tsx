@@ -24,7 +24,7 @@ import {
   CheckCircle
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { marketplaceApi, secretsApi } from '../lib/api';
+import { marketplaceApi, secretsApi, usersApi } from '../lib/api';
 import toast from 'react-hot-toast';
 
 interface LibraryAgent {
@@ -427,12 +427,41 @@ function ModelsTab({
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [customModels, setCustomModels] = useState<Model[]>([]);
   const [systemModels, setSystemModels] = useState<Model[]>([]);
+  const [diagramModel, setDiagramModel] = useState<string>('');
+  const [loadingPreferences, setLoadingPreferences] = useState(true);
 
   useEffect(() => {
     // Separate custom and system models
     setCustomModels(models.filter(m => m.source === 'custom'));
     setSystemModels(models.filter(m => m.source !== 'custom'));
   }, [models]);
+
+  useEffect(() => {
+    // Load user preferences
+    loadUserPreferences();
+  }, []);
+
+  const loadUserPreferences = async () => {
+    try {
+      const prefs = await usersApi.getPreferences();
+      setDiagramModel(prefs.diagram_model || '');
+    } catch (error) {
+      console.error('Failed to load preferences:', error);
+    } finally {
+      setLoadingPreferences(false);
+    }
+  };
+
+  const handleDiagramModelChange = async (modelId: string) => {
+    try {
+      await usersApi.updatePreferences({ diagram_model: modelId });
+      setDiagramModel(modelId);
+      toast.success('Diagram generation model updated');
+    } catch (error: any) {
+      console.error('Failed to update diagram model:', error);
+      toast.error(error.response?.data?.detail || 'Failed to update diagram model');
+    }
+  };
 
   const handleDeleteCustomModel = async (modelId: number) => {
     try {
@@ -448,6 +477,59 @@ function ModelsTab({
 
   return (
     <div className="space-y-8">
+      {/* Diagram Model Selection */}
+      <div className="bg-gradient-to-r from-orange-500/10 to-purple-500/10 border border-orange-500/20 rounded-xl p-6">
+        <div className="flex items-start gap-4 mb-4">
+          <div className="p-3 bg-orange-500/20 rounded-lg">
+            <ChartLine size={24} className="text-orange-400" />
+          </div>
+          <div className="flex-1">
+            <h2 className="text-xl font-bold text-[var(--text)] mb-2">Architecture Diagram Generation</h2>
+            <p className="text-[var(--text)]/60 text-sm mb-4">
+              Select which AI model to use for generating architecture diagrams of your projects.
+              This model will analyze your code and create Mermaid diagrams showing component relationships.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-[var(--text)] mb-2">
+            Diagram Generation Model
+          </label>
+          {loadingPreferences ? (
+            <div className="px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)]/40">
+              Loading preferences...
+            </div>
+          ) : (
+            <select
+              value={diagramModel}
+              onChange={(e) => handleDiagramModelChange(e.target.value)}
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 transition-colors"
+            >
+              <option value="">Select a model...</option>
+              {[...systemModels, ...customModels].map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.provider})
+                </option>
+              ))}
+            </select>
+          )}
+          {diagramModel && (
+            <div className="mt-3 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-2">
+              <CheckCircle size={16} className="text-green-400" weight="fill" />
+              <span className="text-xs text-green-400">
+                Diagram generation configured with {models.find(m => m.id === diagramModel)?.name || diagramModel}
+              </span>
+            </div>
+          )}
+          {!diagramModel && !loadingPreferences && (
+            <p className="mt-2 text-xs text-[var(--text)]/40">
+              You must select a model before you can generate architecture diagrams
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Custom Models */}
       {customModels.length > 0 && (
         <div>

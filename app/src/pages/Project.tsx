@@ -25,6 +25,7 @@ import { MobileMenu } from '../components/ui/MobileMenu';
 import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
+import { BrowserPreview } from '../components/BrowserPreview';
 import {
   GitHubPanel,
   ArchitecturePanel,
@@ -59,6 +60,7 @@ export default function Project() {
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
+  const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
   const projectId = parseInt(id!);
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -68,7 +70,18 @@ export default function Project() {
     loadProject();
     loadDevServerUrl();
     loadAgents();
+    loadSettings();
   }, [projectId]);
+
+  const loadSettings = async () => {
+    try {
+      const data = await projectsApi.getSettings(projectId);
+      const settings = data.settings || {};
+      setPreviewMode(settings.preview_mode || 'normal');
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -393,55 +406,67 @@ export default function Project() {
           {/* Preview View */}
           <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
             {devServerUrl ? (
-              <>
-                {/* Browser-style chrome */}
-                <div className="bg-[var(--surface)] border-b border-white/10 p-3 flex items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500" />
-                    <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                    <div className="w-3 h-3 rounded-full bg-green-500" />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={navigateBack}
-                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                      title="Go back"
-                    >
-                      <CaretLeft size={18} weight="bold" />
-                    </button>
-                    <button
-                      onClick={navigateForward}
-                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                      title="Go forward"
-                    >
-                      <CaretRight size={18} weight="bold" />
-                    </button>
-                  </div>
-                  <div className="flex-1">
-                    <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
-                      <span className="text-yellow-500 mr-2">🔒</span>
-                      <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
+              previewMode === 'browser-tabs' ? (
+                <BrowserPreview
+                  devServerUrl={devServerUrl}
+                  devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
+                  currentPreviewUrl={currentPreviewUrl}
+                  onNavigateBack={navigateBack}
+                  onNavigateForward={navigateForward}
+                  onRefresh={refreshPreview}
+                  onUrlChange={setCurrentPreviewUrl}
+                />
+              ) : (
+                <>
+                  {/* Browser-style chrome */}
+                  <div className="bg-[var(--surface)] border-b border-white/10 p-3 flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-red-500" />
+                      <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                      <div className="w-3 h-3 rounded-full bg-green-500" />
                     </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={navigateBack}
+                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        title="Go back"
+                      >
+                        <CaretLeft size={18} weight="bold" />
+                      </button>
+                      <button
+                        onClick={navigateForward}
+                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        title="Go forward"
+                      >
+                        <CaretRight size={18} weight="bold" />
+                      </button>
+                    </div>
+                    <div className="flex-1">
+                      <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
+                        <span className="text-yellow-500 mr-2">🔒</span>
+                        <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={refreshPreview}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                      title="Refresh"
+                    >
+                      <ArrowsClockwise size={16} />
+                    </button>
                   </div>
-                  <button
-                    onClick={refreshPreview}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                    title="Refresh"
-                  >
-                    <ArrowsClockwise size={16} />
-                  </button>
-                </div>
-                {/* Preview iframe */}
-                <div className="w-full h-[calc(100%-50px)] bg-white">
-                  <iframe
-                    ref={iframeRef}
-                    id="preview-iframe"
-                    src={devServerUrlWithAuth || devServerUrl}
-                    className="w-full h-full"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-                  />
-                </div>
-              </>
+                  {/* Preview iframe */}
+                  <div className="w-full h-[calc(100%-50px)] bg-white">
+                    <iframe
+                      ref={iframeRef}
+                      id="preview-iframe"
+                      src={devServerUrlWithAuth || devServerUrl}
+                      className="w-full h-full"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                    />
+                  </div>
+                </>
+              )
             ) : (
               <div className="h-full flex items-center justify-center text-[var(--text)]/60">
                 <LoadingSpinner message="Starting development server..." size={60} />
@@ -475,6 +500,8 @@ export default function Project() {
         icon={<GitBranch size={20} />}
         isOpen={activePanel === 'architecture'}
         onClose={() => setActivePanel(null)}
+        defaultSize={{ width: 900, height: 700 }}
+        defaultPosition={{ x: 200, y: 100 }}
       >
         <ArchitecturePanel projectId={projectId} />
       </FloatingPanel>

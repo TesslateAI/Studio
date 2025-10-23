@@ -20,6 +20,7 @@ class User(Base):
     stripe_customer_id = Column(String, nullable=True)
     total_spend = Column(Integer, default=0)  # In cents for precision
     credits_balance = Column(Integer, default=0)  # In cents
+    diagram_model = Column(String, nullable=True)  # Selected model for architecture diagram generation
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -58,6 +59,8 @@ class Project(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     has_git_repo = Column(Boolean, default=False)
     git_remote_url = Column(String(500), nullable=True)
+    architecture_diagram = Column(Text, nullable=True)  # Stored Mermaid diagram
+    settings = Column(JSON, nullable=True)  # Project settings: preview_mode, etc.
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
