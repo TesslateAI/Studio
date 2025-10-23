@@ -410,6 +410,31 @@ class LiteLLMService:
                 logger.error(f"Error revoking user key: {e}")
                 return False
 
+    async def get_available_models(self) -> List[Dict[str, Any]]:
+        """
+        Get list of available models from LiteLLM.
+
+        Returns:
+            List of model objects with id, object, created, owned_by
+        """
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(
+                    f"{self.management_base_url}/models",
+                    headers=self.headers
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        logger.error(f"Failed to get models: {error_text}")
+                        return []
+
+                    data = await resp.json()
+                    return data.get('data', [])
+
+            except Exception as e:
+                logger.error(f"Error getting available models: {e}")
+                return []
+
 
 # Singleton instance
 litellm_service = LiteLLMService()

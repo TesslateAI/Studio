@@ -32,6 +32,7 @@ class User(Base):
     purchased_agents = relationship("UserPurchasedAgent", back_populates="user", cascade="all, delete-orphan")
     agent_reviews = relationship("AgentReview", back_populates="user", cascade="all, delete-orphan")
     purchased_bases = relationship("UserPurchasedBase", back_populates="user", cascade="all, delete-orphan")
+    api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
 
 
 class RefreshToken(Base):
@@ -434,3 +435,24 @@ class BaseReview(Base):
     # Relationships
     base = relationship("MarketplaceBase", back_populates="reviews")
     user = relationship("User")
+
+
+class UserAPIKey(Base):
+    """Stores user API keys and OAuth tokens for various providers."""
+    __tablename__ = "user_api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    provider = Column(String, nullable=False)  # openrouter, anthropic, openai, google, github, etc.
+    auth_type = Column(String, nullable=False, default="api_key")  # api_key, oauth_token, bearer_token, personal_access_token
+    key_name = Column(String, nullable=True)  # Optional name for the key
+    encrypted_value = Column(Text, nullable=False)  # The actual key/token (should be encrypted)
+    provider_metadata = Column(JSON, default={})  # Provider-specific: refresh_token, scopes, token_type, etc.
+    is_active = Column(Boolean, default=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="api_keys")

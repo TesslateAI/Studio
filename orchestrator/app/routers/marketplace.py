@@ -32,18 +32,120 @@ settings = get_settings()
 
 @router.get("/models")
 async def get_available_models(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Get list of available models from LITELLM_DEFAULT_MODELS configuration.
+    Get list of available models from LiteLLM with pricing information.
+    Includes both system models and models from user's configured providers.
     Returns models that users can select for open source agents.
     """
-    models_str = settings.litellm_default_models
-    models = [model.strip() for model in models_str.split(",") if model.strip()]
+    from ..services.litellm_service import litellm_service
+    from ..models import UserAPIKey
+
+    # Get models from LiteLLM
+    litellm_models = await litellm_service.get_available_models()
+
+    # Model pricing database (approximate, in USD per 1M tokens)
+    # These are typical costs - actual costs may vary
+    model_pricing = {
+        # OpenAI
+        "gpt-4": {"input": 30.0, "output": 60.0},
+        "gpt-4-turbo": {"input": 10.0, "output": 30.0},
+        "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+
+        # Anthropic
+        "claude-3-opus": {"input": 15.0, "output": 75.0},
+        "claude-3-sonnet": {"input": 3.0, "output": 15.0},
+        "claude-3-haiku": {"input": 0.25, "output": 1.25},
+
+        # Open source / self-hosted
+        "llama-3.3": {"input": 0.0, "output": 0.0},
+        "qwen": {"input": 0.0, "output": 0.0},
+        "default": {"input": 2.0, "output": 6.0}  # Default for unknown models
+    }
+
+    def get_model_pricing(model_id: str):
+        """Get pricing for a model based on ID"""
+        model_lower = model_id.lower()
+        for key, price in model_pricing.items():
+            if key in model_lower:
+                return price
+        return model_pricing["default"]
+
+    # Convert LiteLLM models to response format with pricing
+    system_models = [
+        {
+            "id": model.get('id'),
+            "name": model.get('id'),
+            "source": "system",
+            "provider": "internal",
+            "pricing": get_model_pricing(model.get('id', '')),
+            "available": True
+        }
+        for model in litellm_models if model.get('id')
+    ]
+
+    # Check which providers the user has API keys for
+    user_keys_query = select(UserAPIKey).where(
+        UserAPIKey.user_id == current_user.id,
+        UserAPIKey.is_active == True
+    )
+    result = await db.execute(user_keys_query)
+    user_keys = result.scalars().all()
+
+    # Map of providers user has keys for
+    user_providers = {key.provider for key in user_keys}
+
+    # Add information about available external providers
+    external_providers = [
+        {
+            "provider": "openrouter",
+            "name": "OpenRouter",
+            "description": "Access 200+ models through OpenRouter",
+            "has_key": "openrouter" in user_providers,
+            "setup_required": "openrouter" not in user_providers,
+            "models_count": "200+"
+        },
+        {
+            "provider": "anthropic",
+            "name": "Anthropic",
+            "description": "Claude models directly from Anthropic",
+            "has_key": "anthropic" in user_providers,
+            "setup_required": "anthropic" not in user_providers,
+            "models_count": "5+"
+        },
+        {
+            "provider": "openai",
+            "name": "OpenAI",
+            "description": "GPT models directly from OpenAI",
+            "has_key": "openai" in user_providers,
+            "setup_required": "openai" not in user_providers,
+            "models_count": "10+"
+        }
+    ]
+
+    # Fallback to config if LiteLLM call fails
+    if not system_models:
+        models_str = settings.litellm_default_models
+        system_models = [
+            {
+                "id": m.strip(),
+                "name": m.strip(),
+                "source": "system",
+                "provider": "internal",
+                "pricing": get_model_pricing(m.strip()),
+                "available": True
+            }
+            for m in models_str.split(",") if m.strip()
+        ]
 
     return {
-        "models": models,
-        "default": models[0] if models else None
+        "models": system_models,
+        "default": system_models[0]["id"] if system_models else None,
+        "count": len(system_models),
+        "external_providers": external_providers,
+        "user_providers": list(user_providers)
     }
 
 
