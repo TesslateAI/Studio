@@ -280,6 +280,18 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  // Get available models from LITELLM_DEFAULT_MODELS
+  getAvailableModels: async () => {
+    const response = await api.get('/api/marketplace/models');
+    return response.data;
+  },
+
+  // Select a model for an agent in user's library
+  selectAgentModel: async (agentId: number, model: string) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/select-model`, { model });
+    return response.data;
+  },
+
   // Publish agent to community marketplace
   publishAgent: async (agentId: number) => {
     const response = await api.post(`/api/marketplace/agents/${agentId}/publish`);

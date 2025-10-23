@@ -21,6 +21,30 @@ from ..schemas import MarketplaceAgentResponse, AgentPurchaseRequest
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+from ..config import get_settings
+settings = get_settings()
+
+
+# ============================================================================
+# Models Configuration
+# ============================================================================
+
+@router.get("/models")
+async def get_available_models(
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get list of available models from LITELLM_DEFAULT_MODELS configuration.
+    Returns models that users can select for open source agents.
+    """
+    models_str = settings.litellm_default_models
+    models = [model.strip() for model in models_str.split(",") if model.strip()]
+
+    return {
+        "models": models,
+        "default": models[0] if models else None
+    }
+
 
 # ============================================================================
 # Browse Marketplace
@@ -629,6 +653,7 @@ async def get_user_agents(
             "mode": agent.mode,
             "agent_type": agent.agent_type,  # StreamAgent, IterativeAgent, etc.
             "model": agent.model,
+            "selected_model": purchase.selected_model,  # User's model override
             "source_type": agent.source_type,
             "is_forkable": agent.is_forkable,
             "system_prompt": agent.system_prompt,  # Include for editing
@@ -678,6 +703,57 @@ async def toggle_agent(
         "message": f"Agent {'enabled' if enabled else 'disabled'} successfully",
         "agent_id": agent_id,
         "enabled": enabled,
+        "success": True
+    }
+
+
+@router.post("/agents/{agent_id}/select-model")
+async def select_agent_model(
+    agent_id: int,
+    model: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Set the user's selected model for an agent in their library.
+    Only works for open source agents.
+    """
+    # Get the agent
+    agent_result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+    )
+    agent = agent_result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Check if agent is open source or custom
+    if agent.source_type != 'open' and agent.forked_by_user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Model selection is only available for open source agents"
+        )
+
+    # Find the purchase record
+    result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == agent_id
+        )
+    )
+    purchase = result.scalar_one_or_none()
+
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Agent not in your library")
+
+    # Update selected model
+    purchase.selected_model = model
+    await db.commit()
+
+    return {
+        "message": "Model selection updated successfully",
+        "agent_id": agent_id,
+        "selected_model": model,
         "success": True
     }
 

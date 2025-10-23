@@ -319,6 +319,7 @@ class UserPurchasedAgent(Base):
     stripe_subscription_id = Column(String, nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)  # For subscriptions
     is_active = Column(Boolean, default=True)
+    selected_model = Column(String, nullable=True)  # User's model override for open source agents
 
     # Relationships
     user = relationship("User", back_populates="purchased_agents")

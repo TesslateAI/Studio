@@ -27,6 +27,7 @@ interface LibraryAgent {
   mode: string;
   agent_type: string;
   model: string;
+  selected_model?: string | null;
   source_type: 'open' | 'closed';
   is_forkable: boolean;
   icon: string;
@@ -48,10 +49,21 @@ export default function Library() {
   const [agents, setAgents] = useState<LibraryAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   useEffect(() => {
     loadLibraryAgents();
+    loadAvailableModels();
   }, []);
+
+  const loadAvailableModels = async () => {
+    try {
+      const data = await marketplaceApi.getAvailableModels();
+      setAvailableModels(data.models || []);
+    } catch (error) {
+      console.error('Failed to load available models:', error);
+    }
+  };
 
   const loadLibraryAgents = async () => {
     try {
@@ -94,6 +106,17 @@ export default function Library() {
     } catch (error: any) {
       console.error('Publish toggle failed:', error);
       toast.error(error.response?.data?.detail || 'Failed to toggle publish status');
+    }
+  };
+
+  const handleModelChange = async (agent: LibraryAgent, model: string) => {
+    try {
+      await marketplaceApi.selectAgentModel(agent.id, model);
+      toast.success('Model updated successfully');
+      loadLibraryAgents(); // Reload to update state
+    } catch (error: any) {
+      console.error('Model change failed:', error);
+      toast.error(error.response?.data?.detail || 'Failed to change model');
     }
   };
 
@@ -162,9 +185,11 @@ export default function Library() {
             <AgentCard
               key={agent.id}
               agent={agent}
+              availableModels={availableModels}
               onToggleEnable={() => handleToggleEnable(agent)}
               onEdit={() => handleEditAgent(agent)}
               onTogglePublish={() => handleTogglePublish(agent)}
+              onModelChange={(model) => handleModelChange(agent, model)}
             />
           ))}
         </div>
@@ -187,6 +212,7 @@ export default function Library() {
       {editingAgent && (
         <EditAgentModal
           agent={editingAgent}
+          availableModels={availableModels}
           onClose={() => setEditingAgent(null)}
           onSave={async (updatedData) => {
             try {
@@ -212,16 +238,22 @@ export default function Library() {
 // Agent Card Component
 function AgentCard({
   agent,
+  availableModels,
   onToggleEnable,
   onEdit,
-  onTogglePublish
+  onTogglePublish,
+  onModelChange
 }: {
   agent: LibraryAgent;
+  availableModels: string[];
   onToggleEnable: () => void;
   onEdit: () => void;
   onTogglePublish: () => void;
+  onModelChange: (model: string) => void;
 }) {
   const canEdit = agent.source_type === 'open' || agent.is_custom;
+  const canChangeModel = agent.source_type === 'open' || agent.is_custom;
+  const currentModel = agent.selected_model || agent.model;
 
   return (
     <div className="bg-[var(--surface)] border border-white/10 rounded-xl p-6 hover:border-orange-500/30 transition-all">
@@ -274,7 +306,7 @@ function AgentCard({
       <div className="mb-4">
         <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg w-fit">
           <Cpu size={14} className="text-blue-400" />
-          <span className="text-xs text-blue-400 font-medium">{agent.model}</span>
+          <span className="text-xs text-blue-400 font-medium">{currentModel}</span>
         </div>
       </div>
 
@@ -356,17 +388,20 @@ function AgentCard({
 // Edit Agent Modal Component
 function EditAgentModal({
   agent,
+  availableModels,
   onClose,
   onSave
 }: {
   agent: LibraryAgent;
+  availableModels: string[];
   onClose: () => void;
   onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string }) => void;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description);
   const [systemPrompt, setSystemPrompt] = useState(agent.system_prompt || '');
-  const [model, setModel] = useState(agent.model);
+  const currentModel = agent.selected_model || agent.model;
+  const [model, setModel] = useState(currentModel);
   const [originalPrompt, setOriginalPrompt] = useState(agent.system_prompt || '');
   const [loading, setLoading] = useState(false);
 
@@ -455,10 +490,24 @@ function EditAgentModal({
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)] [&>option]:py-2"
               disabled={agent.source_type !== 'open' && !agent.is_custom}
             >
-              <option value="cerebras/qwen-3-coder-480b">Cerebras Qwen 3 Coder (480B)</option>
+              {availableModels.length > 0 ? (
+                availableModels.map((modelName) => (
+                  <option
+                    key={modelName}
+                    value={modelName}
+                    className="bg-[var(--surface)] text-[var(--text)] py-2"
+                  >
+                    {modelName}
+                  </option>
+                ))
+              ) : (
+                <option value={model} className="bg-[var(--surface)] text-[var(--text)] py-2">
+                  {model}
+                </option>
+              )}
             </select>
             {agent.source_type !== 'open' && !agent.is_custom && (
               <p className="mt-1 text-xs text-[var(--text)]/40">

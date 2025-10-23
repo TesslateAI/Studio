@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
-from ..models import User, Chat, Message, Project, ProjectFile, MarketplaceAgent
+from ..models import User, Chat, Message, Project, ProjectFile, MarketplaceAgent, UserPurchasedAgent
 from ..schemas import (
     Chat as ChatSchema, Message as MessageSchema, MessageCreate,
     AgentChatRequest, AgentChatResponse, AgentStepResponse
@@ -408,10 +408,23 @@ async def agent_chat(
                 detail="User does not have a LiteLLM API key. Please contact support."
             )
 
+        # 2.5. Get user's selected model override (if any)
+        user_purchase_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.agent_id == agent_model.id
+            )
+        )
+        user_purchase = user_purchase_result.scalar_one_or_none()
+
+        # Use user's selected model if available, otherwise use agent's default model
+        model_name = (user_purchase.selected_model if user_purchase and user_purchase.selected_model
+                     else agent_model.model or settings.litellm_default_models.split(",")[0])
+
+        logger.info(f"[HTTP-AGENT] Using model: {model_name}")
+
         # 3. Create model adapter for IterativeAgent
         logger.info(f"[HTTP-AGENT] Creating model adapter")
-        # Use agent's configured model or fallback to first default model
-        model_name = agent_model.model or settings.litellm_default_models.split(",")[0]
         model_adapter = create_model_adapter(
             model_name=model_name,
             api_key=current_user.litellm_api_key,
@@ -926,17 +939,30 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     try:
         logger.info(f"[UNIFIED-CHAT] Creating agent instance via factory")
 
+        # Get user's selected model override (if any)
+        user_purchase_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == user.id,
+                UserPurchasedAgent.agent_id == agent_model.id
+            )
+        )
+        user_purchase = user_purchase_result.scalar_one_or_none()
+
+        # Use user's selected model if available, otherwise use agent's default model
+        model_name = (user_purchase.selected_model if user_purchase and user_purchase.selected_model
+                     else agent_model.model or settings.litellm_default_models.split(",")[0])
+
+        logger.info(f"[UNIFIED-CHAT] Using model: {model_name}")
+
         # For IterativeAgent, we need to create a model adapter
         model_adapter = None
         if agent_model.agent_type == "IterativeAgent":
-            # Use agent's configured model or fallback to first default model
-            model_name = agent_model.model or settings.litellm_default_models.split(",")[0]
             model_adapter = create_model_adapter(
                 model_name=model_name,
                 api_key=user.litellm_api_key,
                 api_base=settings.litellm_api_base
             )
-            logger.info(f"[UNIFIED-CHAT] Created model adapter for IterativeAgent with model: {model_name}")
+            logger.info(f"[UNIFIED-CHAT] Created model adapter for IterativeAgent")
 
         # Create the agent
         agent_instance = await create_agent_from_db_model(
@@ -965,8 +991,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'db': db,
         'project_context_str': project_context_str,
         'has_existing_files': has_existing_files,
-        # Use agent's configured model or fallback to first default model
-        'model': agent_model.model or settings.litellm_default_models.split(",")[0],
+        'model': model_name,  # Use the resolved model name (user's selection or agent's default)
         'api_base': settings.litellm_api_base
     }
 
