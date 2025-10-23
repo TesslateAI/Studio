@@ -740,11 +740,31 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     # Handle heartbeat ping
     if data.get("type") == "ping":
         await websocket.send_json({"type": "pong"})
+
+        # Track activity on heartbeat to keep container alive
+        project_id = data.get("project_id")
+        if project_id:
+            try:
+                from ..dev_server_manager import get_container_manager
+                container_manager = get_container_manager()
+                container_manager.track_activity(user.id, str(project_id))
+            except Exception as e:
+                logger.debug(f"Could not track heartbeat activity: {e}")
+
         return
 
     message_content = data.get("message")
     project_id = data.get("project_id")
     agent_id = data.get("agent_id")  # Get agent_id from request
+
+    # Track activity when user sends a message
+    if project_id:
+        try:
+            from ..dev_server_manager import get_container_manager
+            container_manager = get_container_manager()
+            container_manager.track_activity(user.id, str(project_id))
+        except Exception as e:
+            logger.debug(f"Could not track message activity: {e}")
 
     try:
         # Get or create chat for this user and project

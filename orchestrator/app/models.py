@@ -33,6 +33,7 @@ class User(Base):
     agent_reviews = relationship("AgentReview", back_populates="user", cascade="all, delete-orphan")
     purchased_bases = relationship("UserPurchasedBase", back_populates="user", cascade="all, delete-orphan")
     api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
+    custom_models = relationship("UserCustomModel", back_populates="user", cascade="all, delete-orphan")
 
 
 class RefreshToken(Base):
@@ -456,3 +457,22 @@ class UserAPIKey(Base):
 
     # Relationships
     user = relationship("User", back_populates="api_keys")
+
+
+class UserCustomModel(Base):
+    """Stores user-added custom OpenRouter models."""
+    __tablename__ = "user_custom_models"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    model_id = Column(String, nullable=False)  # e.g., "openrouter/model-name"
+    model_name = Column(String, nullable=False)  # Display name
+    provider = Column(String, nullable=False, default="openrouter")
+    pricing_input = Column(Float, nullable=True)  # Cost per 1M input tokens
+    pricing_output = Column(Float, nullable=True)  # Cost per 1M output tokens
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="custom_models")

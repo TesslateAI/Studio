@@ -41,7 +41,7 @@ async def get_available_models(
     Returns models that users can select for open source agents.
     """
     from ..services.litellm_service import litellm_service
-    from ..models import UserAPIKey
+    from ..models import UserAPIKey, UserCustomModel
 
     # Get models from LiteLLM
     litellm_models = await litellm_service.get_available_models()
@@ -97,6 +97,31 @@ async def get_available_models(
     # Map of providers user has keys for
     user_providers = {key.provider for key in user_keys}
 
+    # Get user's custom models
+    custom_models_query = select(UserCustomModel).where(
+        UserCustomModel.user_id == current_user.id,
+        UserCustomModel.is_active == True
+    )
+    result = await db.execute(custom_models_query)
+    custom_models = result.scalars().all()
+
+    # Convert custom models to response format
+    custom_models_data = [
+        {
+            "id": model.model_id,
+            "name": model.model_name,
+            "source": "custom",
+            "provider": model.provider,
+            "pricing": {
+                "input": model.pricing_input or 0.0,
+                "output": model.pricing_output or 0.0
+            },
+            "available": True,
+            "custom_id": model.id
+        }
+        for model in custom_models
+    ]
+
     # Add information about available external providers
     external_providers = [
         {
@@ -106,22 +131,6 @@ async def get_available_models(
             "has_key": "openrouter" in user_providers,
             "setup_required": "openrouter" not in user_providers,
             "models_count": "200+"
-        },
-        {
-            "provider": "anthropic",
-            "name": "Anthropic",
-            "description": "Claude models directly from Anthropic",
-            "has_key": "anthropic" in user_providers,
-            "setup_required": "anthropic" not in user_providers,
-            "models_count": "5+"
-        },
-        {
-            "provider": "openai",
-            "name": "OpenAI",
-            "description": "GPT models directly from OpenAI",
-            "has_key": "openai" in user_providers,
-            "setup_required": "openai" not in user_providers,
-            "models_count": "10+"
         }
     ]
 
@@ -140,12 +149,104 @@ async def get_available_models(
             for m in models_str.split(",") if m.strip()
         ]
 
+    # Combine system models and custom models
+    all_models = system_models + custom_models_data
+
     return {
-        "models": system_models,
+        "models": all_models,
         "default": system_models[0]["id"] if system_models else None,
-        "count": len(system_models),
+        "count": len(all_models),
         "external_providers": external_providers,
-        "user_providers": list(user_providers)
+        "user_providers": list(user_providers),
+        "custom_models": custom_models_data
+    }
+
+
+@router.post("/models/custom")
+async def add_custom_model(
+    model_id: str,
+    model_name: str,
+    pricing_input: Optional[float] = None,
+    pricing_output: Optional[float] = None,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Add a custom OpenRouter model to the user's account.
+    """
+    from ..models import UserCustomModel
+
+    # Check if model already exists for this user
+    existing_query = select(UserCustomModel).where(
+        UserCustomModel.user_id == current_user.id,
+        UserCustomModel.model_id == model_id,
+        UserCustomModel.is_active == True
+    )
+    result = await db.execute(existing_query)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Model already exists in your library")
+
+    # Create new custom model
+    custom_model = UserCustomModel(
+        user_id=current_user.id,
+        model_id=model_id,
+        model_name=model_name,
+        provider="openrouter",
+        pricing_input=pricing_input,
+        pricing_output=pricing_output
+    )
+
+    db.add(custom_model)
+    await db.commit()
+    await db.refresh(custom_model)
+
+    return {
+        "message": "Custom model added successfully",
+        "model": {
+            "id": custom_model.model_id,
+            "name": custom_model.model_name,
+            "source": "custom",
+            "provider": custom_model.provider,
+            "pricing": {
+                "input": custom_model.pricing_input or 0.0,
+                "output": custom_model.pricing_output or 0.0
+            },
+            "custom_id": custom_model.id
+        }
+    }
+
+
+@router.delete("/models/custom/{model_id}")
+async def delete_custom_model(
+    model_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a custom model from the user's account.
+    """
+    from ..models import UserCustomModel
+
+    # Find the model
+    query = select(UserCustomModel).where(
+        UserCustomModel.id == model_id,
+        UserCustomModel.user_id == current_user.id
+    )
+    result = await db.execute(query)
+    model = result.scalar_one_or_none()
+
+    if not model:
+        raise HTTPException(status_code=404, detail="Custom model not found")
+
+    # Soft delete
+    model.is_active = False
+    await db.commit()
+
+    return {
+        "message": "Custom model deleted successfully",
+        "success": True
     }
 
 

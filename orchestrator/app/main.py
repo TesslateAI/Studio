@@ -116,6 +116,27 @@ async def shell_session_cleanup_loop():
         await asyncio.sleep(300)
 
 
+async def container_cleanup_loop():
+    """Background task to clean up idle project containers."""
+    import asyncio
+    from .dev_server_manager import get_container_manager
+
+    logger.info("Container cleanup task started - will shutdown idle containers after 5 minutes")
+
+    while True:
+        try:
+            container_manager = get_container_manager()
+            # Clean up containers idle for 5 minutes
+            cleaned = await container_manager.cleanup_idle_environments(idle_timeout_minutes=5)
+            if cleaned:
+                logger.info(f"Auto-shutdown {len(cleaned)} idle project containers: {', '.join(cleaned)}")
+        except Exception as e:
+            logger.error(f"Container cleanup error: {e}", exc_info=True)
+
+        # Run every 2 minutes to check for idle containers
+        await asyncio.sleep(120)
+
+
 # Add security headers middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -202,8 +223,9 @@ async def startup():
     # Seed default agents if they don't exist
     await seed_default_agents()
 
-    # Start background cleanup task for idle shell sessions
+    # Start background cleanup tasks
     asyncio.create_task(shell_session_cleanup_loop())
+    asyncio.create_task(container_cleanup_loop())
 
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods

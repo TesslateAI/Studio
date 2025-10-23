@@ -280,6 +280,11 @@ export default function Dashboard() {
       onClick: () => navigate('/marketplace')
     },
     {
+      icon: <ShoppingCart className="w-5 h-5" weight="fill" />,
+      title: 'Library',
+      onClick: () => navigate('/library')
+    },
+    {
       icon: <Package className="w-5 h-5" weight="fill" />,
       title: 'Components',
       onClick: () => toast('Components library coming soon!')

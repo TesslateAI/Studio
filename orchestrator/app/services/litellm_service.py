@@ -50,14 +50,14 @@ class LiteLLMService:
         Args:
             user_id: Internal user ID
             username: Username for identification
-            models: List of allowed models (default: all available models)
+            models: List of allowed models (default: inherit from team, allowing all team models)
 
         Returns:
             Dictionary containing the API key and user details
         """
-        if models is None:
-            # Use default models from configuration
-            models = self.default_models if self.default_models else []
+        # For internal team users, don't restrict models - let team configuration handle it
+        # This allows access to all internal team models
+        # If you want to restrict specific users, pass a models list explicitly
 
         # Generate unique user ID for LiteLLM
         litellm_user_id = f"user_{user_id}_{username}"
@@ -101,7 +101,6 @@ class LiteLLMService:
                 key_data = {
                     "user_id": litellm_user_id,
                     "key_alias": f"{username}_key_{timestamp}",
-                    "models": models,
                     "team_id": self.team_id,  # Access group from configuration
                     "max_budget": self.initial_budget,  # Initial budget from configuration
                     "duration": "365d",  # Key valid for 1 year
@@ -110,6 +109,11 @@ class LiteLLMService:
                         "username": username
                     }
                 }
+
+                # Only add models restriction if explicitly provided
+                # For internal team users, omit this to inherit all team models
+                if models is not None:
+                    key_data["models"] = models
 
                 async with session.post(
                     f"{self.management_base_url}/key/generate",
@@ -152,7 +156,7 @@ class LiteLLMService:
                 return {
                     "api_key": key_response.get("key"),
                     "litellm_user_id": litellm_user_id,
-                    "models": models,
+                    "models": models if models is not None else "inherited_from_team",
                     "budget": key_data["max_budget"]
                 }
 

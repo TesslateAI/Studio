@@ -292,6 +292,23 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  // Add custom OpenRouter model
+  addCustomModel: async (data: {
+    model_id: string;
+    model_name: string;
+    pricing_input?: number;
+    pricing_output?: number;
+  }) => {
+    const response = await api.post('/api/marketplace/models/custom', data);
+    return response.data;
+  },
+
+  // Delete custom model
+  deleteCustomModel: async (modelId: number) => {
+    const response = await api.delete(`/api/marketplace/models/custom/${modelId}`);
+    return response.data;
+  },
+
   // Publish agent to community marketplace
   publishAgent: async (agentId: number) => {
     const response = await api.post(`/api/marketplace/agents/${agentId}/publish`);
@@ -360,6 +377,55 @@ export const agentsApi = {
   },
   delete: async (id: number) => {
     const response = await api.delete(`/api/agents/${id}`);
+    return response.data;
+  },
+};
+
+export const secretsApi = {
+  // List all API keys
+  listApiKeys: async (provider?: string) => {
+    const params = provider ? `?provider=${provider}` : '';
+    const response = await api.get(`/api/secrets/api-keys${params}`);
+    return response.data;
+  },
+
+  // Add new API key
+  addApiKey: async (data: {
+    provider: string;
+    api_key: string;
+    key_name?: string;
+    auth_type?: string;
+    provider_metadata?: any;
+  }) => {
+    const response = await api.post('/api/secrets/api-keys', data);
+    return response.data;
+  },
+
+  // Update API key
+  updateApiKey: async (keyId: number, data: {
+    api_key?: string;
+    key_name?: string;
+    provider_metadata?: any;
+  }) => {
+    const response = await api.put(`/api/secrets/api-keys/${keyId}`, data);
+    return response.data;
+  },
+
+  // Delete API key
+  deleteApiKey: async (keyId: number) => {
+    const response = await api.delete(`/api/secrets/api-keys/${keyId}`);
+    return response.data;
+  },
+
+  // Get specific API key with optional reveal
+  getApiKey: async (keyId: number, reveal: boolean = false) => {
+    const response = await api.get(`/api/secrets/api-keys/${keyId}?reveal=${reveal}`);
+    return response.data;
+  },
+
+  // List supported providers
+  getProviders: async () => {
+    const response = await api.get('/api/secrets/providers');
     return response.data;
   },
 };

@@ -148,7 +148,7 @@ export function ChatContainer({
       heartbeatTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            ws.send(JSON.stringify({ type: 'ping' }));
+            ws.send(JSON.stringify({ type: 'ping', project_id: projectId }));
             console.log('[WS] Heartbeat ping sent');
           } catch (error) {
             console.error('[WS] Heartbeat error:', error);

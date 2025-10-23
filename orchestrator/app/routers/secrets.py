@@ -268,24 +268,6 @@ async def list_supported_providers(
             "supports_oauth": False
         },
         {
-            "id": "anthropic",
-            "name": "Anthropic",
-            "description": "Claude AI models",
-            "auth_type": "api_key",
-            "website": "https://www.anthropic.com",
-            "requires_key": True,
-            "supports_oauth": False
-        },
-        {
-            "id": "openai",
-            "name": "OpenAI",
-            "description": "GPT models",
-            "auth_type": "api_key",
-            "website": "https://platform.openai.com",
-            "requires_key": True,
-            "supports_oauth": False
-        },
-        {
             "id": "google",
             "name": "Google Cloud",
             "description": "Gemini and other Google AI models",

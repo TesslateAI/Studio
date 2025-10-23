@@ -1134,6 +1134,15 @@ async def save_project_file(
                     f.write(content)
 
                 logger.info(f"[FILE] ✅ Wrote {file_path} to filesystem for user {current_user.id}, project {project_id}")
+
+                # Track activity to keep container alive
+                try:
+                    from ..dev_server_manager import get_container_manager
+                    container_manager = get_container_manager()
+                    container_manager.track_activity(current_user.id, str(project_id))
+                except Exception as e:
+                    logger.debug(f"Could not track file save activity: {e}")
+
             except Exception as docker_error:
                 logger.warning(f"[FILE] ⚠️ Failed to write to filesystem: {docker_error}")
 
