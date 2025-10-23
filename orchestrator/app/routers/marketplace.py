@@ -3,7 +3,7 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -916,7 +916,7 @@ async def toggle_agent(
 @router.post("/agents/{agent_id}/select-model")
 async def select_agent_model(
     agent_id: int,
-    model: str,
+    model: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
