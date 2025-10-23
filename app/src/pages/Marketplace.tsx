@@ -290,152 +290,88 @@ export default function Marketplace() {
     <div className="min-h-screen bg-[var(--background)]">
       {/* Header */}
       <div className="border-b border-white/10 bg-[var(--surface)]">
-        <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-[var(--text)] mb-2">Marketplace</h1>
-              <p className="text-[var(--text)]/60">Discover agents, bases, tools, and integrations for your projects</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => navigate('/library')}
-                className="px-4 py-2 bg-purple-500 hover:bg-purple-600 rounded-lg text-white transition-colors flex items-center gap-2"
-              >
-                <Package size={18} />
-                My Library
-              </button>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors flex items-center gap-2"
-              >
-                <Sparkle size={18} />
-                Create Agent
-              </button>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors"
-              >
-                Back to Dashboard
-              </button>
-            </div>
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="text-2xl font-bold text-[var(--text)]">Tesslate Marketplace</h1>
+            <button
+              onClick={() => navigate('/library')}
+              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors text-sm"
+            >
+              Library
+            </button>
           </div>
 
-          {/* Item Type Tabs */}
-          <div className="flex items-center gap-2 mb-6 p-1 bg-white/5 rounded-lg overflow-x-auto">
-            {itemTypes.map(type => (
-              <button
-                key={type.id}
-                onClick={() => {
-                  setSelectedItemType(type.id);
-                  setSelectedCategory('all'); // Reset category when changing type
-                }}
-                className={`flex items-center gap-2 px-6 py-3 rounded-lg transition-all whitespace-nowrap ${
-                  selectedItemType === type.id
-                    ? 'bg-orange-500 text-white'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)]'
-                }`}
-              >
-                {type.icon}
-                <span className="font-medium">{type.name}</span>
-              </button>
-            ))}
+          {/* Main Title Section */}
+          <div className="text-center mb-8">
+            <h2 className="text-3xl font-bold text-[var(--text)] mb-2">
+              Discover Free, Community-Made AI Tools!
+            </h2>
           </div>
 
           {/* Search Bar */}
-          <div className="relative mb-6">
+          <div className="relative mb-8 max-w-2xl mx-auto">
             <MagnifyingGlass className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text)]/40" size={20} />
             <input
               type="text"
-              placeholder={`Search ${itemTypes.find(t => t.id === selectedItemType)?.name.toLowerCase()} by name, category, or tags...`}
+              placeholder="Search agents by name, category, or tags..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:border-orange-500/50"
+              className="w-full pl-12 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:border-orange-500/50"
             />
           </div>
 
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Category Tabs */}
-            <div className="flex items-center gap-2 p-1 bg-white/5 rounded-lg">
+          {/* Filter Section */}
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <FunnelSimple size={18} className="text-[var(--text)]/60" />
+              <span className="text-sm font-medium text-[var(--text)]/80">Filter by</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Agents Category */}
+              <div className="text-sm font-medium text-[var(--text)]/80">Agents</div>
+
+              {/* Category Pills */}
               {categories.map(category => (
                 <button
                   key={category.id}
                   onClick={() => setSelectedCategory(category.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                  className={`px-3 py-1.5 rounded-full text-sm transition-all ${
                     selectedCategory === category.id
-                      ? 'bg-orange-500 text-white'
-                      : 'text-[var(--text)]/60 hover:text-[var(--text)]'
+                      ? 'bg-[#C0C0C0] text-black font-medium'
+                      : 'bg-[#C0C0C0]/20 text-[var(--text)]/70 hover:bg-[#C0C0C0]/30'
                   }`}
                 >
-                  {category.icon}
-                  <span className="text-sm font-medium">{category.name}</span>
+                  {category.name}
                 </button>
               ))}
-            </div>
 
-            {/* Creator Type Filter */}
-            <div className="flex items-center gap-2 p-1 bg-white/5 rounded-lg">
+              {/* Source Type Pills */}
               <button
-                onClick={() => setSelectedCreatorType('all')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
-                  selectedCreatorType === 'all'
-                    ? 'bg-orange-500 text-white'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)]'
+                onClick={() => setSelectedCreatorType(selectedCreatorType === 'open' ? 'all' : 'open')}
+                className={`px-3 py-1.5 rounded-full text-sm transition-all ${
+                  selectedCreatorType === 'open'
+                    ? 'bg-[#C0C0C0] text-black font-medium'
+                    : 'bg-[#C0C0C0]/20 text-[var(--text)]/70 hover:bg-[#C0C0C0]/30'
                 }`}
               >
-                <Globe size={16} />
-                <span className="text-sm font-medium">All</span>
+                Builder
               </button>
               <button
-                onClick={() => setSelectedCreatorType('official')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
-                  selectedCreatorType === 'official'
-                    ? 'bg-orange-500 text-white'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)]'
+                onClick={() => setSelectedPricing(selectedPricing === 'free' ? 'all' : 'free')}
+                className={`px-3 py-1.5 rounded-full text-sm transition-all ${
+                  selectedPricing === 'free'
+                    ? 'bg-[#C0C0C0] text-black font-medium'
+                    : 'bg-[#C0C0C0]/20 text-[var(--text)]/70 hover:bg-[#C0C0C0]/30'
                 }`}
               >
-                <Sparkle size={16} />
-                <span className="text-sm font-medium">Official</span>
+                Frontend
               </button>
               <button
-                onClick={() => setSelectedCreatorType('community')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
-                  selectedCreatorType === 'community'
-                    ? 'bg-orange-500 text-white'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)]'
-                }`}
+                className="px-3 py-1.5 rounded-full text-sm bg-[#C0C0C0]/20 text-[var(--text)]/70 hover:bg-[#C0C0C0]/30 transition-all"
               >
-                <Users size={16} />
-                <span className="text-sm font-medium">Community</span>
+                Data & AI
               </button>
-            </div>
-
-            {/* Pricing Filter */}
-            <select
-              value={selectedPricing}
-              onChange={(e) => setSelectedPricing(e.target.value)}
-              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
-            >
-              {pricingOptions.map(option => (
-                <option key={option.id} value={option.id}>{option.name}</option>
-              ))}
-            </select>
-
-            {/* Sort */}
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
-            >
-              <option value="featured">Featured</option>
-              <option value="popular">Most Popular</option>
-              <option value="rating">Highest Rated</option>
-              <option value="price_asc">Price: Low to High</option>
-              <option value="price_desc">Price: High to Low</option>
-            </select>
-
-            <div className="ml-auto text-sm text-[var(--text)]/60">
-              {filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'} found
             </div>
           </div>
         </div>
@@ -443,17 +379,53 @@ export default function Marketplace() {
 
       {/* Items Grid */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredItems.map(item => (
-            <ItemCard
-              key={item.id}
-              item={item}
-              onPurchase={() => handlePurchase(item)}
-              onFork={() => handleFork(item)}
-              onViewDetails={() => setShowItemDetail(item)}
-            />
-          ))}
-        </div>
+        {/* Featured Agents Section */}
+        {filteredItems.filter(item => item.is_featured).length > 0 && (
+          <div className="mb-12">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-[var(--text)]">Featured Agents</h3>
+              <button className="text-sm text-[var(--text)]/60 hover:text-[var(--text)] flex items-center gap-1">
+                View all
+                <span>→</span>
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {filteredItems.filter(item => item.is_featured).slice(0, 4).map(item => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  onPurchase={() => handlePurchase(item)}
+                  onFork={() => handleFork(item)}
+                  onViewDetails={() => setShowItemDetail(item)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Open Source Agents Section */}
+        {filteredItems.filter(item => item.source_type === 'open').length > 0 && (
+          <div className="mb-12">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-[var(--text)]">Open Source Agents</h3>
+              <button className="text-sm text-[var(--text)]/60 hover:text-[var(--text)] flex items-center gap-1">
+                View all
+                <span>→</span>
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {filteredItems.filter(item => item.source_type === 'open' && !item.is_featured).slice(0, 4).map(item => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  onPurchase={() => handlePurchase(item)}
+                  onFork={() => handleFork(item)}
+                  onViewDetails={() => setShowItemDetail(item)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {filteredItems.length === 0 && (
           <div className="text-center py-16">
@@ -506,138 +478,88 @@ function ItemCard({ item, onPurchase, onFork, onViewDetails }: {
   onViewDetails: () => void;
 }) {
   return (
-    <div className={`bg-[var(--surface)] rounded-xl p-6 border transition-all group ${
+    <div className={`bg-[var(--surface)] rounded-xl p-5 border transition-all group relative ${
       item.is_active
-        ? 'border-white/10 hover:border-orange-500/30'
+        ? 'border-white/10 hover:border-orange-500/30 hover:shadow-lg'
         : 'border-white/5 opacity-60'
     }`}>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="text-3xl">{item.icon}</div>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-semibold text-[var(--text)] group-hover:text-orange-400 transition-colors">
-                {item.name}
-              </h3>
-              {!item.is_active && (
-                <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">
-                  Coming Soon
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs text-[var(--text)]/60">
-                <svg width="12" height="12" viewBox="0 0 162 127" fill="currentColor" className="text-orange-500">
-                  <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"/>
-                  <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"/>
-                  <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"/>
-                </svg>
-                <span className="capitalize">{item.category}</span>
-                <span className="text-[var(--text)]/40">by {item.creator_name || 'Tesslate'}</span>
-              </span>
-              {item.source_type === 'open' ? (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
-                  <LockSimpleOpen size={10} />
-                  Open Source
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">
-                  <LockKey size={10} />
-                  Pro
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-        {item.is_featured && (
-          <span className="px-2 py-1 bg-orange-500/20 text-orange-400 text-xs rounded-full">
-            Featured
+      {/* Badge - Top Right Corner */}
+      <div className="absolute top-3 right-3">
+        {item.source_type === 'open' ? (
+          <span className="px-2.5 py-1 bg-white/10 text-white text-xs rounded-md font-medium">
+            Open Source
+          </span>
+        ) : (
+          <span className="px-2.5 py-1 bg-white/5 text-white/60 text-xs rounded-md font-medium">
+            Closed Source
           </span>
         )}
       </div>
 
-      {/* Model Badge (for agents only) */}
-      {item.item_type === 'agent' && item.model && (
-        <div className="mb-3 flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-          <Cpu size={14} className="text-blue-400" />
-          <span className="text-xs text-blue-400 font-medium">{item.model.replace('cerebras/', '')}</span>
-        </div>
-      )}
+      {/* Icon - Large, centered placeholder */}
+      <div className="w-full h-32 bg-[#808080] rounded-lg mb-4 flex items-center justify-center">
+        <div className="text-5xl opacity-50">{item.icon}</div>
+      </div>
+
+      {/* Agent Name */}
+      <h3 className="font-bold text-[var(--text)] mb-2 text-lg group-hover:text-orange-400 transition-colors pr-20">
+        {item.name}
+      </h3>
 
       {/* Description */}
-      <p className="text-sm text-[var(--text)]/80 mb-4 line-clamp-2">{item.description}</p>
+      <p className="text-sm text-[var(--text)]/70 mb-4 line-clamp-2 min-h-[40px]">
+        {item.description}
+      </p>
 
-      {/* Features */}
+      {/* Tags */}
       <div className="flex flex-wrap gap-2 mb-4">
-        {item.features?.slice(0, 3).map((feature, idx) => (
+        {item.tags?.slice(0, 3).map((tag, idx) => (
           <span
             key={idx}
-            className="px-2 py-1 bg-white/5 rounded-lg text-xs text-[var(--text)]/70"
+            className="px-2 py-0.5 bg-white/5 rounded text-xs text-[var(--text)]/60"
           >
-            {feature}
+            {tag}
           </span>
         ))}
-        {item.features?.length > 3 && (
-          <span className="px-2 py-1 text-xs text-[var(--text)]/50">
-            +{item.features.length - 3} more
-          </span>
-        )}
       </div>
 
-      {/* Stats */}
-      <div className="flex items-center gap-4 mb-4 text-xs text-[var(--text)]/60">
-        <span className="flex items-center gap-1">
-          <Lightning size={12} weight="fill" className="text-orange-400" />
-          {item.usage_count || 0} uses
-        </span>
-        {item.item_type === 'agent' && item.mode && (
-          <span className="ml-auto capitalize">{item.mode} mode</span>
-        )}
-      </div>
+      {/* Bottom Section */}
+      <div className="flex items-center justify-between pt-4 border-t border-white/10">
+        {/* Price/Type */}
+        <div className="text-sm font-semibold text-[var(--text)]">
+          {item.pricing_type === 'free' ? 'Price' : `$${item.price}`}
+        </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={onViewDetails}
-          className="flex-1 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-[var(--text)]/80 transition-colors"
-        >
-          View Details
-        </button>
-        {item.is_purchased ? (
+        {/* Action Buttons */}
+        <div className="flex gap-2">
           <button
-            disabled
-            className="flex-1 py-2 bg-green-500/20 text-green-400 rounded-lg text-sm flex items-center justify-center gap-2"
+            onClick={onViewDetails}
+            className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-md text-xs text-[var(--text)]/80 transition-colors"
           >
-            <Check size={16} weight="bold" />
-            In Library
+            View Details
           </button>
-        ) : (
-          <button
-            onClick={onPurchase}
-            disabled={!item.is_active}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-              item.is_active
-                ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                : 'bg-white/5 text-[var(--text)]/40 cursor-not-allowed'
-            }`}
-          >
-            <ShoppingCart size={16} />
-            {item.is_active
-              ? (item.pricing_type === 'free' ? 'Add Free' : `$${item.price}/mo`)
-              : 'Soon'
-            }
-          </button>
-        )}
-        {item.is_forkable && item.is_active && (
-          <button
-            onClick={onFork}
-            className="py-2 px-3 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400 rounded-lg text-sm transition-colors flex items-center gap-2"
-            title="Fork and customize this agent"
-          >
-            <GitFork size={16} />
-          </button>
-        )}
+          {item.is_purchased ? (
+            <button
+              disabled
+              className="px-3 py-1.5 bg-green-500/20 text-green-400 rounded-md text-xs flex items-center gap-1.5"
+            >
+              <Check size={14} weight="bold" />
+              Installed
+            </button>
+          ) : (
+            <button
+              onClick={onPurchase}
+              disabled={!item.is_active}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                item.is_active
+                  ? 'bg-white/90 hover:bg-white text-black'
+                  : 'bg-white/5 text-[var(--text)]/40 cursor-not-allowed'
+              }`}
+            >
+              {item.is_active ? 'Install' : 'Soon'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

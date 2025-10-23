@@ -564,6 +564,14 @@ async def agent_chat(
                 content=request.message
             )
             db.add(user_message)
+
+            # Increment usage_count for the agent
+            if agent_model:
+                agent_model.usage_count = (agent_model.usage_count or 0) + 1
+                db.add(agent_model)
+                logger.info(f"[USAGE-TRACKING] Incremented usage_count for agent {agent_model.name} to {agent_model.usage_count}")
+
+            await db.commit()
         except Exception as e:
             await db.rollback()
             logger.error(f"Database error during chat history setup: {e}", exc_info=True)
@@ -839,6 +847,17 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             f"[UNIFIED-CHAT] Using agent: {agent_model.name} "
             f"(type: {agent_model.agent_type}, slug: {agent_model.slug})"
         )
+
+        # Increment usage_count for the agent
+        try:
+            agent_model.usage_count = (agent_model.usage_count or 0) + 1
+            db.add(agent_model)
+            await db.commit()
+            logger.info(f"[USAGE-TRACKING] Incremented usage_count for agent {agent_model.name} to {agent_model.usage_count}")
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"[USAGE-TRACKING] Failed to increment usage_count: {e}")
+            # Continue anyway - this is not critical
 
         # 2. Build project context
         project_context_str = ""

@@ -95,6 +95,84 @@ Format your thoughts clearly and use tools strategically.""",
         "is_featured": True,
         "is_active": True,
         "tools": None  # Uses all tools
+    },
+    {
+        "name": "React Component Builder",
+        "slug": "react-component-builder",
+        "description": "Specialized in creating beautiful, reusable React components",
+        "long_description": "Build production-ready React components with TypeScript, proper prop types, and comprehensive documentation. Perfect for component library development.",
+        "category": "frontend",
+        "system_prompt": """You are an expert React component developer specializing in creating reusable, well-documented components.
+
+Your approach:
+- Always use TypeScript for type safety
+- Include comprehensive JSDoc comments
+- Follow React best practices (hooks, composition, etc.)
+- Create accessible components (ARIA labels, keyboard navigation)
+- Include usage examples in comments
+- Use semantic HTML
+- Implement proper error boundaries where needed
+
+Style with Tailwind CSS using utility classes. Make components customizable through props.""",
+        "mode": "stream",
+        "agent_type": "StreamAgent",
+        "model": "cerebras/qwen-3-coder-480b",
+        "icon": "⚛️",
+        "preview_image": None,
+        "pricing_type": "free",
+        "price": 0,
+        "source_type": "open",
+        "is_forkable": True,
+        "requires_user_keys": False,
+        "features": ["TypeScript support", "Accessible components", "JSDoc documentation", "Tailwind styling"],
+        "required_models": ["gpt-4", "claude-3", "cerebras/llama"],
+        "tags": ["react", "components", "typescript", "accessibility", "open-source"],
+        "is_featured": False,
+        "is_active": True,
+        "tools": None
+    },
+    {
+        "name": "API Integration Agent",
+        "slug": "api-integration-agent",
+        "description": "Build robust API integrations with error handling and type safety",
+        "long_description": "Specializes in creating API clients, handling authentication, implementing retry logic, and managing API state. Includes proper error handling and TypeScript types.",
+        "category": "fullstack",
+        "system_prompt": """You are an expert at building API integrations and data fetching logic.
+
+Your expertise includes:
+- RESTful API client implementation
+- GraphQL query/mutation handling
+- Authentication (JWT, OAuth, API keys)
+- Error handling and retry logic
+- Request/response type definitions
+- Caching strategies
+- Loading and error states
+- Request cancellation
+
+Always:
+1. Use TypeScript for request/response types
+2. Implement comprehensive error handling
+3. Add request/response logging for debugging
+4. Include timeout and retry logic
+5. Document API endpoints and parameters
+6. Use modern fetch/axios patterns
+7. Handle edge cases (network errors, timeouts, etc.)""",
+        "mode": "agent",
+        "agent_type": "IterativeAgent",
+        "model": "cerebras/qwen-3-coder-480b",
+        "icon": "🔌",
+        "preview_image": None,
+        "pricing_type": "free",
+        "price": 0,
+        "source_type": "open",
+        "is_forkable": True,
+        "requires_user_keys": False,
+        "features": ["REST & GraphQL", "Error handling", "Type safety", "Auth support", "Retry logic"],
+        "required_models": ["gpt-4", "claude-3", "cerebras/llama"],
+        "tags": ["api", "integration", "typescript", "error-handling", "open-source"],
+        "is_featured": False,
+        "is_active": True,
+        "tools": None
     }
 ]
 
