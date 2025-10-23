@@ -87,7 +87,9 @@ class StreamAgent(AbstractAgent):
             logger.info(f"[StreamAgent] Starting stream for user {user.id}, project {project_id}")
 
             # Stream the response
-            model = context.get('model', settings.openai_model)
+            # Use model from context or fallback to first default model
+            model = context.get('model') or settings.litellm_default_models.split(",")[0]
+            logger.info(f"[StreamAgent] Using model: {model}")
             stream = await client.chat.completions.create(
                 model=model,
                 messages=messages,

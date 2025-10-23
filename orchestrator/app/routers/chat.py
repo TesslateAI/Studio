@@ -410,8 +410,10 @@ async def agent_chat(
 
         # 3. Create model adapter for IterativeAgent
         logger.info(f"[HTTP-AGENT] Creating model adapter")
+        # Use agent's configured model or fallback to first default model
+        model_name = agent_model.model or settings.litellm_default_models.split(",")[0]
         model_adapter = create_model_adapter(
-            model_name=settings.openai_model,
+            model_name=model_name,
             api_key=current_user.litellm_api_key,
             api_base=settings.litellm_api_base
         )
@@ -927,12 +929,14 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         # For IterativeAgent, we need to create a model adapter
         model_adapter = None
         if agent_model.agent_type == "IterativeAgent":
+            # Use agent's configured model or fallback to first default model
+            model_name = agent_model.model or settings.litellm_default_models.split(",")[0]
             model_adapter = create_model_adapter(
-                model_name=settings.openai_model,
+                model_name=model_name,
                 api_key=user.litellm_api_key,
                 api_base=settings.litellm_api_base
             )
-            logger.info(f"[UNIFIED-CHAT] Created model adapter for IterativeAgent")
+            logger.info(f"[UNIFIED-CHAT] Created model adapter for IterativeAgent with model: {model_name}")
 
         # Create the agent
         agent_instance = await create_agent_from_db_model(
@@ -961,7 +965,8 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'db': db,
         'project_context_str': project_context_str,
         'has_existing_files': has_existing_files,
-        'model': settings.openai_model,
+        # Use agent's configured model or fallback to first default model
+        'model': agent_model.model or settings.litellm_default_models.split(",")[0],
         'api_base': settings.litellm_api_base
     }
 

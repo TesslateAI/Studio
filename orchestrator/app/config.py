@@ -8,10 +8,6 @@ class Settings(BaseSettings):
     # Database - PostgreSQL required
     database_url: str
 
-    # AI Configuration - points to LiteLLM proxy
-    openai_api_base: str = ""  # This will be the LiteLLM proxy URL
-    openai_model: str = ""  # Model to use via LiteLLM
-
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""

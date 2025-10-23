@@ -77,8 +77,6 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
       - DEPLOYMENT_MODE=docker
-      - OPENAI_API_BASE=${OPENAI_API_BASE}
-      - OPENAI_MODEL=${OPENAI_MODEL}
       - LITELLM_API_BASE=${LITELLM_API_BASE}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
       - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS}
