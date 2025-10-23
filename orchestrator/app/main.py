@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from .database import engine, Base
-from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users
+from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban
 from .config import get_settings
 import os
 import logging
@@ -244,6 +244,7 @@ app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(shell.router, prefix="/api/shell", tags=["shell"])
 app.include_router(secrets.router, prefix="/api/secrets", tags=["secrets"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
+app.include_router(kanban.router, tags=["kanban"])
 
 @app.get("/")
 async def root():

@@ -4,3 +4,4 @@ export { NotesPanel } from './NotesPanel';
 export { SettingsPanel } from './SettingsPanel';
 export { MarketplacePanel } from './MarketplacePanel';
 export { AssetsPanel } from './AssetsPanel';
+export { KanbanPanel } from './KanbanPanel';

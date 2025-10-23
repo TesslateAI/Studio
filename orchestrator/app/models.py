@@ -3,6 +3,9 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
 
+# Import kanban models so they're included in Base.metadata
+from .models_kanban import KanbanBoard, KanbanColumn, KanbanTask, KanbanTaskComment, ProjectNote
+
 class User(Base):
     __tablename__ = "users"
 

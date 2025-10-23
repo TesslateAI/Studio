@@ -17,7 +17,9 @@ import {
   Gear,
   Rocket,
   ShareNetwork,
-  ArrowsClockwise
+  ArrowsClockwise,
+  Kanban,
+  FlowArrow
 } from '@phosphor-icons/react';
 import { FloatingSidebar } from '../components/ui/FloatingSidebar';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
@@ -31,7 +33,8 @@ import {
   ArchitecturePanel,
   NotesPanel,
   SettingsPanel,
-  AssetsPanel
+  AssetsPanel,
+  KanbanPanel
 } from '../components/panels';
 import CodeEditor from '../components/CodeEditor';
 import { projectsApi, marketplaceApi } from '../lib/api';
@@ -39,6 +42,7 @@ import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
 
 type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | 'assets' | null;
+type MainViewType = 'preview' | 'code' | 'kanban';
 
 interface UIAgent {
   id: string;
@@ -55,7 +59,7 @@ export default function Project() {
   const [project, setProject] = useState<any>(null);
   const [files, setFiles] = useState<any[]>([]);
   const [agents, setAgents] = useState<UIAgent[]>([]);
-  const [activeView, setActiveView] = useState<'preview' | 'code'>('preview');
+  const [activeView, setActiveView] = useState<MainViewType>('preview');
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
@@ -300,6 +304,12 @@ export default function Project() {
       active: activeView === 'code'
     },
     {
+      icon: <Kanban size={20} />,
+      title: 'Kanban Board',
+      onClick: () => setActiveView('kanban'),
+      active: activeView === 'kanban'
+    },
+    {
       icon: <Folder size={20} />,
       title: 'Files',
       onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
@@ -310,16 +320,10 @@ export default function Project() {
       onClick: () => toast('Components library coming soon!', { icon: '🧩' })
     },
     {
-      icon: <GitBranch size={20} />,
+      icon: <FlowArrow size={20} />,
       title: 'Architecture',
       onClick: () => togglePanel('architecture'),
       active: activePanel === 'architecture'
-    },
-    {
-      icon: <BookOpen size={20} />,
-      title: 'Notes & Tasks',
-      onClick: () => togglePanel('notes'),
-      active: activePanel === 'notes'
     }
   ];
 
@@ -328,6 +332,12 @@ export default function Project() {
       icon: theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />,
       title: 'Toggle Theme',
       onClick: toggleTheme
+    },
+    {
+      icon: <BookOpen size={20} />,
+      title: 'Notes',
+      onClick: () => togglePanel('notes'),
+      active: activePanel === 'notes'
     },
     {
       icon: <GitBranch size={20} />,
@@ -482,6 +492,11 @@ export default function Project() {
               onFileUpdate={handleFileUpdate}
             />
           </div>
+
+          {/* Kanban View */}
+          <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+            <KanbanPanel projectId={projectId} />
+          </div>
         </div>
       </div>
 
@@ -497,7 +512,7 @@ export default function Project() {
 
       <FloatingPanel
         title="Architecture"
-        icon={<GitBranch size={20} />}
+        icon={<FlowArrow size={20} />}
         isOpen={activePanel === 'architecture'}
         onClose={() => setActivePanel(null)}
         defaultSize={{ width: 900, height: 700 }}
