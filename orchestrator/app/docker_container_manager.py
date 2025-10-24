@@ -954,13 +954,23 @@ class DockerContainerManager(BaseContainerManager):
         
         if not container_info:
             print(f"[WARN] No container found to stop for user {user_id}, project {project_id}")
-            # Also try to force stop any containers with matching name pattern
-            container_name = self._get_container_name(user_id or 0, project_id)
-            print(f"[DEBUG] Attempting force cleanup of container: {container_name}")
+            # Try to find any running containers matching this project by labels
             try:
-                subprocess.run(["docker", "stop", container_name], capture_output=True, timeout=10)
-                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=10)
-                print(f"[OK] Force cleaned up container: {container_name}")
+                result = subprocess.run(
+                    ["docker", "ps", "-a", "--filter", f"label=com.tesslate.devserver.project_id={project_id}",
+                     "--filter", f"label=com.tesslate.devserver.user_id={user_id}", "--format", "{{.Names}}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    container_name = result.stdout.strip().split('\n')[0]
+                    print(f"[DEBUG] Found container by labels: {container_name}")
+                    subprocess.run(["docker", "stop", container_name], capture_output=True, timeout=10)
+                    subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=10)
+                    print(f"[OK] Force cleaned up container: {container_name}")
+                else:
+                    print(f"[DEBUG] No matching container found by labels")
             except Exception as e:
                 print(f"[DEBUG] Force cleanup failed: {e}")
             return
@@ -1193,7 +1203,8 @@ class DockerContainerManager(BaseContainerManager):
         user_id: int,
         project_id: str,
         command: List[str],
-        timeout: int = 120
+        timeout: int = 120,
+        project_slug: str = None
     ) -> str:
         """
         Execute a command inside a user's development container.
@@ -1203,6 +1214,7 @@ class DockerContainerManager(BaseContainerManager):
             project_id: Project ID
             command: Command to execute (as list, e.g., ["/bin/sh", "-c", "git status"])
             timeout: Timeout in seconds
+            project_slug: Project slug (optional, for slug-based container naming)
 
         Returns:
             Command output (stdout + stderr combined)
@@ -1210,8 +1222,18 @@ class DockerContainerManager(BaseContainerManager):
         Raises:
             RuntimeError: If command execution fails or container not found
         """
-        # Get container name
-        container_name = self._get_container_name(user_id, project_id)
+        # Get container name - try to find it from tracking dict first
+        project_key = self._get_project_key(user_id, project_id)
+        container_info = self.containers.get(project_key)
+
+        if container_info:
+            container_name = container_info["container_name"]
+        elif project_slug:
+            # Use slug-based naming
+            container_name = self._get_container_name(user_id, project_id, project_slug)
+        else:
+            # Fallback to old ID-based naming (backwards compatibility)
+            container_name = self._get_container_name(user_id, project_id)
 
         # Build docker exec command
         exec_cmd = ["docker", "exec", container_name] + command

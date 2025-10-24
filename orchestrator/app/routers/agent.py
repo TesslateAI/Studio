@@ -216,10 +216,30 @@ async def execute_command(
                     success = True
                     exit_code = 0
                 else:
-                    # Docker mode - execute command in container
-                    import subprocess
-                    container_name = f"builder-dev-user{current_user.id}-project{request.project_id}"
+                    # Docker mode - execute command in container using container manager
+                    from ..dev_server_manager import get_container_manager
+                    container_manager = get_container_manager()
 
+                    # Get container name using slug
+                    project_key = f"user-{current_user.id}-project-{request.project_id}"
+                    container_info = container_manager.containers.get(project_key)
+
+                    if not container_info:
+                        # Try to find by labels as fallback
+                        import subprocess as sp
+                        result = sp.run(
+                            ["docker", "ps", "--filter", f"label=com.tesslate.devserver.project_id={request.project_id}",
+                             "--filter", f"label=com.tesslate.devserver.user_id={current_user.id}", "--format", "{{.Names}}"],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            container_name = result.stdout.strip().split('\n')[0]
+                        else:
+                            raise Exception(f"Container not found for project {request.project_id}")
+                    else:
+                        container_name = container_info["container_name"]
+
+                    import subprocess
                     docker_cmd = [
                         "docker", "exec",
                         "-w", f"/app/{request.working_dir}" if request.working_dir != "." else "/app",
