@@ -25,6 +25,7 @@ import {
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { DiscordSupport } from '../components/DiscordSupport';
+import { ConfirmDialog } from '../components/modals';
 import { marketplaceApi, secretsApi, usersApi } from '../lib/api';
 import toast from 'react-hot-toast';
 
@@ -379,19 +380,29 @@ function AgentsTab({
   onReload: () => void;
 }) {
   const navigate = useNavigate();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [agentToDelete, setAgentToDelete] = useState<LibraryAgent | null>(null);
 
-  const handleRemove = async (agent: LibraryAgent) => {
-    if (!confirm(`Remove "${agent.name}" from your library? This cannot be undone.`)) {
-      return;
-    }
+  const handleRemove = (agent: LibraryAgent) => {
+    setAgentToDelete(agent);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmRemoveAgent = async () => {
+    if (!agentToDelete) return;
+
+    setShowDeleteDialog(false);
+    const removingToast = toast.loading(`Removing ${agentToDelete.name}...`);
 
     try {
-      await marketplaceApi.removeFromLibrary(agent.id);
-      toast.success(`${agent.name} removed from library`);
+      await marketplaceApi.removeFromLibrary(agentToDelete.id);
+      toast.success(`${agentToDelete.name} removed from library`, { id: removingToast });
       onReload();
     } catch (error) {
       console.error('Remove failed:', error);
-      toast.error('Failed to remove agent from library');
+      toast.error('Failed to remove agent from library', { id: removingToast });
+    } finally {
+      setAgentToDelete(null);
     }
   };
 
@@ -447,6 +458,21 @@ function AgentsTab({
           />
         ))}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteDialog}
+        onClose={() => {
+          setShowDeleteDialog(false);
+          setAgentToDelete(null);
+        }}
+        onConfirm={confirmRemoveAgent}
+        title="Remove Agent"
+        message={`Remove "${agentToDelete?.name}" from your library? This cannot be undone.`}
+        confirmText="Remove"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </>
   );
 }

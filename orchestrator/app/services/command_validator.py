@@ -271,9 +271,9 @@ class CommandValidator:
         # Ensure working_dir is safe (prevent directory traversal)
         safe_working_dir = working_dir.replace("..", "").strip("/")
         if not safe_working_dir or safe_working_dir == ".":
-            full_path = "/app/project"
+            full_path = "/app"
         else:
-            full_path = f"/app/project/{safe_working_dir}"
+            full_path = f"/app/{safe_working_dir}"
 
         # Return command wrapped in shell with cd
         return ["/bin/sh", "-c", f"cd {shlex.quote(full_path)} && {command}"]

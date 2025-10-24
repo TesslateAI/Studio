@@ -912,6 +912,49 @@ async def toggle_agent(
     }
 
 
+@router.delete("/agents/{agent_id}/library")
+async def remove_agent_from_library(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Remove an agent from user's library (delete purchase record).
+    """
+    # Find the purchase record
+    result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == agent_id
+        )
+    )
+    purchase = result.scalar_one_or_none()
+
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Agent not in your library")
+
+    # Check if agent is assigned to any projects
+    project_assignments_result = await db.execute(
+        select(ProjectAgent).where(ProjectAgent.agent_id == agent_id)
+    )
+    project_assignments = project_assignments_result.scalars().all()
+
+    if project_assignments:
+        # Remove from all projects first
+        for assignment in project_assignments:
+            await db.delete(assignment)
+
+    # Delete the purchase record
+    await db.delete(purchase)
+    await db.commit()
+
+    return {
+        "message": "Agent removed from library successfully",
+        "agent_id": agent_id,
+        "success": True
+    }
+
+
 @router.post("/agents/{agent_id}/select-model")
 async def select_agent_model(
     agent_id: int,

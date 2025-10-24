@@ -25,7 +25,7 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     project_id: int
     command: str = "/bin/bash"
-    cwd: str = "/app/project"
+    cwd: str = "/app"
 
 
 class CreateSessionResponse(BaseModel):

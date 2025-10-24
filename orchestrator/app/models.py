@@ -167,7 +167,7 @@ class ShellSession(Base):
 
     # Session metadata
     command = Column(String, default="/bin/bash")  # Shell command
-    working_dir = Column(String, default="/app/project")
+    working_dir = Column(String, default="/app")
     terminal_rows = Column(Integer, default=24)
     terminal_cols = Column(Integer, default=80)
 

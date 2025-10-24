@@ -49,9 +49,8 @@ class GitManager:
         Raises:
             RuntimeError: If command execution fails
         """
-        # Determine project path based on deployment mode
-        # Kubernetes mounts to /app/project via subPath, Docker mounts directly to /app
-        project_path = "/app/project" if self.settings.deployment_mode == "kubernetes" else "/app"
+        # Both Docker and Kubernetes now mount to /app
+        project_path = "/app"
 
         # Build the full command
         command = ["/bin/sh", "-c", f"cd {project_path} && git {' '.join(shlex.quote(arg) for arg in git_args)}"]
@@ -206,8 +205,8 @@ class GitManager:
             logger.info(f"[GIT] Repository cloned successfully")
 
             # Move files from clone to project directory
-            # Determine project path based on deployment mode
-            project_path = "/app/project" if self.settings.deployment_mode == "kubernetes" else "/app"
+            # Both Docker and Kubernetes now mount to /app
+            project_path = "/app"
 
             # Use shell command to move contents
             move_command = [

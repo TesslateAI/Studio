@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface Agent {
   id: string;
@@ -16,6 +17,7 @@ interface AgentSelectorProps {
 export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -134,7 +136,7 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
               <button
                 onClick={() => {
                   setIsOpen(false);
-                  // Navigate to marketplace
+                  navigate('/marketplace');
                 }}
                 className="w-full py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-lg text-white text-sm font-semibold transition-all"
               >

@@ -33,12 +33,10 @@ class Settings(BaseSettings):
         Get the project directory path inside containers.
 
         - Docker: Project mounted at /app
-        - Kubernetes: Project mounted at /app/project (with /app as working dir)
+        - Kubernetes: Project mounted at /app (consistent with Docker)
         """
-        if self.deployment_mode == "kubernetes":
-            return "/app/project"
-        else:
-            return "/app"
+        # Both modes now use /app for consistency
+        return "/app"
 
     # CORS Configuration
     # Comma-separated list of allowed origins for CORS requests

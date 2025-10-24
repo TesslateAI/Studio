@@ -36,7 +36,7 @@ class StartupGenerator:
             f"# Framework: {config.framework}",
             f"# Port: {config.port}",
             "",
-            "cd /app/project",
+            "cd /app",
             ""
         ]
 

@@ -169,53 +169,50 @@ class KubernetesManager:
                                     echo "[DEV] ======================================"
 
                                     # Check if project directory exists and is writable
-                                    if [ ! -d "/app/project" ]; then
-                                        echo "[DEV] ERROR: Project directory /app/project not found!"
+                                    if [ ! -d "/app" ]; then
+                                        echo "[DEV] ERROR: Project directory /app not found!"
                                         exit 1
                                     fi
 
                                     # Initialize project from template
                                     # Template is baked into the image at /template with all dependencies
-                                    if [ -z "$(ls -A /app/project 2>/dev/null)" ]; then
+                                    if [ -z "$(ls -A /app 2>/dev/null)" ]; then
                                         echo "[DEV] Initializing new project from template..."
                                         echo "[DEV] Copying pre-built template with dependencies..."
-                                        cp -r /template/. /app/project/
+                                        cp -r /template/. /app/
                                         echo "[DEV] ✓ Template copied (includes node_modules)"
-                                        echo "[DEV] Project size: $(du -sh /app/project | cut -f1)"
+                                        echo "[DEV] Project size: $(du -sh /app | cut -f1)"
                                     else
                                         echo "[DEV] Project directory has existing files"
-                                        echo "[DEV] Files: $(ls -A /app/project | head -5 | tr '\n' ' ')..."
+                                        echo "[DEV] Files: $(ls -A /app | head -5 | tr '\n' ' ')..."
                                     fi
-
-                                    # Navigate to project directory
-                                    cd /app/project || (echo "[DEV] ERROR: Cannot cd to /app/project" && exit 1)
 
                                     # Ensure node_modules is complete - critical for fast startup
                                     # If Vite binary is missing, copy pre-built node_modules from template
-                                    if [ ! -f "node_modules/.bin/vite" ] && [ ! -L "node_modules/.bin/vite" ]; then
+                                    if [ ! -f "/app/node_modules/.bin/vite" ] && [ ! -L "/app/node_modules/.bin/vite" ]; then
                                         echo "[DEV] node_modules missing or incomplete"
                                         echo "[DEV] Copying pre-built node_modules from template..."
-                                        rm -rf node_modules 2>/dev/null || true
-                                        cp -r /template/node_modules /app/project/
+                                        rm -rf /app/node_modules 2>/dev/null || true
+                                        cp -r /template/node_modules /app/
                                         echo "[DEV] ✓ node_modules restored from template"
                                     fi
 
                                     # Verify critical files exist
-                                    if [ ! -f "package.json" ]; then
+                                    if [ ! -f "/app/package.json" ]; then
                                         echo "[DEV] ERROR: No package.json found!"
                                         exit 1
                                     fi
-                                    if [ ! -f "node_modules/.bin/vite" ] && [ ! -L "node_modules/.bin/vite" ]; then
+                                    if [ ! -f "/app/node_modules/.bin/vite" ] && [ ! -L "/app/node_modules/.bin/vite" ]; then
                                         echo "[DEV] ERROR: Vite binary still missing after template copy!"
                                         echo "[DEV] This should not happen - template may be corrupted"
                                         exit 1
                                     fi
 
                                     # Configure Vite to allow all hosts (required for ingress routing)
-                                    if [ -f "vite.config.js" ]; then
+                                    if [ -f "/app/vite.config.js" ]; then
                                         echo "[DEV] Patching vite.config.js for Kubernetes ingress..."
 
-                                        cat > vite.config.js.new << 'VITECONFIG'
+                                        cat > /app/vite.config.js.new << 'VITECONFIG'
 import {{ defineConfig }} from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -229,11 +226,11 @@ export default defineConfig({{
   }}
 }})
 VITECONFIG
-                                        mv vite.config.js.new vite.config.js
+                                        mv /app/vite.config.js.new /app/vite.config.js
                                         echo "[DEV] ✓ Vite config patched"
                                     fi
 
-                                    # Start development server
+                                    # Start development server (working directory is already /app)
                                     echo "[DEV] ======================================"
                                     echo "[DEV] 🚀 Starting Vite dev server..."
                                     echo "[DEV] Port: 5173"
@@ -244,7 +241,7 @@ VITECONFIG
                                 volume_mounts=[
                                     client.V1VolumeMount(
                                         name="projects-storage",
-                                        mount_path="/app/project",
+                                        mount_path="/app",
                                         sub_path=sub_path
                                     )
                                 ],
@@ -881,7 +878,7 @@ VITECONFIG
 
             # Secure path - prevent directory traversal
             safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/project/{safe_path}"
+            full_path = f"/app/{safe_path}"
 
             # Check if file exists first
             check_cmd = ["/bin/sh", "-c", f"test -f {shlex.quote(full_path)} && echo exists || echo notfound"]
@@ -963,11 +960,11 @@ VITECONFIG
 
             # Secure path - prevent directory traversal
             safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/project/{safe_path}"
+            full_path = f"/app/{safe_path}"
 
             # Ensure parent directory exists
             dir_path = os.path.dirname(full_path)
-            if dir_path and dir_path != "/app/project":
+            if dir_path and dir_path != "/app":
                 mkdir_cmd = ["/bin/sh", "-c", f"mkdir -p {shlex.quote(dir_path)}"]
                 await asyncio.to_thread(
                     self._exec_in_pod,
@@ -1044,7 +1041,7 @@ VITECONFIG
 
             # Secure path - prevent directory traversal
             safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/project/{safe_path}"
+            full_path = f"/app/{safe_path}"
 
             # Delete file (rm -f won't fail if file doesn't exist)
             delete_cmd = ["/bin/sh", "-c", f"rm -f {shlex.quote(full_path)}"]
@@ -1129,7 +1126,7 @@ VITECONFIG
                 display_command = " ".join(command[-1].split("&&")[-1].strip() if len(command) > 2 else command)
             else:
                 # Legacy format - wrap in shell (maintain backward compatibility)
-                full_command = ["/bin/sh", "-c", f"cd /app/project && {' '.join(command)}"]
+                full_command = ["/bin/sh", "-c", f"cd /app && {' '.join(command)}"]
                 display_command = " ".join(command)
 
             logger.info(f"[EXEC] Running command in pod {pod_name}: {display_command[:100]}")
@@ -1321,9 +1318,9 @@ VITECONFIG
             # Secure path - prevent directory traversal
             safe_dir = directory.replace("..", "").strip("/")
             if not safe_dir or safe_dir == ".":
-                full_path = "/app/project"
+                full_path = "/app"
             else:
-                full_path = f"/app/project/{safe_dir}"
+                full_path = f"/app/{safe_dir}"
 
             # List files with details using ls -lA and parse output
             # -l: long format, -A: all except . and .., -1: one per line

@@ -25,7 +25,7 @@ class PTYSession:
         project_id: int,
         container_name: str,
         command: str = "/bin/bash",
-        cwd: str = "/app/project",
+        cwd: str = "/app",
         rows: int = 24,
         cols: int = 80,
     ):
@@ -175,7 +175,7 @@ class DockerPTYBroker(BasePTYBroker):
             project_id=project_id,
             container_name=container_name,
             command=command,
-            cwd=project_path,  # Docker: /app, K8s: /app/project
+            cwd=project_path,  # Both Docker and K8s: /app
             rows=rows,
             cols=cols,
         )
@@ -321,7 +321,7 @@ class KubernetesPTYBroker(BasePTYBroker):
             project_id=project_id,
             container_name=pod_name,
             command=command,
-            cwd=project_path,  # Docker: /app, K8s: /app/project
+            cwd=project_path,  # Both Docker and K8s: /app
             rows=rows,
             cols=cols,
         )
