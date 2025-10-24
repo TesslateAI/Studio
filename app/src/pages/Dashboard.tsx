@@ -415,27 +415,27 @@ export default function Dashboard() {
       </div>
 
       {/* Projects Grid */}
-      <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"}>
+      <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"}>
         {/* Create New Project Card */}
         <button
           onClick={() => setShowCreateModal(true)}
           data-tour="create-project"
           className={`
-            group bg-white/[0.01] dark:bg-white/[0.01] rounded-2xl p-8
+            group bg-white/[0.01] dark:bg-white/[0.01] rounded-2xl p-6 sm:p-8
             border-2 border-dashed border-[rgba(255,107,0,0.3)]
             hover:border-[rgba(255,107,0,0.6)]
             transition-all duration-300
             hover:transform hover:-translate-y-1
-            flex flex-col items-center justify-center gap-4
-            ${filteredProjects.length === 0 ? 'w-full min-h-[400px]' : 'min-h-[280px]'}
+            flex flex-col items-center justify-center gap-3 sm:gap-4
+            ${filteredProjects.length === 0 ? 'w-full min-h-[300px] sm:min-h-[400px]' : 'min-h-[240px] sm:min-h-[280px]'}
           `}
         >
-          <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(255,107,0,0.3)] transition-colors">
-            <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
+          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(255,107,0,0.3)] transition-colors">
+            <FilePlus className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" weight="fill" />
           </div>
           <div className="text-center">
-            <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">Create New Project</h3>
-            <p className="text-sm text-gray-500">Start building something amazing</p>
+            <h3 className="font-heading text-base sm:text-lg font-bold text-[var(--text)] mb-1.5 sm:mb-2">Create New Project</h3>
+            <p className="text-xs sm:text-sm text-gray-500">Start building something amazing</p>
           </div>
         </button>
 
