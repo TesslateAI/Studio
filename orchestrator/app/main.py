@@ -2,11 +2,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from .database import engine, Base
 from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban
 from .config import get_settings
 import os
 import logging
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,30 +18,86 @@ settings = get_settings()
 
 app = FastAPI(title="AI Application Builder API")
 
-# CORS middleware - MUST be added first
-# Production: Only allow specific origins, no wildcards
-# Development: Limit to known frontend dev servers only
-# Parse comma-separated CORS origins from environment variable
-cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
-logger.info(f"CORS origins configured: {cors_origins}")
+# Dynamic CORS middleware that supports wildcard subdomain patterns
+# Allows dev environments to communicate with backend across different subdomains
+class DynamicCORSMiddleware(BaseHTTPMiddleware):
+    """
+    Custom CORS middleware that supports wildcard subdomain patterns.
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],  # Explicit methods only
-    allow_headers=[
-        "Content-Type",
-        "Authorization",
-        "X-Requested-With",
-        "Accept",
-        "Origin",
-        "Access-Control-Request-Method",
-        "Access-Control-Request-Headers",
-    ],
-    expose_headers=["Content-Length", "X-Total-Count"],  # Headers frontend can read
-    max_age=600,  # Cache preflight requests for 10 minutes
-)
+    Validates origins against regex patterns to allow:
+    - Main frontend origins (localhost:3000, studio.localhost, APP_DOMAIN)
+    - User dev environment subdomains (*.studio.localhost, *.{APP_DOMAIN})
+
+    The APP_DOMAIN setting controls which production domain to allow.
+    """
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin")
+
+        # Get app domain from settings (e.g., "studio-demo.tesslate.com")
+        app_domain = settings.app_domain
+        # Escape dots for regex pattern matching
+        escaped_domain = re.escape(app_domain)
+
+        # Define allowed origin patterns (dynamically generated based on app_domain)
+        # Local development patterns (always allowed)
+        local_patterns = [
+            r"^http://localhost:\d+$",                              # Local dev server (any port)
+            r"^http://studio\.localhost$",                          # Local main app
+            r"^http://[\w-]+\.studio\.localhost$",                  # Local user dev environments (subdomain)
+        ]
+
+        # Production patterns (generated from APP_DOMAIN)
+        production_patterns = [
+            f"^https?://{escaped_domain}$",                        # Main app (http or https)
+            f"^https?://[\\w-]+\\.{escaped_domain}$",              # User dev environments (subdomain wildcard)
+        ]
+
+        allowed_patterns = local_patterns + production_patterns
+
+        # Check if origin matches any pattern
+        origin_allowed = False
+        if origin:
+            for pattern in allowed_patterns:
+                if re.match(pattern, origin):
+                    origin_allowed = True
+                    logger.debug(f"CORS: Origin {origin} matched pattern {pattern}")
+                    break
+
+            if not origin_allowed:
+                logger.warning(f"CORS: Origin {origin} not allowed (no pattern matched)")
+
+        # Handle preflight OPTIONS request
+        if request.method == "OPTIONS":
+            if origin_allowed:
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": origin,
+                        "Access-Control-Allow-Credentials": "true",
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin",
+                        "Access-Control-Max-Age": "600",
+                    }
+                )
+            else:
+                # Reject preflight for disallowed origins
+                return Response(status_code=403, content="CORS origin not allowed")
+
+        # Process request
+        response = await call_next(request)
+
+        # Add CORS headers if origin is allowed
+        if origin_allowed and origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+            response.headers["Access-Control-Expose-Headers"] = "Content-Length, X-Total-Count"
+
+        return response
+
+# Use custom dynamic CORS middleware
+app.add_middleware(DynamicCORSMiddleware)
 
 def load_agents_config():
     """Load agent definitions from agents_config.json file."""

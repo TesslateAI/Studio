@@ -160,39 +160,39 @@ export const projectsApi = {
     const response = await api.post('/api/projects/', body);
     return response.data;
   },
-  get: async (id: number) => {
-    const response = await api.get(`/api/projects/${id}`);
+  get: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}`);
     return response.data;
   },
-  delete: async (id: number) => {
-    const response = await api.delete(`/api/projects/${id}`);
+  delete: async (slug: string) => {
+    const response = await api.delete(`/api/projects/${slug}`);
     return response.data;
   },
-  getFiles: async (id: number) => {
-    const response = await api.get(`/api/projects/${id}/files`);
+  getFiles: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/files`);
     return response.data;
   },
-  getDevServerUrl: async (id: number) => {
-    const response = await api.get(`/api/projects/${id}/dev-server-url`);
+  getDevServerUrl: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/dev-server-url`);
     return response.data;
   },
-  restartDevServer: async (id: number) => {
-    const response = await api.post(`/api/projects/${id}/restart-dev-container`);
+  restartDevServer: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/restart-dev-container`);
     return response.data;
   },
-  saveFile: async (id: number, filePath: string, content: string) => {
-    const response = await api.post(`/api/projects/${id}/files/save`, {
+  saveFile: async (slug: string, filePath: string, content: string) => {
+    const response = await api.post(`/api/projects/${slug}/files/save`, {
       file_path: filePath,
       content: content
     });
     return response.data;
   },
-  getSettings: async (id: number) => {
-    const response = await api.get(`/api/projects/${id}/settings`);
+  getSettings: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/settings`);
     return response.data;
   },
-  updateSettings: async (id: number, settings: any) => {
-    const response = await api.patch(`/api/projects/${id}/settings`, { settings });
+  updateSettings: async (slug: string, settings: any) => {
+    const response = await api.patch(`/api/projects/${slug}/settings`, { settings });
     return response.data;
   },
   forkProject: async (id: number) => {

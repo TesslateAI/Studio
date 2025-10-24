@@ -183,7 +183,7 @@ export default function Dashboard() {
       setGithubRepoUrl('');
       setGithubBranch('main');
       setTimeout(() => {
-        navigate(`/project/${project.id}`);
+        navigate(`/project/${project.slug}`);
       }, 500);
     } catch (error: any) {
       const detail = error?.response?.data?.detail;
@@ -447,7 +447,7 @@ export default function Dashboard() {
               lastUpdated: formatDate(project.updated_at),
               isLive: project.status === 'launch'
             }}
-            onOpen={() => navigate(`/project/${project.id}`)}
+            onOpen={() => navigate(`/project/${project.slug}`)}
             onDelete={() => deleteProject(project.id)}
             onStatusChange={(status) => updateProjectStatus(project.id, status)}
             onFork={() => handleForkProject(project.id)}

@@ -53,7 +53,7 @@ interface UIAgent {
 }
 
 export default function Project() {
-  const { id } = useParams<{ id: string }>();
+  const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const [project, setProject] = useState<any>(null);
@@ -65,21 +65,30 @@ export default function Project() {
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
-  const projectId = parseInt(id!);
+  // Note: We still have projectId for internal use, but it comes from the loaded project object
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
-    loadProject();
-    loadDevServerUrl();
-    loadAgents();
-    loadSettings();
-  }, [projectId]);
+    if (slug) {
+      loadProject();
+      loadDevServerUrl();
+      loadSettings();
+    }
+  }, [slug]);
+
+  // Load agents after project is loaded
+  useEffect(() => {
+    if (project?.id) {
+      loadAgents();
+    }
+  }, [project?.id]);
 
   const loadSettings = async () => {
+    if (!slug) return;
     try {
-      const data = await projectsApi.getSettings(projectId);
+      const data = await projectsApi.getSettings(slug);
       const settings = data.settings || {};
       setPreviewMode(settings.preview_mode || 'normal');
     } catch (error) {
@@ -143,10 +152,11 @@ export default function Project() {
   }, [devServerUrl]);
 
   const loadProject = async () => {
+    if (!slug) return;
     try {
       const [projectData, filesData] = await Promise.all([
-        projectsApi.get(projectId),
-        projectsApi.getFiles(projectId),
+        projectsApi.get(slug),
+        projectsApi.getFiles(slug),
       ]);
       setProject(projectData);
       setFiles(filesData);
@@ -157,8 +167,9 @@ export default function Project() {
   };
 
   const loadAgents = async () => {
+    if (!slug || !project?.id) return;
     try {
-      const agentsData = await marketplaceApi.getProjectAgents(projectId);
+      const agentsData = await marketplaceApi.getProjectAgents(project.id);
 
       // Convert backend agents to UI format
       const uiAgents = agentsData.map(agent => ({
@@ -177,6 +188,8 @@ export default function Project() {
   };
 
   const handleFileUpdate = useCallback(async (filePath: string, content: string) => {
+    if (!slug) return;
+
     setFiles(prev => {
       const existing = prev.find(f => f.file_path === filePath);
       if (existing) {
@@ -188,7 +201,7 @@ export default function Project() {
     });
 
     try {
-      await projectsApi.saveFile(projectId, filePath, content);
+      await projectsApi.saveFile(slug, filePath, content);
     } catch (error) {
       console.error('Failed to save file:', error);
       toast.error(`Failed to save ${filePath}`);
@@ -211,11 +224,12 @@ export default function Project() {
         }
       }, 5000);
     }
-  }, [projectId]);
+  }, [slug]);
 
   const loadDevServerUrl = async () => {
+    if (!slug) return;
     try {
-      const response = await projectsApi.getDevServerUrl(projectId);
+      const response = await projectsApi.getDevServerUrl(slug);
       const token = localStorage.getItem('token');
       const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
 
@@ -487,7 +501,7 @@ export default function Project() {
           {/* Code View */}
           <div className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}>
             <CodeEditor
-              projectId={projectId}
+              projectId={project?.id}
               files={files}
               onFileUpdate={handleFileUpdate}
             />
@@ -495,7 +509,7 @@ export default function Project() {
 
           {/* Kanban View */}
           <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-            <KanbanPanel projectId={projectId} />
+            <KanbanPanel projectId={project?.id} />
           </div>
         </div>
       </div>
@@ -507,7 +521,7 @@ export default function Project() {
         isOpen={activePanel === 'github'}
         onClose={() => setActivePanel(null)}
       >
-        <GitHubPanel projectId={projectId} />
+        <GitHubPanel projectId={project?.id} />
       </FloatingPanel>
 
       <FloatingPanel
@@ -518,7 +532,7 @@ export default function Project() {
         defaultSize={{ width: 900, height: 700 }}
         defaultPosition={{ x: 200, y: 100 }}
       >
-        <ArchitecturePanel projectId={projectId} />
+        <ArchitecturePanel projectId={project?.id} />
       </FloatingPanel>
 
       <FloatingPanel
@@ -527,7 +541,7 @@ export default function Project() {
         isOpen={activePanel === 'notes'}
         onClose={() => setActivePanel(null)}
       >
-        <NotesPanel projectId={projectId} />
+        <NotesPanel projectId={project?.id} />
       </FloatingPanel>
 
       <FloatingPanel
@@ -536,7 +550,7 @@ export default function Project() {
         isOpen={activePanel === 'settings'}
         onClose={() => setActivePanel(null)}
       >
-        <SettingsPanel projectId={projectId} />
+        <SettingsPanel projectId={project?.id} />
       </FloatingPanel>
 
       <FloatingPanel
@@ -545,13 +559,13 @@ export default function Project() {
         isOpen={activePanel === 'assets'}
         onClose={() => setActivePanel(null)}
       >
-        <AssetsPanel projectId={projectId} />
+        <AssetsPanel projectId={project?.id} />
       </FloatingPanel>
 
       {/* Chat Interface */}
       {agents.length > 0 && (
         <ChatContainer
-          projectId={projectId}
+          projectId={project?.id}
           agents={agents}
           currentAgent={agents[0]}
           onSelectAgent={(agent) => console.log('Selected agent:', agent)}

@@ -79,10 +79,11 @@ class ProjectCreate(ProjectBase):
 
 class Project(ProjectBase):
     id: int
+    slug: str  # URL-safe identifier for routing
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
 

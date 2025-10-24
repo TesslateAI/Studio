@@ -188,7 +188,7 @@ function App() {
             }
           />
           <Route
-            path="/project/:id"
+            path="/project/:slug"
             element={
               <PrivateRoute>
                 <Project />

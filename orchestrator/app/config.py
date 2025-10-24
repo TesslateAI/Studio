@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # Default is empty - should be configured via environment variables
     allowed_hosts: str = ""
 
+    # Application domain (no protocol, just domain)
+    # Used for subdomain routing and CORS wildcard pattern matching
+    # Format: "subdomain.domain.com" (no protocol, no wildcards)
+    # Examples: studio.localhost (local), studio-demo.tesslate.com (production)
+    app_domain: str = "studio.localhost"
+
     # GitHub OAuth Configuration
     github_client_id: str = ""
     github_client_secret: str = ""

@@ -11,7 +11,8 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)  # Display name, not unique
-    username = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String, unique=True, index=True, nullable=False)  # Login identifier (email-based)
+    slug = Column(String, unique=True, index=True, nullable=False)  # URL-safe identifier (e.g., "ernest-k3x8n2")
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
@@ -58,6 +59,7 @@ class Project(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    slug = Column(String, unique=True, index=True, nullable=False)  # URL-safe identifier (e.g., "my-awesome-app-k3x8n2")
     description = Column(Text)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     has_git_repo = Column(Boolean, default=False)

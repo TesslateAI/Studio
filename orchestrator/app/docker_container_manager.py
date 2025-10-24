@@ -338,63 +338,67 @@ class DockerContainerManager(BaseContainerManager):
         """Generate a unique project key for container management."""
         return f"user-{user_id}-project-{project_id}"
     
-    def _get_container_name(self, user_id: int, project_id: str) -> str:
-        """Generate a descriptive container name for Docker Desktop visibility."""
+    def _get_container_name(self, user_id: int, project_id: str, project_slug: str = None) -> str:
+        """
+        Generate a descriptive container name for Docker Desktop visibility.
+
+        Uses project slug for human-readable names (e.g., "tesslate-my-app-k3x8n2")
+        Falls back to ID-based name if slug not provided.
+        """
+        if project_slug:
+            return f"tesslate-{project_slug}"
         return f"tesslate-user{user_id}-project{project_id}"
     
-    def _generate_hostname(self, user_id: int, project_id: str) -> str:
-        """Generate a unique identifier for the project container."""
-        # No longer using subdomain-based hostnames, just return the identifier
-        return f"user{user_id}-project{project_id}"
-    
+    def _generate_hostname(self, project_slug: str) -> str:
+        """
+        Generate a unique subdomain hostname for the project container.
+
+        Args:
+            project_slug: Project slug (e.g., "my-awesome-app-k3x8n2")
+
+        Returns:
+            Full hostname (e.g., "my-awesome-app-k3x8n2.studio.localhost")
+        """
+        from .config import get_settings
+        settings = get_settings()
+        # Use project slug for clean, human-readable subdomains
+        return f"{project_slug}.{settings.app_domain}"
+
     def _get_container_access_url(self, hostname: str) -> str:
-        """Get the access URL for a container using path-based routing."""
-        settings = get_settings()
-        # hostname is now just "user{id}-project{id}" without domain
-
-        # Use configured base URL if available, otherwise construct from environment
-        if settings.dev_server_base_url:
-            # Production or configured base URL
-            return f"{settings.dev_server_base_url}/preview/{hostname}/"
-        else:
-            # Construct from environment or use defaults (studio.localhost for local dev)
-            protocol = os.environ.get('APP_PROTOCOL', 'http')
-            domain = os.environ.get('APP_DOMAIN', 'studio.localhost')
-            return f"{protocol}://{domain}/preview/{hostname}/"
+        """Get the access URL for a container using subdomain routing."""
+        # Always use subdomain routing (dev/prod parity)
+        # hostname is already the full subdomain like "user6-project123.studio.localhost"
+        protocol = os.environ.get('APP_PROTOCOL', 'http')
+        return f"{protocol}://{hostname}/"
     
-    def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str, port: int = 5173) -> List[str]:
-        """Generate Traefik labels for path-based routing only."""
-        service_name = f"tesslate-user{user_id}-project{project_id}"
-        # hostname is now just "user{id}-project{id}" without domain
+    def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str, port: int = 5173, project_slug: str = None) -> List[str]:
+        """
+        Generate Traefik labels for subdomain-based routing.
 
-        settings = get_settings()
-
-        # Determine the domain based on environment
-        if settings.dev_server_base_url:
-            # Production mode - extract domain from base URL
-            import urllib.parse
-            parsed = urllib.parse.urlparse(settings.dev_server_base_url)
-            domain = parsed.netloc
+        Uses hostname-based routing for dev/prod parity with Kubernetes.
+        No path stripping or base path configuration needed!
+        """
+        # Use slug for service name if available, fallback to ID-based
+        if project_slug:
+            service_name = f"tesslate-{project_slug}"
         else:
-            # Use environment variable or default to studio.localhost for local dev
-            domain = os.environ.get('APP_DOMAIN', 'studio.localhost')
+            service_name = f"tesslate-user{user_id}-project{project_id}"
+        # hostname is the full subdomain like "my-app-k3x8n2.studio.localhost"
 
         labels = [
             "--label", "traefik.enable=true",
 
-            # Path-based routing for HTTP: /preview/user{id}-project{id}
-            "--label", f"traefik.http.routers.{service_name}.rule=Host(`{domain}`) && PathPrefix(`/preview/{hostname}`)",
+            # Subdomain-based routing for HTTP (clean!)
+            "--label", f"traefik.http.routers.{service_name}.rule=Host(`{hostname}`)",
             "--label", f"traefik.http.routers.{service_name}.entrypoints=web",
-            "--label", f"traefik.http.routers.{service_name}.priority=150",  # Higher priority than frontend
 
-            # Service configuration - use the specified port from template
+            # Service configuration
             "--label", f"traefik.http.services.{service_name}.loadbalancer.server.port={port}",
             "--label", f"traefik.docker.network={self.network_name}",
 
-            # Path-based routing for HTTPS (production)
-            "--label", f"traefik.http.routers.{service_name}-secure.rule=Host(`{domain}`) && PathPrefix(`/preview/{hostname}`)",
+            # Subdomain-based routing for HTTPS (production)
+            "--label", f"traefik.http.routers.{service_name}-secure.rule=Host(`{hostname}`)",
             "--label", f"traefik.http.routers.{service_name}-secure.entrypoints=websecure",
-            "--label", f"traefik.http.routers.{service_name}-secure.priority=150",
             "--label", f"traefik.http.routers.{service_name}-secure.tls=true",
         ]
 
@@ -624,7 +628,7 @@ class DockerContainerManager(BaseContainerManager):
 
         return True  # Return True to allow container to continue - Traefik will handle routing when ready
     
-    async def start_container(self, project_path: str, project_id: str, user_id: int, skip_validation: bool = False,
+    async def start_container(self, project_path: str, project_id: str, user_id: int, project_slug: str = None, skip_validation: bool = False,
                               environment_vars: Dict[str, str] = None, secrets: Dict[str, str] = None,
                               port: int = 5173, start_command: str = None) -> str:
         """
@@ -632,19 +636,24 @@ class DockerContainerManager(BaseContainerManager):
 
         Args:
             project_path: Path to project directory
-            project_id: Project ID
+            project_id: Project ID (for internal naming)
             user_id: User ID
+            project_slug: Project slug for URL generation (e.g., "my-app-k3x8n2")
             skip_validation: Skip file validation (useful for GitHub imports that will clone later)
             environment_vars: Custom environment variables to inject into container
             secrets: Sensitive environment variables (API keys, etc.) to inject securely
             port: The port the application server will listen on (default: 5173)
             start_command: Custom start command (default: "npm install && npm start")
         """
+        # For backwards compatibility, generate slug from IDs if not provided
+        if not project_slug:
+            project_slug = f"user{user_id}-project{project_id}"
+
         # Generate unique identifiers for multi-user system
         project_key = self._get_project_key(user_id, project_id)
-        container_name = self._get_container_name(user_id, project_id)
+        container_name = self._get_container_name(user_id, project_id, project_slug)
 
-        print(f"[START] Starting development container for user {user_id}, project {project_id}")
+        print(f"[START] Starting development container for user {user_id}, project {project_slug} (ID: {project_id})")
         print(f"[INFO] Project key: {project_key}")
         print(f"[INFO] Container name: {container_name}")
 
@@ -717,7 +726,7 @@ class DockerContainerManager(BaseContainerManager):
         await self.stop_container(project_id, user_id)
         
         # Generate hostname for Traefik routing
-        hostname = self._generate_hostname(user_id, project_id)
+        hostname = self._generate_hostname(project_slug)
         
         print(f"[INFO] Container path: {abs_project_path}")
         print(f"[INFO] Host path: {host_project_path}")
@@ -742,25 +751,13 @@ class DockerContainerManager(BaseContainerManager):
             ]
 
             # Generic environment variables that templates can use
-            settings = get_settings()
-
-            # Provide base path as environment variable for templates that need it
-            # Templates can use this for routing configuration if needed
-            base_path = f"/preview/{hostname}"
-
-            # Determine HMR WebSocket protocol and port based on deployment
-            protocol = os.environ.get('APP_PROTOCOL', 'http')
-            hmr_protocol = 'wss' if protocol == 'https' else 'ws'
-            hmr_port = '443' if protocol == 'https' else '80'
+            # Subdomain routing: Container always serves from root '/'
+            # No base path configuration needed!
 
             # Add default environment variables
             run_cmd.extend([
-                "-e", f"VITE_BASE_PATH={base_path}",                    # Base path for Vite routing
-                "-e", f"PUBLIC_URL={base_path}",                        # For Create React App and similar
                 "-e", "NODE_ENV=development",                           # Development mode
                 "-e", f"PORT={port}",                                   # Server port
-                "-e", f"VITE_HMR_PROTOCOL={hmr_protocol}",              # WebSocket protocol (ws/wss)
-                "-e", f"VITE_HMR_PORT={hmr_port}",                      # WebSocket port (80/443)
                 # File watching settings from .env (required for hot reload in Docker)
                 "-e", f"CHOKIDAR_USEPOLLING={os.environ.get('CHOKIDAR_USEPOLLING', 'true')}",
                 "-e", f"CHOKIDAR_INTERVAL={os.environ.get('CHOKIDAR_INTERVAL', '1000')}",
@@ -790,7 +787,7 @@ class DockerContainerManager(BaseContainerManager):
             ])
 
             # Add Traefik labels for automatic service discovery
-            run_cmd.extend(self._get_traefik_labels(user_id, project_id, hostname, port))
+            run_cmd.extend(self._get_traefik_labels(user_id, project_id, hostname, port, project_slug))
 
             # Add network (required for Traefik)
             run_cmd.extend(["--network", self.network_name])
@@ -1031,7 +1028,7 @@ class DockerContainerManager(BaseContainerManager):
             return self._get_container_access_url(container_info['hostname'])
         return None
     
-    async def get_container_status(self, project_id: str, user_id: int = None) -> Dict[str, Any]:
+    async def get_container_status(self, project_id: str, user_id: int = None, project_slug: str = None) -> Dict[str, Any]:
         """Get detailed status of a development container with multi-user support."""
         container_info = None
 
@@ -1049,8 +1046,12 @@ class DockerContainerManager(BaseContainerManager):
 
         # If not in tracking dict, check if container exists in Docker
         if not container_info and user_id is not None:
-            container_name = self._get_container_name(user_id, project_id)
-            hostname = self._generate_hostname(user_id, project_id)
+            # For backwards compatibility, generate slug from IDs if not provided
+            if not project_slug:
+                project_slug = f"user{user_id}-project{project_id}"
+
+            container_name = self._get_container_name(user_id, project_id, project_slug)
+            hostname = self._generate_hostname(project_slug)
 
             # Check if this container exists in Docker
             result = subprocess.run([
