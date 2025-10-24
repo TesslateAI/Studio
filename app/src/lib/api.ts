@@ -233,10 +233,10 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  // Get available agents for a specific project
+  // Get agents that are currently added to a specific project
   getProjectAgents: async (projectId: number): Promise<Agent[]> => {
-    const response = await api.get(`/api/marketplace/projects/${projectId}/available-agents`);
-    return response.data.available_agents || [];
+    const response = await api.get(`/api/marketplace/projects/${projectId}/agents`);
+    return response.data.agents || [];
   },
 
   // Purchase/add agent to account
@@ -288,7 +288,13 @@ export const marketplaceApi = {
 
   // Toggle agent enabled/disabled status
   toggleAgent: async (agentId: number, enabled: boolean) => {
-    const response = await api.post(`/api/marketplace/agents/${agentId}/toggle`, { enabled });
+    const response = await api.post(`/api/marketplace/agents/${agentId}/toggle?enabled=${enabled}`);
+    return response.data;
+  },
+
+  // Remove agent from library
+  removeFromLibrary: async (agentId: number) => {
+    const response = await api.delete(`/api/marketplace/agents/${agentId}/library`);
     return response.data;
   },
 

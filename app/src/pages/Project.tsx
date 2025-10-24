@@ -549,8 +549,8 @@ export default function Project() {
         <AssetsPanel projectId={projectId} />
       </FloatingPanel>
 
-      {/* Chat Interface */}
-      {agents.length > 0 && (
+      {/* Chat Interface or Empty State */}
+      {agents.length > 0 ? (
         <ChatContainer
           projectId={projectId}
           agents={agents}
@@ -560,6 +560,29 @@ export default function Project() {
           projectFiles={files}
           projectName={project?.name}
         />
+      ) : (
+        <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">
+          <div className="bg-[var(--surface)] border border-white/10 rounded-2xl shadow-2xl p-8 max-w-md pointer-events-auto">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Storefront className="w-8 h-8 text-[var(--primary)]" weight="fill" />
+              </div>
+              <h3 className="font-heading text-xl font-bold text-[var(--text)] mb-2">
+                No Agents Added
+              </h3>
+              <p className="text-[var(--text)]/60 mb-6">
+                Add an agent from the marketplace to start building your project with AI assistance
+              </p>
+              <button
+                onClick={() => navigate('/marketplace')}
+                className="w-full bg-[var(--primary)] hover:bg-orange-600 text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+              >
+                <Storefront size={20} weight="fill" />
+                Browse Marketplace
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Discord Support */}

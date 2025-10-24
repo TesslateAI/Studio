@@ -62,27 +62,6 @@ export default function Marketplace() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showItemDetail, setShowItemDetail] = useState<MarketplaceItem | null>(null);
-  const [isWalkthroughActive, setIsWalkthroughActive] = useState(false);
-
-  // Check if walkthrough is active
-  useEffect(() => {
-    const hasSeenWalkthrough = localStorage.getItem('hasSeenWalkthrough');
-    setIsWalkthroughActive(!hasSeenWalkthrough);
-
-    // Listen for walkthrough events
-    const handleRestartWalkthrough = () => setIsWalkthroughActive(true);
-    const handleWalkthroughComplete = () => setIsWalkthroughActive(false);
-
-    window.addEventListener('restartWalkthrough', handleRestartWalkthrough);
-    window.addEventListener('walkthroughComplete', handleWalkthroughComplete);
-    window.addEventListener('walkthroughSkip', handleWalkthroughComplete);
-
-    return () => {
-      window.removeEventListener('restartWalkthrough', handleRestartWalkthrough);
-      window.removeEventListener('walkthroughComplete', handleWalkthroughComplete);
-      window.removeEventListener('walkthroughSkip', handleWalkthroughComplete);
-    };
-  }, []);
 
   const categories = [
     { id: 'all', name: 'All Agents' },
@@ -190,20 +169,8 @@ export default function Marketplace() {
         <div className="flex items-center justify-between mb-8">
           {/* Back Button */}
           <button
-            onClick={() => {
-              if (isWalkthroughActive) {
-                toast.error('Please complete the walkthrough or click "Skip" to navigate freely', {
-                  duration: 4000,
-                });
-              } else {
-                navigate('/dashboard');
-              }
-            }}
-            className={`flex items-center gap-2 transition-colors ${
-              isWalkthroughActive
-                ? 'text-[var(--text)]/30 cursor-not-allowed'
-                : 'text-[var(--text)]/60 hover:text-[var(--text)]'
-            }`}
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-2 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors"
           >
             <ArrowLeft size={20} weight="bold" />
             <span className="font-medium">Back</span>

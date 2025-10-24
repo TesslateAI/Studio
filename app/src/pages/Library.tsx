@@ -107,40 +107,6 @@ export default function Library() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
-  const [isWalkthroughActive, setIsWalkthroughActive] = useState(false);
-  const [canClickBackButton, setCanClickBackButton] = useState(false);
-
-  // Check if walkthrough is active
-  useEffect(() => {
-    const hasSeenWalkthrough = localStorage.getItem('hasSeenWalkthrough');
-    setIsWalkthroughActive(!hasSeenWalkthrough);
-
-    // Listen for walkthrough events
-    const handleRestartWalkthrough = () => {
-      setIsWalkthroughActive(true);
-      setCanClickBackButton(false);
-    };
-    const handleWalkthroughComplete = () => {
-      setIsWalkthroughActive(false);
-      setCanClickBackButton(false);
-    };
-    const handleAllowBackButton = () => setCanClickBackButton(true);
-    const handleDisallowBackButton = () => setCanClickBackButton(false);
-
-    window.addEventListener('restartWalkthrough', handleRestartWalkthrough);
-    window.addEventListener('walkthroughComplete', handleWalkthroughComplete);
-    window.addEventListener('walkthroughSkip', handleWalkthroughComplete);
-    window.addEventListener('walkthroughAllowBackButton', handleAllowBackButton);
-    window.addEventListener('walkthroughDisallowBackButton', handleDisallowBackButton);
-
-    return () => {
-      window.removeEventListener('restartWalkthrough', handleRestartWalkthrough);
-      window.removeEventListener('walkthroughComplete', handleWalkthroughComplete);
-      window.removeEventListener('walkthroughSkip', handleWalkthroughComplete);
-      window.removeEventListener('walkthroughAllowBackButton', handleAllowBackButton);
-      window.removeEventListener('walkthroughDisallowBackButton', handleDisallowBackButton);
-    };
-  }, []);
 
   useEffect(() => {
     loadData();
@@ -267,22 +233,9 @@ export default function Library() {
         <div className="flex items-center justify-between mb-8">
           {/* Back Button */}
           <button
-            onClick={() => {
-              // Allow navigation if walkthrough is not active OR if the walkthrough specifically allows it
-              if (isWalkthroughActive && !canClickBackButton) {
-                toast.error('Please complete the walkthrough or click "Skip" to navigate freely', {
-                  duration: 4000,
-                });
-              } else {
-                navigate('/dashboard');
-              }
-            }}
+            onClick={() => navigate('/dashboard')}
             data-tour="dashboard-link"
-            className={`flex items-center gap-2 transition-colors ${
-              isWalkthroughActive && !canClickBackButton
-                ? 'text-[var(--text)]/30 cursor-not-allowed'
-                : 'text-[var(--text)]/60 hover:text-[var(--text)]'
-            }`}
+            className="flex items-center gap-2 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors"
           >
             <ArrowLeft size={20} weight="bold" />
             <span className="font-medium">Back</span>
@@ -427,6 +380,21 @@ function AgentsTab({
 }) {
   const navigate = useNavigate();
 
+  const handleRemove = async (agent: LibraryAgent) => {
+    if (!confirm(`Remove "${agent.name}" from your library? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await marketplaceApi.removeFromLibrary(agent.id);
+      toast.success(`${agent.name} removed from library`);
+      onReload();
+    } catch (error) {
+      console.error('Remove failed:', error);
+      toast.error('Failed to remove agent from library');
+    }
+  };
+
   if (agents.length === 0) {
     return (
       <div className="text-center py-16">
@@ -451,16 +419,16 @@ function AgentsTab({
           <div className="text-sm text-[var(--text)]/60">Total Agents</div>
         </div>
         <div className="p-4 bg-white/5 border border-white/10 rounded-lg">
-          <div className="text-2xl font-bold text-green-400 mb-1">
+          <div className="text-2xl font-bold text-[var(--text)] mb-1">
             {agents.filter(a => a.is_enabled).length}
           </div>
-          <div className="text-sm text-[var(--text)]/60">Enabled</div>
+          <div className="text-sm text-[var(--text)]/60">Active</div>
         </div>
         <div className="p-4 bg-white/5 border border-white/10 rounded-lg">
-          <div className="text-2xl font-bold text-orange-400 mb-1">
+          <div className="text-2xl font-bold text-[var(--text)] mb-1">
             {agents.filter(a => a.is_custom).length}
           </div>
-          <div className="text-sm text-[var(--text)]/60">Custom Agents</div>
+          <div className="text-sm text-[var(--text)]/60">Custom</div>
         </div>
       </div>
 
@@ -475,6 +443,7 @@ function AgentsTab({
             onEdit={() => onEdit(agent)}
             onTogglePublish={() => onTogglePublish(agent)}
             onModelChange={(model) => onModelChange(agent, model)}
+            onRemove={() => handleRemove(agent)}
           />
         ))}
       </div>
@@ -1207,7 +1176,8 @@ function AgentCard({
   onToggleEnable,
   onEdit,
   onTogglePublish,
-  onModelChange
+  onModelChange,
+  onRemove
 }: {
   agent: LibraryAgent;
   availableModels: string[];
@@ -1215,6 +1185,7 @@ function AgentCard({
   onEdit: () => void;
   onTogglePublish: () => void;
   onModelChange: (model: string) => void;
+  onRemove: () => void;
 }) {
   const canEdit = agent.source_type === 'open' || agent.is_custom;
   const canChangeModel = agent.source_type === 'open' || agent.is_custom;
@@ -1373,6 +1344,17 @@ function AgentCard({
               Enable
             </>
           )}
+        </button>
+      </div>
+
+      {/* Remove Button */}
+      <div className="mt-3">
+        <button
+          onClick={onRemove}
+          className="w-full py-2 px-3 bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/20 text-[var(--text)]/60 hover:text-red-400 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          <Trash size={16} />
+          Remove from Library
         </button>
       </div>
 

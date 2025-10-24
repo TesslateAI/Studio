@@ -835,13 +835,12 @@ async def get_user_agents(
     """
     Get all agents in the user's library.
     """
-    # Query user's purchased agents
+    # Query user's purchased agents (all agents in library, regardless of enabled/disabled status)
     result = await db.execute(
         select(MarketplaceAgent, UserPurchasedAgent)
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
         .where(
-            UserPurchasedAgent.user_id == current_user.id,
-            UserPurchasedAgent.is_active == True
+            UserPurchasedAgent.user_id == current_user.id
         )
         .order_by(UserPurchasedAgent.purchase_date.desc())
     )
@@ -1070,13 +1069,12 @@ async def get_available_agents_for_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Get user's purchased agents
+    # Get user's purchased agents (all agents in library, regardless of enabled/disabled status)
     purchased_result = await db.execute(
         select(MarketplaceAgent, UserPurchasedAgent)
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
         .where(
-            UserPurchasedAgent.user_id == current_user.id,
-            UserPurchasedAgent.is_active == True
+            UserPurchasedAgent.user_id == current_user.id
         )
     )
     purchased_agents = purchased_result.fetchall()
