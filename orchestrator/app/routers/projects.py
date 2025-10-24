@@ -1526,3 +1526,74 @@ async def update_project_settings(
         await db.rollback()
         logger.error(f"[SETTINGS] Failed to update settings: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")
+
+
+@router.post("/{project_id}/fork", response_model=ProjectSchema)
+async def fork_project(
+    project_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Fork (duplicate) a project with all its files.
+    Creates a new project with the same files as the original.
+    """
+    # Get source project
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    source_project = result.scalar_one_or_none()
+    if not source_project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        logger.info(f"[FORK] Forking project {project_id} for user {current_user.id}")
+
+        # Create new project
+        forked_project = Project(
+            name=f"{source_project.name} (Fork)",
+            description=f"Forked from: {source_project.description or source_project.name}",
+            owner_id=current_user.id
+        )
+        db.add(forked_project)
+        await db.commit()
+        await db.refresh(forked_project)
+
+        logger.info(f"[FORK] Created new project {forked_project.id}")
+
+        # Copy all files from source project
+        files_result = await db.execute(
+            select(ProjectFile).where(ProjectFile.project_id == project_id)
+        )
+        source_files = files_result.scalars().all()
+
+        files_copied = 0
+        for source_file in source_files:
+            forked_file = ProjectFile(
+                project_id=forked_project.id,
+                file_path=source_file.file_path,
+                content=source_file.content
+            )
+            db.add(forked_file)
+            files_copied += 1
+
+        await db.commit()
+        await db.refresh(forked_project)
+
+        logger.info(f"[FORK] Copied {files_copied} files to project {forked_project.id}")
+
+        return forked_project
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[FORK] Failed to fork project: {e}", exc_info=True)
+        if 'forked_project' in locals():
+            try:
+                await db.delete(forked_project)
+                await db.commit()
+            except:
+                pass
+        raise HTTPException(status_code=500, detail=f"Failed to fork project: {str(e)}")

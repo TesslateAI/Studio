@@ -35,7 +35,8 @@ import {
   DiscordLogo,
   SignOut,
   CaretDown,
-  Check
+  Check,
+  ArrowSquareOut
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -71,6 +72,20 @@ export default function Dashboard() {
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [userName, setUserName] = useState<string>('');
+
+  // Get user name from JWT token
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setUserName(payload.sub || 'there');
+      } catch (e) {
+        setUserName('there');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     loadProjects();
@@ -219,6 +234,22 @@ export default function Dashboard() {
     }
   };
 
+  const handleForkProject = async (id: number) => {
+    const forkingToast = toast.loading('Forking project...');
+    try {
+      const forkedProject = await projectsApi.forkProject(id);
+      toast.success('Project forked successfully!', { id: forkingToast });
+      await loadProjects(); // Refresh project list
+      // Navigate to the forked project after a brief delay
+      setTimeout(() => {
+        navigate(`/project/${forkedProject.id}`);
+      }, 500);
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.detail || 'Failed to fork project';
+      toast.error(errorMessage, { id: forkingToast });
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     navigate('/login');
@@ -318,7 +349,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24 relative">
+    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24 relative flex flex-col">
       {/* Mobile Warning */}
       <MobileWarning />
 
@@ -329,32 +360,41 @@ export default function Dashboard() {
       <FloatingSidebar position="left" items={leftSidebarItems} />
       <FloatingSidebar position="right" items={rightSidebarItems} />
 
-      {/* Header */}
-      <div className="mb-6 md:mb-10">
+      {/* Main Content */}
+      <div className="flex-grow">
+        {/* Header */}
+        <div className="mb-6 md:mb-10">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="font-heading text-2xl sm:text-3xl md:text-4xl font-bold text-[var(--text)]">My Projects</h1>
+          <div>
+            <h1 className="font-heading text-2xl sm:text-3xl md:text-4xl font-bold text-[var(--text)]">
+              Welcome back, {userName}! 👋
+            </h1>
+            <p className="text-[var(--text)]/60 mt-2">Ready to build something amazing?</p>
+          </div>
         </div>
 
         {/* Tab Navigation */}
         <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
           {[
-            { key: 'all', label: 'All Projects' },
-            { key: 'idea', label: 'Idea' },
-            { key: 'build', label: 'Build' },
-            { key: 'launch', label: 'Launch' }
+            { key: 'all', label: 'All Projects', enabled: true },
+            { key: 'idea', label: 'Idea', enabled: false },
+            { key: 'build', label: 'Build', enabled: true },
+            { key: 'launch', label: 'Launch', enabled: false }
           ].map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key as TabFilter)}
+              onClick={() => tab.enabled ? setActiveTab(tab.key as TabFilter) : toast('Coming soon!')}
               className={`
                 font-heading text-sm sm:text-lg md:text-xl pb-2 border-b-2 transition-all whitespace-nowrap
                 ${activeTab === tab.key
                   ? 'text-[var(--primary)] border-[var(--primary)]'
-                  : 'text-gray-400 border-transparent hover:text-[var(--text)]'
+                  : tab.enabled
+                    ? 'text-gray-400 border-transparent hover:text-[var(--text)]'
+                    : 'text-gray-600 border-transparent cursor-not-allowed opacity-50'
                 }
               `}
             >
-              {tab.label}
+              {tab.label}{!tab.enabled && ' 🔒'}
             </button>
           ))}
         </div>
@@ -410,16 +450,18 @@ export default function Dashboard() {
             onOpen={() => navigate(`/project/${project.id}`)}
             onDelete={() => deleteProject(project.id)}
             onStatusChange={(status) => updateProjectStatus(project.id, status)}
+            onFork={() => handleForkProject(project.id)}
             isDeleting={deletingProjectId === project.id}
           />
         ))}
       </div>
 
-      {/* Empty State */}
-      {filteredProjects.length === 0 && (
-        <div className="text-center py-16">
-        </div>
-      )}
+        {/* Empty State */}
+        {filteredProjects.length === 0 && (
+          <div className="text-center py-16">
+          </div>
+        )}
+      </div>
 
       {/* Create Project Modal */}
       {showCreateModal && (
@@ -799,6 +841,48 @@ export default function Dashboard() {
           </div>
           <span className="text-xs md:text-sm font-medium text-[var(--text)] hidden sm:block">Support</span>
         </a>
+      </div>
+
+      {/* Tesslate Footer */}
+      <div className="mt-16 pt-6 border-t border-white/5">
+        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-gray-400">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
+              <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
+              <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
+              <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+            </svg>
+            <span className="font-semibold text-[var(--text)]">Tesslate.</span>
+            <span className="text-[var(--primary)] font-semibold">Build beyond limits</span>
+          </div>
+          <span className="hidden sm:inline text-gray-600">•</span>
+          <span>We're committed to open sourcing AI to empower builders everywhere</span>
+          <span className="hidden sm:inline text-gray-600">•</span>
+          <a
+            href="https://tesslate.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-[var(--primary)] transition-colors flex items-center gap-1.5"
+          >
+            Learn more
+            <ArrowSquareOut className="w-4 h-4" weight="bold" />
+          </a>
+          <span className="hidden sm:inline text-gray-600">•</span>
+          <a
+            href="https://docs.tesslate.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-[var(--primary)] transition-colors flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
+              <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
+              <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
+              <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+            </svg>
+            Documentation for <span className="font-semibold">Studio</span>
+            <ArrowSquareOut className="w-4 h-4" weight="bold" />
+          </a>
+        </div>
       </div>
     </div>
   );

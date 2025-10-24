@@ -195,6 +195,10 @@ export const projectsApi = {
     const response = await api.patch(`/api/projects/${id}/settings`, { settings });
     return response.data;
   },
+  forkProject: async (id: number) => {
+    const response = await api.post(`/api/projects/${id}/fork`);
+    return response.data;
+  },
 };
 
 export const chatApi = {
