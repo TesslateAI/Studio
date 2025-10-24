@@ -43,16 +43,16 @@ This template includes React Router DOM v6 pre-configured for client-side naviga
 
 **Configuration:**
 
-The `vite.config.js` file is pre-configured to use the `VITE_BASE_PATH` environment variable:
+The `vite.config.js` file is configured for subdomain routing:
 
 ```javascript
 export default defineConfig({
-  base: process.env.VITE_BASE_PATH || '/',
+  base: '/',  // No base path needed - each project gets its own subdomain
   // ... other config
 })
 ```
 
-This allows the application to work correctly regardless of where it's deployed (root path or subpath).
+Projects are accessed via subdomain routing (e.g., `your-project.studio.localhost`), so no base path configuration is needed.
 
 **Adding New Routes:**
 

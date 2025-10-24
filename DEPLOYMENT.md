@@ -251,57 +251,365 @@ docker compose ps
 ### Architecture
 ```
 Single Server:
-  • Traefik - Reverse proxy with Let's Encrypt SSL
+  • Traefik - Reverse proxy with Let's Encrypt SSL (via Cloudflare DNS challenge)
   • PostgreSQL - Production database
   • Orchestrator - Backend API
   • Frontend - Production build (nginx)
-  • User Containers - Dynamically created
+  • User Containers - Dynamically created with subdomain routing
 ```
 
 ### Prerequisites
 - Linux server (Ubuntu 22.04+ recommended)
 - Docker and Docker Compose installed
-- Domain name pointing to server IP
-- Cloudflare account (optional, for DNS and DDoS protection)
+- Domain name (e.g., `studio-demo.tesslate.com`)
+- Cloudflare account (required for wildcard SSL and subdomain routing)
+- Server accessible on ports 80 and 443
+
+### Architecture Explanation
+
+This setup uses **subdomain-based routing** for user dev environments:
+- Main app: `studio-demo.tesslate.com`
+- User projects: `{project-slug}.studio-demo.tesslate.com` (e.g., `my-app-k3x8n2.studio-demo.tesslate.com`)
+
+**Why Cloudflare DNS Challenge?**
+- Supports wildcard SSL certificates (`*.studio-demo.tesslate.com`)
+- No need to expose port 80 for ACME HTTP challenge
+- Works behind firewalls and load balancers
+- Automatic certificate renewal
+
+---
 
 ### Setup Steps
 
-1. **Configure domain DNS**
+#### 1. Cloudflare Configuration
+
+**A. Add Your Domain to Cloudflare**
+
+1. Log in to [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. Click "Add a Site" and enter your domain (e.g., `tesslate.com`)
+3. Follow the setup wizard to change your nameservers at your domain registrar
+4. Wait for DNS propagation (can take up to 24 hours)
+
+**B. Configure DNS Records**
+
+In Cloudflare Dashboard → DNS → Records:
+
+```
+Type    Name                   Content          Proxy Status    TTL
+─────────────────────────────────────────────────────────────────────
+A       studio-demo            YOUR_SERVER_IP   DNS only        Auto
+A       *.studio-demo          YOUR_SERVER_IP   DNS only        Auto
+```
+
+**Important Settings:**
+- **Proxy Status**: Must be "DNS only" (gray cloud icon)
+  - Orange cloud (proxied) breaks Traefik's Let's Encrypt DNS challenge
+  - Turn off proxy after clicking the cloud icon
+- **Wildcard Record**: The `*.studio-demo` record enables all subdomains to route to your server
+- Replace `YOUR_SERVER_IP` with your server's public IP address
+
+**C. Create Cloudflare API Token**
+
+This token allows Traefik to create DNS TXT records for Let's Encrypt DNS challenge.
+
+1. Go to [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Click "Create Token"
+3. Use the "Edit zone DNS" template
+4. Configure permissions:
    ```
-   A record: studio-demo.tesslate.com → YOUR_SERVER_IP
+   Permissions:
+     Zone - DNS - Edit
+     Zone - Zone - Read
+
+   Zone Resources:
+     Include - Specific zone - tesslate.com (or your domain)
    ```
+5. Click "Continue to summary" → "Create Token"
+6. **Copy the token immediately** (shown only once)
+7. Save it securely for the next step
 
-2. **Configure environment**
-   ```bash
-   cp .env.example .env
-   cp docker-compose.prod.yml docker-compose.yml
-   ```
+**D. Verify Cloudflare SSL/TLS Settings**
 
-   Edit `.env`:
-   ```env
-   SECRET_KEY=generate-strong-random-key-here
-   POSTGRES_PASSWORD=generate-strong-db-password
-   LITELLM_MASTER_KEY=your-litellm-master-key
-   LITELLM_API_BASE=https://your-litellm-proxy.com/v1
-   CF_DNS_API_TOKEN=your-cloudflare-token  # If using Cloudflare
-   ```
+In Cloudflare Dashboard → SSL/TLS:
 
-3. **Deploy**
-   ```bash
-   # Start services
-   docker compose -f docker-compose.prod.yml up -d
+1. **SSL/TLS encryption mode**: Set to "Full (strict)"
+   - This ensures end-to-end encryption
+   - Requires valid SSL certificate on your server (Traefik will handle this)
 
-   # Check logs
-   docker compose -f docker-compose.prod.yml logs -f
-   ```
+2. **Edge Certificates**: Enable "Always Use HTTPS"
 
-4. **SSL Certificate**
-   - Traefik automatically obtains Let's Encrypt SSL certificates
-   - Certificates stored in `traefik/acme.json`
+---
 
-5. **Access the application**
-   - Frontend: https://studio-demo.tesslate.com
-   - User Projects: https://{project-slug}.studio-demo.tesslate.com (subdomain routing)
+#### 2. Server Preparation
+
+**A. Install Docker and Docker Compose**
+
+```bash
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Add your user to docker group (optional)
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Install Docker Compose
+sudo apt install docker-compose-plugin -y
+
+# Verify installation
+docker --version
+docker compose version
+```
+
+**B. Configure Firewall**
+
+```bash
+# Allow SSH, HTTP, and HTTPS
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status
+```
+
+**C. Clone Repository**
+
+```bash
+cd /opt
+sudo git clone https://github.com/yourusername/tesslate-studio.git
+cd tesslate-studio
+```
+
+---
+
+#### 3. Configure Environment
+
+**A. Copy and Edit Environment File**
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+**B. Update Required Variables**
+
+```env
+# ============================================================================
+# Production Configuration
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Required: Security Keys
+# ----------------------------------------------------------------------------
+SECRET_KEY=<generate-strong-random-key-here>
+POSTGRES_PASSWORD=<generate-strong-db-password>
+
+# Generate SECRET_KEY:
+# python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# ----------------------------------------------------------------------------
+# Required: Domain Configuration
+# ----------------------------------------------------------------------------
+APP_DOMAIN=studio-demo.tesslate.com
+APP_PROTOCOL=https
+APP_PORT=80
+APP_SECURE_PORT=443
+
+# Base URL (automatically constructed)
+APP_BASE_URL=${APP_PROTOCOL}://${APP_DOMAIN}
+
+# CORS and Security
+CORS_ORIGINS=${APP_BASE_URL}
+ALLOWED_HOSTS=${APP_DOMAIN}
+
+# ----------------------------------------------------------------------------
+# Required: Cloudflare API Token
+# ----------------------------------------------------------------------------
+CF_DNS_API_TOKEN=<your-cloudflare-api-token-from-step-1c>
+
+# ----------------------------------------------------------------------------
+# Required: LiteLLM Configuration
+# ----------------------------------------------------------------------------
+LITELLM_API_BASE=https://your-litellm-proxy.com/v1
+LITELLM_MASTER_KEY=<your-litellm-master-key>
+LITELLM_DEFAULT_MODELS=gpt-4o-mini,gpt-3.5-turbo
+LITELLM_TEAM_ID=default
+LITELLM_EMAIL_DOMAIN=tesslate.com
+LITELLM_INITIAL_BUDGET=10.0
+
+# ----------------------------------------------------------------------------
+# Optional: Traefik Dashboard Security
+# ----------------------------------------------------------------------------
+# Generate with: htpasswd -nb admin your-strong-password
+# Default: admin:admin (CHANGE THIS!)
+TRAEFIK_BASIC_AUTH=admin:REDACTED_TRAEFIK_BCRYPT
+
+# ----------------------------------------------------------------------------
+# Database Configuration
+# ----------------------------------------------------------------------------
+DATABASE_URL=postgresql+asyncpg://tesslate_user:${POSTGRES_PASSWORD}@postgres:5432/tesslate
+POSTGRES_DB=tesslate
+POSTGRES_USER=tesslate_user
+# POSTGRES_PASSWORD already set above
+
+# ----------------------------------------------------------------------------
+# Deployment Mode
+# ----------------------------------------------------------------------------
+DEPLOYMENT_MODE=docker
+```
+
+**C. Configure Traefik Email for SSL Certificates**
+
+Edit `traefik/traefik.prod.yml`:
+
+```bash
+nano traefik/traefik.prod.yml
+```
+
+Update the email address:
+```yaml
+certificatesResolvers:
+  cloudflare:
+    acme:
+      email: admin@yourdomain.com  # Change this to your email
+      storage: /etc/traefik/acme.json
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+```
+
+**D. Set Correct Permissions for acme.json**
+
+```bash
+chmod 600 traefik/acme.json
+```
+
+---
+
+#### 4. Deploy Application
+
+**A. Build and Start Services**
+
+```bash
+# Start all services
+docker compose -f docker-compose.prod.yml up -d
+
+# Check status
+docker compose -f docker-compose.prod.yml ps
+
+# View logs
+docker compose -f docker-compose.prod.yml logs -f
+```
+
+**B. Monitor SSL Certificate Generation**
+
+Watch Traefik logs for Let's Encrypt certificate generation:
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f traefik
+```
+
+Look for:
+```
+time="..." level=info msg="Certificates obtained for domains [studio-demo.tesslate.com *.studio-demo.tesslate.com]"
+```
+
+This may take 1-2 minutes. Traefik will:
+1. Request certificate from Let's Encrypt
+2. Create DNS TXT record via Cloudflare API
+3. Validate domain ownership
+4. Download and store certificate in `traefik/acme.json`
+
+**C. Verify Services are Running**
+
+```bash
+# Check all containers
+docker ps
+
+# Expected containers:
+# - tesslate-traefik
+# - tesslate-orchestrator
+# - tesslate-app
+# - tesslate-postgres
+
+# Check health
+docker compose -f docker-compose.prod.yml ps
+```
+
+---
+
+#### 5. Create Admin User
+
+```bash
+# Enter orchestrator container
+docker exec -it tesslate-orchestrator bash
+
+# Create admin user
+python -m app.create_admin
+
+# Follow prompts to set email and password
+# Exit container
+exit
+```
+
+---
+
+#### 6. Access and Verify
+
+**A. Access the Application**
+- Frontend: https://studio-demo.tesslate.com
+- Traefik Dashboard: https://studio-demo.tesslate.com/traefik (requires basic auth)
+
+**B. Test User Project Subdomain Routing**
+1. Log in to the application
+2. Create a new project
+3. Access project preview at: `https://{project-slug}.studio-demo.tesslate.com`
+   - Example: `https://my-app-k3x8n2.studio-demo.tesslate.com`
+
+**C. Verify SSL Certificate**
+
+```bash
+# Check certificate details
+echo | openssl s_client -connect studio-demo.tesslate.com:443 -servername studio-demo.tesslate.com 2>/dev/null | openssl x509 -noout -text
+
+# Should show:
+# - Issuer: Let's Encrypt
+# - Subject Alternative Names: studio-demo.tesslate.com, *.studio-demo.tesslate.com
+# - Valid for 90 days
+```
+
+---
+
+#### 7. SSL Certificate Auto-Renewal
+
+Traefik automatically renews Let's Encrypt certificates 30 days before expiration.
+
+**Verify Auto-Renewal Configuration:**
+
+Check `traefik/traefik.prod.yml`:
+```yaml
+certificatesResolvers:
+  cloudflare:
+    acme:
+      email: admin@yourdomain.com
+      storage: /etc/traefik/acme.json  # Persisted via volume mount
+      dnsChallenge:
+        provider: cloudflare
+```
+
+**Monitor Renewal:**
+```bash
+# Check certificate expiration
+docker compose -f docker-compose.prod.yml logs traefik | grep -i "renew"
+
+# View acme.json (certificates stored here)
+cat traefik/acme.json | jq
+```
 
 ### Advantages ✅
 - Simple deployment (single server)
@@ -316,13 +624,288 @@ Single Server:
 - Resource limits of single server
 
 ### Production Checklist
-- [ ] Strong `SECRET_KEY` generated
-- [ ] Strong `POSTGRES_PASSWORD` set
-- [ ] Regular database backups configured
-- [ ] Traefik dashboard secured or disabled
+
+**Security:**
+- [ ] Strong `SECRET_KEY` generated (use `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
+- [ ] Strong `POSTGRES_PASSWORD` set (use `openssl rand -base64 32`)
+- [ ] `TRAEFIK_BASIC_AUTH` changed from default (use `htpasswd -nb admin your-password`)
+- [ ] Cloudflare API token permissions limited to specific zone
 - [ ] Firewall configured (ports 80, 443, 22 only)
-- [ ] Monitoring setup (logs, metrics)
-- [ ] SSL certificates auto-renewing
+- [ ] SSH key-based authentication enabled (disable password auth)
+- [ ] Regular security updates configured (`unattended-upgrades`)
+
+**SSL/TLS:**
+- [ ] Cloudflare DNS records set to "DNS only" (gray cloud)
+- [ ] Wildcard DNS record configured (`*.studio-demo`)
+- [ ] Cloudflare SSL/TLS mode set to "Full (strict)"
+- [ ] Traefik email configured in `traefik/traefik.prod.yml`
+- [ ] SSL certificates auto-renewing (check `acme.json` is persisted)
+- [ ] Certificate expiration monitored
+
+**Backup and Recovery:**
+- [ ] Database backups automated (see [Database Backup Guide](#database-backup-guide))
+- [ ] User project files backed up (`/opt/tesslate-studio/users/`)
+- [ ] `.env` file backed up securely (contains secrets)
+- [ ] `traefik/acme.json` backed up (contains SSL certificates)
+- [ ] Backup restoration tested
+
+**Monitoring:**
+- [ ] Log aggregation configured (see [Logging Setup](#logging-setup))
+- [ ] Disk space alerts configured
+- [ ] Container health monitoring enabled
+- [ ] Certificate expiration alerts configured
+- [ ] Error rate monitoring configured
+
+**Documentation:**
+- [ ] Server access credentials documented
+- [ ] Cloudflare account credentials documented
+- [ ] Database credentials stored in password manager
+- [ ] Disaster recovery plan documented
+- [ ] On-call procedures documented
+
+---
+
+### Database Backup Guide
+
+**Setup Automated Backups:**
+
+```bash
+# Create backup directory
+sudo mkdir -p /opt/backups/tesslate-db
+
+# Create backup script
+sudo nano /opt/backups/backup-tesslate-db.sh
+```
+
+Add the following script:
+```bash
+#!/bin/bash
+BACKUP_DIR="/opt/backups/tesslate-db"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/tesslate_backup_$TIMESTAMP.sql.gz"
+POSTGRES_PASSWORD="your-postgres-password"  # Use same as .env
+
+# Create backup
+docker exec tesslate-postgres pg_dump -U tesslate_user tesslate | gzip > "$BACKUP_FILE"
+
+# Keep only last 30 days of backups
+find "$BACKUP_DIR" -name "tesslate_backup_*.sql.gz" -mtime +30 -delete
+
+echo "Backup completed: $BACKUP_FILE"
+```
+
+Make executable and configure cron:
+```bash
+sudo chmod +x /opt/backups/backup-tesslate-db.sh
+
+# Add to crontab (daily at 2 AM)
+sudo crontab -e
+
+# Add this line:
+0 2 * * * /opt/backups/backup-tesslate-db.sh >> /var/log/tesslate-backup.log 2>&1
+```
+
+**Restore from Backup:**
+```bash
+# Stop application
+cd /opt/tesslate-studio
+docker compose -f docker-compose.prod.yml down
+
+# Restore database
+gunzip < /opt/backups/tesslate-db/tesslate_backup_20250124_020000.sql.gz | \
+  docker exec -i tesslate-postgres psql -U tesslate_user tesslate
+
+# Start application
+docker compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+### Logging Setup
+
+**Configure Log Rotation:**
+
+Create `/etc/logrotate.d/tesslate`:
+```
+/var/lib/docker/containers/*/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+```
+
+**View Logs:**
+```bash
+# All services
+docker compose -f docker-compose.prod.yml logs -f
+
+# Specific service
+docker compose -f docker-compose.prod.yml logs -f orchestrator
+docker compose -f docker-compose.prod.yml logs -f traefik
+
+# Last 100 lines
+docker compose -f docker-compose.prod.yml logs --tail=100
+
+# Filter by time
+docker compose -f docker-compose.prod.yml logs --since="2025-01-24T10:00:00"
+
+# Export logs
+docker compose -f docker-compose.prod.yml logs > tesslate-logs-$(date +%Y%m%d).log
+```
+
+---
+
+### Maintenance Tasks
+
+**Weekly:**
+```bash
+# Check disk space
+df -h
+
+# Check Docker resource usage
+docker system df
+
+# Review logs for errors
+docker compose -f docker-compose.prod.yml logs --since="7d" | grep -i error
+
+# Check certificate expiration
+docker compose -f docker-compose.prod.yml logs traefik | grep -i "certificate"
+```
+
+**Monthly:**
+```bash
+# Update system packages
+sudo apt update && sudo apt upgrade -y
+
+# Clean up unused Docker resources
+docker system prune -a --volumes -f
+
+# Verify backups
+ls -lh /opt/backups/tesslate-db/
+
+# Test backup restoration (on staging environment)
+```
+
+**Quarterly:**
+```bash
+# Review security updates
+sudo apt list --upgradable
+
+# Audit user access logs
+docker compose -f docker-compose.prod.yml exec orchestrator python -m app.audit_logs
+
+# Review Cloudflare firewall rules
+# Visit: https://dash.cloudflare.com/
+
+# Update dependencies
+cd /opt/tesslate-studio
+git pull
+docker compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+### Scaling and Performance
+
+**Increase Orchestrator Replicas:**
+
+This is not directly supported in Docker Compose. For scaling, migrate to [Kubernetes deployment](#option-4-kubernetes-production-scalable).
+
+**Optimize PostgreSQL:**
+
+Edit `docker-compose.prod.yml` and add to postgres service:
+```yaml
+postgres:
+  # ... existing config ...
+  command:
+    - "postgres"
+    - "-c"
+    - "max_connections=200"
+    - "-c"
+    - "shared_buffers=256MB"
+    - "-c"
+    - "effective_cache_size=1GB"
+    - "-c"
+    - "work_mem=16MB"
+```
+
+Restart:
+```bash
+docker compose -f docker-compose.prod.yml restart postgres
+```
+
+**Monitor Performance:**
+```bash
+# Check container stats
+docker stats
+
+# Check database connections
+docker exec tesslate-postgres psql -U tesslate_user tesslate -c "SELECT count(*) FROM pg_stat_activity;"
+
+# Check slow queries
+docker exec tesslate-postgres psql -U tesslate_user tesslate -c "SELECT query, calls, mean_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 10;"
+```
+
+---
+
+### Upgrading to New Versions
+
+**Standard Update Process:**
+
+```bash
+cd /opt/tesslate-studio
+
+# Backup current state
+docker compose -f docker-compose.prod.yml exec postgres pg_dump -U tesslate_user tesslate > backup_before_upgrade.sql
+cp .env .env.backup
+
+# Pull latest code
+git fetch
+git checkout main
+git pull origin main
+
+# Check for breaking changes
+git log --oneline
+
+# Rebuild images
+docker compose -f docker-compose.prod.yml build --no-cache
+
+# Restart services (brief downtime)
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
+
+# Verify services
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f
+
+# Test application
+curl -I https://studio-demo.tesslate.com
+```
+
+**Rollback Procedure:**
+
+```bash
+# Stop services
+docker compose -f docker-compose.prod.yml down
+
+# Restore previous version
+git checkout <previous-commit-hash>
+
+# Restore environment
+cp .env.backup .env
+
+# Restore database (if needed)
+cat backup_before_upgrade.sql | docker exec -i tesslate-postgres psql -U tesslate_user tesslate
+
+# Rebuild and start
+docker compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker-compose.prod.yml up -d
+```
 
 ---
 
@@ -505,6 +1088,290 @@ lsof -i :8000
 
 # Kill the process or change port in .env
 ```
+
+---
+
+### Production Docker / Cloudflare Issues
+
+**Problem:** SSL certificate not generating / "Unable to obtain certificate"
+
+**Symptoms:**
+```
+time="..." level=error msg="Unable to obtain ACME certificate for domains..."
+time="..." level=error msg="Cloudflare API error"
+```
+
+**Solutions:**
+
+1. **Verify Cloudflare API Token**
+   ```bash
+   # Test API token with curl
+   curl -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+     -H "Authorization: Bearer YOUR_CF_DNS_API_TOKEN" \
+     -H "Content-Type: application/json"
+
+   # Should return: "status": "active"
+   ```
+
+2. **Check Token Permissions**
+   - Go to [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+   - Find your token and click "Edit"
+   - Verify permissions:
+     - `Zone - DNS - Edit`
+     - `Zone - Zone - Read`
+   - Verify zone resources include your domain
+
+3. **Verify DNS Records**
+   ```bash
+   # Check DNS propagation
+   nslookup studio-demo.tesslate.com
+   nslookup subdomain.studio-demo.tesslate.com
+
+   # Should resolve to your server IP
+   ```
+
+4. **Check Proxy Status in Cloudflare**
+   - DNS records must be "DNS only" (gray cloud icon)
+   - Orange cloud (proxied) breaks DNS challenge
+   - Turn off proxy in Cloudflare Dashboard → DNS
+
+5. **Verify Environment Variable**
+   ```bash
+   # Check if CF_DNS_API_TOKEN is set correctly
+   docker compose -f docker-compose.prod.yml exec traefik env | grep CLOUDFLARE
+
+   # Should show: CLOUDFLARE_DNS_API_TOKEN=your-token
+   ```
+
+6. **Check Traefik Configuration**
+   ```bash
+   # Verify traefik.prod.yml has correct provider
+   cat traefik/traefik.prod.yml | grep -A 5 "dnsChallenge"
+
+   # Should show:
+   #   dnsChallenge:
+   #     provider: cloudflare
+   ```
+
+7. **Check acme.json Permissions**
+   ```bash
+   ls -la traefik/acme.json
+   # Should be: -rw------- (600 permissions)
+
+   # Fix if needed:
+   chmod 600 traefik/acme.json
+   ```
+
+8. **Clear Certificate Cache and Retry**
+   ```bash
+   # Stop services
+   docker compose -f docker-compose.prod.yml down
+
+   # Clear certificate storage
+   echo '{}' > traefik/acme.json
+   chmod 600 traefik/acme.json
+
+   # Restart and watch logs
+   docker compose -f docker-compose.prod.yml up -d
+   docker compose -f docker-compose.prod.yml logs -f traefik
+   ```
+
+---
+
+**Problem:** "Site can't be reached" / DNS not resolving
+
+**Solutions:**
+
+1. **Check DNS Propagation**
+   ```bash
+   # Check if DNS has propagated globally
+   dig studio-demo.tesslate.com @1.1.1.1
+   dig studio-demo.tesslate.com @8.8.8.8
+
+   # Or use online tools:
+   # https://www.whatsmydns.net/
+   ```
+
+2. **Verify Cloudflare Nameservers**
+   ```bash
+   # Check if domain is using Cloudflare nameservers
+   dig NS tesslate.com
+
+   # Should return Cloudflare nameservers (e.g., bob.ns.cloudflare.com)
+   ```
+
+3. **Check Firewall**
+   ```bash
+   # Verify ports are open
+   sudo ufw status
+
+   # Should show:
+   # 80/tcp    ALLOW
+   # 443/tcp   ALLOW
+   ```
+
+4. **Test Direct IP Access**
+   ```bash
+   # Test if server is accessible directly
+   curl -I http://YOUR_SERVER_IP
+
+   # If this works but domain doesn't, it's a DNS issue
+   ```
+
+---
+
+**Problem:** Wildcard subdomain routing not working for user projects
+
+**Symptoms:**
+- Main app (studio-demo.tesslate.com) works
+- User projects (my-app-k3x8n2.studio-demo.tesslate.com) show "404 Not Found"
+
+**Solutions:**
+
+1. **Verify Wildcard DNS Record in Cloudflare**
+   ```bash
+   # Test wildcard subdomain resolves
+   nslookup random-subdomain.studio-demo.tesslate.com
+
+   # Should resolve to your server IP
+   ```
+
+2. **Check Cloudflare DNS Records**
+   - Must have: `A *.studio-demo YOUR_SERVER_IP` (DNS only)
+   - If missing, add it in Cloudflare Dashboard → DNS
+
+3. **Verify Wildcard SSL Certificate**
+   ```bash
+   # Check if Traefik obtained wildcard cert
+   docker compose -f docker-compose.prod.yml logs traefik | grep -i "studio-demo"
+
+   # Should see: "*.studio-demo.tesslate.com"
+   ```
+
+4. **Check Traefik Dashboard**
+   - Open: https://studio-demo.tesslate.com/traefik
+   - Check "HTTP Routers" section
+   - Look for user container routers with subdomain rules
+
+5. **Verify User Container Labels**
+   ```bash
+   # Check labels on user containers
+   docker inspect tesslate-user1-project1 | grep -A 10 "Labels"
+
+   # Should include Traefik labels with subdomain Host() rules
+   ```
+
+---
+
+**Problem:** "SSL_ERROR_BAD_CERT_DOMAIN" or certificate warnings
+
+**Solutions:**
+
+1. **Check Certificate Domains**
+   ```bash
+   # View certificate details
+   echo | openssl s_client -connect studio-demo.tesslate.com:443 -servername studio-demo.tesslate.com 2>/dev/null | openssl x509 -noout -text | grep -A 2 "Subject Alternative Name"
+
+   # Should include:
+   # DNS:studio-demo.tesslate.com
+   # DNS:*.studio-demo.tesslate.com
+   ```
+
+2. **Verify Cloudflare SSL/TLS Mode**
+   - Go to Cloudflare Dashboard → SSL/TLS
+   - Must be "Full (strict)" mode
+   - If set to "Flexible", change to "Full (strict)"
+
+3. **Check Docker Compose TLS Configuration**
+   ```bash
+   # Verify labels in docker-compose.prod.yml
+   grep -A 3 "tls.domains" docker-compose.prod.yml
+
+   # Should show:
+   # - "traefik.http.routers.app.tls.domains[0].main=${APP_DOMAIN}"
+   # - "traefik.http.routers.app.tls.domains[0].sans=*.${APP_DOMAIN}"
+   ```
+
+4. **Force Certificate Regeneration**
+   ```bash
+   docker compose -f docker-compose.prod.yml down
+   rm traefik/acme.json
+   touch traefik/acme.json
+   chmod 600 traefik/acme.json
+   docker compose -f docker-compose.prod.yml up -d
+   ```
+
+---
+
+**Problem:** Let's Encrypt rate limits hit
+
+**Symptoms:**
+```
+time="..." level=error msg="too many certificates already issued for exact set of domains"
+```
+
+**Solutions:**
+
+1. **Use Staging Server for Testing**
+
+   Edit `traefik/traefik.prod.yml`:
+   ```yaml
+   certificatesResolvers:
+     cloudflare:
+       acme:
+         caServer: https://acme-staging-v02.api.letsencrypt.org/directory  # Add this line
+         email: admin@yourdomain.com
+         storage: /etc/traefik/acme.json
+         dnsChallenge:
+           provider: cloudflare
+   ```
+
+2. **Wait for Rate Limit Reset**
+   - Let's Encrypt limits: 50 certificates per registered domain per week
+   - Wait 7 days or use staging server
+
+3. **Check Current Rate Limits**
+   - Visit: https://crt.sh/?q=%.studio-demo.tesslate.com
+   - Shows all certificates issued for your domain
+
+---
+
+**Problem:** Traefik dashboard not accessible
+
+**Solutions:**
+
+1. **Verify Dashboard is Enabled**
+   ```bash
+   # Check traefik.prod.yml
+   grep -A 2 "api:" traefik/traefik.prod.yml
+
+   # Should show:
+   # api:
+   #   dashboard: true
+   ```
+
+2. **Check Basic Auth Credentials**
+   ```bash
+   # Generate new credentials
+   htpasswd -nb admin your-new-password
+
+   # Add to .env as TRAEFIK_BASIC_AUTH
+   # Remember to escape $ as $$
+   ```
+
+3. **Test Basic Auth**
+   ```bash
+   curl -u admin:your-password https://studio-demo.tesslate.com/traefik/
+
+   # Should return HTML, not 401 Unauthorized
+   ```
+
+4. **Check Docker Labels**
+   ```bash
+   docker inspect tesslate-traefik | grep -A 20 "Labels"
+
+   # Should include dashboard router labels
+   ```
 
 ### Kubernetes Mode Issues
 

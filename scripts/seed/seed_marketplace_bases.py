@@ -17,8 +17,8 @@ import os
 # Add parent directories to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from orchestrator.app.config import get_settings
-from orchestrator.app.models import MarketplaceBase
+from app.config import get_settings
+from app.models import MarketplaceBase
 
 
 async def seed_bases():
@@ -43,7 +43,7 @@ async def seed_bases():
                 slug="nextjs-15",
                 description="Integrated fullstack with Next.js 15 and API routes",
                 long_description="Modern Next.js 15 starter with App Router, React Server Components, API routes, TypeScript, and Tailwind CSS. All-in-one solution for rapid fullstack development with automatic image optimization and font loading.",
-                git_repo_url="https://github.com/tesslate/base-nextjs-15.git",
+                git_repo_url="https://github.com/TesslateAI/Studio-NextJS-15-Base.git",
                 default_branch="main",
                 category="fullstack",
                 icon="⚡",
@@ -63,7 +63,7 @@ async def seed_bases():
                 slug="vite-react-fastapi",
                 description="Separated fullstack with Vite React frontend and FastAPI Python backend",
                 long_description="Full-stack template with explicit separation: Vite + React for the frontend and FastAPI for the backend. Includes CORS setup, hot reload for both servers, PostgreSQL integration, and example CRUD API endpoints. Perfect for data science and ML applications.",
-                git_repo_url="https://github.com/tesslate/base-vite-react-fastapi.git",
+                git_repo_url="https://github.com/TesslateAI/Studio-Vite-React-FastAPI-Base.git",
                 default_branch="main",
                 category="fullstack",
                 icon="🐍",
@@ -83,7 +83,7 @@ async def seed_bases():
                 slug="vite-react-go",
                 description="High-performance fullstack with Vite React frontend and Go backend",
                 long_description="Performance-focused fullstack template with Vite + React for the frontend and Go with Chi router for the backend. Includes Air for hot reloading, CORS middleware, example REST endpoints, and WebSocket support. Ideal for real-time applications and microservices.",
-                git_repo_url="https://github.com/tesslate/base-vite-react-go.git",
+                git_repo_url="https://github.com/TesslateAI/Studio-Vite-React-Go-Base.git",
                 default_branch="main",
                 category="fullstack",
                 icon="🔷",

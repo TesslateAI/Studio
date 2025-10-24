@@ -139,7 +139,11 @@ export default function Marketplace() {
     }
 
     try {
-      const data = await marketplaceApi.purchaseAgent(item.id);
+      // Call the correct endpoint based on item type
+      const data = item.item_type === 'base'
+        ? await marketplaceApi.purchaseBase(item.id)
+        : await marketplaceApi.purchaseAgent(item.id);
+
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
       } else {
