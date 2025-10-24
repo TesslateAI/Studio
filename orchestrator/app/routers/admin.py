@@ -665,3 +665,509 @@ async def get_metrics_summary(
     except Exception as e:
         logger.error(f"Error getting metrics summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to get metrics summary")
+
+
+# ============================================================================
+# Agent Management
+# ============================================================================
+
+from pydantic import BaseModel, Field
+from typing import List as TypeList
+import re
+import os
+
+
+class AgentCreate(BaseModel):
+    """Schema for creating a new agent."""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(..., min_length=1, max_length=500)
+    long_description: str = Field(..., min_length=1)
+    category: str = Field(..., min_length=1)
+    system_prompt: str = Field(..., min_length=1)
+    mode: str = Field(..., pattern="^(stream|agent)$")
+    agent_type: str = Field(..., min_length=1)
+    model: str = Field(..., min_length=1)
+    icon: str = Field(default="🤖")
+    pricing_type: str = Field(..., pattern="^(free|monthly|api|one_time)$")
+    price: int = Field(default=0, ge=0)  # In cents
+    api_pricing_input: float = Field(default=0.0, ge=0)  # $ per million input tokens
+    api_pricing_output: float = Field(default=0.0, ge=0)  # $ per million output tokens
+    source_type: str = Field(..., pattern="^(open|closed)$")
+    is_forkable: bool = Field(default=False)
+    requires_user_keys: bool = Field(default=False)
+    features: TypeList[str] = Field(default_factory=list)
+    required_models: TypeList[str] = Field(default_factory=list)
+    tags: TypeList[str] = Field(default_factory=list)
+    is_featured: bool = Field(default=False)
+    is_active: bool = Field(default=True)
+
+
+class AgentUpdate(BaseModel):
+    """Schema for updating an existing agent."""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = Field(None, min_length=1, max_length=500)
+    long_description: Optional[str] = None
+    category: Optional[str] = None
+    system_prompt: Optional[str] = None
+    mode: Optional[str] = Field(None, pattern="^(stream|agent)$")
+    agent_type: Optional[str] = None
+    model: Optional[str] = None
+    icon: Optional[str] = None
+    pricing_type: Optional[str] = Field(None, pattern="^(free|monthly|api|one_time)$")
+    price: Optional[int] = Field(None, ge=0)
+    api_pricing_input: Optional[float] = Field(None, ge=0)
+    api_pricing_output: Optional[float] = Field(None, ge=0)
+    source_type: Optional[str] = Field(None, pattern="^(open|closed)$")
+    is_forkable: Optional[bool] = None
+    requires_user_keys: Optional[bool] = None
+    features: Optional[TypeList[str]] = None
+    required_models: Optional[TypeList[str]] = None
+    tags: Optional[TypeList[str]] = None
+    is_featured: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+def can_edit_agent(agent: MarketplaceAgent) -> bool:
+    """Check if admin can edit this agent (only Tesslate-created agents)."""
+    return agent.created_by_user_id is None and agent.forked_by_user_id is None
+
+
+def generate_slug(name: str, db_session: AsyncSession = None) -> str:
+    """Generate a unique slug from agent name."""
+    # Convert to lowercase and replace spaces with hyphens
+    slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    return slug
+
+
+@router.get("/agents")
+async def list_agents(
+    source_type: Optional[str] = None,
+    pricing_type: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    List all agents with optional filters.
+    Admins can see all agents including user-created ones.
+    """
+    try:
+        query = select(MarketplaceAgent).options(
+            selectinload(MarketplaceAgent.created_by_user),
+            selectinload(MarketplaceAgent.forked_by_user)
+        )
+
+        # Apply filters
+        if source_type:
+            query = query.where(MarketplaceAgent.source_type == source_type)
+        if pricing_type:
+            query = query.where(MarketplaceAgent.pricing_type == pricing_type)
+        if is_active is not None:
+            query = query.where(MarketplaceAgent.is_active == is_active)
+
+        # Order by creation date (newest first)
+        query = query.order_by(MarketplaceAgent.created_at.desc())
+
+        result = await db.execute(query)
+        agents = result.scalars().all()
+
+        return {
+            "agents": [
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "slug": agent.slug,
+                    "description": agent.description,
+                    "category": agent.category,
+                    "mode": agent.mode,
+                    "agent_type": agent.agent_type,
+                    "model": agent.model,
+                    "icon": agent.icon,
+                    "pricing_type": agent.pricing_type,
+                    "price": agent.price,
+                    "api_pricing_input": agent.api_pricing_input,
+                    "api_pricing_output": agent.api_pricing_output,
+                    "source_type": agent.source_type,
+                    "is_forkable": agent.is_forkable,
+                    "requires_user_keys": agent.requires_user_keys,
+                    "is_featured": agent.is_featured,
+                    "is_active": agent.is_active,
+                    "usage_count": agent.usage_count,
+                    "created_at": agent.created_at.isoformat(),
+                    "created_by_tesslate": agent.created_by_user_id is None and agent.forked_by_user_id is None,
+                    "created_by_username": agent.created_by_user.username if agent.created_by_user else None,
+                    "forked_by_username": agent.forked_by_user.username if agent.forked_by_user else None,
+                    "can_edit": can_edit_agent(agent)
+                }
+                for agent in agents
+            ],
+            "total": len(agents)
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing agents: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list agents")
+
+
+@router.get("/agents/{agent_id}")
+async def get_agent(
+    agent_id: int,
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Get detailed information about a specific agent."""
+    try:
+        result = await db.execute(
+            select(MarketplaceAgent)
+            .options(
+                selectinload(MarketplaceAgent.created_by_user),
+                selectinload(MarketplaceAgent.forked_by_user)
+            )
+            .where(MarketplaceAgent.id == agent_id)
+        )
+        agent = result.scalar_one_or_none()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "slug": agent.slug,
+            "description": agent.description,
+            "long_description": agent.long_description,
+            "category": agent.category,
+            "system_prompt": agent.system_prompt,
+            "mode": agent.mode,
+            "agent_type": agent.agent_type,
+            "model": agent.model,
+            "icon": agent.icon,
+            "pricing_type": agent.pricing_type,
+            "price": agent.price,
+            "api_pricing_input": agent.api_pricing_input,
+            "api_pricing_output": agent.api_pricing_output,
+            "source_type": agent.source_type,
+            "is_forkable": agent.is_forkable,
+            "requires_user_keys": agent.requires_user_keys,
+            "features": agent.features,
+            "required_models": agent.required_models,
+            "tags": agent.tags,
+            "is_featured": agent.is_featured,
+            "is_active": agent.is_active,
+            "is_published": agent.is_published,
+            "usage_count": agent.usage_count,
+            "created_at": agent.created_at.isoformat(),
+            "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
+            "created_by_tesslate": agent.created_by_user_id is None and agent.forked_by_user_id is None,
+            "created_by_username": agent.created_by_user.username if agent.created_by_user else None,
+            "forked_by_username": agent.forked_by_user.username if agent.forked_by_user else None,
+            "can_edit": can_edit_agent(agent)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting agent {agent_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get agent")
+
+
+@router.post("/agents")
+async def create_agent(
+    agent_data: AgentCreate,
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Create a new agent.
+    All agents created via admin panel are marked as Tesslate-created (created_by_user_id = NULL).
+    """
+    try:
+        # Generate slug from name
+        slug = generate_slug(agent_data.name)
+
+        # Check if slug already exists
+        existing = await db.execute(
+            select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
+        )
+        if existing.scalar_one_or_none():
+            # Add a number suffix if slug exists
+            counter = 1
+            while True:
+                new_slug = f"{slug}-{counter}"
+                existing = await db.execute(
+                    select(MarketplaceAgent).where(MarketplaceAgent.slug == new_slug)
+                )
+                if not existing.scalar_one_or_none():
+                    slug = new_slug
+                    break
+                counter += 1
+
+        # Create agent (created_by_user_id = NULL means Tesslate-created)
+        agent = MarketplaceAgent(
+            name=agent_data.name,
+            slug=slug,
+            description=agent_data.description,
+            long_description=agent_data.long_description,
+            category=agent_data.category,
+            system_prompt=agent_data.system_prompt,
+            mode=agent_data.mode,
+            agent_type=agent_data.agent_type,
+            model=agent_data.model,
+            icon=agent_data.icon,
+            pricing_type=agent_data.pricing_type,
+            price=agent_data.price,
+            api_pricing_input=agent_data.api_pricing_input,
+            api_pricing_output=agent_data.api_pricing_output,
+            source_type=agent_data.source_type,
+            is_forkable=agent_data.is_forkable,
+            requires_user_keys=agent_data.requires_user_keys,
+            features=agent_data.features,
+            required_models=agent_data.required_models,
+            tags=agent_data.tags,
+            is_featured=agent_data.is_featured,
+            is_active=agent_data.is_active,
+            created_by_user_id=None,  # NULL = Tesslate-created
+            forked_by_user_id=None
+        )
+
+        db.add(agent)
+        await db.commit()
+        await db.refresh(agent)
+
+        logger.info(f"Admin {admin.username} created agent: {agent.name} (ID: {agent.id})")
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "slug": agent.slug,
+            "message": "Agent created successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating agent: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create agent")
+
+
+@router.put("/agents/{agent_id}")
+async def update_agent(
+    agent_id: int,
+    agent_data: AgentUpdate,
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Update an existing agent.
+    Only Tesslate-created agents can be edited. User-forked or custom agents cannot be edited.
+    """
+    try:
+        result = await db.execute(
+            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+        )
+        agent = result.scalar_one_or_none()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Check if admin can edit this agent
+        if not can_edit_agent(agent):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot edit user-created or forked agents. Only Tesslate-created agents can be edited."
+            )
+
+        # Update fields that were provided
+        update_data = agent_data.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(agent, field, value)
+
+        agent.updated_at = datetime.utcnow()
+
+        await db.commit()
+        await db.refresh(agent)
+
+        logger.info(f"Admin {admin.username} updated agent: {agent.name} (ID: {agent.id})")
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "slug": agent.slug,
+            "message": "Agent updated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating agent {agent_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update agent")
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_agent(
+    agent_id: int,
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Delete an agent.
+    Only Tesslate-created agents can be deleted. User-created agents can only be removed from marketplace.
+    """
+    try:
+        result = await db.execute(
+            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+        )
+        agent = result.scalar_one_or_none()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Check if admin can delete this agent
+        if not can_edit_agent(agent):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot delete user-created or forked agents. Use remove-from-marketplace instead."
+            )
+
+        agent_name = agent.name
+        await db.delete(agent)
+        await db.commit()
+
+        logger.info(f"Admin {admin.username} deleted agent: {agent_name} (ID: {agent_id})")
+
+        return {
+            "message": f"Agent '{agent_name}' deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting agent {agent_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete agent")
+
+
+@router.patch("/agents/{agent_id}/remove-from-marketplace")
+async def remove_from_marketplace(
+    agent_id: int,
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Remove an agent from the public marketplace (set is_active = false).
+    This can be used on ANY agent, including user-created ones.
+    """
+    try:
+        result = await db.execute(
+            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+        )
+        agent = result.scalar_one_or_none()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        agent.is_active = False
+        agent.updated_at = datetime.utcnow()
+
+        await db.commit()
+
+        logger.info(f"Admin {admin.username} removed agent from marketplace: {agent.name} (ID: {agent_id})")
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "message": "Agent removed from marketplace successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing agent {agent_id} from marketplace: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to remove agent from marketplace")
+
+
+@router.patch("/agents/{agent_id}/feature")
+async def toggle_featured(
+    agent_id: int,
+    is_featured: bool,
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Toggle the featured status of an agent.
+    """
+    try:
+        result = await db.execute(
+            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+        )
+        agent = result.scalar_one_or_none()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        agent.is_featured = is_featured
+        agent.updated_at = datetime.utcnow()
+
+        await db.commit()
+
+        status = "featured" if is_featured else "unfeatured"
+        logger.info(f"Admin {admin.username} {status} agent: {agent.name} (ID: {agent_id})")
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "is_featured": agent.is_featured,
+            "message": f"Agent {status} successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling featured status for agent {agent_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to toggle featured status")
+
+
+@router.get("/models")
+async def get_available_models(
+    admin: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get list of available models from LiteLLM.
+    Returns model names from your LiteLLM instance.
+    """
+    try:
+        from ..services.litellm_service import litellm_service
+
+        # Get all available models from LiteLLM
+        litellm_models = await litellm_service.get_available_models()
+
+        # Extract model IDs
+        models = [model.get('id') for model in litellm_models if model.get('id')]
+
+        # If no models from LiteLLM, fallback to environment variable
+        if not models:
+            from ..config import get_settings
+            settings = get_settings()
+            models_str = settings.litellm_default_models
+            models = [m.strip() for m in models_str.split(",") if m.strip()]
+
+        if not models:
+            models = ["cerebras/qwen-3-coder-480b"]  # Final fallback
+
+        return {
+            "models": models
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting available models: {e}")
+        # Fallback to environment variable on error
+        from ..config import get_settings
+        settings = get_settings()
+        models_str = settings.litellm_default_models
+        models = [m.strip() for m in models_str.split(",") if m.strip()]
+        return {
+            "models": models if models else ["cerebras/qwen-3-coder-480b"]
+        }

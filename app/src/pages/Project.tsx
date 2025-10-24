@@ -76,15 +76,9 @@ export default function Project() {
       loadProject();
       loadDevServerUrl();
       loadSettings();
+      loadAgents(); // Load user's enabled agents from library
     }
   }, [slug]);
-
-  // Load agents after project is loaded
-  useEffect(() => {
-    if (project?.id) {
-      loadAgents();
-    }
-  }, [project?.id]);
 
   const loadSettings = async () => {
     if (!slug) return;
@@ -168,12 +162,13 @@ export default function Project() {
   };
 
   const loadAgents = async () => {
-    if (!slug || !project?.id) return;
     try {
-      const agentsData = await marketplaceApi.getProjectAgents(project.id);
+      // Load agents from user's library (enabled agents only)
+      const libraryData = await marketplaceApi.getMyAgents();
+      const enabledAgents = libraryData.agents.filter((agent: any) => agent.is_enabled);
 
       // Convert backend agents to UI format
-      const uiAgents = agentsData.map(agent => ({
+      const uiAgents = enabledAgents.map((agent: any) => ({
         id: agent.slug,
         name: agent.name,
         icon: agent.icon || '🤖',
@@ -582,18 +577,27 @@ export default function Project() {
                 <Storefront className="w-8 h-8 text-[var(--primary)]" weight="fill" />
               </div>
               <h3 className="font-heading text-xl font-bold text-[var(--text)] mb-2">
-                No Agents Added
+                No Agents Enabled
               </h3>
               <p className="text-[var(--text)]/60 mb-6">
-                Add an agent from the marketplace to start building your project with AI assistance
+                Add agents from the marketplace to your library and enable them to start building
               </p>
-              <button
-                onClick={() => navigate('/marketplace')}
-                className="w-full bg-[var(--primary)] hover:bg-orange-600 text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
-              >
-                <Storefront size={20} weight="fill" />
-                Browse Marketplace
-              </button>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => navigate('/library')}
+                  className="w-full bg-[var(--primary)] hover:bg-orange-600 text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                >
+                  <Storefront size={20} weight="fill" />
+                  Go to Library
+                </button>
+                <button
+                  onClick={() => navigate('/marketplace')}
+                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-[var(--text)] py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                >
+                  <Storefront size={20} weight="fill" />
+                  Browse Marketplace
+                </button>
+              </div>
             </div>
           </div>
         </div>

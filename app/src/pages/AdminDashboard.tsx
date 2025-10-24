@@ -77,7 +77,7 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    if (activeTab !== 'overview') {
+    if (activeTab !== 'overview' && activeTab !== 'agents') {
       loadDetailedMetrics(activeTab);
     }
   }, [activeTab, selectedPeriod]);
@@ -316,7 +316,7 @@ export default function AdminDashboard() {
       <div className="bg-gray-800 border-b border-gray-700">
         <div className="container mx-auto px-4">
           <div className="flex space-x-8">
-            {['overview', 'users', 'projects', 'sessions', 'tokens', 'marketplace'].map(tab => (
+            {['overview', 'users', 'projects', 'sessions', 'tokens', 'marketplace', 'agents'].map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -596,6 +596,845 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {activeTab === 'agents' && (
+          <AgentManagement />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Agent Management Component
+// ============================================================================
+
+interface Agent {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  category: string;
+  mode: string;
+  agent_type: string;
+  model: string;
+  icon: string;
+  pricing_type: string;
+  price: number;
+  api_pricing_input: number;
+  api_pricing_output: number;
+  source_type: string;
+  is_forkable: boolean;
+  requires_user_keys: boolean;
+  is_featured: boolean;
+  is_active: boolean;
+  usage_count: number;
+  created_at: string;
+  created_by_tesslate: boolean;
+  created_by_username: string | null;
+  forked_by_username: string | null;
+  can_edit: boolean;
+}
+
+interface AgentDetailed extends Agent {
+  long_description: string;
+  system_prompt: string;
+  features: string[];
+  required_models: string[];
+  tags: string[];
+  is_published: boolean;
+  updated_at: string | null;
+}
+
+function AgentManagement() {
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<AgentDetailed | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [filter, setFilter] = useState({
+    source_type: '',
+    pricing_type: '',
+    is_active: ''
+  });
+
+  useEffect(() => {
+    loadAgents();
+    loadAvailableModels();
+  }, [filter]);
+
+  const loadAgents = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+
+      // Build query params
+      const params = new URLSearchParams();
+      if (filter.source_type) params.append('source_type', filter.source_type);
+      if (filter.pricing_type) params.append('pricing_type', filter.pricing_type);
+      if (filter.is_active) params.append('is_active', filter.is_active);
+
+      const response = await fetch(`/api/admin/agents?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to load agents');
+
+      const data = await response.json();
+      setAgents(data.agents || []);
+    } catch (error) {
+      console.error('Failed to load agents:', error);
+      toast.error('Failed to load agents');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAvailableModels = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/models', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to load models');
+
+      const data = await response.json();
+      setAvailableModels(data.models || []);
+    } catch (error) {
+      console.error('Failed to load models:', error);
+    }
+  };
+
+  const loadAgentDetails = async (agentId: number) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/admin/agents/${agentId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to load agent details');
+
+      const data = await response.json();
+      setSelectedAgent(data);
+      setShowEditModal(true);
+    } catch (error) {
+      console.error('Failed to load agent details:', error);
+      toast.error('Failed to load agent details');
+    }
+  };
+
+  const handleDelete = async (agent: Agent) => {
+    if (!agent.can_edit) {
+      toast.error('Cannot delete user-created agents');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete "${agent.name}"? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/admin/agents/${agent.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to delete agent');
+      }
+
+      toast.success('Agent deleted successfully');
+      loadAgents();
+    } catch (error: any) {
+      console.error('Failed to delete agent:', error);
+      toast.error(error.message || 'Failed to delete agent');
+    }
+  };
+
+  const handleRemoveFromMarketplace = async (agent: Agent) => {
+    if (!confirm(`Remove "${agent.name}" from the marketplace?`)) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/admin/agents/${agent.id}/remove-from-marketplace`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to remove agent');
+
+      toast.success('Agent removed from marketplace');
+      loadAgents();
+    } catch (error) {
+      console.error('Failed to remove agent:', error);
+      toast.error('Failed to remove agent');
+    }
+  };
+
+  const handleToggleFeatured = async (agent: Agent) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/admin/agents/${agent.id}/feature?is_featured=${!agent.is_featured}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to toggle featured');
+
+      toast.success(`Agent ${!agent.is_featured ? 'featured' : 'unfeatured'}`);
+      loadAgents();
+    } catch (error) {
+      console.error('Failed to toggle featured:', error);
+      toast.error('Failed to toggle featured status');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner message="Loading agents..." size={60} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-white">Agent Management</h2>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2"
+        >
+          <span>+ Create Agent</span>
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <select
+            value={filter.source_type}
+            onChange={(e) => setFilter({...filter, source_type: e.target.value})}
+            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600"
+          >
+            <option value="">All Source Types</option>
+            <option value="open">Open Source</option>
+            <option value="closed">Closed Source</option>
+          </select>
+
+          <select
+            value={filter.pricing_type}
+            onChange={(e) => setFilter({...filter, pricing_type: e.target.value})}
+            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600"
+          >
+            <option value="">All Pricing Types</option>
+            <option value="free">Free</option>
+            <option value="monthly">Monthly</option>
+            <option value="api">API Pricing</option>
+            <option value="one_time">One Time</option>
+          </select>
+
+          <select
+            value={filter.is_active}
+            onChange={(e) => setFilter({...filter, is_active: e.target.value})}
+            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600"
+          >
+            <option value="">All Status</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Agents List */}
+      <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-750 border-b border-gray-700">
+            <tr>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Agent</th>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Category</th>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Model</th>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Pricing</th>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Source</th>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Usage</th>
+              <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Status</th>
+              <th className="text-right px-6 py-3 text-gray-400 font-medium text-sm">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-700">
+            {agents.map((agent) => (
+              <tr key={agent.id} className="hover:bg-gray-700/50 transition-colors">
+                <td className="px-6 py-4">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-2xl">{agent.icon}</span>
+                    <div>
+                      <div className="text-white font-medium">{agent.name}</div>
+                      <div className="text-gray-400 text-sm">/{agent.slug}</div>
+                      {!agent.can_edit && (
+                        <div className="text-yellow-500 text-xs mt-1">
+                          {agent.created_by_username ? `By ${agent.created_by_username}` : agent.forked_by_username ? `Forked by ${agent.forked_by_username}` : 'User-created'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <span className="text-gray-300 capitalize">{agent.category}</span>
+                </td>
+                <td className="px-6 py-4">
+                  <span className="text-gray-300 text-sm font-mono">{agent.model}</span>
+                </td>
+                <td className="px-6 py-4">
+                  <div>
+                    <span className="text-gray-300 capitalize">{agent.pricing_type}</span>
+                    {agent.pricing_type === 'monthly' && (
+                      <div className="text-gray-400 text-sm">${(agent.price / 100).toFixed(2)}/mo</div>
+                    )}
+                    {agent.pricing_type === 'api' && (
+                      <div className="text-gray-400 text-xs">
+                        <div>In: ${agent.api_pricing_input}/M</div>
+                        <div>Out: ${agent.api_pricing_output}/M</div>
+                      </div>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <span className={`px-2 py-1 rounded text-xs ${agent.source_type === 'open' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                    {agent.source_type}
+                  </span>
+                </td>
+                <td className="px-6 py-4">
+                  <span className="text-gray-300">{agent.usage_count}</span>
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex flex-col space-y-1">
+                    <span className={`px-2 py-1 rounded text-xs w-fit ${agent.is_active ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {agent.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                    {agent.is_featured && (
+                      <span className="px-2 py-1 rounded text-xs w-fit bg-yellow-500/20 text-yellow-400">
+                        Featured
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex items-center justify-end space-x-2">
+                    <button
+                      onClick={() => loadAgentDetails(agent.id)}
+                      className="text-blue-400 hover:text-blue-300 text-sm"
+                      title={agent.can_edit ? "Edit agent" : "View agent"}
+                    >
+                      {agent.can_edit ? 'Edit' : 'View'}
+                    </button>
+                    <button
+                      onClick={() => handleToggleFeatured(agent)}
+                      className="text-yellow-400 hover:text-yellow-300 text-sm"
+                      title={agent.is_featured ? "Unfeature" : "Feature"}
+                    >
+                      {agent.is_featured ? '★' : '☆'}
+                    </button>
+                    {agent.is_active && (
+                      <button
+                        onClick={() => handleRemoveFromMarketplace(agent)}
+                        className="text-orange-400 hover:text-orange-300 text-sm"
+                        title="Remove from marketplace"
+                      >
+                        Hide
+                      </button>
+                    )}
+                    {agent.can_edit && (
+                      <button
+                        onClick={() => handleDelete(agent)}
+                        className="text-red-400 hover:text-red-300 text-sm"
+                        title="Delete agent"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {agents.length === 0 && (
+          <div className="text-center py-12 text-gray-400">
+            No agents found
+          </div>
+        )}
+      </div>
+
+      {/* Create/Edit Modals */}
+      {showCreateModal && (
+        <AgentFormModal
+          availableModels={availableModels}
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={() => {
+            setShowCreateModal(false);
+            loadAgents();
+          }}
+        />
+      )}
+
+      {showEditModal && selectedAgent && (
+        <AgentFormModal
+          agent={selectedAgent}
+          availableModels={availableModels}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedAgent(null);
+          }}
+          onSuccess={() => {
+            setShowEditModal(false);
+            setSelectedAgent(null);
+            loadAgents();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Agent Form Modal Component
+// ============================================================================
+
+interface AgentFormModalProps {
+  agent?: AgentDetailed;
+  availableModels: string[];
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFormModalProps) {
+  const isEdit = !!agent;
+  const canEdit = !agent || agent.can_edit;
+
+  // Agent type to mode mapping
+  const agentTypeToMode: Record<string, string> = {
+    'StreamAgent': 'stream',
+    'IterativeAgent': 'agent'
+  };
+
+  const [formData, setFormData] = useState({
+    name: agent?.name || '',
+    description: agent?.description || '',
+    long_description: agent?.long_description || '',
+    category: agent?.category || 'builder',
+    system_prompt: agent?.system_prompt || '',
+    agent_type: agent?.agent_type || 'StreamAgent',
+    model: agent?.model || (availableModels[0] || ''),
+    icon: agent?.icon || '🤖',
+    pricing_type: agent?.pricing_type || 'free',
+    price: agent?.price ? (agent.price / 100) : 0,
+    api_pricing_input: agent?.api_pricing_input || 0,
+    api_pricing_output: agent?.api_pricing_output || 0,
+    source_type: agent?.source_type || 'closed',
+    is_forkable: agent?.is_forkable || false,
+    requires_user_keys: agent?.requires_user_keys || false,
+    features: agent?.features?.join(', ') || '',
+    tags: agent?.tags?.join(', ') || '',
+    is_featured: agent?.is_featured || false,
+    is_active: agent?.is_active !== undefined ? agent.is_active : true
+  });
+
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!canEdit) {
+      toast.error('Cannot edit this agent');
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const token = localStorage.getItem('token');
+
+      // Prepare payload
+      const payload = {
+        ...formData,
+        mode: agentTypeToMode[formData.agent_type] || 'stream', // Infer mode from agent type
+        price: formData.pricing_type === 'monthly' || formData.pricing_type === 'one_time' ? Math.round(formData.price * 100) : 0,
+        api_pricing_input: formData.pricing_type === 'api' ? parseFloat(formData.api_pricing_input.toString()) : 0,
+        api_pricing_output: formData.pricing_type === 'api' ? parseFloat(formData.api_pricing_output.toString()) : 0,
+        features: formData.features.split(',').map(f => f.trim()).filter(f => f),
+        required_models: [], // Empty array - not used
+        tags: formData.tags.split(',').map(t => t.trim()).filter(t => t)
+      };
+
+      const url = isEdit ? `/api/admin/agents/${agent.id}` : '/api/admin/agents';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to save agent');
+      }
+
+      toast.success(`Agent ${isEdit ? 'updated' : 'created'} successfully`);
+      onSuccess();
+    } catch (error: any) {
+      console.error('Failed to save agent:', error);
+      toast.error(error.message || 'Failed to save agent');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-gray-800 rounded-lg border border-gray-700 max-w-4xl w-full my-8">
+        <div className="p-6 border-b border-gray-700">
+          <h2 className="text-2xl font-bold text-white">
+            {isEdit ? (canEdit ? 'Edit Agent' : 'View Agent') : 'Create New Agent'}
+          </h2>
+          {isEdit && !canEdit && (
+            <p className="text-yellow-500 text-sm mt-2">
+              This is a user-created agent. You can only view it, not edit it.
+            </p>
+          )}
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+          {/* Basic Info */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-300 text-sm font-medium mb-2">Name *</label>
+              <input
+                type="text"
+                required
+                disabled={!canEdit}
+                value={formData.name}
+                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <label className="block text-gray-300 text-sm font-medium mb-2">Icon</label>
+              <input
+                type="text"
+                disabled={!canEdit}
+                value={formData.icon}
+                onChange={(e) => setFormData({...formData, icon: e.target.value})}
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                placeholder="🤖"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-300 text-sm font-medium mb-2">Description *</label>
+            <input
+              type="text"
+              required
+              disabled={!canEdit}
+              value={formData.description}
+              onChange={(e) => setFormData({...formData, description: e.target.value})}
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              maxLength={500}
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-300 text-sm font-medium mb-2">Long Description *</label>
+            <textarea
+              required
+              disabled={!canEdit}
+              value={formData.long_description}
+              onChange={(e) => setFormData({...formData, long_description: e.target.value})}
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              rows={3}
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-300 text-sm font-medium mb-2">System Prompt *</label>
+            <textarea
+              required
+              disabled={!canEdit}
+              value={formData.system_prompt}
+              onChange={(e) => setFormData({...formData, system_prompt: e.target.value})}
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 font-mono text-sm disabled:opacity-50"
+              rows={6}
+            />
+          </div>
+
+          {/* Configuration */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-300 text-sm font-medium mb-2">
+                Category *
+                <span className="text-gray-500 font-normal text-xs ml-2">(e.g., builder, fullstack, data)</span>
+              </label>
+              <input
+                type="text"
+                required
+                disabled={!canEdit}
+                value={formData.category}
+                onChange={(e) => setFormData({...formData, category: e.target.value})}
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                placeholder="builder"
+              />
+            </div>
+            <div>
+              <label className="block text-gray-300 text-sm font-medium mb-2">
+                Agent Type *
+                <span className="text-gray-500 font-normal text-xs ml-2">(determines mode automatically)</span>
+              </label>
+              <select
+                required
+                disabled={!canEdit}
+                value={formData.agent_type}
+                onChange={(e) => setFormData({...formData, agent_type: e.target.value})}
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              >
+                <option value="StreamAgent">StreamAgent (streaming mode)</option>
+                <option value="IterativeAgent">IterativeAgent (agent mode)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-300 text-sm font-medium mb-2">
+                Model *
+                <span className="text-gray-500 font-normal text-xs ml-2">(LiteLLM model - fixed for closed source, suggestion for open source)</span>
+              </label>
+              <select
+                required
+                disabled={!canEdit}
+                value={formData.model}
+                onChange={(e) => setFormData({...formData, model: e.target.value})}
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              >
+                {availableModels.map(model => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-gray-300 text-sm font-medium mb-2">Source Type *</label>
+              <select
+                required
+                disabled={!canEdit}
+                value={formData.source_type}
+                onChange={(e) => setFormData({...formData, source_type: e.target.value})}
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              >
+                <option value="closed">Closed Source</option>
+                <option value="open">Open Source</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Pricing */}
+          <div>
+            <label className="block text-gray-300 text-sm font-medium mb-2">Pricing Type *</label>
+            <select
+              required
+              disabled={!canEdit}
+              value={formData.pricing_type}
+              onChange={(e) => setFormData({...formData, pricing_type: e.target.value})}
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+            >
+              <option value="free">Free</option>
+              <option value="monthly">Monthly Subscription</option>
+              <option value="api">API Pricing (per token)</option>
+              <option value="one_time">One-Time Purchase</option>
+            </select>
+          </div>
+
+          {(formData.pricing_type === 'monthly' || formData.pricing_type === 'one_time') && (
+            <div>
+              <label className="block text-gray-300 text-sm font-medium mb-2">
+                Price ($) {formData.pricing_type === 'monthly' ? '/ month' : ''}
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                disabled={!canEdit}
+                value={formData.price}
+                onChange={(e) => setFormData({...formData, price: parseFloat(e.target.value) || 0})}
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                min="0"
+                placeholder="e.g., 9.99"
+              />
+            </div>
+          )}
+
+          {formData.pricing_type === 'api' && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-gray-300 text-sm font-medium mb-2">
+                  Input Pricing ($/M tokens)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={!canEdit}
+                  value={formData.api_pricing_input}
+                  onChange={(e) => setFormData({...formData, api_pricing_input: parseFloat(e.target.value) || 0})}
+                  className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                  min="0"
+                  placeholder="e.g., 0.50"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-300 text-sm font-medium mb-2">
+                  Output Pricing ($/M tokens)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={!canEdit}
+                  value={formData.api_pricing_output}
+                  onChange={(e) => setFormData({...formData, api_pricing_output: parseFloat(e.target.value) || 0})}
+                  className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                  min="0"
+                  placeholder="e.g., 1.50"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Lists */}
+          <div>
+            <label className="block text-gray-300 text-sm font-medium mb-2">
+              Features (comma-separated)
+            </label>
+            <input
+              type="text"
+              disabled={!canEdit}
+              value={formData.features}
+              onChange={(e) => setFormData({...formData, features: e.target.value})}
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              placeholder="Real-time streaming, Code generation"
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-300 text-sm font-medium mb-2">
+              Tags (comma-separated)
+            </label>
+            <input
+              type="text"
+              disabled={!canEdit}
+              value={formData.tags}
+              onChange={(e) => setFormData({...formData, tags: e.target.value})}
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              placeholder="react, typescript, streaming"
+            />
+          </div>
+
+          {/* Flags */}
+          <div className="grid grid-cols-2 gap-4">
+            <label className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                disabled={!canEdit}
+                checked={formData.is_forkable}
+                onChange={(e) => setFormData({...formData, is_forkable: e.target.checked})}
+                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+              />
+              <span className="text-gray-300">Is Forkable (open source only)</span>
+            </label>
+
+            <label className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                disabled={!canEdit}
+                checked={formData.requires_user_keys}
+                onChange={(e) => setFormData({...formData, requires_user_keys: e.target.checked})}
+                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+              />
+              <span className="text-gray-300">
+                Requires User Keys
+                <span className="text-gray-500 font-normal text-xs ml-2">(user must provide their own API keys)</span>
+              </span>
+            </label>
+
+            <label className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                disabled={!canEdit}
+                checked={formData.is_featured}
+                onChange={(e) => setFormData({...formData, is_featured: e.target.checked})}
+                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+              />
+              <span className="text-gray-300">Featured</span>
+            </label>
+
+            <label className="flex items-center space-x-3">
+              <input
+                type="checkbox"
+                disabled={!canEdit}
+                checked={formData.is_active}
+                onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
+                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+              />
+              <span className="text-gray-300">Active</span>
+            </label>
+          </div>
+        </form>
+
+        <div className="p-6 border-t border-gray-700 flex items-center justify-end space-x-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-6 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600"
+          >
+            {canEdit ? 'Cancel' : 'Close'}
+          </button>
+          {canEdit && (
+            <button
+              type="submit"
+              disabled={saving}
+              onClick={handleSubmit}
+              className="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+            >
+              {saving ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>{isEdit ? 'Update Agent' : 'Create Agent'}</span>
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

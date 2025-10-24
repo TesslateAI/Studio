@@ -276,14 +276,17 @@ class MarketplaceAgent(Base):
     is_forkable = Column(Boolean, default=False)
     parent_agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=True)
     forked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # NULL = Tesslate-created
     config = Column(JSON, nullable=True)  # Editable configuration for forked agents
 
     icon = Column(String, default="🤖")  # emoji or phosphor icon name
     preview_image = Column(String, nullable=True)
 
     # Pricing
-    pricing_type = Column(String, nullable=False)  # free, monthly, usage, passthrough
-    price = Column(Integer, default=0)  # In cents for precision (monthly or per-token)
+    pricing_type = Column(String, nullable=False)  # free, monthly, api, one_time
+    price = Column(Integer, default=0)  # In cents for precision (monthly or one-time)
+    api_pricing_input = Column(Float, default=0.0)  # $ per million input tokens
+    api_pricing_output = Column(Float, default=0.0)  # $ per million output tokens
     stripe_price_id = Column(String, nullable=True)
     stripe_product_id = Column(String, nullable=True)
 
@@ -311,6 +314,7 @@ class MarketplaceAgent(Base):
     # Relationships
     parent_agent = relationship("MarketplaceAgent", remote_side=[id], foreign_keys=[parent_agent_id])
     forked_by_user = relationship("User", foreign_keys=[forked_by_user_id])
+    created_by_user = relationship("User", foreign_keys=[created_by_user_id])
     purchased_by = relationship("UserPurchasedAgent", back_populates="agent", cascade="all, delete-orphan")
     project_assignments = relationship("ProjectAgent", back_populates="agent", cascade="all, delete-orphan")
     reviews = relationship("AgentReview", back_populates="agent", cascade="all, delete-orphan")
