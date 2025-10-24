@@ -110,6 +110,8 @@ services:
       - "traefik.http.routers.app.priority=10"
       - "traefik.http.routers.app.tls=true"
       - "traefik.http.routers.app.tls.certresolver=cloudflare"
+      - "traefik.http.routers.app.tls.domains[0].main=${APP_DOMAIN}"
+      - "traefik.http.routers.app.tls.domains[0].sans=*.${APP_DOMAIN}"
       - "traefik.http.services.app.loadbalancer.server.port=80"
 
 networks:

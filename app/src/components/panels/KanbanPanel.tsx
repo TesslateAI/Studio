@@ -82,7 +82,7 @@ interface Comment {
   updated_at: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const priorityColors = {
   low: 'text-blue-400',

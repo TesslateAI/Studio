@@ -425,10 +425,10 @@ async def agent_chat(
 
         # 3. Create model adapter for IterativeAgent
         logger.info(f"[HTTP-AGENT] Creating model adapter")
-        model_adapter = create_model_adapter(
+        model_adapter = await create_model_adapter(
             model_name=model_name,
-            api_key=current_user.litellm_api_key,
-            api_base=settings.litellm_api_base
+            user_id=current_user.id,
+            db=db
         )
 
         # 4. Create agent via factory
@@ -996,10 +996,10 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         # For IterativeAgent, we need to create a model adapter
         model_adapter = None
         if agent_model.agent_type == "IterativeAgent":
-            model_adapter = create_model_adapter(
+            model_adapter = await create_model_adapter(
                 model_name=model_name,
-                api_key=user.litellm_api_key,
-                api_base=settings.litellm_api_base
+                user_id=user.id,
+                db=db
             )
             logger.info(f"[UNIFIED-CHAT] Created model adapter for IterativeAgent")
 

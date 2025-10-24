@@ -60,19 +60,23 @@ class StreamAgent(AbstractAgent):
         db = context.get('db')
         project_context_str = context.get('project_context_str', '')
 
-        # Check if user has LiteLLM API key
-        if not user.litellm_api_key:
+        # Get the model to use
+        model = context.get('model') or settings.litellm_default_models.split(",")[0]
+
+        # Create OpenAI client using centralized routing (handles OpenRouter vs LiteLLM)
+        from .models import get_llm_client
+        try:
+            client = await get_llm_client(
+                user_id=user.id,
+                model_name=model,
+                db=db
+            )
+        except ValueError as e:
             yield {
                 'type': 'error',
-                'content': 'User does not have a LiteLLM API key. Please contact support.'
+                'content': str(e)
             }
             return
-
-        # Create OpenAI client with user's LiteLLM key
-        client = AsyncOpenAI(
-            api_key=user.litellm_api_key,
-            base_url=context.get('api_base', settings.litellm_api_base)
-        )
 
         # Build the complete prompt
         messages = [
@@ -85,17 +89,27 @@ class StreamAgent(AbstractAgent):
 
         try:
             logger.info(f"[StreamAgent] Starting stream for user {user.id}, project {project_id}")
-
-            # Stream the response
-            # Use model from context or fallback to first default model
-            model = context.get('model') or settings.litellm_default_models.split(",")[0]
             logger.info(f"[StreamAgent] Using model: {model}")
-            stream = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True,
-                temperature=0.7
-            )
+
+            # Prepare request parameters
+            # Strip openrouter/ prefix if present (OpenRouter API expects just the model ID)
+            model_id = model.removeprefix("openrouter/") if model.startswith("openrouter/") else model
+
+            stream_params = {
+                "model": model_id,
+                "messages": messages,
+                "stream": True,
+                "temperature": 0.7
+            }
+
+            # Add OpenRouter-specific headers if needed
+            if model.startswith("openrouter/"):
+                stream_params["extra_headers"] = {
+                    "HTTP-Referer": "https://tesslate.com",
+                    "X-Title": "Tesslate Studio"
+                }
+
+            stream = await client.chat.completions.create(**stream_params)
 
             # Stream chunks to the frontend
             async for chunk in stream:

@@ -164,10 +164,10 @@ async def get_available_models(
 
 @router.post("/models/custom")
 async def add_custom_model(
-    model_id: str,
-    model_name: str,
-    pricing_input: Optional[float] = None,
-    pricing_output: Optional[float] = None,
+    model_id: str = Body(...),
+    model_name: str = Body(...),
+    pricing_input: Optional[float] = Body(None),
+    pricing_output: Optional[float] = Body(None),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):

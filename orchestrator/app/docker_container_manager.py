@@ -755,9 +755,34 @@ class DockerContainerManager(BaseContainerManager):
             # No base path configuration needed!
 
             # Add default environment variables
+            # Get APP_DOMAIN from settings for wildcard subdomain support
+            from .config import get_settings
+            settings = get_settings()
+
             run_cmd.extend([
                 "-e", "NODE_ENV=development",                           # Development mode
                 "-e", f"PORT={port}",                                   # Server port
+
+                # Universal domain variables (available to all frameworks)
+                "-e", f"APP_DOMAIN={settings.app_domain}",             # Base domain for custom logic
+                "-e", f"WILDCARD_DOMAIN=*.{settings.app_domain}",      # Wildcard pattern
+
+                # Vite-specific wildcard subdomain support
+                "-e", f"VITE_ALLOWED_HOSTS=.{settings.app_domain}",    # Native Vite allowed hosts
+                "-e", f"VITE_APP_DOMAIN={settings.app_domain}",        # Legacy support
+
+                # Next.js wildcard subdomain support
+                "-e", f"ALLOWED_HOSTS=.{settings.app_domain}",         # Next.js hostname validation
+                "-e", "HOSTNAME=0.0.0.0",                              # Allow all hostnames
+
+                # Go wildcard subdomain support
+                "-e", f"ALLOWED_ORIGINS=*.{settings.app_domain}",      # CORS/origin validation
+                "-e", "HOST=0.0.0.0",                                  # Bind to all interfaces
+
+                # Python/FastAPI wildcard subdomain support
+                "-e", f"FASTAPI_ALLOWED_HOSTS=.{settings.app_domain},*.{settings.app_domain}",  # FastAPI/Starlette
+                "-e", f"CORS_ORIGINS=https://*.{settings.app_domain},http://*.{settings.app_domain}",  # CORS config
+
                 # File watching settings from .env (required for hot reload in Docker)
                 "-e", f"CHOKIDAR_USEPOLLING={os.environ.get('CHOKIDAR_USEPOLLING', 'true')}",
                 "-e", f"CHOKIDAR_INTERVAL={os.environ.get('CHOKIDAR_INTERVAL', '1000')}",

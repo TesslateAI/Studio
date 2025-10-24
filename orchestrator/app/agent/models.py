@@ -16,6 +16,8 @@ from typing import List, Dict, Any, Optional
 import logging
 import asyncio
 from openai import AsyncOpenAI
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 # Optional: Anthropic import (only needed if using Claude)
 try:
@@ -26,6 +28,84 @@ except ImportError:
     AsyncAnthropic = None
 
 logger = logging.getLogger(__name__)
+
+
+async def get_llm_client(
+    user_id: int,
+    model_name: str,
+    db: AsyncSession
+) -> AsyncOpenAI:
+    """
+    Get configured LLM client for a user and model.
+
+    This is the centralized routing function that handles:
+    - OpenRouter models: Routes to OpenRouter API with user's stored key
+    - Other models: Routes to LiteLLM proxy with user's LiteLLM key
+
+    Args:
+        user_id: The user ID
+        model_name: The model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
+        db: Database session
+
+    Returns:
+        Configured AsyncOpenAI client ready to use
+
+    Raises:
+        ValueError: If user not found or OpenRouter key not configured
+    """
+    from ..models import User, UserAPIKey
+    from ..config import get_settings
+    from ..routers.secrets import decode_key
+
+    settings = get_settings()
+
+    # Get user
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise ValueError(f"User {user_id} not found")
+
+    # Check if this is an OpenRouter model
+    if model_name.startswith("openrouter/"):
+        logger.info(f"OpenRouter model detected: {model_name}, fetching user's API key")
+
+        # Get user's OpenRouter API key
+        result = await db.execute(
+            select(UserAPIKey).where(
+                UserAPIKey.user_id == user_id,
+                UserAPIKey.provider == "openrouter",
+                UserAPIKey.is_active == True
+            )
+        )
+        api_key_record = result.scalar_one_or_none()
+
+        if not api_key_record:
+            raise ValueError(
+                "OpenRouter model selected but no OpenRouter API key configured. "
+                "Please add your OpenRouter API key in Settings."
+            )
+
+        # Decode the stored key
+        openrouter_key = decode_key(api_key_record.encrypted_value)
+
+        logger.info(f"Using OpenRouter API with user's key for model: {model_name}")
+
+        # Return client configured for OpenRouter
+        return AsyncOpenAI(
+            api_key=openrouter_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
+    else:
+        # Use LiteLLM proxy for system models
+        logger.info(f"Using LiteLLM proxy for model: {model_name}")
+
+        if not user.litellm_api_key:
+            raise ValueError("User does not have a LiteLLM API key. Please contact support.")
+
+        return AsyncOpenAI(
+            api_key=user.litellm_api_key,
+            base_url=settings.litellm_api_base
+        )
 
 
 class ModelAdapter(ABC):
@@ -64,31 +144,26 @@ class OpenAIAdapter(ModelAdapter):
     def __init__(
         self,
         model_name: str,
-        api_key: str,
-        api_base: Optional[str] = None,
+        client: AsyncOpenAI,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None
     ):
         """
-        Initialize OpenAI adapter.
+        Initialize OpenAI adapter with a pre-configured client.
 
         Args:
-            model_name: Model identifier (e.g., "gpt-4o", "cerebras/llama3.1-8b")
-            api_key: API key
-            api_base: Custom API base URL (for OpenAI-compatible APIs)
+            model_name: Model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
+            client: Pre-configured AsyncOpenAI client (from get_llm_client())
             temperature: Sampling temperature (0-2)
             max_tokens: Maximum tokens in response
         """
         self.model_name = model_name
+        self.client = client
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.is_openrouter = model_name.startswith("openrouter/")
 
-        client_kwargs = {"api_key": api_key}
-        if api_base:
-            client_kwargs["base_url"] = api_base
-
-        self.client = AsyncOpenAI(**client_kwargs)
-        logger.info(f"OpenAIAdapter initialized - model: {model_name}, base: {api_base or 'default'}")
+        logger.info(f"OpenAIAdapter initialized - model: {model_name}")
 
     async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """
@@ -104,14 +179,25 @@ class OpenAIAdapter(ModelAdapter):
         temperature = kwargs.get("temperature", self.temperature)
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
 
+        # Strip openrouter/ prefix if present (OpenRouter API expects just the model ID)
+        model_id = self.model_name.removeprefix("openrouter/") if self.is_openrouter else self.model_name
+
         request_params = {
-            "model": self.model_name,
+            "model": model_id,
             "messages": messages,
             "temperature": temperature
         }
 
         if max_tokens:
             request_params["max_tokens"] = max_tokens
+
+        # Add OpenRouter-specific parameters
+        if self.is_openrouter:
+            # Add extra_headers for OpenRouter rankings and referrals
+            request_params["extra_headers"] = {
+                "HTTP-Referer": "https://tesslate.com",  # Your app URL
+                "X-Title": "Tesslate Studio"  # Your app name
+            }
 
         try:
             logger.debug(f"Sending request to {self.model_name} with {len(messages)} messages")
@@ -228,60 +314,67 @@ class AnthropicAdapter(ModelAdapter):
         return self.model_name
 
 
-def create_model_adapter(
+async def create_model_adapter(
     model_name: str,
-    api_key: str,
-    api_base: Optional[str] = None,
+    user_id: int,
+    db: AsyncSession,
     provider: Optional[str] = None,
     **kwargs
 ) -> ModelAdapter:
     """
     Factory function to create the appropriate model adapter.
 
+    Uses get_llm_client() to handle model routing (OpenRouter vs LiteLLM).
     Auto-detects provider from model name if not specified.
 
     Args:
-        model_name: Model identifier
-        api_key: API key
-        api_base: Custom API base URL
+        model_name: Model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
+        user_id: User ID for fetching API keys
+        db: Database session
         provider: Force specific provider ("openai", "anthropic", etc.)
-        **kwargs: Additional adapter parameters
+        **kwargs: Additional adapter parameters (temperature, max_tokens, etc.)
 
     Returns:
         ModelAdapter instance
 
     Examples:
-        # OpenAI GPT-4
-        adapter = create_model_adapter("gpt-4o", api_key="sk-...")
+        # OpenAI GPT-4 (via LiteLLM)
+        adapter = await create_model_adapter("gpt-4o", user_id=1, db=db)
 
-        # Cerebras via OpenAI-compatible API
-        adapter = create_model_adapter(
-            "cerebras/llama3.1-8b",
-            api_key="csk-...",
-            api_base="https://api.cerebras.ai/v1"
-        )
+        # OpenRouter model (uses user's OpenRouter key)
+        adapter = await create_model_adapter("openrouter/anthropic/claude-3.5-sonnet", user_id=1, db=db)
 
-        # Claude
-        adapter = create_model_adapter(
-            "claude-3-5-sonnet-20241022",
-            api_key="sk-ant-...",
-            provider="anthropic"
-        )
+        # Cerebras via LiteLLM
+        adapter = await create_model_adapter("cerebras/llama3.1-8b", user_id=1, db=db)
     """
     model_lower = model_name.lower()
 
     # Auto-detect provider if not specified
     if not provider:
         if "claude" in model_lower or "anthropic" in model_lower:
-            provider = "anthropic"
+            # Only use native Anthropic adapter for non-OpenRouter Claude models
+            if not model_name.startswith("openrouter/"):
+                provider = "anthropic"
+            else:
+                provider = "openai"  # OpenRouter uses OpenAI-compatible API
         else:
             # Default to OpenAI-compatible
             provider = "openai"
 
     if provider == "anthropic":
-        return AnthropicAdapter(model_name, api_key, **kwargs)
+        # Native Anthropic API (not implemented for async client fetching yet)
+        # For now, this would require direct API key - not commonly used
+        raise NotImplementedError("Native Anthropic adapter not yet updated for centralized routing")
     elif provider == "openai":
-        return OpenAIAdapter(model_name, api_key, api_base, **kwargs)
+        # Get configured client using centralized routing
+        client = await get_llm_client(user_id, model_name, db)
+
+        # Create adapter with the configured client
+        return OpenAIAdapter(
+            model_name=model_name,
+            client=client,
+            **kwargs
+        )
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 

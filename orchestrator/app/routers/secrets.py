@@ -22,12 +22,14 @@ router = APIRouter()
 # Simple encoding for now - in production, use proper encryption (e.g., Fernet, AWS KMS, etc.)
 def encode_key(key: str) -> str:
     """Encode API key for storage. In production, use proper encryption."""
-    return base64.b64encode(key.encode()).decode()
+    # Strip whitespace before encoding to prevent issues
+    return base64.b64encode(key.strip().encode()).decode()
 
 
 def decode_key(encoded: str) -> str:
     """Decode API key from storage. In production, use proper decryption."""
-    return base64.b64decode(encoded.encode()).decode()
+    # Strip whitespace after decoding to handle any encoding issues
+    return base64.b64decode(encoded.encode()).decode().strip()
 
 
 @router.get("/api-keys")
