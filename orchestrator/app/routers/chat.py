@@ -1014,6 +1014,13 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             f"for agent '{agent_model.name}'"
         )
 
+        # Set max_iterations for IterativeAgent (default to 20 for complex tasks)
+        if hasattr(agent_instance, 'max_iterations'):
+            # Use client-provided value or default to 20
+            max_iters = data.get('max_iterations', 20)
+            agent_instance.max_iterations = max_iters
+            logger.info(f"[UNIFIED-CHAT] Set max_iterations to {max_iters}")
+
     except Exception as e:
         logger.error(f"[UNIFIED-CHAT] Failed to create agent: {e}", exc_info=True)
         await websocket.send_json({

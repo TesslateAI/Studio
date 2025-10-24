@@ -44,7 +44,7 @@ CRITICAL RULES:
 ```""",
         "mode": "stream",
         "agent_type": "StreamAgent",
-        "model": "cerebras/qwen-3-coder-480b",
+        "model": "qwen-3-coder-480b",
         "icon": "⚡",
         "preview_image": None,
         "pricing_type": "free",
@@ -73,16 +73,18 @@ Your capabilities:
 - Iteratively solve problems
 
 Always:
-1. Think before you act
-2. Use tools to gather information
-3. Make incremental changes
-4. Verify your work
-5. Signal TASK_COMPLETE when done
+1. Check project structure from TESSLATE.md context
+2. Think before you act
+3. Use correct file paths with subdirectories
+4. Use tools to gather information
+5. Make incremental changes
+6. Verify your work
+7. Signal TASK_COMPLETE when done
 
 Format your thoughts clearly and use tools strategically.""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "cerebras/qwen-3-coder-480b",
+        "model": "qwen-3-coder-480b",
         "icon": "🤖",
         "preview_image": None,
         "pricing_type": "free",
@@ -116,7 +118,7 @@ Your approach:
 Style with Tailwind CSS using utility classes. Make components customizable through props.""",
         "mode": "stream",
         "agent_type": "StreamAgent",
-        "model": "cerebras/qwen-3-coder-480b",
+        "model": "qwen-3-coder-480b",
         "icon": "⚛️",
         "preview_image": None,
         "pricing_type": "free",
@@ -159,7 +161,7 @@ Always:
 7. Handle edge cases (network errors, timeouts, etc.)""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
-        "model": "cerebras/qwen-3-coder-480b",
+        "model": "qwen-3-coder-480b",
         "icon": "🔌",
         "preview_image": None,
         "pricing_type": "free",

@@ -759,6 +759,11 @@ class DockerContainerManager(BaseContainerManager):
             from .config import get_settings
             settings = get_settings()
 
+            # Determine WebSocket protocol based on APP_PROTOCOL
+            app_protocol = os.environ.get('APP_PROTOCOL', 'http')
+            ws_protocol = 'wss' if app_protocol == 'https' else 'ws'
+            hmr_port = '443' if app_protocol == 'https' else '80'
+
             run_cmd.extend([
                 "-e", "NODE_ENV=development",                           # Development mode
                 "-e", f"PORT={port}",                                   # Server port
@@ -766,6 +771,10 @@ class DockerContainerManager(BaseContainerManager):
                 # Universal domain variables (available to all frameworks)
                 "-e", f"APP_DOMAIN={settings.app_domain}",             # Base domain for custom logic
                 "-e", f"WILDCARD_DOMAIN=*.{settings.app_domain}",      # Wildcard pattern
+
+                # Vite HMR WebSocket configuration (critical for HTTPS)
+                "-e", f"VITE_HMR_PROTOCOL={ws_protocol}",              # WebSocket protocol (ws/wss)
+                "-e", f"VITE_HMR_PORT={hmr_port}",                     # WebSocket port (80/443)
 
                 # Vite-specific wildcard subdomain support
                 "-e", f"VITE_ALLOWED_HOSTS=.{settings.app_domain}",    # Native Vite allowed hosts
