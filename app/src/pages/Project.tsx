@@ -528,7 +528,7 @@ export default function Project() {
         defaultSize={{ width: 900, height: 700 }}
         defaultPosition={{ x: 200, y: 100 }}
       >
-        <ArchitecturePanel projectId={project?.id} />
+        <ArchitecturePanel projectSlug={slug!} />
       </FloatingPanel>
 
       <FloatingPanel
@@ -537,7 +537,7 @@ export default function Project() {
         isOpen={activePanel === 'notes'}
         onClose={() => setActivePanel(null)}
       >
-        <NotesPanel projectId={project?.id} />
+        <NotesPanel projectSlug={slug!} />
       </FloatingPanel>
 
       <FloatingPanel
@@ -546,7 +546,7 @@ export default function Project() {
         isOpen={activePanel === 'settings'}
         onClose={() => setActivePanel(null)}
       >
-        <SettingsPanel projectId={project?.id} />
+        <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
 
       <FloatingPanel

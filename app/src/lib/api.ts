@@ -465,8 +465,8 @@ export const usersApi = {
 // Add diagram generation to projectsApi
 export const diagramApi = {
   // Generate architecture diagram for a project
-  generateDiagram: async (projectId: number) => {
-    const response = await api.post(`/api/projects/${projectId}/generate-architecture-diagram`);
+  generateDiagram: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/generate-architecture-diagram`);
     return response.data;
   },
 };

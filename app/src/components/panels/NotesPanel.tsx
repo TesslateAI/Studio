@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Underline } from '@tiptap/extension-underline';
+import Underline from '@tiptap/extension-underline';
 import { TextAlign } from '@tiptap/extension-text-align';
 import { Link } from '@tiptap/extension-link';
 import { Image } from '@tiptap/extension-image';
@@ -45,12 +45,12 @@ import toast from 'react-hot-toast';
 const lowlight = createLowlight(common);
 
 interface NotesPanelProps {
-  projectId: number;
+  projectSlug: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
-export function NotesPanel({ projectId }: NotesPanelProps) {
+export function NotesPanel({ projectSlug }: NotesPanelProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -134,13 +134,13 @@ export function NotesPanel({ projectId }: NotesPanelProps) {
   // Load notes from backend
   useEffect(() => {
     loadNotes();
-  }, [projectId]);
+  }, [projectSlug]);
 
   const loadNotes = async () => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(
-        `${API_BASE}/api/kanban/projects/${projectId}/notes`,
+        `${API_URL}/api/kanban/projects/${projectSlug}/notes`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -161,7 +161,7 @@ export function NotesPanel({ projectId }: NotesPanelProps) {
       setIsSaving(true);
       const token = localStorage.getItem('token');
       await axios.put(
-        `${API_BASE}/api/kanban/projects/${projectId}/notes`,
+        `${API_URL}/api/kanban/projects/${projectSlug}/notes`,
         {
           content,
           content_format: 'html'
@@ -188,7 +188,7 @@ export function NotesPanel({ projectId }: NotesPanelProps) {
         }, 1000); // Save 1 second after user stops typing
       };
     })(),
-    [projectId]
+    [projectSlug]
   );
 
   const addLink = () => {

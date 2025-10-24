@@ -4,24 +4,24 @@ import { projectsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 
 interface SettingsPanelProps {
-  projectId: number;
+  projectSlug: string;
   onLockToggle?: (locked: boolean) => void;
 }
 
 type PreviewMode = 'normal' | 'browser-tabs';
 
-export function SettingsPanel({ projectId }: SettingsPanelProps) {
+export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
   const [previewMode, setPreviewMode] = useState<PreviewMode>('normal');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadSettings();
-  }, [projectId]);
+  }, [projectSlug]);
 
   const loadSettings = async () => {
     try {
-      const data = await projectsApi.getSettings(projectId);
+      const data = await projectsApi.getSettings(projectSlug);
       const settings = data.settings || {};
       setPreviewMode(settings.preview_mode || 'normal');
     } catch (error) {
@@ -34,7 +34,7 @@ export function SettingsPanel({ projectId }: SettingsPanelProps) {
   const handlePreviewModeChange = async (mode: PreviewMode) => {
     setSaving(true);
     try {
-      await projectsApi.updateSettings(projectId, { preview_mode: mode });
+      await projectsApi.updateSettings(projectSlug, { preview_mode: mode });
       setPreviewMode(mode);
       toast.success('Preview mode updated! Refresh the page to see changes.');
     } catch (error: any) {

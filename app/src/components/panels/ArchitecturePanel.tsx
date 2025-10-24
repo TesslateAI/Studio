@@ -5,10 +5,10 @@ import toast from 'react-hot-toast';
 import mermaid from 'mermaid';
 
 interface ArchitecturePanelProps {
-  projectId: number;
+  projectSlug: string;
 }
 
-export function ArchitecturePanel({ projectId }: ArchitecturePanelProps) {
+export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
   const [diagram, setDiagram] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -37,7 +37,7 @@ export function ArchitecturePanel({ projectId }: ArchitecturePanelProps) {
 
     // Load saved diagram on mount
     loadSavedDiagram();
-  }, [projectId]);
+  }, [projectSlug]);
 
   useEffect(() => {
     // Render diagram when it changes
@@ -48,7 +48,7 @@ export function ArchitecturePanel({ projectId }: ArchitecturePanelProps) {
 
   const loadSavedDiagram = async () => {
     try {
-      const data = await projectsApi.getSettings(projectId);
+      const data = await projectsApi.getSettings(projectSlug);
       if (data.architecture_diagram) {
         setDiagram(data.architecture_diagram);
       }
@@ -72,7 +72,7 @@ export function ArchitecturePanel({ projectId }: ArchitecturePanelProps) {
   const handleGenerateDiagram = async () => {
     setLoading(true);
     try {
-      const response = await diagramApi.generateDiagram(projectId);
+      const response = await diagramApi.generateDiagram(projectSlug);
       setDiagram(response.diagram);
       setModelUsed(response.model_used);
       toast.success('Architecture diagram generated successfully!');

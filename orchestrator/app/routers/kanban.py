@@ -96,6 +96,35 @@ class ProjectNoteUpdate(BaseModel):
 # Helper Functions
 # ============================================================================
 
+async def get_project_id_from_slug_or_id(
+    project_slug_or_id: str,
+    db: AsyncSession,
+    current_user: User
+) -> int:
+    """Get project ID from slug or numeric ID and verify ownership."""
+    # Try to parse as numeric ID first
+    try:
+        project_id = int(project_slug_or_id)
+        result = await db.execute(
+            select(Project).where(Project.id == project_id)
+        )
+        project = result.scalar_one_or_none()
+    except ValueError:
+        # Not a numeric ID, treat as slug
+        result = await db.execute(
+            select(Project).where(Project.slug == project_slug_or_id)
+        )
+        project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this project")
+
+    return project.id
+
+
 async def get_board_with_auth(
     project_id: int,
     db: AsyncSession,
@@ -661,13 +690,14 @@ async def add_comment(
 # Notes Endpoints
 # ============================================================================
 
-@router.get("/projects/{project_id}/notes")
+@router.get("/projects/{project_slug_or_id}/notes")
 async def get_notes(
-    project_id: int,
+    project_slug_or_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get project notes."""
+    project_id = await get_project_id_from_slug_or_id(project_slug_or_id, db, current_user)
     await get_board_with_auth(project_id, db, current_user, create_if_missing=False)
 
     result = await db.execute(
@@ -694,14 +724,15 @@ async def get_notes(
     }
 
 
-@router.put("/projects/{project_id}/notes")
+@router.put("/projects/{project_slug_or_id}/notes")
 async def update_notes(
-    project_id: int,
+    project_slug_or_id: str,
     notes_data: ProjectNoteUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Update project notes."""
+    project_id = await get_project_id_from_slug_or_id(project_slug_or_id, db, current_user)
     await get_board_with_auth(project_id, db, current_user, create_if_missing=False)
 
     result = await db.execute(

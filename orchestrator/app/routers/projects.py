@@ -24,11 +24,11 @@ async def get_project_by_slug(
     user_id: int
 ) -> Project:
     """
-    Get a project by its slug and verify ownership.
+    Get a project by its slug or numeric ID and verify ownership.
 
     Args:
         db: Database session
-        project_slug: Project slug (e.g., "my-awesome-app-k3x8n2")
+        project_slug: Project slug (e.g., "my-awesome-app-k3x8n2") or numeric ID as string (e.g., "4")
         user_id: User ID to verify ownership
 
     Returns:
@@ -38,10 +38,19 @@ async def get_project_by_slug(
         HTTPException 404 if project not found
         HTTPException 403 if user doesn't own the project
     """
-    result = await db.execute(
-        select(Project).where(Project.slug == project_slug)
-    )
-    project = result.scalar_one_or_none()
+    # Try to parse as numeric ID first
+    try:
+        project_id = int(project_slug)
+        result = await db.execute(
+            select(Project).where(Project.id == project_id)
+        )
+        project = result.scalar_one_or_none()
+    except ValueError:
+        # Not a numeric ID, treat as slug
+        result = await db.execute(
+            select(Project).where(Project.slug == project_slug)
+        )
+        project = result.scalar_one_or_none()
 
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1477,7 +1486,7 @@ async def update_project_settings(
         await db.commit()
         await db.refresh(project)
 
-        logger.info(f"[SETTINGS] Updated settings for project {project_id}")
+        logger.info(f"[SETTINGS] Updated settings for project {project.id}")
 
         return {
             "message": "Settings updated successfully",
