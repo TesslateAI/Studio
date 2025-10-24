@@ -12,6 +12,7 @@ from ..auth import (
 )
 from ..config import get_settings
 from ..services.litellm_service import litellm_service
+from ..utils.slug_generator import generate_username_slug
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,17 +38,35 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
             detail="Username or email already registered"
         )
 
-    # Create new user
-    hashed_password = get_password_hash(user.password)
-    db_user = User(
-        name=user.name,
-        username=user.username,
-        email=user.email,
-        hashed_password=hashed_password
-    )
-    db.add(db_user)
-    await db.commit()
-    await db.refresh(db_user)
+    # Generate unique slug for the user
+    user_slug = generate_username_slug(username=user.name, email=user.email)
+
+    # Handle collision (retry with new slug)
+    max_retries = 10
+    for attempt in range(max_retries):
+        try:
+            # Create new user
+            hashed_password = get_password_hash(user.password)
+            db_user = User(
+                name=user.name,
+                username=user.username,
+                slug=user_slug,
+                email=user.email,
+                hashed_password=hashed_password
+            )
+            db.add(db_user)
+            await db.commit()
+            await db.refresh(db_user)
+            break
+        except Exception as e:
+            await db.rollback()
+            if "unique" in str(e).lower() and "slug" in str(e).lower() and attempt < max_retries - 1:
+                # Slug collision, generate a new one
+                user_slug = generate_username_slug(username=user.name, email=user.email)
+                logger.warning(f"[REGISTER] Slug collision, retrying with: {user_slug}")
+            else:
+                # Other error or max retries reached
+                raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
     # Create LiteLLM virtual key for the user
     try:

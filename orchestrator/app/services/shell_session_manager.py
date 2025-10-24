@@ -277,8 +277,27 @@ class ShellSessionManager:
             # K8s pod name format
             return f"dev-user{user_id}-project{project_id}"
         else:
-            # Docker container name format
-            return f"builder-dev-user{user_id}-project{project_id}"
+            # Docker container name format - use slug from container manager
+            from ..dev_server_manager import get_container_manager
+            manager = get_container_manager()
+            project_key = f"user-{user_id}-project-{project_id}"
+            container_info = manager.containers.get(project_key)
+
+            if container_info:
+                return container_info["container_name"]
+            else:
+                # Fallback: try to find container by labels
+                import subprocess
+                result = subprocess.run(
+                    ["docker", "ps", "--filter", f"label=com.tesslate.devserver.project_id={project_id}",
+                     "--filter", f"label=com.tesslate.devserver.user_id={user_id}", "--format", "{{.Names}}"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip().split('\n')[0]
+                else:
+                    # Last resort fallback (should not happen in production)
+                    return f"tesslate-user{user_id}-project{project_id}"
 
     async def _is_container_running(self, user_id: int, project_id: int) -> bool:
         """Check if container/pod is running."""

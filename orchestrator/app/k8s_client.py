@@ -57,15 +57,35 @@ class KubernetesManager:
 
         logger.info(f"Kubernetes client initialized - Main namespace: {self.namespace}, User environments: {self.user_namespace}")
 
-    def _generate_resource_names(self, user_id: int, project_id: str) -> Dict[str, str]:
-        """Generate consistent resource names for a user's project."""
+    def _generate_resource_names(self, user_id: int, project_id: str, project_slug: str = None) -> Dict[str, str]:
+        """
+        Generate consistent resource names for a user's project.
+
+        Args:
+            user_id: User ID (for internal resource naming)
+            project_id: Project ID (for internal resource naming)
+            project_slug: Project slug for hostname (e.g., "my-app-k3x8n2")
+
+        Returns:
+            Dictionary with namespace, deployment, service, ingress, and hostname
+        """
+        from .config import get_settings
+        settings = get_settings()
+
+        # Internal resource names still use IDs for uniqueness
         base_name = f"dev-user{user_id}-project{project_id}"
+
+        # Hostname uses project slug for clean URLs (fallback to ID-based for backwards compat)
+        if not project_slug:
+            project_slug = f"user{user_id}-project{project_id}"
+        hostname = f"{project_slug}.{settings.app_domain}"
+
         return {
             "namespace": self.user_namespace,
             "deployment": base_name,
             "service": f"{base_name}-service",
             "ingress": f"{base_name}-ingress",
-            "hostname": f"user{user_id}-project{project_id}.studio-test.tesslate.com"
+            "hostname": hostname
         }
 
     def _create_deployment_manifest(
@@ -423,15 +443,17 @@ VITECONFIG
         self,
         user_id: int,
         project_id: str,
-        project_path: str
+        project_path: str,
+        project_slug: str = None
     ) -> Dict[str, Any]:
         """
         Create a complete development environment for a user's project.
 
         Args:
             user_id: Unique identifier for the user
-            project_id: Unique identifier for the project
+            project_id: Unique identifier for the project (for internal naming)
             project_path: Path to the project files (used for metadata only)
+            project_slug: Project slug for URL generation (e.g., "my-app-k3x8n2")
 
         Returns:
             Dict containing environment details including hostname
@@ -439,7 +461,7 @@ VITECONFIG
         Raises:
             RuntimeError: If Kubernetes resource creation fails
         """
-        names = self._generate_resource_names(user_id, project_id)
+        names = self._generate_resource_names(user_id, project_id, project_slug)
         namespace = names["namespace"]
 
         logger.info(f"[K8S] Creating dev environment for user {user_id}, project {project_id}")

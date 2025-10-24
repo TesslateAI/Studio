@@ -34,17 +34,12 @@ function App() {
     // Notify parent window when URL changes
     const notifyParent = () => {
       if (window.parent !== window) {
-        // Get the base path from the import.meta.env
-        const basePath = import.meta.env.BASE_URL || '/';
-        // Strip the base path from the pathname before sending to parent
-        let pathname = window.location.pathname;
-        if (basePath !== '/' && pathname.startsWith(basePath)) {
-          pathname = pathname.slice(basePath.length) || '/';
-        }
+        // With subdomain routing, always use absolute pathname
+        const pathname = window.location.pathname + window.location.search + window.location.hash;
 
         window.parent.postMessage({
           type: 'urlchange',
-          url: pathname + window.location.search + window.location.hash
+          url: pathname
         }, '*');
       }
     };
@@ -76,12 +71,9 @@ function App() {
     };
   }, []);
 
-  // Get the base path from Vite's import.meta.env
-  // This is automatically set by Vite based on the 'base' config option
-  const basename = import.meta.env.BASE_URL;
-
+  // No basename needed - always at root with subdomain routing!
   return (
-    <Router basename={basename}>
+    <Router>
       <Routes>
         <Route path="/" element={<Home />} />
       </Routes>

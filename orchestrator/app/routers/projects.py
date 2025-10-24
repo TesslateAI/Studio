@@ -7,6 +7,7 @@ from ..models import Project, User, ProjectFile, Chat, Message
 from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema
 from ..auth import get_current_active_user
 from ..config import get_settings
+from ..utils.slug_generator import generate_project_slug
 import os
 import shutil
 import asyncio
@@ -15,6 +16,41 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def get_project_by_slug(
+    db: AsyncSession,
+    project_slug: str,
+    user_id: int
+) -> Project:
+    """
+    Get a project by its slug and verify ownership.
+
+    Args:
+        db: Database session
+        project_slug: Project slug (e.g., "my-awesome-app-k3x8n2")
+        user_id: User ID to verify ownership
+
+    Returns:
+        Project object if found and owned by user
+
+    Raises:
+        HTTPException 404 if project not found
+        HTTPException 403 if user doesn't own the project
+    """
+    result = await db.execute(
+        select(Project).where(Project.slug == project_slug)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.owner_id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this project")
+
+    return project
+
 
 @router.get("/", response_model=List[ProjectSchema])
 async def get_projects(
@@ -49,17 +85,35 @@ async def create_project(
     try:
         logger.info(f"[CREATE] Creating project for user {current_user.id}: {project.name} (source: {project.source_type})")
 
-        # Create project database record
-        db_project = Project(
-            name=project.name,
-            description=project.description,
-            owner_id=current_user.id
-        )
-        db.add(db_project)
-        await db.commit()
-        await db.refresh(db_project)
+        # Generate unique slug for the project
+        project_slug = generate_project_slug(project.name)
 
-        logger.info(f"[CREATE] Project {db_project.id} created in database")
+        # Handle collision (retry with new slug)
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                # Create project database record
+                db_project = Project(
+                    name=project.name,
+                    slug=project_slug,
+                    description=project.description,
+                    owner_id=current_user.id
+                )
+                db.add(db_project)
+                await db.commit()
+                await db.refresh(db_project)
+                break
+            except Exception as e:
+                await db.rollback()
+                if "unique" in str(e).lower() and "slug" in str(e).lower() and attempt < max_retries - 1:
+                    # Slug collision, generate a new one
+                    project_slug = generate_project_slug(project.name)
+                    logger.warning(f"[CREATE] Slug collision, retrying with: {project_slug}")
+                else:
+                    # Other error or max retries reached
+                    raise HTTPException(status_code=500, detail=f"Failed to create project: {str(e)}")
+
+        logger.info(f"[CREATE] Project {db_project.slug} (ID: {db_project.id}) created in database")
 
         # Start container first (so we have a container to clone into)
         project_path = os.path.abspath(f"users/{current_user.id}/{db_project.id}")
@@ -594,26 +648,19 @@ async def create_project(
             detail=f"Failed to create project: {str(e)}"
         )
 
-@router.get("/{project_id}", response_model=ProjectSchema)
+@router.get("/{project_slug}", response_model=ProjectSchema)
 async def get_project(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Get a project by its slug."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
     return project
 
-@router.get("/{project_id}/files", response_model=List[ProjectFileSchema])
+@router.get("/{project_slug}/files", response_model=List[ProjectFileSchema])
 async def get_project_files(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     from_pod: bool = False  # Optional query param to force reading from pod
@@ -625,16 +672,9 @@ async def get_project_files(
     - Default: Return files from database (fast, always available)
     - If from_pod=true: Try to read from pod, fall back to DB if pod unavailable
     """
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     # If from_pod requested, try to read from running container (K8s only)
     settings = get_settings()
@@ -697,26 +737,18 @@ async def get_project_files(
     logger.info(f"[FILES] Returning {len(files)} files from database")
     return files
 
-@router.post("/{project_id}/start-dev-container")
+@router.post("/{project_slug}/start-dev-container")
 async def start_dev_container(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Start a Kubernetes development environment for the project."""
-    logger.info(f"[START-CONTAINER] Request to start dev container for project {project_id}, user {current_user.id}")
+    """Start a development environment for the project."""
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        logger.warning(f"[START-CONTAINER] Project {project_id} not found for user {current_user.id}")
-        raise HTTPException(status_code=404, detail="Project not found")
+    logger.info(f"[START-CONTAINER] Request to start dev container for project {project_slug} (ID: {project_id}), user {current_user.id}")
 
     # Start dev container (path is for metadata only in K8s mode)
     project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
@@ -725,29 +757,22 @@ async def start_dev_container(
         from ..dev_server_manager import get_container_manager
         container_manager = get_container_manager()
         logger.info(f"[START-CONTAINER] Starting container for project {project_id}...")
-        url = await container_manager.start_container(project_path, str(project_id), current_user.id)
+        url = await container_manager.start_container(project_path, str(project_id), current_user.id, project_slug=project.slug)
         logger.info(f"[START-CONTAINER] ✅ Container started successfully: {url}")
         return {"url": url, "hostname": url}
     except Exception as e:
         logger.error(f"[START-CONTAINER] ❌ Failed to start container: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to start development environment: {str(e)}")
 
-@router.post("/{project_id}/restart-dev-container")
+@router.post("/{project_slug}/restart-dev-container")
 async def restart_dev_container(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     # Restart dev container
     project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
@@ -759,22 +784,15 @@ async def restart_dev_container(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to restart dev container: {str(e)}")
 
-@router.post("/{project_id}/stop-dev-container")
+@router.post("/{project_slug}/stop-dev-container")
 async def stop_dev_container(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     # Stop dev container
     try:
@@ -786,9 +804,9 @@ async def stop_dev_container(
         # Don't fail if container is already stopped
         return {"message": "Container stop attempted", "project_id": project_id}
 
-@router.get("/{project_id}/dev-server-url")
+@router.get("/{project_slug}/dev-server-url")
 async def get_dev_server_url(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -801,17 +819,9 @@ async def get_dev_server_url(
     3. Wait for readiness before returning URL
     4. Return detailed status for better UX
     """
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        logger.warning(f"Project {project_id} not found for user {current_user.id}")
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     logger.info(f"[DEV-URL] Checking dev environment for user {current_user.id}, project {project_id}")
 
@@ -846,7 +856,7 @@ async def get_dev_server_url(
             # Docker mode - use Docker-specific status check
             from ..dev_server_manager import get_container_manager
             docker_manager = get_container_manager()
-            status = await docker_manager.get_container_status(str(project_id), current_user.id)
+            status = await docker_manager.get_container_status(str(project_id), current_user.id, project.slug)
 
             if status.get("running"):
                 url = docker_manager.get_container_url(str(project_id), current_user.id)
@@ -939,7 +949,7 @@ async def get_dev_server_url(
 
         from ..dev_server_manager import get_container_manager
         container_manager = get_container_manager()
-        url = await container_manager.start_container(project_path, str(project_id), current_user.id)
+        url = await container_manager.start_container(project_path, str(project_id), current_user.id, project_slug=project.slug)
         logger.info(f"[DEV-URL] ✅ Dev container started successfully: {url}")
 
         return {
@@ -962,9 +972,9 @@ async def get_dev_server_url(
             }
         )
 
-@router.get("/{project_id}/container-status")
+@router.get("/{project_slug}/container-status")
 async def get_container_status(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -974,16 +984,9 @@ async def get_container_status(
     Returns readiness, phase, and detailed status information.
     Frontend should poll this endpoint to know when pod is ready.
     """
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     try:
         settings = get_settings()
@@ -1047,9 +1050,9 @@ async def get_container_status(
             "user_id": current_user.id
         }
 
-@router.post("/{project_id}/files/save")
+@router.post("/{project_slug}/files/save")
 async def save_project_file(
-    project_id: int,
+    project_slug: str,
     file_data: dict,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
@@ -1060,16 +1063,9 @@ async def save_project_file(
     Architecture: Backend is stateless and doesn't store files.
     Instead, it writes files directly to the dev container pod via K8s API.
     """
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     file_path = file_data.get('file_path')
     content = file_data.get('content')
@@ -1176,9 +1172,9 @@ async def save_project_file(
         logger.error(f"[ERROR] Failed to save file {file_path}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
-@router.get("/{project_id}/container-info")
+@router.get("/{project_slug}/container-info")
 async def get_container_info(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -1199,16 +1195,9 @@ async def get_container_info(
           - container_name: Name of the container (e.g., "tesslate-dev-user1-project5")
           - command_prefix: docker exec command prefix
     """
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     settings = get_settings()
 
@@ -1250,23 +1239,16 @@ async def get_all_dev_containers(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get containers: {str(e)}")
 
-@router.delete("/{project_id}")
+@router.delete("/{project_slug}")
 async def delete_project(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a project and ALL associated data including chats, messages, files, and containers."""
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     try:
         logger.info(f"[DELETE] Starting deletion of project {project_id} for user {current_user.id}")
@@ -1323,9 +1305,9 @@ async def delete_project(
         raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
 
 
-@router.post("/{project_id}/generate-architecture-diagram")
+@router.post("/{project_slug}/generate-architecture-diagram")
 async def generate_architecture_diagram(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -1335,16 +1317,9 @@ async def generate_architecture_diagram(
     This endpoint analyzes the project files and generates a Mermaid diagram
     showing the architecture, component relationships, and data flow.
     """
-    # Verify project ownership
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     # Check if user has selected a diagram model
     if not current_user.diagram_model:
@@ -1465,22 +1440,15 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
         raise HTTPException(status_code=500, detail=f"Failed to generate diagram: {str(e)}")
 
 
-@router.get("/{project_id}/settings")
+@router.get("/{project_slug}/settings")
 async def get_project_settings(
-    project_id: int,
+    project_slug: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get project settings."""
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
 
     return {
         "settings": project.settings or {},
@@ -1488,23 +1456,16 @@ async def get_project_settings(
     }
 
 
-@router.patch("/{project_id}/settings")
+@router.patch("/{project_slug}/settings")
 async def update_project_settings(
-    project_id: int,
+    project_slug: str,
     settings_data: dict,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Update project settings."""
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
 
     try:
         # Merge new settings with existing

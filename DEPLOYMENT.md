@@ -43,14 +43,15 @@ Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment 
 
 1. **Docker Mode** (`DEPLOYMENT_MODE=docker`)
    - User dev environments run as Docker containers
-   - Uses Traefik reverse proxy for routing
-   - Routing: `user{id}-project{id}.localhost`
-   - Storage: Volume mounts to `users/{user_id}/projects/{project_id}/`
+   - Uses Traefik reverse proxy with subdomain routing
+   - Routing: `{project-slug}.studio.localhost` (e.g., `my-app-k3x8n2.studio.localhost`)
+   - Storage: Volume mounts to `users/{user_id}/{project_id}/`
+   - **Browser Requirement:** Chrome or Firefox recommended (auto-resolve `*.localhost`)
 
 2. **Kubernetes Mode** (`DEPLOYMENT_MODE=kubernetes`)
    - User dev environments run as Kubernetes Pods/Deployments
-   - Uses NGINX Ingress Controller
-   - Routing: `user{id}-project{id}.studio-test.tesslate.com`
+   - Uses NGINX Ingress Controller with subdomain routing
+   - Routing: `{project-slug}.studio-test.tesslate.com` (e.g., `my-app-k3x8n2.studio-test.tesslate.com`)
    - Storage: Shared PVC with subPath isolation
 
 ### Why Traefik is Required in Docker Mode
@@ -69,20 +70,21 @@ Even if you run main services natively (orchestrator, frontend), **Traefik must 
 ┌──────────────────────────────────────────────────────────────┐
 │ Docker Network: tesslate-network                             │
 │                                                               │
-│  ┌──────────────┐    ┌───────────────────────────────────┐  │
-│  │   Traefik    │───▶│  User Dev Containers (dynamic)    │  │
-│  │  (required)  │    │  • user1-project5.localhost:5173  │  │
-│  └──────────────┘    │  • user2-project8.localhost:5173  │  │
-│                      │  • user3-project12.localhost:5173 │  │
-│                      └───────────────────────────────────┘  │
+│  ┌──────────────┐    ┌──────────────────────────────────────┐  │
+│  │   Traefik    │───▶│  User Dev Containers (dynamic)       │  │
+│  │  (required)  │    │  • my-app-k3x8n2.studio.localhost   │  │
+│  └──────────────┘    │  • blog-cms-h7y2k1.studio.localhost │  │
+│                      │  • todo-app-m9p3x5.studio.localhost │  │
+│                      └──────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 **Why?**
 - Multiple user projects need isolated containers
-- Each needs unique hostname routing (`user1-project5.localhost`)
+- Each needs unique subdomain routing (e.g., `my-app-k3x8n2.studio.localhost`)
 - Can't all bind to port 5173 simultaneously
-- Traefik provides automatic service discovery and zero-port-conflict routing
+- Traefik provides automatic service discovery and zero-port-conflict subdomain routing
+- **Note:** Chrome and Firefox auto-resolve `*.localhost` subdomains to 127.0.0.1
 
 ---
 
@@ -147,7 +149,7 @@ Docker:
    - Frontend: http://localhost:5173
    - Orchestrator API: http://localhost:8000
    - Traefik Dashboard: http://localhost:8080
-   - User Projects: http://user{id}-project{id}.localhost (auto-created)
+   - User Projects: http://{project-slug}.studio.localhost (subdomain routing)
 
 ### Advantages ✅
 - Fastest hot reload for main services
@@ -211,7 +213,7 @@ All services in Docker containers:
    - Frontend: http://studio.localhost
    - Orchestrator API: http://api.localhost
    - Traefik Dashboard: http://traefik.localhost:8080
-   - User Projects: http://user{id}-project{id}.localhost
+   - User Projects: http://{project-slug}.studio.localhost (subdomain routing)
 
 ### Advantages ✅
 - Single command to start everything
@@ -299,7 +301,7 @@ Single Server:
 
 5. **Access the application**
    - Frontend: https://studio-demo.tesslate.com
-   - User Projects: https://user{id}-project{id}.studio-demo.tesslate.com
+   - User Projects: https://{project-slug}.studio-demo.tesslate.com (subdomain routing)
 
 ### Advantages ✅
 - Simple deployment (single server)
@@ -381,7 +383,7 @@ See detailed guides:
 4. **Access the application**
    - Frontend: https://studio-test.tesslate.com
    - Backend API: https://studio-test.tesslate.com/api
-   - User Projects: https://user{id}-project{id}.studio-test.tesslate.com
+   - User Projects: https://{project-slug}.studio-test.tesslate.com (subdomain routing)
 
 ### Advantages ✅
 - Auto-scaling (horizontal pod autoscaling)
@@ -474,16 +476,23 @@ LITELLM_API_BASE=https://your-litellm-proxy.com/v1
 docker network create tesslate-network
 ```
 
-**Problem:** User containers not accessible
+**Problem:** User containers not accessible or subdomain not resolving
 ```bash
-# Check Traefik is running
+# Solution 1: Use Chrome or Firefox
+# These browsers auto-resolve *.localhost subdomains to 127.0.0.1
+# Other browsers may require DNS configuration
+
+# Solution 2: Check Traefik is running
 docker ps | grep traefik
 
-# Check container logs
-docker logs tesslate-dev-user1-project5
+# Solution 3: Check container logs
+docker logs tesslate-{project-slug}
 
-# Check Traefik dashboard
-# Open http://localhost:8080 and verify routes
+# Solution 4: Check Traefik dashboard
+# Open http://localhost:8080 and verify Host() rules for subdomains
+
+# Solution 5: Test with curl using Host header
+curl -H "Host: test.studio.localhost" http://localhost/
 ```
 
 **Problem:** Port already in use

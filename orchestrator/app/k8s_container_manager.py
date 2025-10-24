@@ -46,16 +46,23 @@ class KubernetesContainerManager(BaseContainerManager):
     
     
     
-    async def start_container(self, project_path: str, project_id: str, user_id: int) -> str:
+    async def start_container(self, project_path: str, project_id: str, user_id: int, project_slug: str = None, **kwargs) -> str:
         """
         Start a development environment using Kubernetes resources.
+
+        Args:
+            project_path: Path to project directory (for reference)
+            project_id: Project ID (for internal naming)
+            user_id: User ID
+            project_slug: Project slug for URL generation (e.g., "my-app-k3x8n2")
+            **kwargs: Additional arguments (for compatibility)
 
         In Kubernetes, the project directory is on the shared PVC, not on the backend pod's filesystem.
         The K8s init container will handle copying template files to the PVC if needed.
         """
         project_key = self._get_project_key(user_id, project_id)
 
-        logger.info(f"[START] Starting development environment for user {user_id}, project {project_id}")
+        logger.info(f"[START] Starting development environment for user {user_id}, project {project_slug or project_id} (ID: {project_id})")
         logger.info(f"[START] Project key: {project_key}")
         logger.info(f"[START] Project path (for reference): {project_path}")
 
@@ -71,7 +78,8 @@ class KubernetesContainerManager(BaseContainerManager):
             environment_info = await get_k8s_manager().create_dev_environment(
                 user_id=user_id,
                 project_id=project_id,
-                project_path=project_path  # Used only for metadata, not file operations
+                project_path=project_path,  # Used only for metadata, not file operations
+                project_slug=project_slug
             )
 
             # Store environment info

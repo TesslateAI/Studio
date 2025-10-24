@@ -81,8 +81,28 @@ async def execute_command_tool(params: Dict[str, Any], context: Dict[str, Any]) 
                 details={"risk_level": validation.risk_level.value}
             )
         else:
-            # Docker mode: Execute via docker exec
-            container_name = f"builder-dev-user{user_id}-project{project_id}"
+            # Docker mode: Execute via docker exec using container manager
+            from ...dev_server_manager import get_container_manager
+            container_manager = get_container_manager()
+
+            # Get container name using slug from container tracking
+            project_key = f"user-{user_id}-project-{project_id}"
+            container_info = container_manager.containers.get(project_key)
+
+            if not container_info:
+                # Try to find by labels as fallback
+                import subprocess as sp
+                result = sp.run(
+                    ["docker", "ps", "--filter", f"label=com.tesslate.devserver.project_id={project_id}",
+                     "--filter", f"label=com.tesslate.devserver.user_id={user_id}", "--format", "{{.Names}}"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    container_name = result.stdout.strip().split('\n')[0]
+                else:
+                    raise Exception(f"Container not found for project {project_id}")
+            else:
+                container_name = container_info["container_name"]
 
             # Construct docker exec command with proper working directory
             # Note: Docker exec handles shell wrapping differently than K8s,
