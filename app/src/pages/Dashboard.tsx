@@ -13,6 +13,7 @@ import type { Status } from '../components/ui';
 import { GitHubConnectModal, ConfirmDialog } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
+import { DiscordSupport } from '../components/DiscordSupport';
 import toast from 'react-hot-toast';
 import {
   Atom,
@@ -303,17 +304,20 @@ export default function Dashboard() {
       icon: <Folder className="w-5 h-5" weight="fill" />,
       title: 'Projects',
       onClick: () => {},
-      active: true
+      active: true,
+      dataTour: 'dashboard-link'
     },
     {
       icon: <Storefront className="w-5 h-5" weight="fill" />,
       title: 'Marketplace',
-      onClick: () => navigate('/marketplace')
+      onClick: () => navigate('/marketplace'),
+      dataTour: 'marketplace-link'
     },
     {
       icon: <ShoppingCart className="w-5 h-5" weight="fill" />,
       title: 'Library',
-      onClick: () => navigate('/library')
+      onClick: () => navigate('/library'),
+      dataTour: 'library-link'
     },
     {
       icon: <Package className="w-5 h-5" weight="fill" />,
@@ -415,6 +419,7 @@ export default function Dashboard() {
         {/* Create New Project Card */}
         <button
           onClick={() => setShowCreateModal(true)}
+          data-tour="create-project"
           className={`
             group bg-white/[0.01] dark:bg-white/[0.01] rounded-2xl p-8
             border-2 border-dashed border-[rgba(255,107,0,0.3)]
@@ -809,39 +814,7 @@ export default function Dashboard() {
       />
 
       {/* Discord Support Bubble */}
-      <div className="fixed bottom-4 right-4 md:bottom-8 md:right-8 z-40 group">
-        <a
-          href="https://discord.gg/WgXabcN2r2"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex flex-col items-center gap-2"
-        >
-          <div className="
-            w-12 h-12 md:w-16 md:h-16 bg-[#5865F2] rounded-full
-            flex items-center justify-center
-            shadow-lg hover:shadow-xl
-            transition-all duration-300
-            hover:scale-110
-            relative
-          ">
-            <DiscordLogo className="w-6 h-6 md:w-8 md:h-8 text-white" weight="fill" />
-
-            {/* Hover tooltip */}
-            <div className="
-              absolute bottom-full mb-2 right-0
-              bg-gray-900 text-white text-sm
-              px-3 py-2 rounded-lg
-              whitespace-nowrap
-              opacity-0 group-hover:opacity-100
-              transition-opacity duration-200
-              pointer-events-none
-            ">
-              Join our Discord for support
-            </div>
-          </div>
-          <span className="text-xs md:text-sm font-medium text-[var(--text)] hidden sm:block">Support</span>
-        </a>
-      </div>
+      <DiscordSupport />
 
       {/* Tesslate Footer */}
       <div className="mt-16 pt-6 border-t border-white/5">

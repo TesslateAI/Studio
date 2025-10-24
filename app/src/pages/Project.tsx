@@ -28,6 +28,7 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
 import { BrowserPreview } from '../components/BrowserPreview';
+import { DiscordSupport } from '../components/DiscordSupport';
 import {
   GitHubPanel,
   ArchitecturePanel,
@@ -560,6 +561,9 @@ export default function Project() {
           projectName={project?.name}
         />
       )}
+
+      {/* Discord Support */}
+      <DiscordSupport />
     </div>
   );
 }

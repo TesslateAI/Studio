@@ -100,7 +100,7 @@ export function ChatInput({
 
   return (
     <form className="chat-input-wrapper px-2 sm:px-5 py-2 sm:py-4 flex-shrink-0" onSubmit={handleSubmit}>
-      <div className="input-container flex items-center gap-1.5 sm:gap-2">
+      <div className="input-container flex items-center gap-1.5 sm:gap-2" data-tour="chat-input">
         {/* Tools dropdown - hidden on mobile for more space */}
         <div className="hidden sm:block">
           <ToolDropdown

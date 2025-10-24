@@ -32,6 +32,7 @@
     "@types/react-router-dom": "^5.3.3",
     "axios": "^1.11.0",
     "chart.js": "^4.5.1",
+    "framer-motion": "^12.23.24",
     "jszip": "^3.10.1",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.541.0",

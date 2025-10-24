@@ -5,6 +5,7 @@ interface SidebarItem {
   title: string;
   onClick: () => void;
   active?: boolean;
+  dataTour?: string;
 }
 
 interface FloatingSidebarProps {
@@ -28,6 +29,7 @@ export function FloatingSidebar({ position, items }: FloatingSidebarProps) {
           key={index}
           onClick={item.onClick}
           title={item.title}
+          data-tour={item.dataTour}
           className={`
             sidebar-icon
             w-12 h-12

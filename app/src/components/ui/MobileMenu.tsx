@@ -15,12 +15,14 @@ interface MobileMenuProps {
     title: string;
     onClick: () => void;
     active?: boolean;
+    dataTour?: string;
   }>;
   rightItems: Array<{
     icon: ReactNode;
     title: string;
     onClick: () => void;
     active?: boolean;
+    dataTour?: string;
   }>;
 }
 
@@ -75,6 +77,7 @@ export function MobileMenu({ leftItems, rightItems }: MobileMenuProps) {
                       <button
                         key={index}
                         onClick={() => handleItemClick(item.onClick)}
+                        data-tour={item.dataTour}
                         className={`
                           w-full flex items-center gap-3 px-4 py-3 rounded-xl
                           transition-all duration-200
@@ -103,6 +106,7 @@ export function MobileMenu({ leftItems, rightItems }: MobileMenuProps) {
                       <button
                         key={index}
                         onClick={() => handleItemClick(item.onClick)}
+                        data-tour={item.dataTour}
                         className={`
                           w-full flex items-center gap-3 px-4 py-3 rounded-xl
                           transition-all duration-200

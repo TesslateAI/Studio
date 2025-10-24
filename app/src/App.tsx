@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { useState, useEffect } from 'react';
 import { ThemeProvider } from './theme';
 import Layout from './components/Layout';
@@ -13,6 +14,7 @@ import Library from './pages/Library';
 import AdminDashboard from './pages/AdminDashboard';
 import AuthCallback from './pages/AuthCallback';
 import Logout from './pages/Logout';
+import { Walkthrough } from './components/Walkthrough';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -48,28 +50,22 @@ async function validateAndRefreshToken(): Promise<boolean> {
 }
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const token = localStorage.getItem('token');
+  const refreshToken = localStorage.getItem('refreshToken');
 
-  useEffect(() => {
-    validateAndRefreshToken().then((valid) => {
-      setIsAuthenticated(valid);
-      setIsAuthReady(true);
-    });
-  }, []);
-
-  if (!isAuthReady) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-gray-400">Loading...</div>
-      </div>
-    );
+  // If we have either token, assume authenticated
+  // The axios interceptor will handle refresh on API calls
+  if (token || refreshToken) {
+    return <>{children}</>;
   }
 
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
+  return <Navigate to="/login" />;
 }
 
 function App() {
+  // WALKTHROUGH DISABLED - Was causing logout issues
+  // const [showWalkthrough, setShowWalkthrough] = useState(false);
+
   return (
     <ThemeProvider>
       <style>{`
@@ -228,6 +224,8 @@ function App() {
             }
           />
         </Routes>
+
+        {/* WALKTHROUGH DISABLED - Was causing logout issues */}
       </BrowserRouter>
     </ThemeProvider>
   );

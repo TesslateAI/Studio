@@ -24,6 +24,7 @@ import {
   CheckCircle
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import { DiscordSupport } from '../components/DiscordSupport';
 import { marketplaceApi, secretsApi, usersApi } from '../lib/api';
 import toast from 'react-hot-toast';
 
@@ -106,6 +107,40 @@ export default function Library() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
+  const [isWalkthroughActive, setIsWalkthroughActive] = useState(false);
+  const [canClickBackButton, setCanClickBackButton] = useState(false);
+
+  // Check if walkthrough is active
+  useEffect(() => {
+    const hasSeenWalkthrough = localStorage.getItem('hasSeenWalkthrough');
+    setIsWalkthroughActive(!hasSeenWalkthrough);
+
+    // Listen for walkthrough events
+    const handleRestartWalkthrough = () => {
+      setIsWalkthroughActive(true);
+      setCanClickBackButton(false);
+    };
+    const handleWalkthroughComplete = () => {
+      setIsWalkthroughActive(false);
+      setCanClickBackButton(false);
+    };
+    const handleAllowBackButton = () => setCanClickBackButton(true);
+    const handleDisallowBackButton = () => setCanClickBackButton(false);
+
+    window.addEventListener('restartWalkthrough', handleRestartWalkthrough);
+    window.addEventListener('walkthroughComplete', handleWalkthroughComplete);
+    window.addEventListener('walkthroughSkip', handleWalkthroughComplete);
+    window.addEventListener('walkthroughAllowBackButton', handleAllowBackButton);
+    window.addEventListener('walkthroughDisallowBackButton', handleDisallowBackButton);
+
+    return () => {
+      window.removeEventListener('restartWalkthrough', handleRestartWalkthrough);
+      window.removeEventListener('walkthroughComplete', handleWalkthroughComplete);
+      window.removeEventListener('walkthroughSkip', handleWalkthroughComplete);
+      window.removeEventListener('walkthroughAllowBackButton', handleAllowBackButton);
+      window.removeEventListener('walkthroughDisallowBackButton', handleDisallowBackButton);
+    };
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -115,7 +150,7 @@ export default function Library() {
     setLoading(true);
     try {
       if (activeTab === 'agents') {
-        await loadLibraryAgents();
+        await Promise.all([loadLibraryAgents(), loadModels()]); // Load models for agent tab
       } else if (activeTab === 'models') {
         await loadModels();
       } else if (activeTab === 'api-keys') {
@@ -226,74 +261,93 @@ export default function Library() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--background)]">
+    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24">
       {/* Header */}
-      <div className="border-b border-white/10 bg-[var(--surface)]">
-        <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-[var(--text)] mb-2">My Library</h1>
-              <p className="text-[var(--text)]/60">Manage agents, models, and API keys</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => navigate('/marketplace')}
-                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors flex items-center gap-2"
-              >
-                <Sparkle size={18} />
-                Browse Marketplace
-              </button>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors flex items-center gap-2"
-              >
-                <ArrowLeft size={18} />
-                Back to Dashboard
-              </button>
-            </div>
-          </div>
+      <div className="mb-10">
+        <div className="flex items-center justify-between mb-8">
+          {/* Back Button */}
+          <button
+            onClick={() => {
+              // Allow navigation if walkthrough is not active OR if the walkthrough specifically allows it
+              if (isWalkthroughActive && !canClickBackButton) {
+                toast.error('Please complete the walkthrough or click "Skip" to navigate freely', {
+                  duration: 4000,
+                });
+              } else {
+                navigate('/dashboard');
+              }
+            }}
+            data-tour="dashboard-link"
+            className={`flex items-center gap-2 transition-colors ${
+              isWalkthroughActive && !canClickBackButton
+                ? 'text-[var(--text)]/30 cursor-not-allowed'
+                : 'text-[var(--text)]/60 hover:text-[var(--text)]'
+            }`}
+          >
+            <ArrowLeft size={20} weight="bold" />
+            <span className="font-medium">Back</span>
+          </button>
 
-          {/* Tabs */}
-          <div className="flex items-center gap-2 border-b border-white/10">
+          {/* Action Buttons */}
+          <div className="flex items-center gap-3">
             <button
-              onClick={() => setActiveTab('agents')}
-              className={`px-4 py-3 font-medium transition-colors border-b-2 flex items-center gap-2 ${
-                activeTab === 'agents'
-                  ? 'border-orange-500 text-orange-400'
-                  : 'border-transparent text-[var(--text)]/60 hover:text-[var(--text)]/80'
-              }`}
+              onClick={() => navigate('/marketplace')}
+              className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 rounded-xl text-white font-semibold transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-105"
             >
-              <Package size={18} />
-              Agents ({agents.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('models')}
-              className={`px-4 py-3 font-medium transition-colors border-b-2 flex items-center gap-2 ${
-                activeTab === 'models'
-                  ? 'border-orange-500 text-orange-400'
-                  : 'border-transparent text-[var(--text)]/60 hover:text-[var(--text)]/80'
-              }`}
-            >
-              <Cpu size={18} />
-              Model Management
-            </button>
-            <button
-              onClick={() => setActiveTab('api-keys')}
-              className={`px-4 py-3 font-medium transition-colors border-b-2 flex items-center gap-2 ${
-                activeTab === 'api-keys'
-                  ? 'border-orange-500 text-orange-400'
-                  : 'border-transparent text-[var(--text)]/60 hover:text-[var(--text)]/80'
-              }`}
-            >
-              <Key size={18} />
-              API Keys ({apiKeys.length})
+              <Sparkle size={20} weight="fill" />
+              Browse Marketplace
             </button>
           </div>
+        </div>
+
+        {/* Main Title */}
+        <div className="mb-8">
+          <h1 className="font-heading text-4xl md:text-5xl font-bold text-[var(--text)] mb-3">
+            My Library
+          </h1>
+          <p className="text-[var(--text)]/60 text-lg">Manage your agents, models, and API keys</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setActiveTab('agents')}
+            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
+              activeTab === 'agents'
+                ? 'bg-[var(--primary)] text-white shadow-lg'
+                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+            }`}
+          >
+            <Package size={20} weight={activeTab === 'agents' ? 'fill' : 'regular'} />
+            Agents ({agents.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('models')}
+            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
+              activeTab === 'models'
+                ? 'bg-[var(--primary)] text-white shadow-lg'
+                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+            }`}
+          >
+            <Cpu size={20} weight={activeTab === 'models' ? 'fill' : 'regular'} />
+            Model Management
+          </button>
+          <button
+            onClick={() => setActiveTab('api-keys')}
+            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
+              activeTab === 'api-keys'
+                ? 'bg-[var(--primary)] text-white shadow-lg'
+                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+            }`}
+          >
+            <Key size={20} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
+            API Keys ({apiKeys.length})
+          </button>
         </div>
       </div>
 
       {/* Tab Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div>
         {activeTab === 'agents' && (
           <AgentsTab
             agents={agents}
@@ -346,6 +400,9 @@ export default function Library() {
           }}
         />
       )}
+
+      {/* Discord Support */}
+      <DiscordSupport />
     </div>
   );
 }
@@ -1164,53 +1221,55 @@ function AgentCard({
   const currentModel = agent.selected_model || agent.model;
 
   return (
-    <div className="bg-[var(--surface)] border border-white/10 rounded-xl p-6 hover:border-orange-500/30 transition-all">
+    <div className={`relative bg-[var(--surface)] border rounded-2xl p-6 transition-all ${
+      agent.is_enabled
+        ? 'border-white/10 hover:border-orange-500/30'
+        : 'border-white/5 opacity-60'
+    }`}>
+      {/* Status Badge - Top Right */}
+      <div className="absolute top-4 right-4">
+        {agent.is_enabled ? (
+          <span className="px-2.5 py-1 bg-green-500/20 text-green-400 text-xs rounded-md font-medium">
+            Active
+          </span>
+        ) : (
+          <span className="px-2.5 py-1 bg-white/10 text-white/40 text-xs rounded-md font-medium">
+            Disabled
+          </span>
+        )}
+      </div>
+
       {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="text-3xl">{agent.icon}</div>
-          <div>
-            <h3 className="font-semibold text-[var(--text)] text-lg">{agent.name}</h3>
-            <div className="flex items-center gap-2 mt-1">
-              {agent.source_type === 'open' ? (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
-                  <LockSimpleOpen size={10} />
-                  Open
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">
-                  <LockKey size={10} />
-                  Pro
-                </span>
-              )}
-              {agent.is_custom && (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded">
-                  <GitFork size={10} />
-                  Custom
-                </span>
-              )}
-              {agent.parent_agent_id && (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">
-                  <GitFork size={10} />
-                  Forked
-                </span>
-              )}
-            </div>
+      <div className="flex items-start gap-4 mb-4 pr-20">
+        <div className="text-4xl">{agent.icon}</div>
+        <div className="flex-1">
+          <h3 className="font-heading font-bold text-[var(--text)] text-xl mb-2">{agent.name}</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            {agent.source_type === 'open' ? (
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
+                <LockSimpleOpen size={10} />
+                Open Source
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">
+                <LockKey size={10} />
+                Closed Source
+              </span>
+            )}
+            {agent.is_custom && (
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded">
+                <GitFork size={10} />
+                Custom
+              </span>
+            )}
+            {agent.parent_agent_id && (
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">
+                <GitFork size={10} />
+                Forked
+              </span>
+            )}
           </div>
         </div>
-
-        {/* Enable/Disable Toggle */}
-        <button
-          onClick={onToggleEnable}
-          className={`p-2 rounded-lg transition-colors ${
-            agent.is_enabled
-              ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-              : 'bg-white/5 text-[var(--text)]/40 hover:bg-white/10'
-          }`}
-          title={agent.is_enabled ? 'Disable agent' : 'Enable agent'}
-        >
-          {agent.is_enabled ? <Power size={20} weight="fill" /> : <Power size={20} />}
-        </button>
       </div>
 
       {/* Description */}
