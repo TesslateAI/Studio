@@ -76,6 +76,8 @@ class Project(Base):
     shell_sessions = relationship("ShellSession", back_populates="project", cascade="all, delete-orphan")
     chats = relationship("Chat", back_populates="project", cascade="all, delete-orphan")
     agent_command_logs = relationship("AgentCommandLog", back_populates="project", cascade="all, delete-orphan")
+    kanban_board = relationship("KanbanBoard", back_populates="project", uselist=False, cascade="all, delete-orphan")
+    notes = relationship("ProjectNote", back_populates="project", uselist=False, cascade="all, delete-orphan")
 
 class ProjectFile(Base):
     __tablename__ = "project_files"

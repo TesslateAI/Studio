@@ -70,7 +70,7 @@ export default function Dashboard() {
   const [bases, setBases] = useState<any[]>([]);
   const [selectedBase, setSelectedBase] = useState<number | null>(null);
   const [isBaseDropdownOpen, setIsBaseDropdownOpen] = useState(false);
-  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
+  const [deletingProjectIds, setDeletingProjectIds] = useState<Set<number>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [userName, setUserName] = useState<string>('');
@@ -206,18 +206,30 @@ export default function Dashboard() {
   const confirmDeleteProject = async () => {
     if (!projectToDelete) return;
 
+    const projectId = projectToDelete.id;
     setShowDeleteDialog(false);
-    setDeletingProjectId(projectToDelete.id);
+    setDeletingProjectIds(prev => new Set(prev).add(projectId));
     const deletingToast = toast.loading('Deleting project...');
 
     try {
-      await projectsApi.delete(projectToDelete.id);
+      await projectsApi.delete(projectId);
       toast.success('Project deleted successfully', { id: deletingToast });
-      loadProjects();
+      await loadProjects();
+      // Only remove from deleting state after project list is refreshed
+      setDeletingProjectIds(prev => {
+        const updated = new Set(prev);
+        updated.delete(projectId);
+        return updated;
+      });
     } catch (error) {
       toast.error('Failed to delete project', { id: deletingToast });
+      // Remove from deleting state on error
+      setDeletingProjectIds(prev => {
+        const updated = new Set(prev);
+        updated.delete(projectId);
+        return updated;
+      });
     } finally {
-      setDeletingProjectId(null);
       setProjectToDelete(null);
     }
   };
@@ -456,7 +468,7 @@ export default function Dashboard() {
             onDelete={() => deleteProject(project.id)}
             onStatusChange={(status) => updateProjectStatus(project.id, status)}
             onFork={() => handleForkProject(project.id)}
-            isDeleting={deletingProjectId === project.id}
+            isDeleting={deletingProjectIds.has(project.id)}
           />
         ))}
       </div>

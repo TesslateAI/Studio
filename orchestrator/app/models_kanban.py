@@ -28,7 +28,7 @@ class KanbanBoard(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    project = relationship("Project", backref="kanban_board")
+    project = relationship("Project", back_populates="kanban_board")
     columns = relationship("KanbanColumn", back_populates="board", cascade="all, delete-orphan", order_by="KanbanColumn.position")
     tasks = relationship("KanbanTask", back_populates="board", cascade="all, delete-orphan")
 
@@ -148,4 +148,4 @@ class ProjectNote(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    project = relationship("Project", backref="notes")
+    project = relationship("Project", back_populates="notes")
