@@ -190,8 +190,9 @@ class StripeService:
         from ..models import UserPurchasedAgent
         from sqlalchemy import select
 
-        user_id = int(session["metadata"]["user_id"])
-        agent_id = int(session["metadata"]["agent_id"])
+        from uuid import UUID
+        user_id = UUID(session["metadata"]["user_id"])
+        agent_id = UUID(session["metadata"]["agent_id"])
 
         # Create purchase record
         purchase = UserPurchasedAgent(

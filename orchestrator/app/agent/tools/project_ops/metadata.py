@@ -7,6 +7,7 @@ Use bash_exec for file listings instead of stale DB cache.
 
 import logging
 from typing import Dict, Any
+from uuid import UUID
 from sqlalchemy import select
 
 from ..registry import Tool, ToolCategory
@@ -22,7 +23,7 @@ async def get_project_info_tool(params: Dict[str, Any], context: Dict[str, Any])
 
     Args:
         params: {} (uses project_id from context)
-        context: {user_id: int, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, db: AsyncSession}
 
     Returns:
         Dict with project information

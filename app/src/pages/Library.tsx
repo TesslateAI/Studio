@@ -30,7 +30,7 @@ import { marketplaceApi, secretsApi, usersApi } from '../lib/api';
 import toast from 'react-hot-toast';
 
 interface LibraryAgent {
-  id: number;
+  id: string;
   name: string;
   slug: string;
   description: string;
@@ -48,7 +48,7 @@ interface LibraryAgent {
   purchase_type: string;
   expires_at: string | null;
   is_custom: boolean;
-  parent_agent_id: number | null;
+  parent_agent_id: string | null;
   system_prompt?: string;
   is_enabled?: boolean;
   is_published?: boolean;
@@ -78,7 +78,7 @@ interface ExternalProvider {
 }
 
 interface ApiKey {
-  id: number;
+  id: string;
   provider: string;
   auth_type: string;
   key_name: string | null;

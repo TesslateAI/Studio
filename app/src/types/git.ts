@@ -2,8 +2,8 @@
 
 // GitHub Credential Types
 export interface GitHubCredential {
-  id: number;
-  user_id: number;
+  id: string;
+  user_id: string;
   github_username: string | null;
   github_email: string | null;
   github_user_id: string | null;
@@ -21,9 +21,9 @@ export interface GitHubCredentialResponse {
 
 // Git Repository Types
 export interface GitRepository {
-  id: number;
-  project_id: number;
-  user_id: number;
+  id: string;
+  project_id: string;
+  user_id: string;
   repo_url: string;
   repo_name: string | null;
   repo_owner: string | null;
@@ -39,8 +39,8 @@ export interface GitRepository {
 }
 
 export interface GitRepositoryResponse {
-  id: number;
-  project_id: number;
+  id: string;
+  project_id: string;
   repo_url: string;
   repo_name: string | null;
   repo_owner: string | null;
@@ -159,7 +159,7 @@ export interface GitInitRequest {
 
 // GitHub Repository Types
 export interface GitHubRepository {
-  id: number;
+  id: string;
   name: string;
   full_name: string;
   description: string | null;

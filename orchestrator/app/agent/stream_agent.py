@@ -7,6 +7,7 @@ code and text that is immediately streamed back to the frontend.
 """
 
 from typing import AsyncIterator, Dict, Any
+from uuid import UUID
 import logging
 import re
 import asyncio
@@ -15,6 +16,7 @@ import aiofiles
 
 from .base import AbstractAgent
 from openai import AsyncOpenAI
+from ..utils.resource_naming import get_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -237,8 +239,8 @@ class StreamAgent(AbstractAgent):
         self,
         file_path: str,
         code: str,
-        project_id: int,
-        user_id: int,
+        project_id: UUID,
+        user_id: UUID,
         db
     ) -> bool:
         """
@@ -304,7 +306,7 @@ class StreamAgent(AbstractAgent):
             else:
                 # Docker: Write to local filesystem
                 try:
-                    project_dir = f"users/{user_id}/{project_id}"
+                    project_dir = get_project_path(user_id, project_id)
                     full_path = os.path.join(project_dir, file_path)
 
                     # Create parent directory

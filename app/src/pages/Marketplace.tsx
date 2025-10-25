@@ -24,7 +24,7 @@ import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
 
 interface MarketplaceItem {
-  id: number;
+  id: string;
   name: string;
   slug: string;
   description: string;

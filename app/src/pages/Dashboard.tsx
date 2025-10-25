@@ -41,7 +41,7 @@ import {
 } from '@phosphor-icons/react';
 
 interface Project {
-  id: number;
+  id: string;
   name: string;
   description: string;
   created_at: string;
@@ -195,7 +195,7 @@ export default function Dashboard() {
     }
   };
 
-  const deleteProject = (id: number) => {
+  const deleteProject = (id: string) => {
     const project = projects.find(p => p.id === id);
     if (project) {
       setProjectToDelete(project);
@@ -234,7 +234,7 @@ export default function Dashboard() {
     }
   };
 
-  const updateProjectStatus = async (id: number, status: Status) => {
+  const updateProjectStatus = async (id: string, status: Status) => {
     try {
       // Update local state immediately for better UX
       setProjects(prev => prev.map(p =>
@@ -247,7 +247,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleForkProject = async (id: number) => {
+  const handleForkProject = async (id: string) => {
     const forkingToast = toast.loading('Forking project...');
     try {
       const forkedProject = await projectsApi.forkProject(id);

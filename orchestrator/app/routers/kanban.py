@@ -18,6 +18,7 @@ from ..models_kanban import (
     KanbanBoard, KanbanColumn, KanbanTask, KanbanTaskComment, ProjectNote
 )
 from pydantic import BaseModel
+from uuid import UUID
 
 
 router = APIRouter(prefix="/api/kanban", tags=["kanban"])
@@ -49,20 +50,20 @@ class KanbanColumnUpdate(BaseModel):
 
 
 class KanbanTaskCreate(BaseModel):
-    column_id: int
+    column_id: UUID
     title: str
     description: Optional[str] = None
     priority: Optional[str] = None
     status: Optional[str] = None
     task_type: Optional[str] = None
     tags: Optional[List[str]] = None
-    assignee_id: Optional[int] = None
+    assignee_id: Optional[UUID] = None
     estimate_hours: Optional[int] = None
     due_date: Optional[datetime] = None
 
 
 class KanbanTaskUpdate(BaseModel):
-    column_id: Optional[int] = None
+    column_id: Optional[UUID] = None
     title: Optional[str] = None
     description: Optional[str] = None
     position: Optional[int] = None
@@ -70,7 +71,7 @@ class KanbanTaskUpdate(BaseModel):
     status: Optional[str] = None
     task_type: Optional[str] = None
     tags: Optional[List[str]] = None
-    assignee_id: Optional[int] = None
+    assignee_id: Optional[UUID] = None
     estimate_hours: Optional[int] = None
     spent_hours: Optional[int] = None
     due_date: Optional[datetime] = None
@@ -79,7 +80,7 @@ class KanbanTaskUpdate(BaseModel):
 
 
 class KanbanTaskMove(BaseModel):
-    column_id: int
+    column_id: UUID
     position: int
 
 
@@ -100,17 +101,17 @@ async def get_project_id_from_slug_or_id(
     project_slug_or_id: str,
     db: AsyncSession,
     current_user: User
-) -> int:
-    """Get project ID from slug or numeric ID and verify ownership."""
-    # Try to parse as numeric ID first
+) -> UUID:
+    """Get project ID from slug or UUID string and verify ownership."""
+    # Try to parse as UUID first
     try:
-        project_id = int(project_slug_or_id)
+        project_id = UUID(project_slug_or_id)
         result = await db.execute(
             select(Project).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
     except ValueError:
-        # Not a numeric ID, treat as slug
+        # Not a UUID, treat as slug
         result = await db.execute(
             select(Project).where(Project.slug == project_slug_or_id)
         )
@@ -126,7 +127,7 @@ async def get_project_id_from_slug_or_id(
 
 
 async def get_board_with_auth(
-    project_id: int,
+    project_id: UUID,
     db: AsyncSession,
     current_user: User,
     create_if_missing: bool = True
@@ -179,7 +180,7 @@ async def get_board_with_auth(
     return board
 
 
-async def reorder_tasks_in_column(db: AsyncSession, column_id: int, exclude_task_id: Optional[int] = None):
+async def reorder_tasks_in_column(db: AsyncSession, column_id: UUID, exclude_task_id: Optional[UUID] = None):
     """Reorder tasks in a column to ensure sequential positions."""
     query = select(KanbanTask).where(KanbanTask.column_id == column_id)
     if exclude_task_id:
@@ -199,12 +200,13 @@ async def reorder_tasks_in_column(db: AsyncSession, column_id: int, exclude_task
 
 @router.get("/projects/{project_id}/board")
 async def get_board(
-    project_id: int,
+    project_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get complete kanban board with all columns and tasks."""
-    board = await get_board_with_auth(project_id, db, current_user)
+    resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
+    board = await get_board_with_auth(resolved_project_id, db, current_user)
 
     # Load all relationships
     await db.refresh(board, ["columns"])
@@ -274,13 +276,14 @@ async def get_board(
 
 @router.post("/projects/{project_id}/columns")
 async def create_column(
-    project_id: int,
+    project_id: str,
     column_data: KanbanColumnCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Create a new column in the board."""
-    board = await get_board_with_auth(project_id, db, current_user)
+    resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
+    board = await get_board_with_auth(resolved_project_id, db, current_user)
 
     # Get max position
     result = await db.execute(
@@ -302,7 +305,7 @@ async def create_column(
 
 @router.patch("/columns/{column_id}")
 async def update_column(
-    column_id: int,
+    column_id: UUID,
     column_data: KanbanColumnUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -326,7 +329,7 @@ async def update_column(
 
 @router.delete("/columns/{column_id}")
 async def delete_column(
-    column_id: int,
+    column_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -352,13 +355,14 @@ async def delete_column(
 
 @router.post("/projects/{project_id}/tasks")
 async def create_task(
-    project_id: int,
+    project_id: str,
     task_data: KanbanTaskCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Create a new task in a column."""
-    board = await get_board_with_auth(project_id, db, current_user)
+    resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
+    board = await get_board_with_auth(resolved_project_id, db, current_user)
 
     # Verify column belongs to board
     column_result = await db.execute(
@@ -391,7 +395,7 @@ async def create_task(
 
 @router.get("/tasks/{task_id}")
 async def get_task(
-    task_id: int,
+    task_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -463,7 +467,7 @@ async def get_task(
 
 @router.patch("/tasks/{task_id}")
 async def update_task(
-    task_id: int,
+    task_id: UUID,
     task_data: KanbanTaskUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -513,7 +517,7 @@ async def update_task(
 
 @router.post("/tasks/{task_id}/move")
 async def move_task(
-    task_id: int,
+    task_id: UUID,
     move_data: KanbanTaskMove,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -567,7 +571,7 @@ async def move_task(
 
 @router.delete("/tasks/{task_id}")
 async def delete_task(
-    task_id: int,
+    task_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -592,17 +596,18 @@ async def delete_task(
 
 @router.get("/projects/{project_id}/tasks/search")
 async def search_tasks(
-    project_id: int,
+    project_id: str,
     q: Optional[str] = Query(None, description="Search query"),
     priority: Optional[str] = Query(None),
     task_type: Optional[str] = Query(None),
-    assignee_id: Optional[int] = Query(None),
+    assignee_id: Optional[UUID] = Query(None),
     tags: Optional[str] = Query(None, description="Comma-separated tags"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Search and filter tasks."""
-    board = await get_board_with_auth(project_id, db, current_user, create_if_missing=False)
+    resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
+    board = await get_board_with_auth(resolved_project_id, db, current_user, create_if_missing=False)
 
     query = select(KanbanTask).where(KanbanTask.board_id == board.id)
 
@@ -658,7 +663,7 @@ async def search_tasks(
 
 @router.post("/tasks/{task_id}/comments")
 async def add_comment(
-    task_id: int,
+    task_id: UUID,
     comment_data: TaskCommentCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)

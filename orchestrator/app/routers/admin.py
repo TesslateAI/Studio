@@ -3,6 +3,7 @@ Admin API endpoints for platform metrics and management.
 """
 
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 from datetime import datetime, timedelta, date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -811,7 +812,7 @@ async def list_agents(
 
 @router.get("/agents/{agent_id}")
 async def get_agent(
-    agent_id: int,
+    agent_id: str,
     admin: User = Depends(admin_required),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -951,7 +952,7 @@ async def create_agent(
 
 @router.put("/agents/{agent_id}")
 async def update_agent(
-    agent_id: int,
+    agent_id: str,
     agent_data: AgentUpdate,
     admin: User = Depends(admin_required),
     db: AsyncSession = Depends(get_db)
@@ -1005,7 +1006,7 @@ async def update_agent(
 
 @router.delete("/agents/{agent_id}")
 async def delete_agent(
-    agent_id: int,
+    agent_id: str,
     admin: User = Depends(admin_required),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -1049,7 +1050,7 @@ async def delete_agent(
 
 @router.patch("/agents/{agent_id}/remove-from-marketplace")
 async def remove_from_marketplace(
-    agent_id: int,
+    agent_id: str,
     admin: User = Depends(admin_required),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -1089,7 +1090,7 @@ async def remove_from_marketplace(
 
 @router.patch("/agents/{agent_id}/feature")
 async def toggle_featured(
-    agent_id: int,
+    agent_id: str,
     is_featured: bool,
     admin: User = Depends(admin_required),
     db: AsyncSession = Depends(get_db)

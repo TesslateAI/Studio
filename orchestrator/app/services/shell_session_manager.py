@@ -1,3 +1,4 @@
+from uuid import UUID
 """
 Shell Session Manager
 
@@ -15,6 +16,7 @@ from sqlalchemy import select
 from ..models import ShellSession, User, Project
 from ..services.pty_broker import get_pty_broker, PTYSession
 from ..config import get_settings
+from ..utils.resource_naming import get_container_name
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -36,8 +38,8 @@ class ShellSessionManager:
 
     async def create_session(
         self,
-        user_id: int,
-        project_id: int,
+        user_id: UUID,
+        project_id: str,
         db: AsyncSession,
         command: str = "/bin/sh",
     ) -> Dict[str, Any]:
@@ -210,8 +212,8 @@ class ShellSessionManager:
 
     async def list_sessions(
         self,
-        user_id: int,
-        project_id: Optional[int],
+        user_id: UUID,
+        project_id: Optional[UUID],
         db: AsyncSession,
     ) -> List[Dict[str, Any]]:
         """List all active sessions for a user/project."""
@@ -271,11 +273,11 @@ class ShellSessionManager:
 
     # Helper methods
 
-    def _get_container_name(self, user_id: int, project_id: int) -> str:
+    def _get_container_name(self, user_id: UUID, project_id: str) -> str:
         """Get container/pod name based on deployment mode."""
         if settings.deployment_mode == "kubernetes":
             # K8s pod name format
-            return f"dev-user{user_id}-project{project_id}"
+            return get_container_name(user_id, project_id, mode="kubernetes")
         else:
             # Docker container name format - use slug from container manager
             from ..dev_server_manager import get_container_manager
@@ -297,9 +299,9 @@ class ShellSessionManager:
                     return result.stdout.strip().split('\n')[0]
                 else:
                     # Last resort fallback (should not happen in production)
-                    return f"tesslate-user{user_id}-project{project_id}"
+                    return get_container_name(user_id, project_id, mode="docker")
 
-    async def _is_container_running(self, user_id: int, project_id: int) -> bool:
+    async def _is_container_running(self, user_id: UUID, project_id: str) -> bool:
         """Check if container/pod is running."""
         from ..dev_server_manager import get_container_manager
 
@@ -309,7 +311,7 @@ class ShellSessionManager:
 
     async def _get_user_active_sessions(
         self,
-        user_id: int,
+        user_id: UUID,
         db: AsyncSession
     ) -> List[ShellSession]:
         """Get all active sessions for a user."""
@@ -323,7 +325,7 @@ class ShellSessionManager:
 
     async def _get_project_active_sessions(
         self,
-        project_id: int,
+        project_id: str,
         db: AsyncSession
     ) -> List[ShellSession]:
         """Get all active sessions for a project."""

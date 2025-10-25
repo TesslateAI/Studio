@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from uuid import UUID
 
 class UserBase(BaseModel):
     name: str
@@ -24,7 +25,7 @@ class UserLogin(BaseModel):
     password: str
 
 class User(UserBase):
-    id: int
+    id: UUID
     is_active: bool
     created_at: datetime
 
@@ -50,7 +51,7 @@ class ProjectCreate(ProjectBase):
     source_type: str = "template"  # "template", "github", or "base"
     github_repo_url: Optional[str] = None
     github_branch: Optional[str] = "main"
-    base_id: Optional[int] = None
+    base_id: Optional[UUID] = None
 
     @field_validator('source_type')
     @classmethod
@@ -78,9 +79,9 @@ class ProjectCreate(ProjectBase):
         return v
 
 class Project(ProjectBase):
-    id: int
+    id: UUID
     slug: str  # URL-safe identifier for routing
-    owner_id: int
+    owner_id: UUID
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -92,14 +93,14 @@ class ProjectFileBase(BaseModel):
     content: str
 
 class ProjectFileCreate(ProjectFileBase):
-    project_id: int
+    project_id: UUID
 
 class ProjectFile(ProjectFileBase):
-    id: int
-    project_id: int
+    id: UUID
+    project_id: UUID
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
 
@@ -111,8 +112,8 @@ class MessageCreate(MessageBase):
     pass
 
 class Message(MessageBase):
-    id: int
-    chat_id: int
+    id: UUID
+    chat_id: UUID
     message_metadata: Optional[Dict[str, Any]] = None  # Agent execution data
     created_at: datetime
 
@@ -120,14 +121,14 @@ class Message(MessageBase):
         from_attributes = True
 
 class ChatBase(BaseModel):
-    project_id: Optional[int] = None
+    project_id: Optional[UUID] = None
 
 class ChatCreate(ChatBase):
     pass
 
 class Chat(ChatBase):
-    id: int
-    user_id: int
+    id: UUID
+    user_id: UUID
     created_at: datetime
     messages: List[Message] = []
 
@@ -139,7 +140,7 @@ class Chat(ChatBase):
 
 class AgentCommandRequest(BaseModel):
     """Request schema for agent command execution."""
-    project_id: int
+    project_id: UUID
     command: str
     working_dir: str = "."
     timeout: int = 60  # seconds
@@ -174,15 +175,15 @@ class AgentCommandResponse(BaseModel):
     duration_ms: int
     risk_level: str
     dry_run: bool
-    command_id: int
+    command_id: UUID
     message: Optional[str] = None
 
 
 class AgentCommandLogSchema(BaseModel):
     """Schema for agent command log entry."""
-    id: int
-    user_id: int
-    project_id: int
+    id: UUID
+    user_id: UUID
+    project_id: UUID
     command: str
     working_dir: str
     success: bool
@@ -210,9 +211,9 @@ class AgentCommandStatsResponse(BaseModel):
 
 class AgentChatRequest(BaseModel):
     """Request schema for agent chat."""
-    project_id: int
+    project_id: UUID
     message: str
-    agent_id: Optional[int] = None  # ID of the agent to use
+    agent_id: Optional[UUID] = None  # ID of the agent to use
     max_iterations: Optional[int] = 20
     minimal_prompts: Optional[bool] = False
 
@@ -281,7 +282,7 @@ class AgentUpdate(BaseModel):
 
 class Agent(AgentBase):
     """Schema for AI Agent response."""
-    id: int
+    id: UUID
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -310,8 +311,8 @@ class GitHubCredentialResponse(BaseModel):
 
 class GitRepositoryResponse(BaseModel):
     """Response schema for Git repository information."""
-    id: int
-    project_id: int
+    id: UUID
+    project_id: UUID
     repo_url: str
     repo_name: Optional[str] = None
     repo_owner: Optional[str] = None
@@ -480,7 +481,7 @@ class CreateGitHubRepoRequest(BaseModel):
 
 class MarketplaceAgentResponse(BaseModel):
     """Response schema for marketplace agent."""
-    id: int
+    id: UUID
     name: str
     slug: str
     description: str
@@ -514,14 +515,14 @@ class AgentPurchaseResponse(BaseModel):
     """Response schema for agent purchase."""
     success: bool
     message: str
-    agent_id: int
+    agent_id: UUID
     checkout_url: Optional[str] = None  # For paid agents
     session_id: Optional[str] = None  # Stripe session ID
 
 
 class MarketplaceBaseResponse(BaseModel):
     """Response schema for marketplace base."""
-    id: int
+    id: UUID
     name: str
     slug: str
     description: str

@@ -5,6 +5,7 @@ This module provides a RESTful API for AI agents to execute shell commands
 in user development environments with comprehensive security controls.
 """
 
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -36,7 +37,7 @@ RATE_LIMIT_COMMANDS = 30  # commands per minute
 RATE_LIMIT_WINDOW = 60  # seconds
 
 
-def check_rate_limit(user_id: int) -> bool:
+def check_rate_limit(user_id: UUID) -> bool:
     """
     Check if user has exceeded rate limit.
 
@@ -331,7 +332,7 @@ async def execute_command(
 
 @router.get("/history/{project_id}", response_model=List[AgentCommandLogSchema])
 async def get_command_history(
-    project_id: int,
+    project_id: str,
     limit: int = 50,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)

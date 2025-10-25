@@ -13,6 +13,7 @@ Supported:
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 import logging
 import asyncio
 from openai import AsyncOpenAI
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 async def get_llm_client(
-    user_id: int,
+    user_id: UUID,
     model_name: str,
     db: AsyncSession
 ) -> AsyncOpenAI:
@@ -315,7 +316,7 @@ class AnthropicAdapter(ModelAdapter):
 
 async def create_model_adapter(
     model_name: str,
-    user_id: int,
+    user_id: UUID,
     db: AsyncSession,
     provider: Optional[str] = None,
     **kwargs

@@ -8,10 +8,12 @@ Supports single edits (patch_file) and batch edits (multi_edit).
 import logging
 import os
 from typing import Dict, Any, List
+from uuid import UUID
 
 from ..registry import Tool, ToolCategory
 from ....config import get_settings
 from ..output_formatter import success_output, error_output
+from ....utils.resource_naming import get_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,7 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             search: str,  # Code block to search for
             replace: str  # Code block to replace it with
         }
-        context: {user_id: int, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, db: AsyncSession}
 
     Returns:
         Dict with success status and details
@@ -65,7 +67,7 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         )
     else:
         # Docker mode: Read from local filesystem
-        project_dir = f"users/{user_id}/{project_id}"
+        project_dir = get_project_path(user_id, project_id)
         full_path = os.path.join(project_dir, file_path)
 
         if os.path.exists(full_path):
@@ -109,7 +111,7 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             )
     else:
         # Docker mode: Write to local filesystem
-        project_dir = f"users/{user_id}/{project_id}"
+        project_dir = get_project_path(user_id, project_id)
         full_path = os.path.join(project_dir, file_path)
 
         try:
@@ -179,7 +181,7 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 ...
             ]
         }
-        context: {user_id: int, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, db: AsyncSession}
 
     Returns:
         Dict with success status and details
@@ -214,7 +216,7 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         )
     else:
         # Docker mode: Read from local filesystem
-        project_dir = f"users/{user_id}/{project_id}"
+        project_dir = get_project_path(user_id, project_id)
         full_path = os.path.join(project_dir, file_path)
 
         if os.path.exists(full_path):
@@ -283,7 +285,7 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             )
     else:
         # Docker mode: Write to local filesystem
-        project_dir = f"users/{user_id}/{project_id}"
+        project_dir = get_project_path(user_id, project_id)
         full_path = os.path.join(project_dir, file_path)
 
         try:

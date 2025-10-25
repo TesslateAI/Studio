@@ -3,7 +3,7 @@ import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
 
 interface Project {
-  id: number;
+  id: string;
   name: string;
   description: string;
   status: Status;

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, List, Any
+from uuid import UUID
 
 
 class BaseContainerManager(ABC):
@@ -11,7 +12,7 @@ class BaseContainerManager(ABC):
     """
 
     @abstractmethod
-    def _get_project_key(self, user_id: int, project_id: str) -> str:
+    def _get_project_key(self, user_id: UUID, project_id: str) -> str:
         """Generate a unique project key for container/environment management."""
         pass
 
@@ -21,7 +22,7 @@ class BaseContainerManager(ABC):
         pass
 
     @abstractmethod
-    async def start_container(self, project_path: str, project_id: str, user_id: int, **kwargs) -> str:
+    async def start_container(self, project_path: str, project_id: str, user_id: UUID, **kwargs) -> str:
         """
         Start a development environment.
 
@@ -37,7 +38,7 @@ class BaseContainerManager(ABC):
         pass
 
     @abstractmethod
-    async def stop_container(self, project_id: str, user_id: int = None) -> None:
+    async def stop_container(self, project_id: str, user_id: UUID = None) -> None:
         """
         Stop and remove a development environment.
 
@@ -48,7 +49,7 @@ class BaseContainerManager(ABC):
         pass
 
     @abstractmethod
-    async def restart_container(self, project_path: str, project_id: str, user_id: int) -> str:
+    async def restart_container(self, project_path: str, project_id: str, user_id: UUID) -> str:
         """
         Restart a development environment.
 
@@ -63,7 +64,7 @@ class BaseContainerManager(ABC):
         pass
 
     @abstractmethod
-    def get_container_url(self, project_id: str, user_id: int = None) -> Optional[str]:
+    def get_container_url(self, project_id: str, user_id: UUID = None) -> Optional[str]:
         """
         Get the URL for a project's development environment.
 
@@ -77,7 +78,7 @@ class BaseContainerManager(ABC):
         pass
 
     @abstractmethod
-    async def get_container_status(self, project_id: str, user_id: int = None) -> Dict[str, Any]:
+    async def get_container_status(self, project_id: str, user_id: UUID = None) -> Dict[str, Any]:
         """
         Get detailed status of a development environment.
 
@@ -110,7 +111,7 @@ class BaseContainerManager(ABC):
         pass
 
     @abstractmethod
-    def track_activity(self, user_id: int, project_id: str) -> None:
+    def track_activity(self, user_id: UUID, project_id: str) -> None:
         """
         Record activity for a project environment.
 

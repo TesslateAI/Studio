@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 from typing import Dict, Optional, List, Any
+from uuid import UUID
 from .config import get_settings
 from .k8s_client import get_k8s_manager
 from .base_container_manager import BaseContainerManager
@@ -26,7 +27,7 @@ class KubernetesContainerManager(BaseContainerManager):
         logger.info("DevContainerManager initialized - Kubernetes-native architecture with NGINX Ingress")
         # K8s manager will be lazily initialized on first use
     
-    def _get_project_key(self, user_id: int, project_id: str) -> str:
+    def _get_project_key(self, user_id: UUID, project_id: str) -> str:
         """Generate a unique project key for environment management."""
         return f"user-{user_id}-project-{project_id}"
     
@@ -46,7 +47,7 @@ class KubernetesContainerManager(BaseContainerManager):
     
     
     
-    async def start_container(self, project_path: str, project_id: str, user_id: int, project_slug: str = None, **kwargs) -> str:
+    async def start_container(self, project_path: str, project_id: str, user_id: UUID, project_slug: str = None, **kwargs) -> str:
         """
         Start a development environment using Kubernetes resources.
 
@@ -112,7 +113,7 @@ class KubernetesContainerManager(BaseContainerManager):
             raise RuntimeError(f"Failed to start development environment for user {user_id}, project {project_id}: {str(e)}")
     
     
-    async def stop_container(self, project_id: str, user_id: int = None) -> None:
+    async def stop_container(self, project_id: str, user_id: UUID = None) -> None:
         """Stop and remove a development environment with multi-user support."""
         if user_id is None:
             logger.warning(f"Stop container called without user_id for project {project_id}")
@@ -139,13 +140,13 @@ class KubernetesContainerManager(BaseContainerManager):
             logger.debug(f"No environment found with key: {project_key}")
             logger.debug(f"Available environments: {list(self.environments.keys())}")
     
-    async def restart_container(self, project_path: str, project_id: str, user_id: int) -> str:
+    async def restart_container(self, project_path: str, project_id: str, user_id: UUID) -> str:
         """Restart a development environment with multi-user support."""
         logger.info(f"Restarting development environment for user {user_id}, project {project_id}")
         await self.stop_container(project_id, user_id)
         return await self.start_container(project_path, project_id, user_id)
     
-    def get_container_url(self, project_id: str, user_id: int = None) -> Optional[str]:
+    def get_container_url(self, project_id: str, user_id: UUID = None) -> Optional[str]:
         """Get the URL for a project's development environment with multi-user support."""
         if user_id is None:
             return None
@@ -158,7 +159,7 @@ class KubernetesContainerManager(BaseContainerManager):
 
         return None
     
-    async def get_container_status(self, project_id: str, user_id: int = None) -> Dict[str, Any]:
+    async def get_container_status(self, project_id: str, user_id: UUID = None) -> Dict[str, Any]:
         """Get detailed status of a development environment with multi-user support."""
         if user_id is None:
             return {"status": "not_found", "running": False}
@@ -280,7 +281,7 @@ class KubernetesContainerManager(BaseContainerManager):
         logger.info(f"Cleanup completed. Removed {len(cleaned_environments)} orphaned environments")
         return cleaned_environments
 
-    def track_activity(self, user_id: int, project_id: str) -> None:
+    def track_activity(self, user_id: UUID, project_id: str) -> None:
         """Record activity for a project environment."""
         project_key = self._get_project_key(user_id, project_id)
         self.activity_tracker[project_key] = time.time()

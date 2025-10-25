@@ -3,6 +3,7 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 """
 
 from typing import List, Optional
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -220,7 +221,7 @@ async def add_custom_model(
 
 @router.delete("/models/custom/{model_id}")
 async def delete_custom_model(
-    model_id: int,
+    model_id: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -452,7 +453,7 @@ async def get_agent_details(
 
 @router.post("/agents/{agent_id}/purchase")
 async def purchase_agent(
-    agent_id: int,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -513,10 +514,13 @@ async def purchase_agent(
     from ..services.stripe_service import StripeService
 
     stripe_service = StripeService()
+    settings = get_settings()
 
-    # Create checkout session
-    success_url = f"http://studio.localhost/marketplace/success?agent={agent.slug}"
-    cancel_url = f"http://studio.localhost/marketplace/agent/{agent.slug}"
+    # Create checkout session with config-based URLs
+    protocol = "https" if settings.deployment_mode == "kubernetes" else "http"
+    base_url = f"{protocol}://{settings.app_domain}"
+    success_url = f"{base_url}/marketplace/success?agent={agent.slug}"
+    cancel_url = f"{base_url}/marketplace/agent/{agent.slug}"
 
     try:
         session = await stripe_service.create_checkout_session(
@@ -539,7 +543,7 @@ async def purchase_agent(
 
 @router.post("/agents/{agent_id}/fork")
 async def fork_agent(
-    agent_id: int,
+    agent_id: str,
     name: Optional[str] = None,
     description: Optional[str] = None,
     system_prompt: Optional[str] = None,
@@ -698,7 +702,7 @@ async def create_custom_agent(
 
 @router.patch("/agents/{agent_id}")
 async def update_custom_agent(
-    agent_id: int,
+    agent_id: str,
     update_data: dict,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -880,7 +884,7 @@ async def get_user_agents(
 
 @router.post("/agents/{agent_id}/toggle")
 async def toggle_agent(
-    agent_id: int,
+    agent_id: str,
     enabled: bool,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -914,7 +918,7 @@ async def toggle_agent(
 
 @router.delete("/agents/{agent_id}/library")
 async def remove_agent_from_library(
-    agent_id: int,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -957,7 +961,7 @@ async def remove_agent_from_library(
 
 @router.post("/agents/{agent_id}/select-model")
 async def select_agent_model(
-    agent_id: int,
+    agent_id: str,
     model: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -1008,7 +1012,7 @@ async def select_agent_model(
 
 @router.post("/agents/{agent_id}/publish")
 async def publish_agent(
-    agent_id: int,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1055,7 +1059,7 @@ async def publish_agent(
 
 @router.post("/agents/{agent_id}/unpublish")
 async def unpublish_agent(
-    agent_id: int,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1093,7 +1097,7 @@ async def unpublish_agent(
 
 @router.get("/projects/{project_id}/available-agents")
 async def get_available_agents_for_project(
-    project_id: int,
+    project_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1152,8 +1156,8 @@ async def get_available_agents_for_project(
 
 @router.post("/projects/{project_id}/agents/{agent_id}")
 async def add_agent_to_project(
-    project_id: int,
-    agent_id: int,
+    project_id: str,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1218,8 +1222,8 @@ async def add_agent_to_project(
 
 @router.delete("/projects/{project_id}/agents/{agent_id}")
 async def remove_agent_from_project(
-    project_id: int,
-    agent_id: int,
+    project_id: str,
+    agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1259,7 +1263,7 @@ async def remove_agent_from_project(
 
 @router.get("/projects/{project_id}/agents")
 async def get_project_agents(
-    project_id: int,
+    project_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1316,7 +1320,7 @@ async def get_project_agents(
 
 @router.post("/agents/{agent_id}/review")
 async def create_agent_review(
-    agent_id: int,
+    agent_id: str,
     rating: int = Query(ge=1, le=5),
     comment: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
@@ -1548,7 +1552,7 @@ async def get_base_details(
 
 @router.post("/bases/{base_id}/purchase")
 async def purchase_base(
-    base_id: int,
+    base_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):

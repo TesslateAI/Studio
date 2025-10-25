@@ -610,7 +610,7 @@ export default function AdminDashboard() {
 // ============================================================================
 
 interface Agent {
-  id: number;
+  id: string;
   name: string;
   slug: string;
   description: string;

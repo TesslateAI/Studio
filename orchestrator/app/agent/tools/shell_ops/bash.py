@@ -7,6 +7,7 @@ Auto-manages shell session lifecycle.
 
 import logging
 from typing import Dict, Any
+from uuid import UUID
 
 from ..registry import Tool, ToolCategory
 from .session import shell_open_executor, shell_close_executor
@@ -28,7 +29,7 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
             command: str,  # Command to execute
             wait_seconds: float  # Optional wait time (default: 2.0)
         }
-        context: {user_id: int, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, db: AsyncSession}
 
     Returns:
         Dict with command output

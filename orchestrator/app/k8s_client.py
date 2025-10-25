@@ -14,6 +14,8 @@ import asyncio
 import shlex
 import json
 from typing import Dict, Optional, Any, List
+from uuid import UUID
+from .utils.resource_naming import get_container_name, get_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,7 @@ class KubernetesManager:
 
         logger.info(f"Kubernetes client initialized - Main namespace: {self.namespace}, User environments: {self.user_namespace}")
 
-    def _generate_resource_names(self, user_id: int, project_id: str, project_slug: str = None) -> Dict[str, str]:
+    def _generate_resource_names(self, user_id: UUID, project_id: str, project_slug: str = None) -> Dict[str, str]:
         """
         Generate consistent resource names for a user's project.
 
@@ -73,11 +75,11 @@ class KubernetesManager:
         settings = get_settings()
 
         # Internal resource names still use IDs for uniqueness
-        base_name = f"dev-user{user_id}-project{project_id}"
+        base_name = get_container_name(user_id, project_id, mode="kubernetes")
 
         # Hostname uses project slug for clean URLs (fallback to ID-based for backwards compat)
         if not project_slug:
-            project_slug = f"user{user_id}-project{project_id}"
+            project_slug = f"{user_id}-{project_id}"
         hostname = f"{project_slug}.{settings.app_domain}"
 
         return {
@@ -91,14 +93,14 @@ class KubernetesManager:
     def _create_deployment_manifest(
         self,
         deployment_name: str,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         project_path: str
     ) -> client.V1Deployment:
         """Create a deployment manifest for dev environment."""
 
         # Generate subPath for user isolation
-        sub_path = f"users/{user_id}/{project_id}"
+        sub_path = get_project_path(user_id, project_id)
 
         return client.V1Deployment(
             metadata=client.V1ObjectMeta(
@@ -328,7 +330,7 @@ VITECONFIG
         ingress_name: str,
         service_name: str,
         hostname: str,
-        user_id: int,
+        user_id: UUID,
         namespace: str
     ) -> client.V1Ingress:
         """Create an ingress manifest for dev environment with NGINX external authentication."""
@@ -438,7 +440,7 @@ VITECONFIG
 
     async def create_dev_environment(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         project_path: str,
         project_slug: str = None
@@ -545,7 +547,7 @@ VITECONFIG
 
             raise RuntimeError(f"Failed to create dev environment: {str(e)}") from e
 
-    async def delete_dev_environment(self, user_id: int, project_id: str) -> None:
+    async def delete_dev_environment(self, user_id: UUID, project_id: str) -> None:
         """
         Delete all Kubernetes resources for a development environment.
 
@@ -596,9 +598,9 @@ VITECONFIG
                 cleanup_errors.append(f"Deployment {names['deployment']}: {e}")
 
         if cleanup_errors:
-            logger.warning(f"Cleanup warnings for user{user_id}-project{project_id}: {cleanup_errors}")
+            logger.warning(f"Cleanup warnings for user {user_id}, project {project_id}: {cleanup_errors}")
 
-    async def get_dev_environment_status(self, user_id: int, project_id: str) -> Dict[str, Any]:
+    async def get_dev_environment_status(self, user_id: UUID, project_id: str) -> Dict[str, Any]:
         """
         Get the status of a development environment.
 
@@ -663,7 +665,7 @@ VITECONFIG
                 "hostname": names["hostname"]
             }
 
-    async def check_dev_environment_health(self, user_id: int, project_id: str) -> Dict[str, Any]:
+    async def check_dev_environment_health(self, user_id: UUID, project_id: str) -> Dict[str, Any]:
         """
         Check if a development environment exists and is healthy.
 
@@ -744,7 +746,7 @@ VITECONFIG
 
         raise RuntimeError(f"Deployment {deployment_name} did not become ready within {timeout} seconds")
 
-    async def list_dev_environments(self, user_id: Optional[int] = None) -> list:
+    async def list_dev_environments(self, user_id: Optional[UUID] = None) -> list:
         """
         List all development environments, optionally filtered by user.
 
@@ -757,7 +759,7 @@ VITECONFIG
         try:
             label_selector = "app=dev-environment"
             if user_id:
-                label_selector += f",user-id={user_id}"
+                label_selector += f",user-id={str(user_id)}"
 
             deployments = await asyncio.to_thread(
                 self.apps_v1.list_namespaced_deployment,
@@ -772,9 +774,9 @@ VITECONFIG
                 project_id = labels.get("project-id")
 
                 if env_user_id and project_id:
-                    status = await self.get_dev_environment_status(int(env_user_id), project_id)
+                    status = await self.get_dev_environment_status(env_user_id, project_id)
                     environments.append({
-                        "user_id": int(env_user_id),
+                        "user_id": env_user_id,
                         "project_id": project_id,
                         "deployment_name": deployment.metadata.name,
                         **status
@@ -840,7 +842,7 @@ VITECONFIG
 
     async def read_file_from_pod(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         file_path: str
     ) -> Optional[str]:
@@ -917,7 +919,7 @@ VITECONFIG
 
     async def write_file_to_pod(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         file_path: str,
         content: str
@@ -1003,7 +1005,7 @@ VITECONFIG
 
     async def delete_file_from_pod(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         file_path: str
     ) -> bool:
@@ -1065,7 +1067,7 @@ VITECONFIG
 
     async def execute_command_in_pod(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         command: List[str],
         timeout: int = 120
@@ -1172,7 +1174,7 @@ VITECONFIG
 
     async def is_pod_ready(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         check_responsive: bool = True
     ) -> Dict[str, Any]:
@@ -1279,7 +1281,7 @@ VITECONFIG
 
     async def list_files_in_pod(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         directory: str = "."
     ) -> List[Dict[str, Any]]:
@@ -1374,7 +1376,7 @@ VITECONFIG
 
     async def glob_files_in_pod(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         pattern: str,
         directory: str = "."
@@ -1460,7 +1462,7 @@ VITECONFIG
 
     async def grep_in_pod(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         pattern: str,
         directory: str = ".",
@@ -1552,7 +1554,7 @@ VITECONFIG
             logger.error(f"[GREP] Failed to grep files: {e}", exc_info=True)
             return []
 
-    def track_activity(self, user_id: int, project_id: str) -> None:
+    def track_activity(self, user_id: UUID, project_id: str) -> None:
         """
         Track activity for a development environment.
 

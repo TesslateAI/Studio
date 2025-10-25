@@ -19,11 +19,11 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 
 interface KanbanPanelProps {
-  projectId: number;
+  projectId: string;
 }
 
 interface Column {
-  id: number;
+  id: string;
   name: string;
   description?: string;
   position: number;
@@ -36,8 +36,8 @@ interface Column {
 }
 
 interface Task {
-  id: number;
-  column_id: number;
+  id: string;
+  column_id: string;
   title: string;
   description?: string;
   position: number;
@@ -46,12 +46,12 @@ interface Task {
   task_type?: 'feature' | 'bug' | 'task' | 'epic';
   tags?: string[];
   assignee?: {
-    id: number;
+    id: string;
     name: string;
     username: string;
   };
   reporter?: {
-    id: number;
+    id: string;
     name: string;
     username: string;
   };
@@ -71,10 +71,10 @@ interface TaskDetails extends Task {
 }
 
 interface Comment {
-  id: number;
+  id: string;
   content: string;
   user: {
-    id: number;
+    id: string;
     name: string;
     username: string;
   };
@@ -106,7 +106,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
   const [filterPriority, setFilterPriority] = useState<string>('');
   const [filterType, setFilterType] = useState<string>('');
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
-  const [newTaskColumnId, setNewTaskColumnId] = useState<number | null>(null);
+  const [newTaskColumnId, setNewTaskColumnId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetails | null>(null);
   const [showTaskDetails, setShowTaskDetails] = useState(false);
   const [newComment, setNewComment] = useState('');
@@ -139,7 +139,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     }
   };
 
-  const loadTaskDetails = async (taskId: number) => {
+  const loadTaskDetails = async (taskId: string) => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_BASE}/api/kanban/tasks/${taskId}`, {
@@ -181,7 +181,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     }
   };
 
-  const updateTask = async (taskId: number, updates: Partial<Task>) => {
+  const updateTask = async (taskId: string, updates: Partial<Task>) => {
     try {
       const token = localStorage.getItem('token');
       await axios.patch(
@@ -199,7 +199,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     }
   };
 
-  const deleteTask = async (taskId: number) => {
+  const deleteTask = async (taskId: string) => {
     if (!confirm('Are you sure you want to delete this task?')) return;
 
     try {
@@ -236,11 +236,11 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!result.destination || !board) return;
 
     const { source, destination, draggableId } = result;
-    const taskId = parseInt(draggableId.split('-')[1]);
+    const taskId = draggableId.split('-')[1];
 
     // Same column reorder
     if (source.droppableId === destination.droppableId) {
-      const columnId = parseInt(source.droppableId.split('-')[1]);
+      const columnId = source.droppableId.split('-')[1];
       const column = board.columns.find(c => c.id === columnId);
       if (!column) return;
 
@@ -259,8 +259,8 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       });
     } else {
       // Move to different column
-      const sourceColumnId = parseInt(source.droppableId.split('-')[1]);
-      const destColumnId = parseInt(destination.droppableId.split('-')[1]);
+      const sourceColumnId = source.droppableId.split('-')[1];
+      const destColumnId = destination.droppableId.split('-')[1];
 
       const sourceColumn = board.columns.find(c => c.id === sourceColumnId);
       const destColumn = board.columns.find(c => c.id === destColumnId);
@@ -292,7 +292,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       await axios.post(
         `${API_BASE}/api/kanban/tasks/${taskId}/move`,
         {
-          column_id: parseInt(destination.droppableId.split('-')[1]),
+          column_id: destination.droppableId.split('-')[1],
           position: destination.index
         },
         { headers: { Authorization: `Bearer ${token}` } }

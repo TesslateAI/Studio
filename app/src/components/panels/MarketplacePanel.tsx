@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { Lock, LockOpen } from 'lucide-react';
 
 interface MarketplacePanelProps {
-  projectId: number;
+  projectId: string;
   onLockToggle?: (locked: boolean) => void;
 }
 
 type MarketplaceTab = 'bases' | 'apis' | 'agents' | 'components';
 
 interface MarketplaceItem {
-  id: number;
+  id: string;
   title: string;
   description: string;
   price?: string;

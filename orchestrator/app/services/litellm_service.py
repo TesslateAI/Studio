@@ -1,3 +1,4 @@
+from uuid import UUID
 """
 LiteLLM Service for managing user virtual keys and tracking usage.
 """
@@ -43,7 +44,7 @@ class LiteLLMService:
             "Content-Type": "application/json"
         } if self.master_key else {}
 
-    async def create_user_key(self, user_id: int, username: str, models: List[str] = None) -> Dict[str, Any]:
+    async def create_user_key(self, user_id: UUID, username: str, models: List[str] = None) -> Dict[str, Any]:
         """
         Create a virtual API key for a user in LiteLLM.
 
@@ -71,7 +72,7 @@ class LiteLLMService:
                     "user_role": "internal_user",
                     "max_parallel_requests": 10,
                     "metadata": {
-                        "tesslate_user_id": user_id,
+                        "tesslate_user_id": str(user_id),
                         "username": username,
                         "created_at": datetime.utcnow().isoformat()
                     }
@@ -105,7 +106,7 @@ class LiteLLMService:
                     "max_budget": self.initial_budget,  # Initial budget from configuration
                     "duration": "365d",  # Key valid for 1 year
                     "metadata": {
-                        "tesslate_user_id": user_id,
+                        "tesslate_user_id": str(user_id),
                         "username": username
                     }
                 }

@@ -1,3 +1,4 @@
+from uuid import UUID
 """
 Credential Manager for securely storing and retrieving GitHub credentials.
 Uses Fernet symmetric encryption for token storage.
@@ -73,7 +74,7 @@ class CredentialManager:
     async def store_oauth_token(
         self,
         db: AsyncSession,
-        user_id: int,
+        user_id: UUID,
         access_token: str,
         refresh_token: Optional[str] = None,
         expires_at: Optional[datetime] = None,
@@ -137,7 +138,7 @@ class CredentialManager:
     async def get_credentials(
         self,
         db: AsyncSession,
-        user_id: int
+        user_id: UUID
     ) -> Optional[dict]:
         """
         Get decrypted credentials for a user.
@@ -174,7 +175,7 @@ class CredentialManager:
     async def get_access_token(
         self,
         db: AsyncSession,
-        user_id: int
+        user_id: UUID
     ) -> Optional[str]:
         """
         Get the decrypted OAuth access token for a user.
@@ -196,7 +197,7 @@ class CredentialManager:
     async def delete_credentials(
         self,
         db: AsyncSession,
-        user_id: int
+        user_id: UUID
     ) -> bool:
         """
         Delete credentials for a user.
@@ -223,7 +224,7 @@ class CredentialManager:
     async def has_credentials(
         self,
         db: AsyncSession,
-        user_id: int
+        user_id: UUID
     ) -> bool:
         """
         Check if a user has stored credentials.

@@ -1,6 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Float, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 from .database import Base
 
 # Import kanban models so they're included in Base.metadata
@@ -9,7 +11,7 @@ from .models_kanban import KanbanBoard, KanbanColumn, KanbanTask, KanbanTaskComm
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)  # Display name, not unique
     username = Column(String, unique=True, index=True, nullable=False)  # Login identifier (email-based)
     slug = Column(String, unique=True, index=True, nullable=False)  # URL-safe identifier (e.g., "ernest-k3x8n2")
@@ -45,9 +47,9 @@ class RefreshToken(Base):
     """Store refresh tokens for automatic token renewal."""
     __tablename__ = "refresh_tokens"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     token = Column(String, unique=True, index=True, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     revoked = Column(Boolean, default=False)
@@ -57,11 +59,11 @@ class RefreshToken(Base):
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, index=True, nullable=False)  # URL-safe identifier (e.g., "my-awesome-app-k3x8n2")
     description = Column(Text)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     has_git_repo = Column(Boolean, default=False)
     git_remote_url = Column(String(500), nullable=True)
     architecture_diagram = Column(Text, nullable=True)  # Stored Mermaid diagram
@@ -82,8 +84,8 @@ class Project(Base):
 class ProjectFile(Base):
     __tablename__ = "project_files"
 
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
     file_path = Column(String, nullable=False)
     content = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -93,10 +95,10 @@ class ProjectFile(Base):
 
 class Chat(Base):
     __tablename__ = "chats"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     user = relationship("User", back_populates="chats")
@@ -106,8 +108,8 @@ class Chat(Base):
 class Message(Base):
     __tablename__ = "messages"
 
-    id = Column(Integer, primary_key=True, index=True)
-    chat_id = Column(Integer, ForeignKey("chats.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey("chats.id"), nullable=False)
     role = Column(String, nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
     message_metadata = Column(JSON, nullable=True)  # Store agent execution data (steps, iterations, etc.)
@@ -120,9 +122,9 @@ class AgentCommandLog(Base):
     """Audit log for agent command executions."""
     __tablename__ = "agent_command_logs"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
     command = Column(Text, nullable=False)
     working_dir = Column(String, default=".")
     success = Column(Boolean, nullable=False)
@@ -142,10 +144,10 @@ class PodAccessLog(Base):
     """Audit log for user pod access attempts (compliance & security monitoring)."""
     __tablename__ = "pod_access_logs"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    expected_user_id = Column(Integer, nullable=False)  # User ID from URL/pod hostname
-    project_id = Column(Integer, nullable=True)  # Extracted from hostname if available
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    expected_user_id = Column(UUID(as_uuid=True), nullable=False)  # User ID from URL/pod hostname
+    project_id = Column(UUID(as_uuid=True), nullable=True)  # Extracted from hostname if available
     success = Column(Boolean, nullable=False)  # True if access granted, False if denied
     request_uri = Column(String, nullable=True)  # Original request URI
     request_host = Column(String, nullable=True)  # Request hostname
@@ -161,10 +163,10 @@ class ShellSession(Base):
     """Track active shell sessions for audit and resource management."""
     __tablename__ = "shell_sessions"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     session_id = Column(String, unique=True, index=True, nullable=False)  # UUID
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
     container_name = Column(String, nullable=False)  # Docker container or K8s pod name
 
     # Session metadata
@@ -193,8 +195,8 @@ class GitHubCredential(Base):
     """Store encrypted GitHub OAuth credentials for users."""
     __tablename__ = "github_credentials"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
 
     # OAuth tokens (encrypted)
     access_token = Column(Text, nullable=False)  # Encrypted OAuth access token
@@ -220,9 +222,9 @@ class GitRepository(Base):
     """Track Git repository connections for projects."""
     __tablename__ = "git_repositories"
 
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, unique=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, unique=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
     # Repository info
     repo_url = Column(String(500), nullable=False)
@@ -257,7 +259,7 @@ class MarketplaceAgent(Base):
     """Marketplace items: agents, bases, tools, integrations."""
     __tablename__ = "marketplace_agents"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -276,9 +278,9 @@ class MarketplaceAgent(Base):
 
     # Forking (for open source agents)
     is_forkable = Column(Boolean, default=False)
-    parent_agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=True)
-    forked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # NULL = Tesslate-created
+    parent_agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=True)
+    forked_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # NULL = Tesslate-created
     config = Column(JSON, nullable=True)  # Editable configuration for forked agents
 
     icon = Column(String, default="🤖")  # emoji or phosphor icon name
@@ -326,9 +328,9 @@ class UserPurchasedAgent(Base):
     """Tracks which agents users have purchased/added to their library."""
     __tablename__ = "user_purchased_agents"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=False)
     purchase_date = Column(DateTime(timezone=True), server_default=func.now())
     purchase_type = Column(String, nullable=False)  # free, purchased, subscription
     stripe_payment_intent = Column(String, nullable=True)
@@ -346,10 +348,10 @@ class ProjectAgent(Base):
     """Tracks which agents are active on which projects."""
     __tablename__ = "project_agents"
 
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-    agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # For validation
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)  # For validation
     enabled = Column(Boolean, default=True)
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -362,9 +364,9 @@ class AgentReview(Base):
     """User reviews for marketplace agents."""
     __tablename__ = "agent_reviews"
 
-    id = Column(Integer, primary_key=True, index=True)
-    agent_id = Column(Integer, ForeignKey("marketplace_agents.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     rating = Column(Integer, nullable=False)  # 1-5
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -378,7 +380,7 @@ class MarketplaceBase(Base):
     """Marketplace bases (project templates) available for purchase."""
     __tablename__ = "marketplace_bases"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
     description = Column(Text, nullable=False)
@@ -423,9 +425,9 @@ class UserPurchasedBase(Base):
     """Tracks which bases users have purchased/acquired."""
     __tablename__ = "user_purchased_bases"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    base_id = Column(Integer, ForeignKey("marketplace_bases.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    base_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_bases.id"), nullable=False)
     purchase_date = Column(DateTime(timezone=True), server_default=func.now())
     purchase_type = Column(String, nullable=False)  # free, purchased, subscription
     stripe_payment_intent = Column(String, nullable=True)
@@ -440,9 +442,9 @@ class BaseReview(Base):
     """User reviews for marketplace bases."""
     __tablename__ = "base_reviews"
 
-    id = Column(Integer, primary_key=True, index=True)
-    base_id = Column(Integer, ForeignKey("marketplace_bases.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    base_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_bases.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     rating = Column(Integer, nullable=False)  # 1-5
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -456,8 +458,8 @@ class UserAPIKey(Base):
     """Stores user API keys and OAuth tokens for various providers."""
     __tablename__ = "user_api_keys"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     provider = Column(String, nullable=False)  # openrouter, anthropic, openai, google, github, etc.
     auth_type = Column(String, nullable=False, default="api_key")  # api_key, oauth_token, bearer_token, personal_access_token
     key_name = Column(String, nullable=True)  # Optional name for the key
@@ -477,8 +479,8 @@ class UserCustomModel(Base):
     """Stores user-added custom OpenRouter models."""
     __tablename__ = "user_custom_models"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     model_id = Column(String, nullable=False)  # e.g., "openrouter/model-name"
     model_name = Column(String, nullable=False)  # Display name
     provider = Column(String, nullable=False, default="openrouter")

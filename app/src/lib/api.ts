@@ -142,7 +142,7 @@ export const projectsApi = {
     sourceType?: 'template' | 'github' | 'base',
     githubRepoUrl?: string,
     githubBranch?: string,
-    baseId?: number
+    baseId?: string
   ) => {
     const body: any = {
       name,
@@ -195,14 +195,14 @@ export const projectsApi = {
     const response = await api.patch(`/api/projects/${slug}/settings`, { settings });
     return response.data;
   },
-  forkProject: async (id: number) => {
+  forkProject: async (id: string) => {
     const response = await api.post(`/api/projects/${id}/fork`);
     return response.data;
   },
 };
 
 export const chatApi = {
-  create: async (projectId?: number) => {
+  create: async (projectId?: string) => {
     const response = await api.post('/api/chat/', { project_id: projectId });
     return response.data;
   },
@@ -210,7 +210,7 @@ export const chatApi = {
     const response = await api.get('/api/chat/');
     return response.data;
   },
-  getProjectMessages: async (projectId: number) => {
+  getProjectMessages: async (projectId: string) => {
     const response = await api.get(`/api/chat/${projectId}/messages`);
     return response.data;
   },
@@ -234,13 +234,13 @@ export const marketplaceApi = {
   },
 
   // Get agents that are currently added to a specific project
-  getProjectAgents: async (projectId: number): Promise<Agent[]> => {
+  getProjectAgents: async (projectId: string): Promise<Agent[]> => {
     const response = await api.get(`/api/marketplace/projects/${projectId}/agents`);
     return response.data.agents || [];
   },
 
   // Purchase/add agent to account
-  purchaseAgent: async (agentId: number) => {
+  purchaseAgent: async (agentId: string) => {
     const response = await api.post(`/api/marketplace/agents/${agentId}/purchase`);
     return response.data;
   },
@@ -252,7 +252,7 @@ export const marketplaceApi = {
   },
 
   // Fork an open source agent
-  forkAgent: async (agentId: number, customizations?: {
+  forkAgent: async (agentId: string, customizations?: {
     name?: string;
     description?: string;
     system_prompt?: string;
@@ -276,7 +276,7 @@ export const marketplaceApi = {
   },
 
   // Update a custom/forked agent
-  updateAgent: async (agentId: number, data: {
+  updateAgent: async (agentId: string, data: {
     name?: string;
     description?: string;
     system_prompt?: string;
@@ -287,13 +287,13 @@ export const marketplaceApi = {
   },
 
   // Toggle agent enabled/disabled status
-  toggleAgent: async (agentId: number, enabled: boolean) => {
+  toggleAgent: async (agentId: string, enabled: boolean) => {
     const response = await api.post(`/api/marketplace/agents/${agentId}/toggle?enabled=${enabled}`);
     return response.data;
   },
 
   // Remove agent from library
-  removeFromLibrary: async (agentId: number) => {
+  removeFromLibrary: async (agentId: string) => {
     const response = await api.delete(`/api/marketplace/agents/${agentId}/library`);
     return response.data;
   },
@@ -305,7 +305,7 @@ export const marketplaceApi = {
   },
 
   // Select a model for an agent in user's library
-  selectAgentModel: async (agentId: number, model: string) => {
+  selectAgentModel: async (agentId: string, model: string) => {
     const response = await api.post(`/api/marketplace/agents/${agentId}/select-model`, { model });
     return response.data;
   },
@@ -381,7 +381,7 @@ export const agentsApi = {
     const response = await api.get('/api/agents/');
     return response.data;
   },
-  get: async (id: number): Promise<Agent> => {
+  get: async (id: string): Promise<Agent> => {
     const response = await api.get(`/api/agents/${id}`);
     return response.data;
   },
@@ -389,11 +389,11 @@ export const agentsApi = {
     const response = await api.post('/api/agents/', agent);
     return response.data;
   },
-  update: async (id: number, agent: Partial<AgentCreate>): Promise<Agent> => {
+  update: async (id: string, agent: Partial<AgentCreate>): Promise<Agent> => {
     const response = await api.put(`/api/agents/${id}`, agent);
     return response.data;
   },
-  delete: async (id: number) => {
+  delete: async (id: string) => {
     const response = await api.delete(`/api/agents/${id}`);
     return response.data;
   },

@@ -10,6 +10,7 @@ import logging
 from typing import List, Dict, Any, Optional, AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from uuid import UUID
 
 from .base import AbstractAgent
 from .models import ModelAdapter
@@ -18,6 +19,30 @@ from .tools.registry import ToolRegistry
 from .prompts import get_user_message_wrapper
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_uuids_to_strings(obj: Any) -> Any:
+    """
+    Recursively convert UUID objects to strings in nested data structures.
+
+    This ensures that data can be JSON-serialized for database storage.
+
+    Args:
+        obj: Any object (dict, list, UUID, or primitive)
+
+    Returns:
+        The same structure with UUIDs converted to strings
+    """
+    if isinstance(obj, UUID):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {k: _convert_uuids_to_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_uuids_to_strings(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_convert_uuids_to_strings(item) for item in obj)
+    else:
+        return obj
 
 
 @dataclass
@@ -43,11 +68,11 @@ class AgentStep:
             "tool_calls": [
                 {
                     "name": tc.name,
-                    "parameters": tc.parameters
+                    "parameters": _convert_uuids_to_strings(tc.parameters)
                 }
                 for tc in self.tool_calls
             ],
-            "tool_results": self.tool_results,
+            "tool_results": _convert_uuids_to_strings(self.tool_results),
             "response_text": self.response_text,
             "timestamp": self.timestamp.isoformat(),
             "is_complete": self.is_complete

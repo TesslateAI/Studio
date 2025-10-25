@@ -5,7 +5,9 @@ System prompts that teach ANY language model how to use tools.
 """
 
 from typing import Optional
+from uuid import UUID
 from .tools.registry import ToolRegistry
+from ..utils.resource_naming import get_project_path, get_container_name
 
 
 def get_base_methodology_prompt() -> str:
@@ -56,7 +58,7 @@ You must break down every task into a series of steps, following this iterative 
 5. Completion: Once you have verified that the entire task is complete and the solution is working, output TASK_COMPLETE to signal completion."""
 
 
-async def get_environment_context(user_id: int, project_id: str) -> str:
+async def get_environment_context(user_id: UUID, project_id: str) -> str:
     """
     Get environment context for the agent.
 
@@ -92,13 +94,13 @@ async def get_environment_context(user_id: int, project_id: str) -> str:
 
     # Container/Pod info
     if settings.deployment_mode == "kubernetes":
-        pod_name = f"dev-user{user_id}-project{project_id}"
+        pod_name = get_container_name(user_id, project_id, mode="kubernetes")
         namespace = "tesslate-user-environments"
         context_parts.append(f"Pod: {pod_name}")
         context_parts.append(f"Namespace: {namespace}")
         context_parts.append(f"Current Working Directory: /app")
     else:
-        container_name = f"tesslate-user{user_id}-project{project_id}"
+        container_name = get_container_name(user_id, project_id, mode="docker")
         context_parts.append(f"Container: {container_name}")
         context_parts.append(f"Current Working Directory: /app")
 
@@ -108,7 +110,7 @@ async def get_environment_context(user_id: int, project_id: str) -> str:
     return "\n".join(context_parts)
 
 
-async def get_file_listing_context(user_id: int, project_id: str, max_lines: int = 50) -> Optional[str]:
+async def get_file_listing_context(user_id: UUID, project_id: str, max_lines: int = 50) -> Optional[str]:
     """
     Get file listing context for the project directory.
 
@@ -128,7 +130,7 @@ async def get_file_listing_context(user_id: int, project_id: str, max_lines: int
     try:
         if settings.deployment_mode == "kubernetes":
             # Kubernetes: Execute ls in pod
-            pod_name = f"dev-user{user_id}-project{project_id}"
+            pod_name = get_container_name(user_id, project_id, mode="kubernetes")
             namespace = "tesslate-user-environments"
 
             cmd = f"kubectl exec -n {namespace} {pod_name} -- ls -lah /app"
@@ -146,7 +148,7 @@ async def get_file_listing_context(user_id: int, project_id: str, max_lines: int
         else:
             # Docker: List local directory
             import os
-            project_dir = f"users/{user_id}/{project_id}"
+            project_dir = get_project_path(user_id, project_id)
 
             if os.path.exists(project_dir):
                 cmd = f"ls -lah {project_dir}"

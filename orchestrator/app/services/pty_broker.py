@@ -1,3 +1,4 @@
+from uuid import UUID
 """
 PTY Broker Service
 
@@ -21,8 +22,8 @@ class PTYSession:
     def __init__(
         self,
         session_id: str,
-        user_id: int,
-        project_id: int,
+        user_id: UUID,
+        project_id: str,
         container_name: str,
         command: str = "/bin/bash",
         cwd: str = "/app",
@@ -90,8 +91,8 @@ class BasePTYBroker(ABC):
     @abstractmethod
     async def create_session(
         self,
-        user_id: int,
-        project_id: int,
+        user_id: UUID,
+        project_id: str,
         container_name: str,
         command: str = "/bin/sh",
         rows: int = 24,
@@ -121,8 +122,8 @@ class DockerPTYBroker(BasePTYBroker):
 
     async def create_session(
         self,
-        user_id: int,
-        project_id: int,
+        user_id: UUID,
+        project_id: str,
         container_name: str,
         command: str = "/bin/sh",
         rows: int = 24,
@@ -277,8 +278,8 @@ class KubernetesPTYBroker(BasePTYBroker):
 
     async def create_session(
         self,
-        user_id: int,
-        project_id: int,
+        user_id: UUID,
+        project_id: str,
         pod_name: str,
         command: str = "/bin/sh",
         rows: int = 24,

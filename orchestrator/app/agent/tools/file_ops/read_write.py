@@ -8,10 +8,12 @@ Deployment-aware: supports both Docker (local filesystem) and Kubernetes (pod AP
 import logging
 import os
 from typing import Dict, Any
+from uuid import UUID
 
 from ..registry import Tool, ToolCategory
 from ....config import get_settings
 from ..output_formatter import success_output, error_output, format_file_size, pluralize
+from ....utils.resource_naming import get_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
 
     Args:
         params: {file_path: str}
-        context: {user_id: int, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, db: AsyncSession}
 
     Returns:
         Dict with file content or error
@@ -68,7 +70,7 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
         )
     else:
         # Docker mode: Read from local filesystem
-        project_dir = f"users/{user_id}/{project_id}"
+        project_dir = get_project_path(user_id, project_id)
         full_path = os.path.join(project_dir, file_path)
 
         if not os.path.exists(full_path):
@@ -111,7 +113,7 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     Args:
         params: {file_path: str, content: str}
-        context: {user_id: int, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, db: AsyncSession}
 
     Returns:
         Dict with success status
@@ -166,7 +168,7 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         )
     else:
         # Docker mode: Write to local filesystem
-        project_dir = f"users/{user_id}/{project_id}"
+        project_dir = get_project_path(user_id, project_id)
         full_path = os.path.join(project_dir, file_path)
 
         try:

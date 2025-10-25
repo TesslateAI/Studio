@@ -19,9 +19,9 @@ export interface AgentStep {
 }
 
 export interface AgentChatRequest {
-  project_id: number;
+  project_id: string;
   message: string;
-  agent_id?: number;  // ID of the agent to use
+  agent_id?: string;  // ID of the agent to use
   max_iterations?: number;
   minimal_prompts?: boolean;
 }
@@ -44,8 +44,8 @@ export interface AgentMessageData {
 }
 
 export interface DBMessage {
-  id: number;
-  chat_id: number;
+  id: string;
+  chat_id: string;
   role: 'user' | 'assistant';
   content: string;
   message_metadata?: {
@@ -60,7 +60,7 @@ export interface DBMessage {
 }
 
 export interface Agent {
-  id: number;
+  id: string;
   name: string;
   slug: string;
   description?: string;

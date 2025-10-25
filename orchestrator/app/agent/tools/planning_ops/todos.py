@@ -8,6 +8,7 @@ Stores todos in-memory per conversation session.
 import logging
 from typing import Dict, Any, List
 from datetime import datetime
+from uuid import UUID
 
 from ..registry import Tool, ToolCategory
 from ..output_formatter import success_output, error_output, pluralize
@@ -34,7 +35,7 @@ async def todo_read_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
 
     Args:
         params: {} (no parameters)
-        context: {user_id: int, project_id: str}
+        context: {user_id: UUID, project_id: str}
 
     Returns:
         Dict with list of todos
@@ -81,7 +82,7 @@ async def todo_write_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 }
             ]
         }
-        context: {user_id: int, project_id: str}
+        context: {user_id: UUID, project_id: str}
 
     Returns:
         Dict with success status

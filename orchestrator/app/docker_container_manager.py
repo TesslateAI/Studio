@@ -5,11 +5,13 @@ import json
 import shutil
 import time
 from typing import Dict, Optional, List, Any
+from uuid import UUID
 import socket
 from contextlib import closing
 import aiohttp
 from .config import get_settings
 from .base_container_manager import BaseContainerManager
+from .utils.resource_naming import get_container_name
 
 
 class DockerContainerManager(BaseContainerManager):
@@ -334,11 +336,11 @@ class DockerContainerManager(BaseContainerManager):
             orchestrator_dir = os.path.dirname(current_dir)
             return os.path.join(orchestrator_dir, 'Dockerfile.devserver')
     
-    def _get_project_key(self, user_id: int, project_id: str) -> str:
+    def _get_project_key(self, user_id: UUID, project_id: str) -> str:
         """Generate a unique project key for container management."""
         return f"user-{user_id}-project-{project_id}"
     
-    def _get_container_name(self, user_id: int, project_id: str, project_slug: str = None) -> str:
+    def _get_container_name(self, user_id: UUID, project_id: str, project_slug: str = None) -> str:
         """
         Generate a descriptive container name for Docker Desktop visibility.
 
@@ -347,7 +349,7 @@ class DockerContainerManager(BaseContainerManager):
         """
         if project_slug:
             return f"tesslate-{project_slug}"
-        return f"tesslate-user{user_id}-project{project_id}"
+        return get_container_name(user_id, project_id, mode="docker")
     
     def _generate_hostname(self, project_slug: str) -> str:
         """
@@ -371,7 +373,7 @@ class DockerContainerManager(BaseContainerManager):
         protocol = os.environ.get('APP_PROTOCOL', 'http')
         return f"{protocol}://{hostname}/"
     
-    def _get_traefik_labels(self, user_id: int, project_id: str, hostname: str, port: int = 5173, project_slug: str = None) -> List[str]:
+    def _get_traefik_labels(self, user_id: UUID, project_id: str, hostname: str, port: int = 5173, project_slug: str = None) -> List[str]:
         """
         Generate Traefik labels for subdomain-based routing.
 
@@ -382,7 +384,7 @@ class DockerContainerManager(BaseContainerManager):
         if project_slug:
             service_name = f"tesslate-{project_slug}"
         else:
-            service_name = f"tesslate-user{user_id}-project{project_id}"
+            service_name = get_container_name(user_id, project_id, mode="docker")
         # hostname is the full subdomain like "my-app-k3x8n2.studio.localhost"
 
         labels = [
@@ -628,7 +630,7 @@ class DockerContainerManager(BaseContainerManager):
 
         return True  # Return True to allow container to continue - Traefik will handle routing when ready
     
-    async def start_container(self, project_path: str, project_id: str, user_id: int, project_slug: str = None, skip_validation: bool = False,
+    async def start_container(self, project_path: str, project_id: str, user_id: UUID, project_slug: str = None, skip_validation: bool = False,
                               environment_vars: Dict[str, str] = None, secrets: Dict[str, str] = None,
                               port: int = 5173, start_command: str = None) -> str:
         """
@@ -647,7 +649,7 @@ class DockerContainerManager(BaseContainerManager):
         """
         # For backwards compatibility, generate slug from IDs if not provided
         if not project_slug:
-            project_slug = f"user{user_id}-project{project_id}"
+            project_slug = f"{user_id}-{project_id}"
 
         # Generate unique identifiers for multi-user system
         project_key = self._get_project_key(user_id, project_id)
@@ -961,7 +963,7 @@ class DockerContainerManager(BaseContainerManager):
             print("[ERROR] npm install timed out")
             raise RuntimeError("npm install timed out")
     
-    async def stop_container(self, project_id: str, user_id: int = None) -> None:
+    async def stop_container(self, project_id: str, user_id: UUID = None) -> None:
         """Stop and remove a development container with multi-user support."""
         container_info = None
         project_key = None
@@ -1046,13 +1048,13 @@ class DockerContainerManager(BaseContainerManager):
         if hostname:
             print(f"[CLEANUP] Stopped container with hostname: {hostname}")
     
-    async def restart_container(self, project_path: str, project_id: str, user_id: int) -> str:
+    async def restart_container(self, project_path: str, project_id: str, user_id: UUID) -> str:
         """Restart a development container with multi-user support."""
         print(f"[RESTART] Restarting development container for user {user_id}, project {project_id}")
         await self.stop_container(project_id, user_id)
         return await self.start_container(project_path, project_id, user_id)
     
-    def get_container_url(self, project_id: str, user_id: int = None) -> Optional[str]:
+    def get_container_url(self, project_id: str, user_id: UUID = None) -> Optional[str]:
         """Get the URL for a project's development container with multi-user support."""
         container_info = None
         
@@ -1072,7 +1074,7 @@ class DockerContainerManager(BaseContainerManager):
             return self._get_container_access_url(container_info['hostname'])
         return None
     
-    async def get_container_status(self, project_id: str, user_id: int = None, project_slug: str = None) -> Dict[str, Any]:
+    async def get_container_status(self, project_id: str, user_id: UUID = None, project_slug: str = None) -> Dict[str, Any]:
         """Get detailed status of a development container with multi-user support."""
         container_info = None
 
@@ -1092,7 +1094,7 @@ class DockerContainerManager(BaseContainerManager):
         if not container_info and user_id is not None:
             # For backwards compatibility, generate slug from IDs if not provided
             if not project_slug:
-                project_slug = f"user{user_id}-project{project_id}"
+                project_slug = f"{user_id}-{project_id}"
 
             container_name = self._get_container_name(user_id, project_id, project_slug)
             hostname = self._generate_hostname(project_slug)
@@ -1234,7 +1236,7 @@ class DockerContainerManager(BaseContainerManager):
 
     async def execute_command_in_container(
         self,
-        user_id: int,
+        user_id: UUID,
         project_id: str,
         command: List[str],
         timeout: int = 120,
@@ -1295,7 +1297,7 @@ class DockerContainerManager(BaseContainerManager):
         except Exception as e:
             raise RuntimeError(f"Failed to execute command in container {container_name}: {str(e)}")
 
-    def track_activity(self, user_id: int, project_id: str) -> None:
+    def track_activity(self, user_id: UUID, project_id: str) -> None:
         """Record activity for a project container."""
         project_key = self._get_project_key(user_id, project_id)
         self.activity_tracker[project_key] = time.time()

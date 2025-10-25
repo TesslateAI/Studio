@@ -210,13 +210,15 @@ async def verify_dev_environment_access(
     ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     user_agent = request.headers.get("User-Agent", "")
 
-    # Extract project_id from hostname if available (format: userX-projectY.domain.com)
+    # Extract project_id from hostname if available
+    # Hostname format: {user_uuid}-{project_uuid}.domain.com
     project_id = None
     try:
-        if "-project" in request_host:
-            project_id_str = request_host.split("-project")[1].split(".")[0]
-            project_id = int(project_id_str)
-    except (ValueError, IndexError):
+        from .utils.resource_naming import parse_hostname
+        _, project_id_str = parse_hostname(request_host)
+        from uuid import UUID
+        project_id = UUID(project_id_str)
+    except (ValueError, IndexError, Exception):
         pass  # Could not extract project ID, log without it
 
     success = False
@@ -248,7 +250,8 @@ async def verify_dev_environment_access(
                 detail="Invalid request - missing user verification data"
             )
 
-        expected_user_id = int(expected_user_id_str)
+        from uuid import UUID
+        expected_user_id = UUID(expected_user_id_str)
 
         # Verify user matches expected user
         if current_user.id != expected_user_id:
@@ -317,9 +320,10 @@ async def verify_dev_environment_access(
 
         # Log error to database
         try:
+            from uuid import UUID
             access_log = PodAccessLog(
                 user_id=current_user.id,
-                expected_user_id=int(expected_user_id_str) if expected_user_id_str else 0,
+                expected_user_id=UUID(expected_user_id_str) if expected_user_id_str else None,
                 project_id=project_id,
                 success=False,
                 request_uri=original_uri,

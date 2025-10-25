@@ -1,3 +1,4 @@
+from uuid import UUID
 """
 Git Manager for executing Git operations in user development environments.
 Works with both Docker and Kubernetes deployments.
@@ -11,6 +12,7 @@ import logging
 
 from ..config import get_settings
 from ..dev_server_manager import get_container_manager
+from ..utils.resource_naming import get_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 class GitManager:
     """Manages Git operations in user development environments."""
 
-    def __init__(self, user_id: int, project_id: str):
+    def __init__(self, user_id: UUID, project_id: str):
         """
         Initialize Git Manager for a specific user project.
 
@@ -167,7 +169,7 @@ class GitManager:
                 import os
 
                 # Build project path on host filesystem
-                project_path = os.path.abspath(f"users/{self.user_id}/{self.project_id}")
+                project_path = os.path.abspath(get_project_path(self.user_id, self.project_id))
                 os.makedirs(project_path, exist_ok=True)
 
                 # Build git clone command

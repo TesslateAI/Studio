@@ -1,4 +1,5 @@
 from typing import List
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -8,6 +9,7 @@ from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as Pr
 from ..auth import get_current_active_user
 from ..config import get_settings
 from ..utils.slug_generator import generate_project_slug
+from ..utils.resource_naming import get_project_path
 import os
 import shutil
 import asyncio
@@ -21,7 +23,7 @@ router = APIRouter()
 async def get_project_by_slug(
     db: AsyncSession,
     project_slug: str,
-    user_id: int
+    user_id: UUID
 ) -> Project:
     """
     Get a project by its slug or numeric ID and verify ownership.
@@ -38,15 +40,16 @@ async def get_project_by_slug(
         HTTPException 404 if project not found
         HTTPException 403 if user doesn't own the project
     """
-    # Try to parse as numeric ID first
+    # Try to parse as UUID first (for direct ID access)
     try:
-        project_id = int(project_slug)
+        from uuid import UUID
+        project_id = UUID(project_slug)
         result = await db.execute(
             select(Project).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
     except ValueError:
-        # Not a numeric ID, treat as slug
+        # Not a UUID, treat as slug (recommended for URLs)
         result = await db.execute(
             select(Project).where(Project.slug == project_slug)
         )
@@ -125,7 +128,7 @@ async def create_project(
         logger.info(f"[CREATE] Project {db_project.slug} (ID: {db_project.id}) created in database")
 
         # Start container first (so we have a container to clone into)
-        project_path = os.path.abspath(f"users/{current_user.id}/{db_project.id}")
+        project_path = os.path.abspath(get_project_path(current_user.id, db_project.id))
 
         # In Docker mode, create the directory
         settings = get_settings()
@@ -760,7 +763,7 @@ async def start_dev_container(
     logger.info(f"[START-CONTAINER] Request to start dev container for project {project_slug} (ID: {project_id}), user {current_user.id}")
 
     # Start dev container (path is for metadata only in K8s mode)
-    project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
+    project_path = os.path.abspath(get_project_path(current_user.id, project_id))
 
     try:
         from ..dev_server_manager import get_container_manager
@@ -784,7 +787,7 @@ async def restart_dev_container(
     project_id = project.id  # For internal operations
 
     # Restart dev container
-    project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
+    project_path = os.path.abspath(get_project_path(current_user.id, project_id))
     try:
         from ..dev_server_manager import get_container_manager
         container_manager = get_container_manager()
@@ -895,7 +898,7 @@ async def get_dev_server_url(
         # Container doesn't exist - create it
         logger.info(f"[DEV-URL] Container does not exist, creating new environment...")
         # Use absolute path to ensure files are created in the correct location
-        project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
+        project_path = os.path.abspath(get_project_path(current_user.id, project_id))
 
         # In Docker mode, create project directory from database files if it doesn't exist
         if settings.deployment_mode == "docker" and not os.path.exists(project_path):
@@ -977,7 +980,7 @@ async def get_dev_server_url(
                 "message": str(e),
                 "user_id": current_user.id,
                 "project_id": project_id,
-                "hint": "Check Kubernetes pod logs: kubectl logs -l app=dev-user{user_id}-project{project_id} -n tesslate"
+                "hint": f"Check Kubernetes pod logs: kubectl logs -l app=dev-environment,user-id={current_user.id},project-id={project_id} -n tesslate-user-environments"
             }
         )
 
@@ -1111,7 +1114,7 @@ async def save_project_file(
         else:
             # Docker mode: Write to filesystem (volume-mounted to container)
             try:
-                project_path = os.path.abspath(f"users/{current_user.id}/{project_id}")
+                project_path = os.path.abspath(get_project_path(current_user.id, project_id))
                 os.makedirs(project_path, exist_ok=True)
 
                 full_file_path = os.path.join(project_path, file_path)
@@ -1197,11 +1200,11 @@ async def get_container_info(
     Returns:
         - deployment_mode: "kubernetes" or "docker"
         - For Kubernetes:
-          - pod_name: Name of the pod (e.g., "dev-user1-project5")
+          - pod_name: Name of the pod (e.g., "dev-{user_uuid}-{project_uuid}")
           - namespace: Kubernetes namespace (e.g., "tesslate-user-environments")
           - command_prefix: kubectl exec command prefix
         - For Docker:
-          - container_name: Name of the container (e.g., "tesslate-dev-user1-project5")
+          - container_name: Name of the container (e.g., "tesslate-dev-{user_uuid}-{project_uuid}")
           - command_prefix: docker exec command prefix
     """
     # Get project and verify ownership
@@ -1211,7 +1214,8 @@ async def get_container_info(
     settings = get_settings()
 
     if settings.deployment_mode == "kubernetes":
-        pod_name = f"dev-user{current_user.id}-project{project_id}"
+        from ..utils.resource_naming import get_container_name
+        pod_name = get_container_name(current_user.id, project_id, mode="kubernetes")
         namespace = "tesslate-user-environments"
         return {
             "deployment_mode": "kubernetes",
@@ -1221,7 +1225,8 @@ async def get_container_info(
             "git_command_example": f"kubectl exec -n {namespace} {pod_name} -- git status"
         }
     else:
-        container_name = f"tesslate-dev-user{current_user.id}-project{project_id}"
+        from ..utils.resource_naming import get_container_name
+        container_name = get_container_name(current_user.id, project_id, mode="docker")
         return {
             "deployment_mode": "docker",
             "container_name": container_name,
@@ -1291,7 +1296,7 @@ async def delete_project(
         # 5. Delete filesystem directory (Docker mode only - K8s uses PVCs)
         settings = get_settings()
         if settings.deployment_mode == "docker":
-            project_dir = os.path.abspath(f"users/{current_user.id}/{project_id}")
+            project_dir = os.path.abspath(get_project_path(current_user.id, project_id))
             if os.path.exists(project_dir):
                 try:
                     shutil.rmtree(project_dir)
@@ -1500,7 +1505,7 @@ async def update_project_settings(
 
 @router.post("/{project_id}/fork", response_model=ProjectSchema)
 async def fork_project(
-    project_id: int,
+    project_id: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):

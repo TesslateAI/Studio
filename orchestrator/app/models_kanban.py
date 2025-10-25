@@ -7,6 +7,8 @@ customizable columns, tasks with rich metadata, and backlog management.
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 from .database import Base
 
 
@@ -16,8 +18,8 @@ class KanbanBoard(Base):
     """
     __tablename__ = "kanban_boards"
 
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
     name = Column(String, nullable=False, default="Project Board")
     description = Column(Text, nullable=True)
 
@@ -40,8 +42,8 @@ class KanbanColumn(Base):
     """
     __tablename__ = "kanban_columns"
 
-    id = Column(Integer, primary_key=True, index=True)
-    board_id = Column(Integer, ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    board_id = Column(UUID(as_uuid=True), ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     position = Column(Integer, nullable=False)  # Order of columns (0, 1, 2, ...)
@@ -70,9 +72,9 @@ class KanbanTask(Base):
     """
     __tablename__ = "kanban_tasks"
 
-    id = Column(Integer, primary_key=True, index=True)
-    board_id = Column(Integer, ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False)
-    column_id = Column(Integer, ForeignKey("kanban_columns.id", ondelete="CASCADE"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    board_id = Column(UUID(as_uuid=True), ForeignKey("kanban_boards.id", ondelete="CASCADE"), nullable=False)
+    column_id = Column(UUID(as_uuid=True), ForeignKey("kanban_columns.id", ondelete="CASCADE"), nullable=False)
 
     # Task content
     title = Column(String, nullable=False)
@@ -86,8 +88,8 @@ class KanbanTask(Base):
     tags = Column(JSON, nullable=True)  # ["frontend", "api", "urgent"]
 
     # Task details
-    assignee_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Who's working on it
-    reporter_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Who created it
+    assignee_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # Who's working on it
+    reporter_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # Who created it
     estimate_hours = Column(Integer, nullable=True)  # Time estimate
     spent_hours = Column(Integer, nullable=True)  # Time tracked
 
@@ -117,9 +119,9 @@ class KanbanTaskComment(Base):
     """
     __tablename__ = "kanban_task_comments"
 
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("kanban_tasks.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("kanban_tasks.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
     content = Column(Text, nullable=False)  # Markdown supported
 
@@ -138,8 +140,8 @@ class ProjectNote(Base):
     """
     __tablename__ = "project_notes"
 
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
 
     content = Column(Text, nullable=True)  # TipTap JSON or HTML content
     content_format = Column(String, default="html")  # html, json, markdown

@@ -6,6 +6,7 @@ REST API endpoints for agent programmatic shell access.
 
 import logging
 from typing import Optional
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -23,7 +24,7 @@ router = APIRouter()
 # Request/Response Models
 
 class CreateSessionRequest(BaseModel):
-    project_id: int
+    project_id: UUID
     command: str = "/bin/bash"
     cwd: str = "/app"
 
@@ -51,7 +52,7 @@ class OutputResponse(BaseModel):
 
 class SessionInfo(BaseModel):
     session_id: str
-    project_id: int
+    project_id: UUID
     command: str
     working_dir: str
     status: str
@@ -166,7 +167,7 @@ async def read_session_output(
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_shell_sessions(
-    project_id: Optional[int] = None,
+    project_id: Optional[UUID] = None,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):

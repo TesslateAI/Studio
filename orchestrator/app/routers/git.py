@@ -1,6 +1,7 @@
 """
 Git operations router for project version control.
 """
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -38,7 +39,7 @@ router = APIRouter(prefix="/projects/{project_id}/git", tags=["git"])
 
 
 async def verify_project_access(
-    project_id: int,
+    project_id: UUID,
     current_user: User,
     db: AsyncSession
 ) -> Project:
@@ -62,7 +63,7 @@ async def verify_project_access(
 
 @router.post("/init")
 async def initialize_repository(
-    project_id: int,
+    project_id: str,
     request: GitInitRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -118,7 +119,7 @@ async def initialize_repository(
 
 @router.post("/clone")
 async def clone_repository(
-    project_id: int,
+    project_id: str,
     request: GitCloneRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -215,7 +216,7 @@ async def clone_repository(
 
 @router.get("/status", response_model=GitStatusResponse)
 async def get_git_status(
-    project_id: int,
+    project_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -256,7 +257,7 @@ async def get_git_status(
 
 @router.post("/commit", response_model=GitCommitResponse)
 async def create_commit(
-    project_id: int,
+    project_id: str,
     request: GitCommitRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -300,7 +301,7 @@ async def create_commit(
 
 @router.post("/push", response_model=GitPushResponse)
 async def push_commits(
-    project_id: int,
+    project_id: str,
     request: GitPushRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -350,7 +351,7 @@ async def push_commits(
 
 @router.post("/pull", response_model=GitPullResponse)
 async def pull_changes(
-    project_id: int,
+    project_id: str,
     request: GitPullRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -396,7 +397,7 @@ async def pull_changes(
 
 @router.get("/commits", response_model=GitHistoryResponse)
 async def get_commit_history(
-    project_id: int,
+    project_id: str,
     limit: int = 50,
     branch: Optional[str] = None,
     current_user: User = Depends(get_current_user),
@@ -429,7 +430,7 @@ async def get_commit_history(
 
 @router.get("/branches", response_model=GitBranchesResponse)
 async def list_branches(
-    project_id: int,
+    project_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -463,7 +464,7 @@ async def list_branches(
 
 @router.post("/branches")
 async def create_branch(
-    project_id: int,
+    project_id: str,
     request: GitBranchRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -500,7 +501,7 @@ async def create_branch(
 
 @router.put("/branches/switch")
 async def switch_branch(
-    project_id: int,
+    project_id: str,
     request: GitSwitchBranchRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -531,7 +532,7 @@ async def switch_branch(
 
 @router.get("/info", response_model=Optional[GitRepositoryResponse])
 async def get_repository_info(
-    project_id: int,
+    project_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -565,7 +566,7 @@ async def get_repository_info(
 
 @router.delete("/disconnect")
 async def disconnect_repository(
-    project_id: int,
+    project_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):

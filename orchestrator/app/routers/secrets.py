@@ -4,6 +4,7 @@ Handles storage and management of user API keys for various providers.
 """
 
 from typing import List, Optional
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -142,7 +143,7 @@ async def add_api_key(
 
 @router.put("/api-keys/{key_id}")
 async def update_api_key(
-    key_id: int,
+    key_id: str,
     api_key: Optional[str] = Body(None, description="New API key value"),
     key_name: Optional[str] = Body(None, description="New name for this key"),
     provider_metadata: Optional[dict] = Body(None, description="Updated metadata"),
@@ -186,7 +187,7 @@ async def update_api_key(
 
 @router.delete("/api-keys/{key_id}")
 async def delete_api_key(
-    key_id: int,
+    key_id: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -217,7 +218,7 @@ async def delete_api_key(
 
 @router.get("/api-keys/{key_id}")
 async def get_api_key(
-    key_id: int,
+    key_id: str,
     reveal: bool = False,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)

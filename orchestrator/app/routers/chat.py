@@ -1,4 +1,5 @@
 from typing import List, Optional
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from ..schemas import (
 )
 from ..auth import get_current_active_user
 from ..config import get_settings
+from ..utils.resource_naming import get_project_path
 from openai import AsyncOpenAI
 import json
 import os
@@ -21,13 +23,14 @@ import logging
 # Agent imports - new factory-based system
 from ..agent import create_agent_from_db_model
 from ..agent.models import create_model_adapter
+from ..agent.iterative_agent import _convert_uuids_to_strings
 
 settings = get_settings()
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def _build_git_context(project: Project, user_id: int, db: AsyncSession) -> Optional[str]:
+async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) -> Optional[str]:
     """
     Build Git context for agent if project has a Git repository connected.
 
@@ -93,7 +96,7 @@ async def _build_git_context(project: Project, user_id: int, db: AsyncSession) -
         return None
 
 
-async def _build_tesslate_context(project: Project, user_id: int, db: AsyncSession) -> Optional[str]:
+async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSession) -> Optional[str]:
     """
     Build TESSLATE.md context for agent.
 
@@ -146,7 +149,7 @@ async def _build_tesslate_context(project: Project, user_id: int, db: AsyncSessi
 
         else:
             # Docker mode: Read from local filesystem
-            project_dir = f"users/{user_id}/{project.id}"
+            project_dir = get_project_path(user_id, project.id)
             tesslate_path = os.path.join(project_dir, "TESSLATE.md")
 
             if os.path.exists(tesslate_path):
@@ -229,7 +232,7 @@ async def create_chat(
 
 @router.get("/{project_id}/messages", response_model=List[MessageSchema])
 async def get_project_messages(
-    project_id: int,
+    project_id: str,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -364,13 +367,21 @@ async def agent_chat(
             )
 
         # 2.5. Get user's selected model override (if any)
-        user_purchase_result = await db.execute(
-            select(UserPurchasedAgent).where(
-                UserPurchasedAgent.user_id == current_user.id,
-                UserPurchasedAgent.agent_id == agent_model.id
+        try:
+            user_purchase_result = await db.execute(
+                select(UserPurchasedAgent).where(
+                    UserPurchasedAgent.user_id == current_user.id,
+                    UserPurchasedAgent.agent_id == agent_model.id
+                )
             )
-        )
-        user_purchase = user_purchase_result.scalar_one_or_none()
+            user_purchase = user_purchase_result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"[HTTP-AGENT] Error fetching user purchase: {e}", exc_info=True)
+            await db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error fetching user purchase: {str(e)}"
+            )
 
         # Use user's selected model if available, otherwise use agent's default model
         model_name = (user_purchase.selected_model if user_purchase and user_purchase.selected_model
@@ -379,19 +390,37 @@ async def agent_chat(
         logger.info(f"[HTTP-AGENT] Using model: {model_name}")
 
         # 3. Create model adapter for IterativeAgent
-        logger.info(f"[HTTP-AGENT] Creating model adapter")
-        model_adapter = await create_model_adapter(
-            model_name=model_name,
-            user_id=current_user.id,
-            db=db
-        )
+        logger.info(f"[HTTP-AGENT] Creating model adapter for user_id: {current_user.id}, model: {model_name}")
+        try:
+            model_adapter = await create_model_adapter(
+                model_name=model_name,
+                user_id=current_user.id,
+                db=db
+            )
+            logger.info(f"[HTTP-AGENT] Model adapter created successfully")
+        except Exception as e:
+            logger.error(f"[HTTP-AGENT] Error creating model adapter: {e}", exc_info=True)
+            await db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error creating model adapter: {str(e)}"
+            )
 
         # 4. Create agent via factory
         logger.info(f"[HTTP-AGENT] Creating agent via factory")
-        agent_instance = await create_agent_from_db_model(
-            agent_model=agent_model,
-            model_adapter=model_adapter
-        )
+        try:
+            agent_instance = await create_agent_from_db_model(
+                agent_model=agent_model,
+                model_adapter=model_adapter
+            )
+            logger.info(f"[HTTP-AGENT] Agent instance created successfully")
+        except Exception as e:
+            logger.error(f"[HTTP-AGENT] Error creating agent instance: {e}", exc_info=True)
+            await db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error creating agent instance: {str(e)}"
+            )
 
         # Set max_iterations for IterativeAgent
         if hasattr(agent_instance, 'max_iterations'):
@@ -399,7 +428,7 @@ async def agent_chat(
         if hasattr(agent_instance, 'minimal_prompts'):
             agent_instance.minimal_prompts = request.minimal_prompts
 
-        logger.info(f"[HTTP-AGENT] Agent created successfully")
+        logger.info(f"[HTTP-AGENT] Agent created successfully with max_iterations={request.max_iterations}")
 
         # Prepare context for tool execution
         context = {
@@ -549,14 +578,14 @@ async def agent_chat(
                     "tool_calls": [
                         {
                             "name": tc.name,
-                            "parameters": tc.parameters,
-                            "result": tc.result
+                            "parameters": _convert_uuids_to_strings(tc.parameters),
+                            "result": _convert_uuids_to_strings(tc.result)
                         }
                         for tc in step.tool_calls
                     ],
                     "response_text": step.response_text,
                     "is_complete": step.is_complete,
-                    "timestamp": step.timestamp
+                    "timestamp": step.timestamp.isoformat() if hasattr(step.timestamp, 'isoformat') else str(step.timestamp)
                 }
                 for step in steps_response
             ]
@@ -602,15 +631,15 @@ async def agent_chat(
 class ConnectionManager:
     def __init__(self):
         # Use (user_id, project_id) tuple as key to support multiple projects per user
-        self.active_connections: dict[tuple[int, int], WebSocket] = {}
+        self.active_connections: dict[tuple[UUID, UUID], WebSocket] = {}
 
-    def disconnect(self, user_id: int, project_id: int):
+    def disconnect(self, user_id: UUID, project_id: UUID):
         connection_key = (user_id, project_id)
         if connection_key in self.active_connections:
             del self.active_connections[connection_key]
             logger.info(f"WebSocket disconnected: user {user_id}, project {project_id}")
 
-    async def send_personal_message(self, message: str, user_id: int, project_id: int):
+    async def send_personal_message(self, message: str, user_id: UUID, project_id: UUID):
         connection_key = (user_id, project_id)
         if connection_key in self.active_connections:
             await self.active_connections[connection_key].send_text(message)
@@ -1123,7 +1152,7 @@ def extract_complete_code_blocks(content: str):
     
     return matches
 
-async def save_file(file_path: str, code: str, project_id: int, user_id: int, db: AsyncSession, websocket: WebSocket):
+async def save_file(file_path: str, code: str, project_id: UUID, user_id: UUID, db: AsyncSession, websocket: WebSocket):
     """
     Save file to database and dev container (Docker or K8s).
 
@@ -1191,7 +1220,7 @@ async def save_file(file_path: str, code: str, project_id: int, user_id: int, db
         else:
             # Docker: Write to local filesystem
             try:
-                project_dir = f"users/{user_id}/{project_id}"
+                project_dir = get_project_path(user_id, project_id)
                 full_path = os.path.join(project_dir, file_path)
 
                 # Create parent directory (with safety check for Windows Docker volumes)

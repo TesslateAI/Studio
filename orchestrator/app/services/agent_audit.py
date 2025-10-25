@@ -1,3 +1,4 @@
+from uuid import UUID
 """
 Audit logging service for agent command executions.
 
@@ -30,8 +31,8 @@ class AgentAuditService:
 
     async def log_command(
         self,
-        user_id: int,
-        project_id: int,
+        user_id: UUID,
+        project_id: str,
         command: str,
         working_dir: str = ".",
         success: bool = False,
@@ -95,8 +96,8 @@ class AgentAuditService:
 
     async def get_user_command_history(
         self,
-        user_id: int,
-        project_id: Optional[int] = None,
+        user_id: UUID,
+        project_id: Optional[UUID] = None,
         limit: int = 100,
         include_dry_run: bool = False
     ) -> list[AgentCommandLog]:
@@ -125,7 +126,7 @@ class AgentAuditService:
         result = await self.db.execute(query)
         return result.scalars().all()
 
-    async def get_command_stats(self, user_id: int, days: int = 7) -> dict:
+    async def get_command_stats(self, user_id: UUID, days: int = 7) -> dict:
         """
         Get command execution statistics for a user.
 
@@ -188,7 +189,7 @@ class AgentAuditService:
 
     async def detect_suspicious_activity(
         self,
-        user_id: int,
+        user_id: UUID,
         time_window_minutes: int = 5
     ) -> dict:
         """
