@@ -88,6 +88,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   let output = '';
   let additionalOutput = '';
   let suggestion = '';
+  let diffPreview = '';
   let technicalDetails: any = null;
 
   if (hasResult && result.result) {
@@ -97,12 +98,17 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         output = result.result.message;
       }
 
-      // PRIORITY 2: Show suggestion if available (for errors)
+      // PRIORITY 2: Show diff preview if available (for patch/edit operations)
+      if (result.result.diff) {
+        diffPreview = result.result.diff;
+      }
+
+      // PRIORITY 3: Show suggestion if available (for errors)
       if (result.result.suggestion) {
         suggestion = result.result.suggestion;
       }
 
-      // PRIORITY 3: Show relevant data fields (stdout, content, output, preview, etc.)
+      // PRIORITY 4: Show relevant data fields (stdout, content, output, preview, etc.)
       if (result.result.stdout) {
         additionalOutput = result.result.stdout;
       } else if (result.result.stderr) {
@@ -206,6 +212,32 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
             <div className={`text-sm ${success ? 'opacity-90' : 'text-red-600 dark:text-red-400 font-medium'}`}>
               {output}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Diff Preview (for patch/edit operations) */}
+      {diffPreview && (
+        <div className="border-t border-current/10">
+          <div className="px-3 py-2 bg-[var(--text)]/5">
+            <div className="text-xs font-medium opacity-70 mb-1">Changes</div>
+            <pre className="text-xs font-mono overflow-x-auto bg-gray-900 text-gray-100 dark:bg-gray-950 p-2 rounded">
+              {diffPreview.split('\n').map((line, i) => {
+                let lineClass = 'opacity-60'; // Context lines
+                if (line.startsWith('+')) {
+                  lineClass = 'text-green-400 bg-green-500/10';
+                } else if (line.startsWith('-')) {
+                  lineClass = 'text-red-400 bg-red-500/10';
+                } else if (line.startsWith('@@')) {
+                  lineClass = 'text-blue-400 opacity-70';
+                }
+                return (
+                  <div key={i} className={lineClass}>
+                    {line || '\u00A0'}
+                  </div>
+                );
+              })}
+            </pre>
           </div>
         </div>
       )}

@@ -123,9 +123,41 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 details={"error": str(e)}
             )
 
+    # Generate a diff preview showing what changed
+    def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:
+        """Generate a concise diff preview showing changes."""
+        import difflib
+
+        old_lines = old.splitlines(keepends=True)
+        new_lines = new.splitlines(keepends=True)
+
+        diff = list(difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile='before',
+            tofile='after',
+            lineterm='',
+            n=2  # Context lines
+        ))
+
+        if not diff:
+            return "No changes"
+
+        # Skip the header lines (--- and +++)
+        diff_body = [line.rstrip() for line in diff[2:]]
+
+        # Truncate if too long
+        if len(diff_body) > max_lines:
+            diff_body = diff_body[:max_lines] + [f"... ({len(diff_body) - max_lines} more lines)"]
+
+        return '\n'.join(diff_body)
+
+    diff_preview = generate_diff_preview(current_content, result.content)
+
     return success_output(
         message=f"Successfully patched '{file_path}'",
         file_path=file_path,
+        diff=diff_preview,
         details={
             "match_method": result.match_method,
             "size_bytes": len(result.content)
@@ -265,9 +297,41 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 details={"error": str(e)}
             )
 
+    # Generate a diff preview showing what changed
+    def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:
+        """Generate a concise diff preview showing changes."""
+        import difflib
+
+        old_lines = old.splitlines(keepends=True)
+        new_lines = new.splitlines(keepends=True)
+
+        diff = list(difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile='before',
+            tofile='after',
+            lineterm='',
+            n=2  # Context lines
+        ))
+
+        if not diff:
+            return "No changes"
+
+        # Skip the header lines (--- and +++)
+        diff_body = [line.rstrip() for line in diff[2:]]
+
+        # Truncate if too long
+        if len(diff_body) > max_lines:
+            diff_body = diff_body[:max_lines] + [f"... ({len(diff_body) - max_lines} more lines)"]
+
+        return '\n'.join(diff_body)
+
+    diff_preview = generate_diff_preview(current_content, content)
+
     return success_output(
         message=f"Successfully applied {len(edits)} edits to '{file_path}'",
         file_path=file_path,
+        diff=diff_preview,
         details={
             "edit_count": len(edits),
             "applied_edits": applied_edits,

@@ -6,7 +6,7 @@ import { TypingIndicator } from './TypingIndicator';
 import { createWebSocket, chatApi, agentsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
-import { type AgentMessageData, type Agent as BackendAgent } from '../../types/agent';
+import { type AgentMessageData, type Agent as BackendAgent, type DBMessage } from '../../types/agent';
 
 interface Agent {
   id: string;
@@ -81,23 +81,25 @@ export function ChatContainer({
   useEffect(() => {
     const loadChatHistory = async () => {
       try {
-        console.log('[CHAT] Loading chat history from database for project:', projectId);
-        const dbMessages = await chatApi.getProjectMessages(projectId);
-        console.log('[CHAT] Loaded', dbMessages.length, 'messages from database');
-        setMessages(dbMessages.map((msg: any, idx: number) => {
+        const dbMessages: DBMessage[] = await chatApi.getProjectMessages(projectId);
+
+        setMessages(dbMessages.map((msg, idx) => {
+          // Map 'assistant' role to 'ai' type for frontend
+          const messageType = msg.role === 'assistant' ? 'ai' : 'user';
+
           const message: Message = {
             id: `msg-${idx}`,
-            type: msg.role as 'user' | 'ai',
+            type: messageType,
             content: msg.content
           };
 
           // Restore agent data from metadata if available
-          if (msg.metadata && msg.metadata.agent_mode) {
+          if (msg.message_metadata?.agent_mode) {
             message.agentData = {
-              steps: msg.metadata.steps || [],
-              iterations: msg.metadata.iterations || 0,
-              tool_calls_made: msg.metadata.tool_calls_made || 0,
-              completion_reason: msg.metadata.completion_reason || 'unknown'
+              steps: msg.message_metadata.steps || [],
+              iterations: msg.message_metadata.iterations || 0,
+              tool_calls_made: msg.message_metadata.tool_calls_made || 0,
+              completion_reason: msg.message_metadata.completion_reason || 'unknown'
             };
           }
 

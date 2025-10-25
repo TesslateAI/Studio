@@ -43,6 +43,22 @@ export interface AgentMessageData {
   completion_reason: string;
 }
 
+export interface DBMessage {
+  id: number;
+  chat_id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  message_metadata?: {
+    agent_mode?: boolean;
+    agent_type?: string;
+    steps?: AgentStep[];
+    iterations?: number;
+    tool_calls_made?: number;
+    completion_reason?: string;
+  };
+  created_at: string;
+}
+
 export interface Agent {
   id: number;
   name: string;

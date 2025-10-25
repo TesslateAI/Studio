@@ -13,9 +13,10 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
 
-  // Filter out steps with no meaningful content (no tool calls AND no thought)
+  // Filter out steps with no meaningful content AND completion steps (shown in Result section)
   const meaningfulSteps = agentData.steps.filter(step =>
-    (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim().length > 0)
+    !step.is_complete &&
+    ((step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim().length > 0))
   );
 
   // Progressive display: show steps one by one with animation

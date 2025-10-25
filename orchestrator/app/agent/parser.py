@@ -263,6 +263,10 @@ class AgentResponseParser:
             # Case-insensitive removal
             text = re.sub(re.escape(signal), '', text, flags=re.IGNORECASE)
 
+        # Remove THOUGHT: and EXPLANATION: prefixes
+        text = re.sub(r'^\s*THOUGHT:\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
+        text = re.sub(r'^\s*EXPLANATION:\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
+
         # Clean up extra whitespace
         text = re.sub(r'\n\s*\n', '\n\n', text)
         text = text.strip()

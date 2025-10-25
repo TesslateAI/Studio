@@ -21,10 +21,7 @@ export default function AgentStep({ step, totalSteps }: AgentStepProps) {
   return (
     <div className="agent-step bg-[var(--surface)]/30 rounded-lg p-3 border border-[var(--border-color)]">
       {/* Step Header */}
-      <div className="flex justify-between items-center mb-3">
-        <span className="text-xs font-semibold text-[var(--text)]/70">
-          Iteration {step.iteration}/{totalSteps}
-        </span>
+      <div className="flex justify-end items-center mb-3">
         <span className="text-xs text-[var(--text)]/50">
           {formatTime(step.timestamp)}
         </span>

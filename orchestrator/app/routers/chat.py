@@ -242,11 +242,11 @@ async def get_project_messages(
         )
     )
     chat = result.scalar_one_or_none()
-    
+
     if not chat:
         # No chat exists yet for this project, return empty list
         return []
-    
+
     # Get all messages for this chat
     messages_result = await db.execute(
         select(Message)
