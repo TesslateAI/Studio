@@ -5,6 +5,19 @@ Creates three featured fullstack bases:
 1. Next.js 15 (Integrated fullstack)
 2. Vite + React + FastAPI (Separated fullstack - Python)
 3. Vite + React + Go (Separated fullstack - Go)
+
+HOW TO RUN:
+-----------
+Local (from orchestrator/):
+  uv run python scripts/seed/seed_marketplace_bases.py
+
+Docker:
+  docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
+  docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
+
+Kubernetes:
+  kubectl cp scripts/seed/seed_marketplace_bases.py tesslate/tesslate-backend-<pod-id>:/tmp/
+  kubectl exec -n tesslate tesslate-backend-<pod-id> -- python /tmp/seed_marketplace_bases.py
 """
 
 import asyncio

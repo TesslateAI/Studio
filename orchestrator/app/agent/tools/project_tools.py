@@ -182,7 +182,7 @@ def register_tools(registry: ToolRegistry):
 
     registry.register(Tool(
         name="get_file_summary",
-        description="Get a preview/summary of a file's content (first 500 characters) without reading the whole file",
+        description="DEPRECATED: Use read_file instead. This tool only shows first 500 chars from database cache (often stale). For actual file content, always use read_file.",
         parameters={
             "type": "object",
             "properties": {

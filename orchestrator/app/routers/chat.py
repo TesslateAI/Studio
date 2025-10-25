@@ -54,82 +54,37 @@ async def _build_git_context(project: Project, user_id: int, db: AsyncSession) -
             logger.warning(f"[GIT-CONTEXT] Could not get Git status: {status_error}")
             git_status = None
 
-        # Get container/pod info for command examples
-        pod_name = f"dev-user{user_id}-project{project.id}"
-        namespace = "tesslate-user-environments"
-        container_name = f"tesslate-dev-user{user_id}-project{project.id}"
-
-        if settings.deployment_mode == "kubernetes":
-            cmd_prefix = f"kubectl exec -n {namespace} {pod_name} --"
-            git_cmd_example = f"{cmd_prefix} git status"
-        else:
-            cmd_prefix = f"docker exec {container_name}"
-            git_cmd_example = f"{cmd_prefix} git status"
-
-        # Build comprehensive Git context
+        # Build concise Git context
         context_lines = [
-            "\n=== Git Version Control ===",
+            "\n=== Git Repository ===",
             f"Repository: {git_repo.repo_url}",
         ]
 
         if git_status:
-            context_lines.extend([
-                f"Current Branch: {git_status['branch']}",
-                f"Status: {git_status['status']}",
-                f"Uncommitted Changes: {git_status['changes_count']}",
-            ])
+            context_lines.append(f"Branch: {git_status['branch']}")
 
+            if git_status.get('status'):
+                context_lines.append(f"Status: {git_status['status']}")
+
+            if git_status.get('changes_count', 0) > 0:
+                context_lines.append(f"Uncommitted Changes: {git_status['changes_count']}")
+
+            sync_info = []
             if git_status.get('ahead', 0) > 0:
-                context_lines.append(f"Ahead of Remote: {git_status['ahead']} commits")
+                sync_info.append(f"{git_status['ahead']} ahead")
             if git_status.get('behind', 0) > 0:
-                context_lines.append(f"Behind Remote: {git_status['behind']} commits")
+                sync_info.append(f"{git_status['behind']} behind")
+            if sync_info:
+                context_lines.append(f"Remote: {', '.join(sync_info)}")
 
             if git_status.get('last_commit'):
                 last_commit = git_status['last_commit']
                 context_lines.append(f"Last Commit: {last_commit['message']} ({last_commit['sha'][:8]})")
 
-        context_lines.extend([
-            "",
-            "=== Git Operations Available ===",
-            "You can perform Git operations using the Bash tool.",
-            "",
-            "Command Format:",
-            f"  {cmd_prefix} <git-command>",
-            "",
-            "Common Operations:",
-            f"  Check status:    {git_cmd_example}",
-            f"  View changes:    {cmd_prefix} git diff",
-            f"  Stage files:     {cmd_prefix} git add .",
-            f"  Create commit:   {cmd_prefix} git commit -m \"your message\"",
-            f"  Push changes:    {cmd_prefix} git push origin {git_status['branch'] if git_status else 'main'}",
-            f"  Pull updates:    {cmd_prefix} git pull origin {git_status['branch'] if git_status else 'main'}",
-            f"  Create branch:   {cmd_prefix} git checkout -b feature/branch-name",
-            f"  Switch branch:   {cmd_prefix} git checkout branch-name",
-            "",
-            "=== Commit Message Guidelines ===",
-            "Use conventional commit format for better history:",
-            "  feat: New feature",
-            "  fix: Bug fix",
-            "  docs: Documentation changes",
-            "  refactor: Code refactoring",
-            "  test: Tests",
-            "  chore: Maintenance",
-            "",
-            "Example:",
-            f"  {cmd_prefix} git add .",
-            f"  {cmd_prefix} git commit -m \"feat: add user authentication\"",
-            "",
-            "=== Important Notes ===",
-            "- Always commit your changes before making significant modifications",
-            "- Use descriptive commit messages",
-            "- Check status before and after Git operations",
-            "- Ask the user if they want to push changes to remote",
-        ])
-
         if git_repo.auto_push:
-            context_lines.append("- Auto-push is ENABLED - commits will be automatically pushed")
+            context_lines.append("Auto-push: ENABLED")
         else:
-            context_lines.append("- Auto-push is DISABLED - ask user before pushing")
+            context_lines.append("Auto-push: DISABLED")
 
         return "\n".join(context_lines)
 

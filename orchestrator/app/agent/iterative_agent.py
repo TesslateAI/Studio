@@ -4,8 +4,6 @@ Iterative Agent
 Model-agnostic agent that uses a think-act-reflect loop with tool calling.
 This agent iteratively processes tasks by thinking, calling tools, and reflecting
 on results until the task is complete.
-
-This is the refactored version of UniversalAgent that implements AbstractAgent.
 """
 
 import logging
@@ -17,14 +15,18 @@ from .base import AbstractAgent
 from .models import ModelAdapter
 from .parser import AgentResponseParser, ToolCall
 from .tools.registry import ToolRegistry
-from .prompts import get_base_system_prompt, get_model_specific_prompt, get_user_message_wrapper
+from .prompts import get_user_message_wrapper
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AgentStep:
-    """Represents one step in the agent's execution."""
+    """
+    Represents one iteration of the agent's execution loop.
+
+    Each step captures the agent's thinking, actions taken, and results received.
+    """
     iteration: int
     thought: Optional[str]
     tool_calls: List[ToolCall]
@@ -52,18 +54,6 @@ class AgentStep:
         }
 
 
-@dataclass
-class AgentResult:
-    """Final result of agent execution."""
-    success: bool
-    iterations: int
-    steps: List[AgentStep]
-    final_response: str
-    error: Optional[str] = None
-    tool_calls_made: int = 0
-    completion_reason: str = "unknown"
-
-
 class IterativeAgent(AbstractAgent):
     """
     Iterative agent that works with any language model.
@@ -83,8 +73,7 @@ class IterativeAgent(AbstractAgent):
         system_prompt: str,
         tools: Optional[ToolRegistry] = None,
         model: Optional[ModelAdapter] = None,
-        max_iterations: int = 20,
-        minimal_prompts: bool = False
+        max_iterations: int = 20
     ):
         """
         Initialize the Iterative Agent.
@@ -94,13 +83,11 @@ class IterativeAgent(AbstractAgent):
             tools: Registry of available tools (if None, uses global registry)
             model: Model adapter for LLM communication (can be set later)
             max_iterations: Maximum number of agent loop iterations
-            minimal_prompts: Use minimal system prompts (for simpler models)
         """
         super().__init__(system_prompt, tools)
 
         self.model = model
         self.max_iterations = max_iterations
-        self.minimal_prompts = minimal_prompts
         self.parser = AgentResponseParser()
 
         # Conversation history
@@ -151,16 +138,27 @@ class IterativeAgent(AbstractAgent):
 
         logger.info(f"[IterativeAgent] Starting - request: {user_request[:100]}...")
 
-        # Extract project context from context dict
+        # Extract and prepare project context
         project_context = None
         if 'project_context' in context:
             project_context = context['project_context']
 
+        # Add user_id and project_id to project_context for environment context
+        if project_context is None:
+            project_context = {}
+
+        project_context['user_id'] = context.get('user_id')
+        project_context['project_id'] = context.get('project_id')
+
         # Initialize conversation with system prompt
         full_system_prompt = self._get_system_prompt()
+
+        # Get user message with full [CONTEXT] section
+        user_message = await get_user_message_wrapper(user_request, project_context)
+
         self.messages = [
             {"role": "system", "content": full_system_prompt},
-            {"role": "user", "content": get_user_message_wrapper(user_request, project_context)}
+            {"role": "user", "content": user_message}
         ]
 
         # Main agent loop
@@ -188,10 +186,9 @@ class IterativeAgent(AbstractAgent):
                     tool_results = await self._execute_tool_calls(tool_calls, context)
                     self.tool_calls_count += len(tool_calls)
 
-                # Record this step
+                # Record this step and yield to client
                 display_text = response
                 if not tool_calls and not is_complete:
-                    # Extract conversational text for display
                     conversational = self.parser.get_conversational_text(response)
                     if conversational:
                         display_text = conversational
@@ -206,7 +203,6 @@ class IterativeAgent(AbstractAgent):
                 )
                 self.steps.append(step)
 
-                # Yield the step to the client
                 yield {
                     'type': 'agent_step',
                     'data': step.to_dict()
@@ -236,7 +232,7 @@ class IterativeAgent(AbstractAgent):
                     }
                     return
 
-                # If no tool calls and not complete, model might be done
+                # If no tool calls and no completion signal, assume task is done
                 if not tool_calls and iteration > 1:
                     logger.info(f"[IterativeAgent] No tool calls in iteration {iteration}, assuming complete")
                     conversational_text = self.parser.get_conversational_text(response)
@@ -352,86 +348,192 @@ class IterativeAgent(AbstractAgent):
                 tool_result = result.get("result", {})
                 # Format result based on content
                 if isinstance(tool_result, dict):
-                    for key, value in tool_result.items():
-                        # Skip preview for now
-                        if key == "preview":
-                            continue
+                    # Show message first (user-friendly summary)
+                    if "message" in tool_result:
+                        formatted.append(f"   message: {tool_result['message']}")
 
-                        if isinstance(value, str) and len(value) > 500:
-                            formatted.append(f"   {key}: {value[:500]}... (truncated)")
-                        elif isinstance(value, list) and len(value) > 10:
-                            formatted.append(f"   {key}: [{len(value)} items]")
-                        else:
-                            formatted.append(f"   {key}: {value}")
-
-                    # Show preview last if it exists
-                    if "preview" in tool_result:
-                        formatted.append(f"   Content Preview:")
+                    # Show full content/stdout/output for agent context
+                    # DO NOT truncate - agent needs full context
+                    if "content" in tool_result:
+                        formatted.append(f"   content:")
+                        content_lines = tool_result["content"].split('\n')
+                        for line in content_lines:
+                            formatted.append(f"   | {line}")
+                    elif "stdout" in tool_result:
+                        formatted.append(f"   stdout:")
+                        stdout_lines = tool_result["stdout"].split('\n')
+                        for line in stdout_lines:
+                            formatted.append(f"   | {line}")
+                    elif "output" in tool_result:
+                        formatted.append(f"   output:")
+                        output_lines = tool_result["output"].split('\n')
+                        for line in output_lines:
+                            formatted.append(f"   | {line}")
+                    elif "preview" in tool_result:
+                        formatted.append(f"   preview:")
                         preview_lines = tool_result["preview"].split('\n')
                         for line in preview_lines:
                             formatted.append(f"   | {line}")
+
+                    # Show files list (for list_files)
+                    if "files" in tool_result:
+                        if isinstance(tool_result["files"], list):
+                            if len(tool_result["files"]) > 0:
+                                formatted.append(f"   files ({len(tool_result['files'])} items):")
+                                for file in tool_result["files"]:
+                                    if isinstance(file, dict):
+                                        file_type = file.get("type", "file")
+                                        file_name = file.get("name", file.get("path", "unknown"))
+                                        file_size = file.get("size", 0)
+                                        formatted.append(f"     [{file_type}] {file_name} ({file_size} bytes)")
+                                    else:
+                                        formatted.append(f"     {file}")
+                        else:
+                            formatted.append(f"   files: {tool_result['files']}")
+
+                    # Show directory (for list_files context)
+                    if "directory" in tool_result and "files" not in formatted[-1]:
+                        formatted.append(f"   directory: {tool_result['directory']}")
+
+                    # Show file_path for file operations
+                    if "file_path" in tool_result and "message" not in formatted[-1]:
+                        formatted.append(f"   file_path: {tool_result['file_path']}")
+
+                    # Show command for command execution
+                    if "command" in tool_result and "message" not in formatted[-1]:
+                        formatted.append(f"   command: {tool_result['command']}")
+
+                    # Show stderr if present (errors)
+                    if "stderr" in tool_result and tool_result["stderr"]:
+                        formatted.append(f"   stderr:")
+                        stderr_lines = tool_result["stderr"].split('\n')
+                        for line in stderr_lines:
+                            formatted.append(f"   | {line}")
+
+                    # Show suggestion for errors/guidance
+                    if "suggestion" in tool_result:
+                        formatted.append(f"   suggestion: {tool_result['suggestion']}")
+
+                    # Show details last (technical info)
+                    if "details" in tool_result:
+                        formatted.append(f"   details: {tool_result['details']}")
+
                 else:
                     formatted.append(f"   {tool_result}")
             else:
                 error = result.get("error", "Unknown error")
                 formatted.append(f"   Error: {error}")
 
+                # Show suggestion from result if available
+                if isinstance(result.get("result"), dict) and "suggestion" in result["result"]:
+                    formatted.append(f"   Suggestion: {result['result']['suggestion']}")
+
         return "\n".join(formatted)
 
     def _get_system_prompt(self) -> str:
-        """Get the appropriate system prompt for the model."""
-        # The system_prompt from AbstractAgent contains the custom agent prompt
-        # We need to append tool information to it
+        """
+        Build the complete system prompt for the agent.
+
+        The prompt has three parts:
+        1. Base methodology (Plan-Act-Observe-Verify workflow)
+        2. Agent specialization (custom prompt defining agent role/expertise)
+        3. Tool information (available tools, formatting, usage rules)
+
+        Returns:
+            Complete system prompt string
+        """
+        from .prompts import get_base_methodology_prompt
+
+        # Start with base methodology
+        prompt_parts = [get_base_methodology_prompt()]
+
+        # Add agent specialization
+        if self.system_prompt and self.system_prompt.strip():
+            prompt_parts.append("\n\n=== AGENT SPECIALIZATION ===\n")
+            prompt_parts.append(self.system_prompt)
+
+        # Add tool information
         if self.tools:
-            tool_info = "\n\n" + self._get_tool_info()
-            return self.system_prompt + tool_info
-        else:
-            return self.system_prompt
+            prompt_parts.append(self._get_tool_info())
+
+        return "\n".join(prompt_parts)
 
     def _get_tool_info(self) -> str:
-        """Get formatted tool information to append to custom prompts."""
+        """
+        Get formatted tool information to append to system prompt.
+
+        Returns tool usage instructions, formatting examples, and available tools list.
+        """
         if not self.tools:
             return ""
 
         tools_text = [
-            "\n\n=== TOOL CALLING FORMAT ===",
+            "\n\nTool Usage and Formatting",
             "",
-            "When you need to perform an action, output tool calls in this XML format:",
+            "Your actions are communicated through specific XML-style tool calls. You must include a THOUGHT section before every tool call to explain your reasoning.",
+            "",
+            "IMPORTANT: Parameters must be provided as valid JSON inside the <parameters> tags.",
+            "",
+            "Format:",
+            "",
+            "THOUGHT: I need to understand the current file structure to locate the main application file. I will list the files in the src directory to get an overview.",
             "",
             "<tool_call>",
             "<tool_name>TOOL_NAME_HERE</tool_name>",
             "<parameters>",
-            '{"parameter_name": "value"}',
+            '{"parameter_name": "value", "another_parameter": "value2"}',
             "</parameters>",
             "</tool_call>",
             "",
-            "Important formatting rules:",
-            "- Parameters must be valid JSON",
-            "- You can call multiple tools in one response",
-            "- Always include a THOUGHT section before tool calls explaining your reasoning",
-            "",
-            "=== Available Tools ===",
-            ""
-        ]
-
-        for tool_name, tool in self.tools._tools.items():
-            tools_text.append(f"- {tool_name}: {tool.description}")
-
-        tools_text.extend([
-            "",
-            "=== Task Completion ===",
-            "",
-            "When you have completed the user's request, output:",
-            "TASK_COMPLETE",
-            "",
             "Example:",
             "",
-            "THOUGHT: I need to add a red border to the button in App.jsx",
+            "THOUGHT: I will read the App.jsx file to understand the application structure.",
             "",
             "<tool_call>",
             "<tool_name>read_file</tool_name>",
-            '<parameters>{"file_path": "src/App.jsx"}</parameters>',
+            "<parameters>",
+            '{"file_path": "src/App.jsx"}',
+            "</parameters>",
             "</tool_call>",
+            "",
+            "Available Tools:",
+            ""
+        ]
+
+        # List all available tools with descriptions and parameters
+        for tool_name, tool in self.tools._tools.items():
+            tools_text.append(f"{tool_name}: {tool.description}")
+            tools_text.append("")
+
+            # Add parameters
+            if hasattr(tool, 'parameters'):
+                params = tool.parameters
+                if isinstance(params, dict):
+                    props = params.get('properties', {})
+                    required = params.get('required', [])
+
+                    if props:
+                        tools_text.append("Parameters:")
+                        tools_text.append("")
+                        for param_name, param_info in props.items():
+                            param_type = param_info.get('type', 'string')
+                            req_str = 'required' if param_name in required else 'optional'
+                            param_desc = param_info.get('description', '')
+                            tools_text.append(f"  - {param_name} ({param_type}, {req_str}): {param_desc}")
+                            tools_text.append("")
+
+        tools_text.extend([
+            "Rules and Constraints",
+            "",
+            "One Tool Call per Thought: Always include a THOUGHT section before tool calls.",
+            "",
+            "Wait for Observation: ALWAYS wait for the observation from your previous tool use before issuing the next command. Do not assume the outcome of any action.",
+            "",
+            "Conciseness: Be professional and concise. Do not provide conversational filler.",
+            "",
+            "File Modifications: Read files before modifying them to understand their current state.",
+            "",
+            "Output Truncation: Be aware that long command outputs or file contents may be truncated to preserve context space. You will be notified if this happens."
         ])
 
         return "\n".join(tools_text)

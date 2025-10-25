@@ -6,6 +6,19 @@ These agents have source_type='open' which allows users to:
 - Select different models from LITELLM_DEFAULT_MODELS
 - Fork and customize
 - Edit system prompts
+
+HOW TO RUN:
+-----------
+Local (from orchestrator/):
+  uv run python scripts/seed/seed_opensource_agents.py
+
+Docker:
+  docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
+  docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
+
+Kubernetes:
+  kubectl cp scripts/seed/seed_opensource_agents.py tesslate/tesslate-backend-<pod-id>:/tmp/
+  kubectl exec -n tesslate tesslate-backend-<pod-id> -- python /tmp/seed_opensource_agents.py
 """
 
 import asyncio

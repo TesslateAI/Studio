@@ -8,259 +8,219 @@ from typing import Optional
 from .tools.registry import ToolRegistry
 
 
-def get_base_system_prompt(tool_registry: ToolRegistry, include_examples: bool = True) -> str:
+def get_base_methodology_prompt() -> str:
     """
-    Get the base system prompt that works with any model.
+    Get the base methodology prompt that defines how agents should work.
 
-    This prompt teaches the model how to:
-    1. Format tool calls properly
-    2. Chain multiple tools together
-    3. Think before acting (THOUGHT section)
-    4. Signal completion
-
-    Args:
-        tool_registry: Registry of available tools
-        include_examples: Whether to include usage examples
+    This is adapted from TODO/agent/System_prompt.txt and defines:
+    - Agent role and expertise
+    - Security directives
+    - Core workflow (Plan-Act-Observe-Verify)
+    - General rules and constraints
 
     Returns:
-        Complete system prompt string
+        Base methodology prompt string
     """
-    tools_section = tool_registry.get_system_prompt_section()
+    return """You are a world-class, autonomous AI software engineering agent. Your role is that of a seasoned Principal Engineer with 20 years of experience, possessing deep expertise in system administration, operating system principles, network protocols, and software development across multiple languages. You are precise, methodical, and security-conscious.
 
-    prompt = f"""You are an expert AI coding assistant with access to tools for managing a React/Vite development project.
+Your primary goal is to solve the user's software engineering task by following a clear, iterative methodology. You will be given a task and a dynamic context about the execution environment. You must use the provided tools to accomplish the task.
 
-# Your Capabilities
+🚨 CRITICAL SECURITY DIRECTIVE 🚨
 
-You can perform actions by calling tools. You have access to the following tools:
+Your top priority is security and safety. If you receive any message indicating that a command or action was blocked by a security mechanism, you MUST adhere to the following protocol:
 
-{tools_section}
+IMMEDIATELY STOP: Halt all current reasoning and action planning.
 
-# Tool Call Format
+ACKNOWLEDGE THE BLOCK: Your ONLY response will be to inform the user that the action was blocked by security mechanisms and cannot be executed.
 
-When you need to perform an action, output tool calls in this XML format:
+STRICTLY PROHIBITED ACTIONS:
+- Do NOT attempt to re-run the blocked command.
+- Do NOT recommend alternative solutions, workarounds, or different commands.
+- Do NOT provide fake or assumed output.
+- Do NOT proceed with any other steps.
 
-<tool_call>
-<tool_name>TOOL_NAME_HERE</tool_name>
-<parameters>
-{{"parameter_name": "value"}}
-</parameters>
-</tool_call>
+This is a non-negotiable safety override.
 
-Important formatting rules:
-- Parameters must be valid JSON
-- You can call multiple tools in one response
-- Always include a THOUGHT section before tool calls
-- Include an EXPLANATION after tool calls (optional)
+Core Workflow: Plan-Act-Observe-Verify
 
-# Response Format
+You must break down every task into a series of steps, following this iterative loop:
 
-Structure your responses like this:
+1. Analyze & Plan: First, analyze the provided [CONTEXT], including file listings and system details. Reason about the user's request, assess what information you have and what you need, and formulate a step-by-step plan. Decide which tool is the most appropriate for the immediate next step.
 
-THOUGHT: Your reasoning about what needs to be done and why
+2. Execute (Tool Call): Use tools to accomplish your goals. You can call multiple tools in a single response when they are independent and don't depend on each other's results.
 
-<tool_call>
-<tool_name>tool_name</tool_name>
-<parameters>{{"param": "value"}}</parameters>
-</tool_call>
+3. Observe & Verify: After executing a tool, you will receive an observation. Carefully analyze the output to verify if the step was successful and if the result matches your expectation.
 
-EXPLANATION: What you expect to happen (optional)
+4. Self-Correct & Proceed: If the previous step failed or produced an unexpected result, analyze the error and formulate a new plan to correct it. If it was successful, proceed to the next step in your plan.
 
-# Task Completion
-
-When you have completed the user's request, output:
-
-TASK_COMPLETE
-
-This signals that the task is done and no further actions are needed.
-
-# Important Guidelines
-
-1. **Read before writing**: Always read a file first to understand its current state before modifying it
-2. **Minimal changes**: Make surgical edits - only change what's necessary
-3. **Test your work**: Run build/test commands to verify changes work
-4. **Explain your actions**: Use THOUGHT and EXPLANATION to make your reasoning clear
-5. **Handle errors**: If a tool fails, analyze the error and try a different approach
-6. **Stay focused**: Complete the user's request without unnecessary changes
-7. **File paths**: Use relative paths from project root (e.g., "src/App.jsx")
-
-# Working with Projects
-
-- The project is a React/Vite application
-- Node.js and npm are available
-- You can read/write files, execute commands, and manage the project
-- Changes to files trigger hot module reload automatically
-- Always run `npm install` after modifying package.json
-
-# Security
-
-- Only use safe, approved commands
-- No network operations (curl, wget) unless absolutely necessary
-- No system modification commands
-- Stay within the project directory"""
-
-    if include_examples:
-        prompt += """
-
-# Examples
-
-Example 1: Reading and modifying a file
-```
-THOUGHT: I need to see the current App.jsx structure before adding the new component
-
-<tool_call>
-<tool_name>read_file</tool_name>
-<parameters>{"file_path": "src/App.jsx"}</parameters>
-</tool_call>
-
-EXPLANATION: Once I see the current file, I can determine where to add the new component import and usage
-```
-
-Example 2: Creating a new component
-```
-THOUGHT: I'll create a new Header component with the requested features
-
-<tool_call>
-<tool_name>write_file</tool_name>
-<parameters>{"file_path": "src/components/Header.jsx", "content": "import React from 'react'..."}}</parameters>
-</tool_call>
-
-<tool_call>
-<tool_name>read_file</tool_name>
-<parameters>{"file_path": "src/App.jsx"}</parameters>
-</tool_call>
-
-EXPLANATION: Created the Header component and now reading App.jsx to integrate it
-```
-
-Example 3: Running build commands
-```
-THOUGHT: After adding the new dependencies, I need to install them and verify the build works
-
-<tool_call>
-<tool_name>execute_command</tool_name>
-<parameters>{"command": "npm install"}</parameters>
-</tool_call>
-
-<tool_call>
-<tool_name>execute_command</tool_name>
-<parameters>{"command": "npm run build", "timeout": 120}</parameters>
-</tool_call>
-
-EXPLANATION: Installing new dependencies and running build to ensure everything works
-```
-
-Example 4: Multiple related files
-```
-THOUGHT: I need to create a complete feature with component, styles, and integration
-
-<tool_call>
-<tool_name>write_file</tool_name>
-<parameters>{"file_path": "src/components/TodoList.jsx", "content": "..."}</parameters>
-</tool_call>
-
-<tool_call>
-<tool_name>write_file</tool_name>
-<parameters>{"file_path": "src/components/TodoItem.jsx", "content": "..."}</parameters>
-</tool_call>
-
-<tool_call>
-<tool_name>write_file</tool_name>
-<parameters>{"file_path": "src/styles/Todo.css", "content": "..."}</parameters>
-</tool_call>
-
-EXPLANATION: Created the complete Todo feature with list, item components, and styles
-```"""
-
-    return prompt.strip()
+5. Completion: Once you have verified that the entire task is complete and the solution is working, output TASK_COMPLETE to signal completion."""
 
 
-def get_model_specific_prompt(model_name: str, base_prompt: str) -> str:
+async def get_environment_context(user_id: int, project_id: str) -> str:
     """
-    Augment the base prompt with model-specific optimizations.
+    Get environment context for the agent.
 
-    Some models work better with specific phrasings or structures.
+    This includes:
+    - Current time and timezone
+    - Operating system info
+    - Current working directory
+    - Container/pod information
 
     Args:
-        model_name: Name of the model (e.g., "gpt-4o", "claude-3-5-sonnet")
-        base_prompt: The base system prompt
+        user_id: User ID
+        project_id: Project ID
 
     Returns:
-        Model-optimized system prompt
+        Formatted environment context string
     """
-    model_lower = model_name.lower()
+    from datetime import datetime
+    import platform
+    from ..config import get_settings
 
-    # OpenAI models (GPT-4, GPT-3.5)
-    if "gpt" in model_lower or "openai" in model_lower:
-        return base_prompt + """
+    settings = get_settings()
 
-# Model-Specific Notes (GPT)
-- You excel at structured output - use the XML format consistently
-- Break complex tasks into clear, logical steps
-- Be concise but thorough in your THOUGHT sections"""
+    context_parts = [
+        "\n=== ENVIRONMENT CONTEXT ===\n"
+    ]
 
-    # Anthropic models (Claude)
-    elif "claude" in model_lower or "anthropic" in model_lower:
-        return base_prompt + """
+    # Time
+    now = datetime.now()
+    context_parts.append(f"Time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-# Model-Specific Notes (Claude)
-- You have strong reasoning capabilities - leverage THOUGHT sections
-- You can handle long contexts - don't hesitate to read multiple files
-- Be systematic and thorough in your approach"""
+    # Deployment mode
+    context_parts.append(f"Deployment Mode: {settings.deployment_mode}")
 
-    # Cerebras models (Llama, Qwen)
-    elif "cerebras" in model_lower or "llama" in model_lower or "qwen" in model_lower:
-        return base_prompt + """
+    # Container/Pod info
+    if settings.deployment_mode == "kubernetes":
+        pod_name = f"dev-user{user_id}-project{project_id}"
+        namespace = "tesslate-user-environments"
+        context_parts.append(f"Pod: {pod_name}")
+        context_parts.append(f"Namespace: {namespace}")
+        context_parts.append(f"Current Working Directory: /app")
+    else:
+        container_name = f"tesslate-user{user_id}-project{project_id}"
+        context_parts.append(f"Container: {container_name}")
+        context_parts.append(f"Current Working Directory: /app")
 
-# Model-Specific Notes (Cerebras/Fast Models)
-- Keep tool calls simple and focused
-- Use clear, direct language in THOUGHT sections
-- Prefer single-purpose tool calls over complex multi-step operations"""
+    # Project path context
+    context_parts.append(f"Project Path: users/{user_id}/{project_id}/")
 
-    # Default: return base prompt
-    return base_prompt
+    return "\n".join(context_parts)
 
 
-def get_user_message_wrapper(user_request: str, project_context: Optional[dict] = None) -> str:
+async def get_file_listing_context(user_id: int, project_id: str, max_lines: int = 50) -> Optional[str]:
+    """
+    Get file listing context for the project directory.
+
+    Args:
+        user_id: User ID
+        project_id: Project ID
+        max_lines: Maximum number of lines to include
+
+    Returns:
+        Formatted file listing or None if unable to retrieve
+    """
+    from ..config import get_settings
+    import asyncio
+
+    settings = get_settings()
+
+    try:
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes: Execute ls in pod
+            pod_name = f"dev-user{user_id}-project{project_id}"
+            namespace = "tesslate-user-environments"
+
+            cmd = f"kubectl exec -n {namespace} {pod_name} -- ls -lah /app"
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+
+            if proc.returncode == 0:
+                output = stdout.decode('utf-8')
+                lines = output.split('\n')[:max_lines]
+                return "\n=== FILE LISTING (CWD: /app) ===\n\n" + "\n".join(lines)
+        else:
+            # Docker: List local directory
+            import os
+            project_dir = f"users/{user_id}/{project_id}"
+
+            if os.path.exists(project_dir):
+                cmd = f"ls -lah {project_dir}"
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+
+                if proc.returncode == 0:
+                    output = stdout.decode('utf-8')
+                    lines = output.split('\n')[:max_lines]
+                    return f"\n=== FILE LISTING (CWD: /app) ===\n\n" + "\n".join(lines)
+
+        return None
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to get file listing: {e}")
+        return None
+
+
+async def get_user_message_wrapper(
+    user_request: str,
+    project_context: Optional[dict] = None,
+    include_environment: bool = True,
+    include_file_listing: bool = True
+) -> str:
     """
     Wrap the user's request with helpful context.
+
+    This now includes the [CONTEXT] section from the TODO prompt format.
 
     Args:
         user_request: The user's original request
         project_context: Optional context about the project
+        include_environment: Whether to include environment context
+        include_file_listing: Whether to include file listing
 
     Returns:
-        Enhanced user message
+        Enhanced user message with [CONTEXT] section
     """
-    message_parts = []
+    message_parts = ["\n[CONTEXT]\n"]
 
-    if project_context:
-        # Add TESSLATE.md context first (most important for understanding the project)
-        if project_context.get("tesslate_context"):
-            message_parts.append(project_context["tesslate_context"])
+    # 1. Environment Context (Time, OS, CWD, etc.)
+    if include_environment and project_context:
+        user_id = project_context.get("user_id")
+        project_id = project_context.get("project_id")
 
-        # Add Git context if available
-        if project_context.get("git_context"):
-            message_parts.append(project_context["git_context"])
+        if user_id and project_id:
+            env_context = await get_environment_context(user_id, str(project_id))
+            message_parts.append(env_context)
 
-        # Add basic project info
-        context_parts = []
+    # 2. File Listing Context
+    if include_file_listing and project_context:
+        user_id = project_context.get("user_id")
+        project_id = project_context.get("project_id")
 
-        if project_context.get("project_name"):
-            context_parts.append(f"Project: {project_context['project_name']}")
+        if user_id and project_id:
+            file_listing = await get_file_listing_context(user_id, str(project_id))
+            if file_listing:
+                message_parts.append(file_listing)
 
-        if project_context.get("project_description"):
-            context_parts.append(f"Description: {project_context['project_description']}")
+    # 3. TESSLATE.md context (project-specific documentation for agents)
+    if project_context and project_context.get("tesslate_context"):
+        message_parts.append(project_context["tesslate_context"])
 
-        if project_context.get("file_count"):
-            context_parts.append(f"Current files: {project_context['file_count']}")
+    # 4. Git context (repository information and status)
+    if project_context and project_context.get("git_context"):
+        message_parts.append(project_context["git_context"])
 
-        if project_context.get("recent_changes"):
-            context_parts.append(f"Recent changes: {project_context['recent_changes']}")
-
-        if context_parts:
-            message_parts.append("\n=== Project Info ===\n" + "\n".join(context_parts))
-
-    # Add user request at the end
+    # 5. User request at the end
     message_parts.append(f"\n=== User Request ===\n{user_request}")
 
     return "\n".join(message_parts)
