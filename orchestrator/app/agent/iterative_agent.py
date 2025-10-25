@@ -180,11 +180,14 @@ class IterativeAgent(AbstractAgent):
                     f"tool_calls: {len(tool_calls)}, complete: {is_complete}"
                 )
 
-                # Step 3: Execute tools if any
+                # Step 3: Execute tools if any (skip if task is complete)
                 tool_results = []
-                if tool_calls:
+                if tool_calls and not is_complete:
                     tool_results = await self._execute_tool_calls(tool_calls, context)
                     self.tool_calls_count += len(tool_calls)
+                elif tool_calls and is_complete:
+                    logger.info(f"[IterativeAgent] Skipping {len(tool_calls)} tool calls because task is complete")
+                    tool_calls = []  # Clear tool calls to avoid showing "Unknown tool" errors
 
                 # Record this step and yield to client
                 display_text = response

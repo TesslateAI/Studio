@@ -182,21 +182,21 @@ def get_tool_registry() -> ToolRegistry:
 
 
 def _register_all_tools(registry: ToolRegistry):
-    """Register all available tools."""
-    from . import file_tools, project_tools, shell_tools
+    """Register all essential tools from modular structure."""
+    from .file_ops import register_all_file_tools
+    from .shell_ops import register_all_shell_tools
+    from .project_ops import register_all_project_tools
+    from .planning_ops import register_all_planning_tools
+    from .web_ops import register_all_web_tools
 
-    # Register file operation tools
-    file_tools.register_tools(registry)
+    # Register essential tools (use bash_exec for file listing, globbing, grepping)
+    register_all_file_tools(registry)      # 4 tools: read_file, write_file, patch_file, multi_edit
+    register_all_shell_tools(registry)     # 4 tools: bash_exec, shell_open, shell_exec, shell_close
+    register_all_project_tools(registry)   # 1 tool: get_project_info
+    register_all_planning_tools(registry)  # 2 tools: todo_read, todo_write
+    register_all_web_tools(registry)       # 1 tool: web_fetch
 
-    # Register project operation tools (database-backed)
-    project_tools.register_tools(registry)
-
-    # Register shell operation tools (replaces command_tools)
-    shell_tools.register_tools(registry)
-
-    # NOTE: command_tools removed - shell_tools provides superior stateful command execution
-
-    logger.info(f"Registered {len(registry._tools)} tools total")
+    logger.info(f"Registered {len(registry._tools)} essential tools total")
 
 
 def create_scoped_tool_registry(tool_names: List[str]) -> ToolRegistry:

@@ -1372,6 +1372,186 @@ VITECONFIG
             logger.error(f"[LIST] Failed to list files in {directory}: {e}", exc_info=True)
             raise RuntimeError(f"Failed to list files in pod: {str(e)}") from e
 
+    async def glob_files_in_pod(
+        self,
+        user_id: int,
+        project_id: str,
+        pattern: str,
+        directory: str = "."
+    ) -> List[Dict[str, Any]]:
+        """
+        Find files matching a glob pattern in the dev container pod.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            pattern: Glob pattern (e.g., "**/*.tsx")
+            directory: Directory to search (default: ".")
+
+        Returns:
+            List of matching file paths with metadata
+        """
+        names = self._generate_resource_names(user_id, project_id)
+        namespace = names["namespace"]
+
+        try:
+            # Get the pod
+            pods = await asyncio.to_thread(
+                self.core_v1.list_namespaced_pod,
+                namespace=namespace,
+                label_selector=f"app={names['deployment']}"
+            )
+
+            if not pods.items:
+                raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
+
+            pod_name = pods.items[0].metadata.name
+            container_name = "dev-server"
+
+            # Secure path
+            safe_dir = directory.replace("..", "").strip("/")
+            if not safe_dir or safe_dir == ".":
+                full_path = "/app"
+            else:
+                full_path = f"/app/{safe_dir}"
+
+            # Use find with glob pattern
+            # Convert glob pattern to find-compatible format
+            glob_cmd = [
+                "/bin/sh", "-c",
+                f"cd {shlex.quote(full_path)} && find . -type f -name {shlex.quote(pattern)} -printf '%s %T@ %p\\n' | sort -rn -k2"
+            ]
+
+            output = await asyncio.to_thread(
+                self._exec_in_pod,
+                pod_name,
+                namespace,
+                container_name,
+                glob_cmd,
+                timeout=30
+            )
+
+            # Parse output
+            matches = []
+            for line in output.strip().split('\n'):
+                if not line:
+                    continue
+
+                parts = line.split(' ', 2)
+                if len(parts) < 3:
+                    continue
+
+                size = int(parts[0]) if parts[0].isdigit() else 0
+                modified = float(parts[1]) if parts[1].replace('.', '').isdigit() else 0
+                path = parts[2].lstrip('./')
+
+                matches.append({
+                    "path": path,
+                    "size": size,
+                    "modified": modified
+                })
+
+            logger.info(f"[GLOB] Found {len(matches)} files matching '{pattern}'")
+            return matches
+
+        except Exception as e:
+            logger.error(f"[GLOB] Failed to glob files: {e}", exc_info=True)
+            return []
+
+    async def grep_in_pod(
+        self,
+        user_id: int,
+        project_id: str,
+        pattern: str,
+        directory: str = ".",
+        file_pattern: str = "*",
+        case_sensitive: bool = True,
+        max_results: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Search file contents for a pattern in the dev container pod.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            pattern: Regex pattern to search for
+            directory: Directory to search
+            file_pattern: File glob pattern to filter
+            case_sensitive: Case sensitive search
+            max_results: Maximum results to return
+
+        Returns:
+            List of matches with file, line number, and content
+        """
+        names = self._generate_resource_names(user_id, project_id)
+        namespace = names["namespace"]
+
+        try:
+            # Get the pod
+            pods = await asyncio.to_thread(
+                self.core_v1.list_namespaced_pod,
+                namespace=namespace,
+                label_selector=f"app={names['deployment']}"
+            )
+
+            if not pods.items:
+                raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
+
+            pod_name = pods.items[0].metadata.name
+            container_name = "dev-server"
+
+            # Secure path
+            safe_dir = directory.replace("..", "").strip("/")
+            if not safe_dir or safe_dir == ".":
+                full_path = "/app"
+            else:
+                full_path = f"/app/{safe_dir}"
+
+            # Build grep command
+            case_flag = "" if case_sensitive else "-i"
+            grep_cmd = [
+                "/bin/sh", "-c",
+                f"cd {shlex.quote(full_path)} && grep -rn {case_flag} {shlex.quote(pattern)} --include={shlex.quote(file_pattern)} . 2>/dev/null | head -n {max_results}"
+            ]
+
+            output = await asyncio.to_thread(
+                self._exec_in_pod,
+                pod_name,
+                namespace,
+                container_name,
+                grep_cmd,
+                timeout=30
+            )
+
+            # Parse output (format: ./path/to/file:line_num:content)
+            matches = []
+            for line in output.strip().split('\n'):
+                if not line:
+                    continue
+
+                # Split on first two colons
+                parts = line.split(':', 2)
+                if len(parts) < 3:
+                    continue
+
+                file_path = parts[0].lstrip('./')
+                line_num = parts[1]
+                content = parts[2]
+
+                if line_num.isdigit():
+                    matches.append({
+                        "file": file_path,
+                        "line": int(line_num),
+                        "content": content
+                    })
+
+            logger.info(f"[GREP] Found {len(matches)} matches for '{pattern}'")
+            return matches
+
+        except Exception as e:
+            logger.error(f"[GREP] Failed to grep files: {e}", exc_info=True)
+            return []
+
     def track_activity(self, user_id: int, project_id: str) -> None:
         """
         Track activity for a development environment.

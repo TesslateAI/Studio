@@ -1028,15 +1028,18 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
                 if final_response:
                     full_response = final_response
 
-                # For IterativeAgent, save metadata
+                # For IterativeAgent, update metadata with completion info
                 if agent_model.agent_type == 'IterativeAgent':
-                    agent_metadata = {
-                        "agent_mode": True,
-                        "agent_type": agent_model.agent_type,
-                        "iterations": data.get('iterations', 0),
-                        "tool_calls_made": data.get('tool_calls_made', 0),
-                        "completion_reason": data.get('completion_reason', 'unknown')
-                    }
+                    if agent_metadata is None:
+                        agent_metadata = {
+                            "agent_mode": True,
+                            "agent_type": agent_model.agent_type,
+                            "steps": []
+                        }
+                    # Add summary fields from completion event
+                    agent_metadata["iterations"] = data.get('iterations', 0)
+                    agent_metadata["tool_calls_made"] = data.get('tool_calls_made', 0)
+                    agent_metadata["completion_reason"] = data.get('completion_reason', 'unknown')
             elif event_type == 'agent_step':
                 # Collect steps for metadata
                 if agent_metadata is None:

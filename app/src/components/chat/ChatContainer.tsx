@@ -94,10 +94,10 @@ export function ChatContainer({
           // Restore agent data from metadata if available
           if (msg.metadata && msg.metadata.agent_mode) {
             message.agentData = {
-              steps: msg.metadata.steps,
-              iterations: msg.metadata.iterations,
-              tool_calls_made: msg.metadata.tool_calls_made,
-              completion_reason: msg.metadata.completion_reason
+              steps: msg.metadata.steps || [],
+              iterations: msg.metadata.iterations || 0,
+              tool_calls_made: msg.metadata.tool_calls_made || 0,
+              completion_reason: msg.metadata.completion_reason || 'unknown'
             };
           }
 
