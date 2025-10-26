@@ -98,8 +98,7 @@ class StreamAgent(AbstractAgent):
             stream_params = {
                 "model": model_id,
                 "messages": messages,
-                "stream": True,
-                "temperature": 0.7
+                "stream": True
             }
 
             # Add OpenRouter-specific headers if needed

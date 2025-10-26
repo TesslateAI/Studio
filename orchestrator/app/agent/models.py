@@ -184,8 +184,7 @@ class OpenAIAdapter(ModelAdapter):
 
         request_params = {
             "model": model_id,
-            "messages": messages,
-            "temperature": temperature
+            "messages": messages
         }
 
         if max_tokens:
