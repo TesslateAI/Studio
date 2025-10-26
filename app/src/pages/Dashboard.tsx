@@ -383,7 +383,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="font-heading text-2xl sm:text-3xl md:text-4xl font-bold text-[var(--text)]">
-              Welcome back, {userName}! 👋
+              Welcome, {userName}! 👋
             </h1>
             <p className="text-[var(--text)]/60 mt-2">Ready to build something amazing?</p>
           </div>
@@ -513,7 +513,7 @@ export default function Dashboard() {
                   >
                     <FilePlus className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
                     <div className="text-sm font-semibold text-[var(--text)]">Template</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Start from scratch</div>
+                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Frontend-only (Vite)</div>
                   </button>
                   <button
                     onClick={() => setSourceType('base')}

@@ -15,7 +15,14 @@ import {
   ChartLine,
   Cpu,
   Wrench,
-  Plug
+  Plug,
+  File,
+  FileText,
+  FilePlus,
+  Terminal,
+  Globe,
+  ListChecks,
+  Pencil
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { DiscordSupport } from '../components/DiscordSupport';
@@ -46,6 +53,7 @@ interface MarketplaceItem {
   usage_count: number;
   features: string[];
   tags: string[];
+  tools?: string[] | null;
   is_featured: boolean;
   is_purchased: boolean;
   creator_type?: 'official' | 'community';
@@ -369,6 +377,38 @@ export default function Marketplace() {
   );
 }
 
+// All available tools in the system
+const ALL_TOOLS = [
+  'read_file',
+  'write_file',
+  'patch_file',
+  'multi_edit',
+  'bash_exec',
+  'shell_open',
+  'shell_exec',
+  'shell_close',
+  'get_project_info',
+  'todo_read',
+  'todo_write',
+  'web_fetch'
+];
+
+// Tool icon mapping
+const toolIcons: Record<string, { icon: React.ReactNode; label: string }> = {
+  read_file: { icon: <File size={14} weight="fill" />, label: 'Read' },
+  write_file: { icon: <FilePlus size={14} weight="fill" />, label: 'Write' },
+  patch_file: { icon: <Pencil size={14} weight="fill" />, label: 'Patch' },
+  multi_edit: { icon: <FileText size={14} weight="fill" />, label: 'Multi-Edit' },
+  bash_exec: { icon: <Terminal size={14} weight="fill" />, label: 'Bash' },
+  shell_open: { icon: <Terminal size={14} weight="fill" />, label: 'Shell Open' },
+  shell_exec: { icon: <Terminal size={14} weight="fill" />, label: 'Shell' },
+  shell_close: { icon: <Terminal size={14} weight="fill" />, label: 'Shell Close' },
+  get_project_info: { icon: <Package size={14} weight="fill" />, label: 'Project Info' },
+  todo_read: { icon: <ListChecks size={14} weight="fill" />, label: 'Todo Read' },
+  todo_write: { icon: <ListChecks size={14} weight="fill" />, label: 'Todo Write' },
+  web_fetch: { icon: <Globe size={14} weight="fill" />, label: 'Web Fetch' },
+};
+
 // Item Card
 function ItemCard({ item, onClick, onPurchase, theme }: {
   item: MarketplaceItem;
@@ -533,6 +573,32 @@ function ItemDetailModal({ item, onClose, onPurchase, theme }: {
                     <span className={`text-sm ${theme === 'light' ? 'text-black/80' : 'text-white/80'}`}>{feature}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tools Section - Only for agents */}
+          {item.item_type === 'agent' && (
+            <div className="mb-8">
+              <h3 className="font-heading font-semibold text-[var(--text)] mb-4 text-xl">Available Tools</h3>
+              <div className="flex flex-wrap gap-2">
+                {(item.tools && item.tools.length > 0 ? item.tools : ALL_TOOLS).map((toolName, idx) => {
+                  const tool = toolIcons[toolName];
+                  if (!tool) return null;
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+                        theme === 'light'
+                          ? 'bg-orange-50 border border-orange-200 text-orange-700'
+                          : 'bg-orange-500/10 border border-orange-500/20 text-orange-400'
+                      }`}
+                    >
+                      {tool.icon}
+                      <span>{tool.label}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

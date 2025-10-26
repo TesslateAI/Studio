@@ -12,6 +12,7 @@ from ..auth import (
 )
 from ..config import get_settings
 from ..services.litellm_service import litellm_service
+from ..services.discord_service import discord_service
 from ..utils.slug_generator import generate_username_slug
 import logging
 
@@ -123,6 +124,17 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 
     logger.info(f"User {db_user.username} registered and auto-logged in")
 
+    # Send Discord notification for signup
+    try:
+        await discord_service.send_signup_notification(
+            username=db_user.username,
+            email=db_user.email,
+            name=db_user.name,
+            user_id=str(db_user.id)
+        )
+    except Exception as e:
+        logger.error(f"Failed to send Discord signup notification: {e}")
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -163,6 +175,17 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
         refresh_token = await create_refresh_token(user, db)
 
         logger.info(f"Login successful for: {username_or_email}")
+
+        # Send Discord notification for login
+        try:
+            await discord_service.send_login_notification(
+                username=user.username,
+                email=user.email,
+                user_id=str(user.id)
+            )
+        except Exception as e:
+            logger.error(f"Failed to send Discord login notification: {e}")
+
         return {
             "access_token": access_token,
             "token_type": "bearer",

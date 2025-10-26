@@ -21,7 +21,14 @@ import {
   EyeSlash,
   CurrencyDollar,
   Circle,
-  CheckCircle
+  CheckCircle,
+  File,
+  FileText,
+  FilePlus,
+  Terminal,
+  Globe,
+  ListChecks,
+  Wrench
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { DiscordSupport } from '../components/DiscordSupport';
@@ -44,6 +51,7 @@ interface LibraryAgent {
   icon: string;
   pricing_type: string;
   features: string[];
+  tools?: string[] | null;
   purchase_date: string;
   purchase_type: string;
   expires_at: string | null;
@@ -97,6 +105,41 @@ interface Provider {
 }
 
 type TabType = 'agents' | 'models' | 'api-keys';
+
+// All available tools in the system
+const ALL_TOOLS = [
+  'read_file',
+  'write_file',
+  'patch_file',
+  'multi_edit',
+  'bash_exec',
+  'shell_open',
+  'shell_exec',
+  'shell_close',
+  'get_project_info',
+  'todo_read',
+  'todo_write',
+  'web_fetch'
+];
+
+// Tool icon mapping helper
+const getToolIcon = (toolName: string): { icon: React.ReactNode; label: string } | null => {
+  const toolIcons: Record<string, { icon: React.ReactNode; label: string }> = {
+    read_file: { icon: <File size={12} weight="fill" />, label: 'Read' },
+    write_file: { icon: <FilePlus size={12} weight="fill" />, label: 'Write' },
+    patch_file: { icon: <Pencil size={12} weight="fill" />, label: 'Patch' },
+    multi_edit: { icon: <FileText size={12} weight="fill" />, label: 'Multi-Edit' },
+    bash_exec: { icon: <Terminal size={12} weight="fill" />, label: 'Bash' },
+    shell_open: { icon: <Terminal size={12} weight="fill" />, label: 'Shell Open' },
+    shell_exec: { icon: <Terminal size={12} weight="fill" />, label: 'Shell' },
+    shell_close: { icon: <Terminal size={12} weight="fill" />, label: 'Shell Close' },
+    get_project_info: { icon: <Package size={12} weight="fill" />, label: 'Project Info' },
+    todo_read: { icon: <ListChecks size={12} weight="fill" />, label: 'Todo Read' },
+    todo_write: { icon: <ListChecks size={12} weight="fill" />, label: 'Todo Write' },
+    web_fetch: { icon: <Globe size={12} weight="fill" />, label: 'Web Fetch' },
+  };
+  return toolIcons[toolName] || null;
+};
 
 export default function Library() {
   const navigate = useNavigate();
@@ -1304,6 +1347,26 @@ function AgentCard({
             <span className="text-xs text-blue-400 font-medium">{currentModel}</span>
           </div>
         )}
+      </div>
+
+      {/* Tools */}
+      <div className="mb-4">
+        <div className="flex flex-wrap gap-1.5">
+          {(agent.tools && agent.tools.length > 0 ? agent.tools : ALL_TOOLS).map((toolName, idx) => {
+            const tool = getToolIcon(toolName);
+            if (!tool) return null;
+            return (
+              <div
+                key={idx}
+                className="flex items-center gap-1 px-2 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs rounded-md font-medium"
+                title={tool.label}
+              >
+                {tool.icon}
+                <span>{tool.label}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Features */}
