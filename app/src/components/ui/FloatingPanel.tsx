@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { useTheme } from '../../theme/ThemeContext';
 
 interface FloatingPanelProps {
   title: string;
@@ -21,6 +22,7 @@ export function FloatingPanel({
   defaultPosition = { x: 100, y: 100 },
   defaultSize = { width: 400, height: 500 }
 }: FloatingPanelProps) {
+  const { theme } = useTheme();
   const [position, setPosition] = useState(defaultPosition);
   const [size, setSize] = useState(defaultSize);
   const [isDragging, setIsDragging] = useState(false);
@@ -173,10 +175,14 @@ export function FloatingPanel({
         ref={panelRef}
         className={`
           floating-panel fixed flex flex-col
-          bg-[rgba(30,30,30,0.98)] backdrop-blur-xl
-          border border-white/20 rounded-lg
+          backdrop-blur-xl
+          border rounded-lg
           shadow-2xl overflow-hidden
           z-[200]
+          ${theme === 'dark'
+            ? 'bg-[rgba(30,30,30,0.98)] border-white/20'
+            : 'bg-[rgba(248,249,250,0.98)] border-black/10'
+          }
           ${isDocked ? 'resize-none rounded-none h-screen' : 'min-w-[300px] min-h-[200px]'}
           ${isDragging || isResizing ? 'cursor-grabbing transition-none select-none' : 'transition-all duration-200'}
         `}
@@ -187,18 +193,24 @@ export function FloatingPanel({
       >
         {/* Drag handle */}
         <div
-          className={`panel-drag-handle h-10 bg-black/20 border-b border-white/10 select-none flex items-center justify-between px-3 rounded-t-lg ${
-            isDragging ? 'cursor-grabbing' : 'cursor-grab'
-          }`}
+          className={`panel-drag-handle h-10 border-b select-none flex items-center justify-between px-3 rounded-t-lg ${
+            theme === 'dark'
+              ? 'bg-black/20 border-white/10'
+              : 'bg-white/40 border-black/5'
+          } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
             {icon && <span className="text-orange-500">{icon}</span>}
-            <span className="text-sm font-semibold text-white">{title}</span>
+            <span className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{title}</span>
           </div>
           <button
             onClick={onClose}
-            className="panel-close p-1 hover:bg-white/10 rounded text-gray-400 hover:text-white transition-colors"
+            className={`panel-close p-1 rounded transition-colors ${
+              theme === 'dark'
+                ? 'hover:bg-white/10 text-gray-400 hover:text-white'
+                : 'hover:bg-black/5 text-gray-600 hover:text-black'
+            }`}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -214,7 +226,9 @@ export function FloatingPanel({
         {/* Resize handle */}
         {!isDocked && (
           <div
-            className="resize-handle absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize z-10 after:content-[''] after:absolute after:bottom-1 after:right-1 after:w-2.5 after:h-2.5 after:border-r-2 after:border-b-2 after:border-white/30"
+            className={`resize-handle absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize z-10 after:content-[''] after:absolute after:bottom-1 after:right-1 after:w-2.5 after:h-2.5 after:border-r-2 after:border-b-2 ${
+              theme === 'dark' ? 'after:border-white/30' : 'after:border-black/20'
+            }`}
             onMouseDown={handleResizeStart}
           />
         )}

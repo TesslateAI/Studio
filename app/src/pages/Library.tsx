@@ -425,17 +425,17 @@ function AgentsTab({
     <>
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="p-4 bg-white/5 border border-white/10 rounded-lg">
+        <div className="p-4 bg-white/5 border border-[var(--text)]/15 rounded-lg">
           <div className="text-2xl font-bold text-[var(--text)] mb-1">{agents.length}</div>
           <div className="text-sm text-[var(--text)]/60">Total Agents</div>
         </div>
-        <div className="p-4 bg-white/5 border border-white/10 rounded-lg">
+        <div className="p-4 bg-white/5 border border-[var(--text)]/15 rounded-lg">
           <div className="text-2xl font-bold text-[var(--text)] mb-1">
             {agents.filter(a => a.is_enabled).length}
           </div>
           <div className="text-sm text-[var(--text)]/60">Active</div>
         </div>
-        <div className="p-4 bg-white/5 border border-white/10 rounded-lg">
+        <div className="p-4 bg-white/5 border border-[var(--text)]/15 rounded-lg">
           <div className="text-2xl font-bold text-[var(--text)] mb-1">
             {agents.filter(a => a.is_custom).length}
           </div>
@@ -603,7 +603,7 @@ function ModelsTab({
 
             {/* API Keys List */}
             {loadingKeys ? (
-              <div className="px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)]/40">
+              <div className="px-4 py-3 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)]/40">
                 Loading keys...
               </div>
             ) : openRouterKeys.length > 0 ? (
@@ -611,7 +611,7 @@ function ModelsTab({
                 {openRouterKeys.map((key) => (
                   <div
                     key={key.id}
-                    className="bg-[var(--surface)] border border-white/10 rounded-lg p-3 flex items-center justify-between"
+                    className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-3 flex items-center justify-between"
                   >
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-green-500/10 rounded-lg">
@@ -675,14 +675,14 @@ function ModelsTab({
             Diagram Generation Model
           </label>
           {loadingPreferences ? (
-            <div className="px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)]/40">
+            <div className="px-4 py-3 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)]/40">
               Loading preferences...
             </div>
           ) : (
             <select
               value={diagramModel}
               onChange={(e) => handleDiagramModelChange(e.target.value)}
-              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 transition-colors"
+              className="w-full px-4 py-3 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 transition-colors [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
             >
               <option value="">Select a model...</option>
               {[...systemModels, ...customModels].map((model) => (
@@ -750,7 +750,7 @@ function ModelsTab({
                 </div>
 
                 {/* Pricing */}
-                <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
+                <div className="grid grid-cols-2 gap-3 pt-3 border-t border-[var(--text)]/15">
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-[var(--text)]/60">Input:</div>
                     <div className="text-sm font-semibold text-[var(--text)]">
@@ -786,7 +786,7 @@ function ModelsTab({
           {systemModels.map((model) => (
             <div
               key={model.id}
-              className="bg-[var(--surface)] border border-white/10 rounded-lg p-4 hover:border-orange-500/30 transition-all"
+              className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4 hover:border-orange-500/30 transition-all"
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
@@ -808,7 +808,7 @@ function ModelsTab({
               </div>
 
               {/* Pricing */}
-              <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-white/10">
+              <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-[var(--text)]/15">
                 <div className="flex items-center gap-2">
                   <div className="text-xs text-[var(--text)]/60">Input:</div>
                   <div className="text-sm font-semibold text-[var(--text)]">
@@ -841,7 +841,7 @@ function ModelsTab({
             {externalProviders.map((provider) => (
               <div
                 key={provider.provider}
-                className="bg-[var(--surface)] border border-white/10 rounded-lg p-4"
+                className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div>
@@ -936,7 +936,7 @@ function ApiKeysTab({
 
       {/* API Keys List */}
       {apiKeys.length === 0 ? (
-        <div className="text-center py-16 bg-[var(--surface)] border border-white/10 rounded-lg">
+        <div className="text-center py-16 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg">
           <Key size={48} className="mx-auto mb-4 text-[var(--text)]/20" />
           <p className="text-[var(--text)]/60 mb-4">No API keys configured</p>
           <button
@@ -961,7 +961,7 @@ function ApiKeysTab({
           {providers.map((provider) => (
             <div
               key={provider.id}
-              className="bg-[var(--surface)] border border-white/10 rounded-lg p-4"
+              className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4"
             >
               <h4 className="font-semibold text-[var(--text)] mb-1">{provider.name}</h4>
               <p className="text-xs text-[var(--text)]/60 mb-2">{provider.description}</p>
@@ -1004,7 +1004,7 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
   };
 
   return (
-    <div className="bg-[var(--surface)] border border-white/10 rounded-lg p-4 flex items-center justify-between">
+    <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4 flex items-center justify-between">
       <div className="flex items-center gap-4">
         <div className="p-3 bg-purple-500/10 rounded-lg">
           <Key size={20} className="text-purple-400" />
@@ -1031,7 +1031,7 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
       {/* Delete Confirmation */}
       {showDelete && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-[var(--surface)] border border-white/10 rounded-lg p-6 max-w-md">
+          <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-6 max-w-md">
             <h3 className="text-lg font-semibold text-[var(--text)] mb-4">Delete API Key?</h3>
             <p className="text-[var(--text)]/60 mb-6">
               Are you sure you want to delete this {apiKey.provider} API key? This action cannot be undone.
@@ -1095,7 +1095,7 @@ function AddApiKeyModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-white/10 rounded-xl max-w-md w-full p-6">
+      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-[var(--text)]">Add API Key</h2>
           <button
@@ -1114,7 +1114,7 @@ function AddApiKeyModal({
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
               required
             >
               <option value="">Select a provider...</option>
@@ -1135,7 +1135,7 @@ function AddApiKeyModal({
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="w-full px-4 py-2 pr-12 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm"
+                className="w-full px-4 py-2 pr-12 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm"
                 placeholder="sk-..."
                 required
               />
@@ -1157,7 +1157,7 @@ function AddApiKeyModal({
               type="text"
               value={keyName}
               onChange={(e) => setKeyName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
               placeholder="My API Key"
             />
             <p className="mt-1 text-xs text-[var(--text)]/40">
@@ -1165,7 +1165,7 @@ function AddApiKeyModal({
             </p>
           </div>
 
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-white/10">
+          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
             <button
               type="button"
               onClick={onClose}
@@ -1220,7 +1220,7 @@ function AgentCard({
   return (
     <div className={`relative bg-[var(--surface)] border rounded-2xl p-6 transition-all ${
       agent.is_enabled
-        ? 'border-white/10 hover:border-orange-500/30'
+        ? 'border-[var(--text)]/15 hover:border-orange-500/30'
         : 'border-white/5 opacity-60'
     }`}>
       {/* Status Badge - Top Right */}
@@ -1279,7 +1279,7 @@ function AgentCard({
             <select
               value={currentModel}
               onChange={(e) => onModelChange(e.target.value)}
-              className="w-full px-3 py-2 pl-8 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 text-xs font-medium focus:outline-none focus:border-blue-500/40 hover:bg-blue-500/15 transition-colors cursor-pointer appearance-none pr-8"
+              className="w-full px-3 py-2 pl-8 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 text-xs font-medium focus:outline-none focus:border-blue-500/40 hover:bg-blue-500/15 transition-colors cursor-pointer appearance-none pr-8 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
             >
               {availableModels.length > 0 ? (
                 availableModels.map((modelName) => (
@@ -1319,7 +1319,7 @@ function AgentCard({
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2 pt-4 border-t border-white/10">
+      <div className="flex items-center gap-2 pt-4 border-t border-[var(--text)]/15">
         {canEdit && (
           <button
             onClick={onEdit}
@@ -1377,7 +1377,7 @@ function AgentCard({
       <div className="mt-3">
         <button
           onClick={onRemove}
-          className="w-full py-2 px-3 bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/20 text-[var(--text)]/60 hover:text-red-400 rounded-lg transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2 px-3 bg-white/5 hover:bg-red-500/10 border border-[var(--text)]/15 hover:border-red-500/20 text-[var(--text)]/60 hover:text-red-400 rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <Trash size={16} />
           Remove from Library
@@ -1428,7 +1428,7 @@ function EditAgentModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-white/10 rounded-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
             <Pencil size={24} />
@@ -1451,7 +1451,7 @@ function EditAgentModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
               required
             />
           </div>
@@ -1464,7 +1464,7 @@ function EditAgentModal({
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
               required
             />
           </div>
@@ -1476,7 +1476,7 @@ function EditAgentModal({
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
               disabled={agent.source_type !== 'open' && !agent.is_custom}
             >
               {availableModels.length > 0 ? (
@@ -1515,7 +1515,7 @@ function EditAgentModal({
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={10}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm resize-y"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm resize-y"
               required
             />
             <p className="mt-1 text-xs text-[var(--text)]/40">
@@ -1523,7 +1523,7 @@ function EditAgentModal({
             </p>
           </div>
 
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-white/10">
+          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
             <button
               type="button"
               onClick={onClose}
@@ -1581,7 +1581,7 @@ function AddCustomModelModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-white/10 rounded-xl max-w-md w-full p-6">
+      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
             <Plus size={24} />
@@ -1604,7 +1604,7 @@ function AddCustomModelModal({
               type="text"
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm"
               placeholder="openrouter/model-name"
               required
             />
@@ -1621,7 +1621,7 @@ function AddCustomModelModal({
               type="text"
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
               placeholder="My Custom Model"
               required
             />
@@ -1637,7 +1637,7 @@ function AddCustomModelModal({
                 step="0.01"
                 value={pricingInput}
                 onChange={(e) => setPricingInput(e.target.value)}
-                className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
                 placeholder="0.00"
               />
             </div>
@@ -1650,13 +1650,13 @@ function AddCustomModelModal({
                 step="0.01"
                 value={pricingOutput}
                 onChange={(e) => setPricingOutput(e.target.value)}
-                className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
                 placeholder="0.00"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-white/10">
+          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
             <button
               type="button"
               onClick={onClose}

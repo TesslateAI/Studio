@@ -89,12 +89,12 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
       TableRow,
       TableHeader.configure({
         HTMLAttributes: {
-          class: 'border border-white/20 bg-white/5 px-3 py-2 text-left font-semibold',
+          class: 'border border-[var(--text)]/20 bg-white/5 px-3 py-2 text-left font-semibold',
         },
       }),
       TableCell.configure({
         HTMLAttributes: {
-          class: 'border border-white/20 px-3 py-2',
+          class: 'border border-[var(--text)]/20 px-3 py-2',
         },
       }),
       TaskList.configure({
@@ -216,11 +216,11 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
   return (
     <div className="h-full flex flex-col bg-[var(--background)]">
       {/* Toolbar */}
-      <div className="flex-shrink-0 border-b border-white/10 bg-[var(--surface)]/50 backdrop-blur-sm">
+      <div className="flex-shrink-0 border-b border-[var(--text)]/15 bg-[var(--surface)]/50 backdrop-blur-sm">
         {/* Main Toolbar */}
         <div className="flex items-center gap-1 p-2 flex-wrap">
           {/* Text Formatting */}
-          <div className="flex items-center gap-1 pr-2 border-r border-white/10">
+          <div className="flex items-center gap-1 pr-2 border-r border-[var(--text)]/15">
             <button
               onClick={() => editor.chain().focus().toggleBold().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
@@ -269,7 +269,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
           </div>
 
           {/* Headings */}
-          <div className="flex items-center gap-1 pr-2 border-r border-white/10">
+          <div className="flex items-center gap-1 pr-2 border-r border-[var(--text)]/15">
             <button
               onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
@@ -300,7 +300,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
           </div>
 
           {/* Lists */}
-          <div className="flex items-center gap-1 pr-2 border-r border-white/10">
+          <div className="flex items-center gap-1 pr-2 border-r border-[var(--text)]/15">
             <button
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
@@ -331,7 +331,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
           </div>
 
           {/* Alignment */}
-          <div className="flex items-center gap-1 pr-2 border-r border-white/10">
+          <div className="flex items-center gap-1 pr-2 border-r border-[var(--text)]/15">
             <button
               onClick={() => editor.chain().focus().setTextAlign('left').run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
@@ -362,7 +362,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
           </div>
 
           {/* Insert Elements */}
-          <div className="flex items-center gap-1 pr-2 border-r border-white/10">
+          <div className="flex items-center gap-1 pr-2 border-r border-[var(--text)]/15">
             <button
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
@@ -407,7 +407,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
           </div>
 
           {/* History */}
-          <div className="flex items-center gap-1 pr-2 border-r border-white/10">
+          <div className="flex items-center gap-1 pr-2 border-r border-[var(--text)]/15">
             <button
               onClick={() => editor.chain().focus().undo().run()}
               disabled={!editor.can().undo()}

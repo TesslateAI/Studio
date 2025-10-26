@@ -1,26 +1,38 @@
 import { useState, useEffect } from 'react';
-import { GitBranch, Sparkle, RefreshCw } from 'lucide-react';
+import { GitBranch, Sparkle, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { diagramApi, projectsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import mermaid from 'mermaid';
+import { useTheme } from '../../theme/ThemeContext';
 
 interface ArchitecturePanelProps {
   projectSlug: string;
 }
 
 export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
+  const { theme } = useTheme();
   const [diagram, setDiagram] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [modelUsed, setModelUsed] = useState<string>('');
   const [diagramSvg, setDiagramSvg] = useState<string>('');
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
-    // Initialize Mermaid
+    // Initialize Mermaid with theme-aware colors
+    const isDark = theme === 'dark';
     mermaid.initialize({
       startOnLoad: false,
-      theme: 'dark',
-      themeVariables: {
+      theme: isDark ? 'dark' : 'default',
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true,
+        curve: 'basis',
+        padding: 40,
+        nodeSpacing: 100,
+        rankSpacing: 100,
+      },
+      themeVariables: isDark ? {
         primaryColor: '#f97316',
         primaryTextColor: '#fff',
         primaryBorderColor: '#fb923c',
@@ -32,19 +44,37 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
         secondBkg: '#171717',
         border1: '#404040',
         border2: '#525252',
+        textColor: '#e2e2e2',
+        fontSize: '24px',
+        fontFamily: 'DM Sans, sans-serif',
+      } : {
+        primaryColor: '#f97316',
+        primaryTextColor: '#1a1a1a',
+        primaryBorderColor: '#fb923c',
+        lineColor: '#fb923c',
+        secondaryColor: '#7c3aed',
+        tertiaryColor: '#06b6d4',
+        background: '#ffffff',
+        mainBkg: '#f8f9fa',
+        secondBkg: '#ffffff',
+        border1: '#e5e7eb',
+        border2: '#d1d5db',
+        textColor: '#1a1a1a',
+        fontSize: '24px',
+        fontFamily: 'DM Sans, sans-serif',
       },
     });
 
-    // Load saved diagram on mount
-    loadSavedDiagram();
-  }, [projectSlug]);
-
-  useEffect(() => {
-    // Render diagram when it changes
+    // Re-render diagram when theme changes
     if (diagram) {
       renderDiagram();
     }
-  }, [diagram]);
+  }, [theme, diagram]);
+
+  useEffect(() => {
+    // Load saved diagram on mount
+    loadSavedDiagram();
+  }, [projectSlug]);
 
   const loadSavedDiagram = async () => {
     try {
@@ -61,7 +91,8 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
 
   const renderDiagram = async () => {
     try {
-      const { svg } = await mermaid.render('mermaid-diagram', diagram);
+      const uniqueId = `mermaid-diagram-${Date.now()}`;
+      const { svg } = await mermaid.render(uniqueId, diagram);
       setDiagramSvg(svg);
     } catch (error) {
       console.error('Failed to render Mermaid diagram:', error);
@@ -91,8 +122,8 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
   };
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="panel-section p-6">
+    <div className="h-full flex flex-col">
+      <div className="panel-section p-6 flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -127,10 +158,39 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
 
         {/* Diagram Display */}
         {diagram ? (
-          <div className="space-y-4">
-            <div className="bg-white/5 border border-white/10 rounded-lg p-6 overflow-x-auto">
+          <div className="space-y-4 flex-1 flex flex-col min-h-0">
+            <div className="diagram-scroll-container bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg flex-1 overflow-auto p-4 relative">
+              {/* Zoom Controls */}
+              <div className="absolute top-4 right-4 z-10 flex gap-2">
+                <button
+                  onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
+                  className="p-2 bg-[var(--surface)] border border-[var(--text)]/20 rounded-lg hover:bg-orange-500/10 hover:border-orange-500/50 transition-colors"
+                  title="Zoom Out"
+                >
+                  <ZoomOut size={16} className="text-[var(--text)]" />
+                </button>
+                <button
+                  onClick={() => setZoom(1)}
+                  className="p-2 bg-[var(--surface)] border border-[var(--text)]/20 rounded-lg hover:bg-orange-500/10 hover:border-orange-500/50 transition-colors"
+                  title="Reset Zoom"
+                >
+                  <Maximize2 size={16} className="text-[var(--text)]" />
+                </button>
+                <button
+                  onClick={() => setZoom(Math.min(3, zoom + 0.25))}
+                  className="p-2 bg-[var(--surface)] border border-[var(--text)]/20 rounded-lg hover:bg-orange-500/10 hover:border-orange-500/50 transition-colors"
+                  title="Zoom In"
+                >
+                  <ZoomIn size={16} className="text-[var(--text)]" />
+                </button>
+                <div className="px-3 py-2 bg-[var(--surface)] border border-[var(--text)]/20 rounded-lg text-xs text-[var(--text)]">
+                  {Math.round(zoom * 100)}%
+                </div>
+              </div>
+
               <div
-                className="mermaid-container flex items-center justify-center"
+                className="mermaid-container"
+                style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
                 dangerouslySetInnerHTML={{ __html: diagramSvg }}
               />
             </div>
@@ -148,12 +208,15 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
             )}
           </div>
         ) : loadingInitial ? (
-          <div className="bg-white/5 border border-white/10 rounded-lg p-8 text-center">
-            <RefreshCw size={48} className="mx-auto mb-4 text-[var(--text)]/20 animate-spin" />
-            <p className="text-[var(--text)]/60">Loading diagram...</p>
+          <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-8 text-center flex-1 flex items-center justify-center">
+            <div>
+              <RefreshCw size={48} className="mx-auto mb-4 text-[var(--text)]/20 animate-spin" />
+              <p className="text-[var(--text)]/60">Loading diagram...</p>
+            </div>
           </div>
         ) : (
-          <div className="bg-white/5 border border-white/10 rounded-lg p-8 text-center">
+          <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-8 text-center flex-1 flex items-center justify-center">
+            <div>
             <GitBranch size={48} className="mx-auto mb-4 text-[var(--text)]/20" />
             <p className="text-[var(--text)]/60 mb-4">
               No diagram generated yet
@@ -178,6 +241,7 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
                 </>
               )}
             </button>
+            </div>
           </div>
         )}
       </div>

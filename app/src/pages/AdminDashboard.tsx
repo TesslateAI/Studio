@@ -179,7 +179,7 @@ export default function AdminDashboard() {
 
   const renderMetricCard = (title: string, value: any, change?: number, icon?: React.ReactNode, suffix?: string) => {
     return (
-      <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+      <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
         <div className="flex items-center justify-between mb-2">
           <span className="text-gray-400 text-sm font-medium">{title}</span>
           {icon && <div className="text-gray-500">{icon}</div>}
@@ -205,7 +205,7 @@ export default function AdminDashboard() {
     const maxCount = Math.max(...detailedMetrics.users.daily_new_users.map((d: any) => d.count));
 
     return (
-      <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+      <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
         <h3 className="text-lg font-semibold text-white mb-4">User Growth</h3>
         <div className="h-64 flex items-end space-x-2">
           {detailedMetrics.users.daily_new_users.map((d: any, idx: number) => (
@@ -237,7 +237,7 @@ export default function AdminDashboard() {
     const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
     return (
-      <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+      <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
         <h3 className="text-lg font-semibold text-white mb-4">Token Usage by Model</h3>
         <div className="space-y-3">
           {models.map((model, idx) => {
@@ -276,7 +276,7 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-900">
       {/* Header */}
-      <div className="bg-gray-800 border-b border-gray-700">
+      <div className="bg-gray-800 border-b border-[var(--text)]/15">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -287,7 +287,7 @@ export default function AdminDashboard() {
               <select
                 value={selectedPeriod}
                 onChange={(e) => setSelectedPeriod(Number(e.target.value))}
-                className="bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-gray-600"
+                className="bg-gray-700 text-white rounded-lg px-3 py-2 text-sm border border-[var(--text)]/20 [&>option]:bg-gray-700 [&>option]:text-white"
               >
                 <option value={7}>Last 7 days</option>
                 <option value={30}>Last 30 days</option>
@@ -313,7 +313,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Tabs */}
-      <div className="bg-gray-800 border-b border-gray-700">
+      <div className="bg-gray-800 border-b border-[var(--text)]/15">
         <div className="container mx-auto px-4">
           <div className="flex space-x-8">
             {['overview', 'users', 'projects', 'sessions', 'tokens', 'marketplace', 'agents'].map(tab => (
@@ -381,7 +381,7 @@ export default function AdminDashboard() {
               {renderMetricCard('Avg per User', detailedMetrics.projects.avg_projects_per_user.toFixed(1))}
               {renderMetricCard('Git Enabled', detailedMetrics.projects.git_enabled_projects)}
             </div>
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
               <h3 className="text-lg font-semibold text-white mb-4">Project Creation Over Time</h3>
               <div className="h-64 flex items-end space-x-1">
                 {detailedMetrics.projects.daily_projects?.map((d: any, idx: number) => {
@@ -413,7 +413,7 @@ export default function AdminDashboard() {
               {renderMetricCard('Avg Duration', detailedMetrics.sessions.avg_session_duration.toFixed(0), undefined, undefined, ' min')}
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+              <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
                 <h3 className="text-lg font-semibold text-white mb-4">Sessions Over Time</h3>
                 <div className="h-64 flex items-end space-x-1">
                   {detailedMetrics.sessions.daily_sessions?.map((d: any, idx: number) => {
@@ -433,7 +433,7 @@ export default function AdminDashboard() {
                   })}
                 </div>
               </div>
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+              <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
                 <h3 className="text-lg font-semibold text-white mb-4">Session Metrics</h3>
                 <div className="space-y-4">
                   <div>
@@ -470,7 +470,7 @@ export default function AdminDashboard() {
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {renderTokenChart()}
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+              <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
                 <h3 className="text-lg font-semibold text-white mb-4">Top Users by Token Usage</h3>
                 <div className="space-y-2">
                   {detailedMetrics.tokens.top_users?.slice(0, 5).map((user: any, idx: number) => (
@@ -498,7 +498,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Agents Section */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
               <h3 className="text-lg font-semibold text-white mb-4">Agents Marketplace</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <div>
@@ -559,7 +559,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Bases Section */}
-            <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
               <h3 className="text-lg font-semibold text-white mb-4">Bases Marketplace</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div>
@@ -829,12 +829,12 @@ function AgentManagement() {
       </div>
 
       {/* Filters */}
-      <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+      <div className="bg-gray-800 rounded-lg p-4 border border-[var(--text)]/15">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <select
             value={filter.source_type}
             onChange={(e) => setFilter({...filter, source_type: e.target.value})}
-            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600"
+            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700 [&>option]:text-white"
           >
             <option value="">All Source Types</option>
             <option value="open">Open Source</option>
@@ -844,7 +844,7 @@ function AgentManagement() {
           <select
             value={filter.pricing_type}
             onChange={(e) => setFilter({...filter, pricing_type: e.target.value})}
-            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600"
+            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700 [&>option]:text-white"
           >
             <option value="">All Pricing Types</option>
             <option value="free">Free</option>
@@ -856,7 +856,7 @@ function AgentManagement() {
           <select
             value={filter.is_active}
             onChange={(e) => setFilter({...filter, is_active: e.target.value})}
-            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600"
+            className="bg-gray-700 text-white rounded-lg px-3 py-2 border border-[var(--text)]/20 [&>option]:bg-gray-700 [&>option]:text-white"
           >
             <option value="">All Status</option>
             <option value="true">Active</option>
@@ -866,9 +866,9 @@ function AgentManagement() {
       </div>
 
       {/* Agents List */}
-      <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+      <div className="bg-gray-800 rounded-lg border border-[var(--text)]/15 overflow-hidden">
         <table className="w-full">
-          <thead className="bg-gray-750 border-b border-gray-700">
+          <thead className="bg-gray-750 border-b border-[var(--text)]/15">
             <tr>
               <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Agent</th>
               <th className="text-left px-6 py-3 text-gray-400 font-medium text-sm">Category</th>
@@ -1115,8 +1115,8 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-gray-800 rounded-lg border border-gray-700 max-w-4xl w-full my-8">
-        <div className="p-6 border-b border-gray-700">
+      <div className="bg-gray-800 rounded-lg border border-[var(--text)]/15 max-w-4xl w-full my-8">
+        <div className="p-6 border-b border-[var(--text)]/15">
           <h2 className="text-2xl font-bold text-white">
             {isEdit ? (canEdit ? 'Edit Agent' : 'View Agent') : 'Create New Agent'}
           </h2>
@@ -1138,7 +1138,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 value={formData.name}
                 onChange={(e) => setFormData({...formData, name: e.target.value})}
-                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               />
             </div>
             <div>
@@ -1148,7 +1148,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 value={formData.icon}
                 onChange={(e) => setFormData({...formData, icon: e.target.value})}
-                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                 placeholder="🤖"
               />
             </div>
@@ -1162,7 +1162,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               disabled={!canEdit}
               value={formData.description}
               onChange={(e) => setFormData({...formData, description: e.target.value})}
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               maxLength={500}
             />
           </div>
@@ -1174,7 +1174,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               disabled={!canEdit}
               value={formData.long_description}
               onChange={(e) => setFormData({...formData, long_description: e.target.value})}
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               rows={3}
             />
           </div>
@@ -1186,7 +1186,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               disabled={!canEdit}
               value={formData.system_prompt}
               onChange={(e) => setFormData({...formData, system_prompt: e.target.value})}
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 font-mono text-sm disabled:opacity-50"
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 font-mono text-sm disabled:opacity-50"
               rows={6}
             />
           </div>
@@ -1204,7 +1204,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 value={formData.category}
                 onChange={(e) => setFormData({...formData, category: e.target.value})}
-                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                 placeholder="builder"
               />
             </div>
@@ -1218,7 +1218,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 value={formData.agent_type}
                 onChange={(e) => setFormData({...formData, agent_type: e.target.value})}
-                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
               >
                 <option value="StreamAgent">StreamAgent (streaming mode)</option>
                 <option value="IterativeAgent">IterativeAgent (agent mode)</option>
@@ -1237,7 +1237,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 value={formData.model}
                 onChange={(e) => setFormData({...formData, model: e.target.value})}
-                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
               >
                 {availableModels.map(model => (
                   <option key={model} value={model}>{model}</option>
@@ -1251,7 +1251,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 value={formData.source_type}
                 onChange={(e) => setFormData({...formData, source_type: e.target.value})}
-                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
               >
                 <option value="closed">Closed Source</option>
                 <option value="open">Open Source</option>
@@ -1267,7 +1267,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               disabled={!canEdit}
               value={formData.pricing_type}
               onChange={(e) => setFormData({...formData, pricing_type: e.target.value})}
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50 [&>option]:bg-gray-700 [&>option]:text-white"
             >
               <option value="free">Free</option>
               <option value="monthly">Monthly Subscription</option>
@@ -1287,7 +1287,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 value={formData.price}
                 onChange={(e) => setFormData({...formData, price: parseFloat(e.target.value) || 0})}
-                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                 min="0"
                 placeholder="e.g., 9.99"
               />
@@ -1306,7 +1306,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                   disabled={!canEdit}
                   value={formData.api_pricing_input}
                   onChange={(e) => setFormData({...formData, api_pricing_input: parseFloat(e.target.value) || 0})}
-                  className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                  className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                   min="0"
                   placeholder="e.g., 0.50"
                 />
@@ -1321,7 +1321,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                   disabled={!canEdit}
                   value={formData.api_pricing_output}
                   onChange={(e) => setFormData({...formData, api_pricing_output: parseFloat(e.target.value) || 0})}
-                  className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+                  className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
                   min="0"
                   placeholder="e.g., 1.50"
                 />
@@ -1339,7 +1339,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               disabled={!canEdit}
               value={formData.features}
               onChange={(e) => setFormData({...formData, features: e.target.value})}
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               placeholder="Real-time streaming, Code generation"
             />
           </div>
@@ -1353,7 +1353,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
               disabled={!canEdit}
               value={formData.tags}
               onChange={(e) => setFormData({...formData, tags: e.target.value})}
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-gray-600 disabled:opacity-50"
+              className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 border border-[var(--text)]/20 disabled:opacity-50"
               placeholder="react, typescript, streaming"
             />
           </div>
@@ -1366,7 +1366,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 checked={formData.is_forkable}
                 onChange={(e) => setFormData({...formData, is_forkable: e.target.checked})}
-                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+                className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">Is Forkable (open source only)</span>
             </label>
@@ -1377,7 +1377,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 checked={formData.requires_user_keys}
                 onChange={(e) => setFormData({...formData, requires_user_keys: e.target.checked})}
-                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+                className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">
                 Requires User Keys
@@ -1391,7 +1391,7 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 checked={formData.is_featured}
                 onChange={(e) => setFormData({...formData, is_featured: e.target.checked})}
-                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+                className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">Featured</span>
             </label>
@@ -1402,14 +1402,14 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
                 disabled={!canEdit}
                 checked={formData.is_active}
                 onChange={(e) => setFormData({...formData, is_active: e.target.checked})}
-                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 disabled:opacity-50"
+                className="w-5 h-5 rounded border-[var(--text)]/20 bg-gray-700 text-blue-600 disabled:opacity-50"
               />
               <span className="text-gray-300">Active</span>
             </label>
           </div>
         </form>
 
-        <div className="p-6 border-t border-gray-700 flex items-center justify-end space-x-4">
+        <div className="p-6 border-t border-[var(--text)]/15 flex items-center justify-end space-x-4">
           <button
             type="button"
             onClick={onClose}

@@ -287,21 +287,27 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   if (!githubConnected) {
     return (
       <>
-        <div className="h-full flex flex-col items-center justify-center p-6">
+        <div className="h-full flex items-center justify-center p-8">
           <div className="text-center max-w-md">
-            <div className="w-20 h-20 bg-purple-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <GitBranch className="w-10 h-10 text-purple-400" weight="fill" />
+            <div className="mb-6 flex justify-center">
+              <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center backdrop-blur-sm border border-[var(--text)]/15">
+                <GitBranch className="w-12 h-12 text-purple-400" weight="fill" />
+              </div>
             </div>
-            <h3 className="text-xl font-bold text-[var(--text)] mb-2">Connect to GitHub</h3>
-            <p className="text-gray-400 mb-6">
+            <h3 className="text-2xl font-bold text-[var(--text)] mb-3">
+              Connect to GitHub
+            </h3>
+            <p className="text-gray-400 leading-relaxed">
               Link your GitHub account to enable version control, collaborate with others, and deploy your projects.
             </p>
-            <button
-              onClick={() => setShowConnectModal(true)}
-              className="w-full py-3 bg-purple-500 hover:bg-purple-600 text-white rounded-xl font-semibold transition-all"
-            >
-              Connect GitHub Account
-            </button>
+            <div className="mt-8 pt-8 border-t border-[var(--text)]/15">
+              <button
+                onClick={() => setShowConnectModal(true)}
+                className="w-full py-3 bg-purple-500 hover:bg-purple-600 text-white rounded-xl font-semibold transition-all"
+              >
+                Connect GitHub Account
+              </button>
+            </div>
           </div>
         </div>
 
@@ -351,7 +357,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
             <div className="space-y-3">
               <button
                 onClick={() => setShowImportModal(true)}
-                className="w-full p-4 bg-white/5 hover:bg-white/8 border border-white/10 rounded-xl text-left transition-all group"
+                className="w-full p-4 bg-white/5 hover:bg-white/8 border border-[var(--text)]/15 rounded-xl text-left transition-all group"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center group-hover:bg-blue-500/30 transition-colors">
@@ -431,7 +437,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
 
                 {/* Branch Dropdown Menu */}
                 {showBranchMenu && (
-                  <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--surface)] border border-white/10 rounded-lg shadow-xl z-50 max-h-64 overflow-hidden flex flex-col">
+                  <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg shadow-xl z-50 max-h-64 overflow-hidden flex flex-col">
                     {/* Current Branch */}
                     <div className="p-2 border-b border-white/5">
                       <div className="text-xs text-gray-400 mb-1">Current Branch</div>
@@ -485,7 +491,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                               }
                             }}
                             placeholder="new-branch-name"
-                            className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-2 py-1 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full bg-white/5 border border-[var(--text)]/15 text-[var(--text)] px-2 py-1 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
                             autoFocus
                           />
                           <div className="flex gap-1">
@@ -555,7 +561,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                 <button
                   onClick={handlePull}
                   disabled={isPulling || isLoadingStatus}
-                  className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                  className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
                 >
                   <CloudArrowDown className="w-4 h-4" />
                   {isPulling ? 'Pulling...' : 'Pull'}
@@ -563,7 +569,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                 <button
                   onClick={handlePush}
                   disabled={isPushing || isLoadingStatus || totalChanges === 0}
-                  className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                  className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
                 >
                   <CloudArrowUp className="w-4 h-4" />
                   {isPushing ? 'Pushing...' : 'Push'}

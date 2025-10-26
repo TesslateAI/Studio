@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { File, Folder, ChevronRight, ChevronDown, FileText, Code } from 'lucide-react';
 import Editor from '@monaco-editor/react';
+import { useTheme } from '../theme/ThemeContext';
 
 interface FileNode {
   name: string;
@@ -17,6 +18,7 @@ interface CodeEditorProps {
 }
 
 export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEditorProps) {
+  const { theme } = useTheme();
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
@@ -237,7 +239,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
                 value={selectedFileContent.content}
                 onChange={handleEditorChange}
                 onMount={handleEditorDidMount}
-                theme="vs-dark"
+                theme={theme === 'dark' ? 'vs-dark' : 'vs'}
                 options={{
                   fontSize: 14,
                   fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",

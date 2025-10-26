@@ -86,7 +86,7 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
                   w-full p-4 rounded-lg border-2 transition-all text-left
                   ${previewMode === 'normal'
                     ? 'border-orange-500 bg-orange-500/10'
-                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                    : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
                   }
                   ${saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
@@ -117,7 +117,7 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
                   w-full p-4 rounded-lg border-2 transition-all text-left
                   ${previewMode === 'browser-tabs'
                     ? 'border-orange-500 bg-orange-500/10'
-                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                    : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
                   }
                   ${saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}

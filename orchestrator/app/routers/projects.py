@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+from sqlalchemy.orm.attributes import flag_modified
 from ..database import get_db
 from ..models import Project, User, ProjectFile, Chat, Message
 from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema
@@ -1488,10 +1489,11 @@ async def update_project_settings(
         current_settings.update(new_settings)
 
         project.settings = current_settings
+        flag_modified(project, 'settings')  # Mark JSON field as modified for SQLAlchemy
         await db.commit()
         await db.refresh(project)
 
-        logger.info(f"[SETTINGS] Updated settings for project {project.id}")
+        logger.info(f"[SETTINGS] Updated settings for project {project.id}: {new_settings}")
 
         return {
             "message": "Settings updated successfully",
