@@ -54,7 +54,7 @@ async def create_agent_from_db_model(
         An instantiated agent ready to run
 
     Raises:
-        ValueError: If the agent_type is not recognized
+        ValueError: If the agent_type is not recognized or system_prompt is missing
 
     Example:
         >>> agent_model = await db.get(MarketplaceAgent, 1)
@@ -63,6 +63,13 @@ async def create_agent_from_db_model(
         ...     print(event)
     """
     agent_type_str = agent_model.agent_type
+
+    # Validate that agent has a system prompt
+    if not agent_model.system_prompt or not agent_model.system_prompt.strip():
+        raise ValueError(
+            f"Agent '{agent_model.name}' (slug: {agent_model.slug}) does not have a system prompt. "
+            f"All agents must have a non-empty system_prompt to function."
+        )
 
     # Look up the agent class
     AgentClass = AGENT_CLASS_MAP.get(agent_type_str)

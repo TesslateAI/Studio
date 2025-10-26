@@ -151,8 +151,8 @@ Additional React-Specific Guidelines:
 4. Add comprehensive JSDoc comments with usage examples
 5. Make components flexible and reusable through well-designed props
 6. Consider performance implications (avoid unnecessary re-renders)""",
-        "mode": "stream",
-        "agent_type": "StreamAgent",
+        "mode": "agent",
+        "agent_type": "IterativeAgent",
         "model": "qwen-3-coder-480b",
         "icon": "⚛️",
         "preview_image": None,

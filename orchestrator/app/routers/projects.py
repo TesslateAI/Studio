@@ -1529,15 +1529,33 @@ async def fork_project(
     try:
         logger.info(f"[FORK] Forking project {project_id} for user {current_user.id}")
 
-        # Create new project
-        forked_project = Project(
-            name=f"{source_project.name} (Fork)",
-            description=f"Forked from: {source_project.description or source_project.name}",
-            owner_id=current_user.id
-        )
-        db.add(forked_project)
-        await db.commit()
-        await db.refresh(forked_project)
+        # Generate unique slug for the forked project
+        forked_name = f"{source_project.name} (Fork)"
+        project_slug = generate_project_slug(forked_name)
+
+        # Handle collision (retry with new slug)
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                # Create new project
+                forked_project = Project(
+                    name=forked_name,
+                    slug=project_slug,
+                    description=f"Forked from: {source_project.description or source_project.name}",
+                    owner_id=current_user.id
+                )
+                db.add(forked_project)
+                await db.commit()
+                await db.refresh(forked_project)
+                break
+            except Exception as e:
+                if "unique constraint" in str(e).lower() and "slug" in str(e).lower():
+                    if attempt < max_retries - 1:
+                        # Generate new slug and retry
+                        project_slug = generate_project_slug(forked_name)
+                        await db.rollback()
+                        continue
+                raise
 
         logger.info(f"[FORK] Created new project {forked_project.id}")
 
