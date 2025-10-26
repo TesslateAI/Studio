@@ -336,6 +336,23 @@ class IterativeAgent(AbstractAgent):
         results = []
 
         for i, tool_call in enumerate(tool_calls):
+            # Handle parse errors specially
+            if tool_call.name == "__parse_error__":
+                logger.warning(f"[IterativeAgent] Parse error detected for tool: {tool_call.parameters.get('tool_name')}")
+                result = {
+                    "success": False,
+                    "tool": tool_call.parameters.get('tool_name', 'unknown'),
+                    "error": "Tool call parsing failed - Invalid JSON format",
+                    "result": {
+                        "message": f"Failed to parse tool call for '{tool_call.parameters.get('tool_name', 'unknown')}'",
+                        "error_details": tool_call.parameters.get('error'),
+                        "problematic_json": tool_call.parameters.get('raw_params', ''),
+                        "suggestion": tool_call.parameters.get('suggestion', '')
+                    }
+                }
+                results.append(result)
+                continue
+
             logger.info(f"[IterativeAgent] Executing tool {i+1}/{len(tool_calls)}: {tool_call.name}")
 
             result = await self.tools.execute(
@@ -453,8 +470,17 @@ class IterativeAgent(AbstractAgent):
                 formatted.append(f"   Error: {error}")
 
                 # Show suggestion from result if available
-                if isinstance(result.get("result"), dict) and "suggestion" in result["result"]:
-                    formatted.append(f"   Suggestion: {result['result']['suggestion']}")
+                if isinstance(result.get("result"), dict):
+                    if "suggestion" in result["result"]:
+                        formatted.append(f"   Suggestion: {result['result']['suggestion']}")
+
+                    # Show parse error details prominently
+                    if "error_details" in result["result"]:
+                        formatted.append(f"   Details: {result['result']['error_details']}")
+
+                    if "problematic_json" in result["result"] and result["result"]["problematic_json"]:
+                        formatted.append(f"   Problematic JSON (first 300 chars):")
+                        formatted.append(f"   {result['result']['problematic_json'][:300]}")
 
         return "\n".join(formatted)
 
@@ -500,9 +526,19 @@ class IterativeAgent(AbstractAgent):
             "",
             "Your actions are communicated through specific XML-style tool calls. You must include a THOUGHT section before every tool call to explain your reasoning.",
             "",
-            "IMPORTANT: Parameters must be provided as valid JSON inside the <parameters> tags.",
+            "CRITICAL: Parameters must be provided as VALID JSON inside the <parameters> tags.",
             "",
-            "Format:",
+            "JSON Escaping Rules (MUST FOLLOW):",
+            "1. ALL quotes inside string values MUST be escaped with backslash: \\\"",
+            "2. Newlines must be escaped as \\n, tabs as \\t, backslashes as \\\\",
+            "3. Use only double quotes for JSON strings, never single quotes",
+            "",
+            "Examples:",
+            '{"description": "The video for \\"Never Gonna Give You Up\\" by Rick Astley"}',
+            '{"message": "Line 1\\nLine 2\\nLine 3"}',
+            '{"path": "C:\\\\Users\\\\Documents\\\\file.txt"}',
+            "",
+            "Tool Call Format:",
             "",
             "THOUGHT: I need to understand the current file structure to locate the main application file. I will list the files in the src directory to get an overview.",
             "",
@@ -513,7 +549,7 @@ class IterativeAgent(AbstractAgent):
             "</parameters>",
             "</tool_call>",
             "",
-            "Example:",
+            "Complete Example:",
             "",
             "THOUGHT: I will read the App.jsx file to understand the application structure.",
             "",
