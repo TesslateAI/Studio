@@ -10,6 +10,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+    referred_by: Optional[str] = None
 
     @field_validator('password')
     @classmethod

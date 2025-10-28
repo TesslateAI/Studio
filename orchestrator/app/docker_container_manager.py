@@ -402,6 +402,8 @@ class DockerContainerManager(BaseContainerManager):
             "--label", f"traefik.http.routers.{service_name}-secure.rule=Host(`{hostname}`)",
             "--label", f"traefik.http.routers.{service_name}-secure.entrypoints=websecure",
             "--label", f"traefik.http.routers.{service_name}-secure.tls=true",
+            "--label", f"traefik.http.routers.{service_name}-secure.tls.certresolver={get_settings().traefik_cert_resolver}",
+            "--label", f"traefik.http.routers.{service_name}-secure.tls.domains[0].main={hostname}",
         ]
 
         return labels

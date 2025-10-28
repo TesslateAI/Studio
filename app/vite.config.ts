@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import path from 'path'
 
 // Parse allowed hosts from environment variable
 // No hardcoded defaults - everything comes from environment
@@ -12,6 +13,11 @@ console.log('Vite allowed hosts:', allowedHosts)
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
   // Expose DEPLOYMENT_MODE to the browser as import.meta.env.DEPLOYMENT_MODE
   define: {
     'import.meta.env.DEPLOYMENT_MODE': JSON.stringify(process.env.DEPLOYMENT_MODE || 'docker'),
@@ -28,10 +34,10 @@ export default defineConfig({
       // When behind Traefik (studio.localhost), use the proxied domain
       // Otherwise use localhost for direct access
       host: process.env.APP_DOMAIN || 'localhost',
-      protocol: 'ws',
-      // Use the frontend port (5173) for HMR, not the Traefik port (80)
-      // Traefik will proxy WebSocket connections to the correct port
-      port: parseInt(process.env.FRONTEND_PORT || '5173'),
+      // Use wss:// for HTTPS, ws:// for HTTP
+      protocol: process.env.APP_PROTOCOL === 'https' ? 'wss' : 'ws',
+      // In production (HTTPS), use standard port 443; in dev use the frontend port
+      port: process.env.APP_PROTOCOL === 'https' ? 443 : parseInt(process.env.FRONTEND_PORT || '5173'),
     },
     proxy: {
       '/api': {

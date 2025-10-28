@@ -135,6 +135,32 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.error(f"Failed to send Discord signup notification: {e}")
 
+    # Check if this was a referral signup
+    # Frontend should send referred_by in request body if it exists in sessionStorage
+    referred_by = getattr(user, 'referred_by', None)
+    if referred_by:
+        try:
+            from ..referral_db import save_conversion
+            from ..services.ntfy_service import ntfy_service
+
+            # Save conversion to database
+            save_conversion(referred_by, str(db_user.id), db_user.username, db_user.email, db_user.name)
+
+            # Send referral conversion notifications
+            await discord_service.send_referral_conversion_notification(
+                referred_by=referred_by,
+                new_user_name=db_user.name,
+                new_user_username=db_user.username,
+                new_user_email=db_user.email,
+                user_id=str(db_user.id)
+            )
+
+            await ntfy_service.send_referral_conversion(referred_by, db_user.username)
+
+            logger.info(f"Tracked referral conversion: {referred_by} -> {db_user.username}")
+        except Exception as e:
+            logger.error(f"Failed to track referral conversion: {e}")
+
     return {
         "access_token": access_token,
         "token_type": "bearer",

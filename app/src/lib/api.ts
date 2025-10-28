@@ -121,11 +121,15 @@ export const authApi = {
     return response.data;
   },
   register: async (name: string, username: string, email: string, password: string) => {
+    // Check if there's a referrer in sessionStorage
+    const referred_by = sessionStorage.getItem('referrer');
+
     const response = await api.post('/api/auth/register', {
       name,
       username,
       email,
       password,
+      referred_by: referred_by || undefined,
     });
     return response.data;
   },

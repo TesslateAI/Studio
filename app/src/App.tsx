@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { ThemeProvider } from './theme';
 import Layout from './components/Layout';
 import Landing from './pages/Landing';
+import NewLandingPage from './pages/NewLandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -14,7 +15,9 @@ import Library from './pages/Library';
 import AdminDashboard from './pages/AdminDashboard';
 import AuthCallback from './pages/AuthCallback';
 import Logout from './pages/Logout';
+import Referrals from './pages/Referrals';
 import { Walkthrough } from './components/Walkthrough';
+import { useReferralTracking } from './hooks/useReferralTracking';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -62,19 +65,12 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return <Navigate to="/login" />;
 }
 
-function App() {
-  // WALKTHROUGH DISABLED - Was causing logout issues
-  // const [showWalkthrough, setShowWalkthrough] = useState(false);
+function AppContent() {
+  // Track referrals (must be inside BrowserRouter)
+  useReferralTracking();
 
   return (
-    <ThemeProvider>
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
-      <BrowserRouter>
+    <>
         <Toaster
           position="top-right"
           toastOptions={{
@@ -171,10 +167,13 @@ function App() {
           }}
         />
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<NewLandingPage />} />
+          <Route path="/landing-old" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/logout" element={<Logout />} />
+          <Route path="/referral" element={<Referrals />} />
+          <Route path="/referrals" element={<Referrals />} />
           <Route
             path="/dashboard"
             element={
@@ -226,6 +225,21 @@ function App() {
         </Routes>
 
         {/* WALKTHROUGH DISABLED - Was causing logout issues */}
+    </>
+  );
+}
+
+function App() {
+  return (
+    <ThemeProvider>
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+      <BrowserRouter>
+        <AppContent />
       </BrowserRouter>
     </ThemeProvider>
   );

@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # Examples: studio.localhost (local), studio-demo.tesslate.com (production)
     app_domain: str = "studio.localhost"
 
+    # Traefik certificate resolver name
+    # Development: "letsencrypt" (HTTP challenge)
+    # Production: "cloudflare" (DNS challenge for wildcard certs)
+    traefik_cert_resolver: str = "letsencrypt"
+
     # GitHub OAuth Configuration
     github_client_id: str = ""
     github_client_secret: str = ""

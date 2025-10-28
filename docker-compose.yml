@@ -20,7 +20,10 @@ services:
       - "traefik.enable=true"
       # Traefik dashboard at /traefik
       - "traefik.http.routers.traefik.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik.entrypoints=web,websecure"
       - "traefik.http.routers.traefik.priority=200"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
       - "traefik.http.routers.traefik.middlewares=traefik-stripprefix,traefik-auth"
       - "traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes=/traefik"
       # Optional: Add basic auth for security (remove if not needed)
@@ -99,7 +102,10 @@ services:
       - "traefik.enable=true"
       # API routes - handle both /api and websocket paths
       - "traefik.http.routers.orchestrator.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      - "traefik.http.routers.orchestrator.entrypoints=web,websecure"
       - "traefik.http.routers.orchestrator.priority=100"
+      - "traefik.http.routers.orchestrator.tls=true"
+      - "traefik.http.routers.orchestrator.tls.certresolver=letsencrypt"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
       # Enable websocket support
       - "traefik.http.middlewares.orchestrator-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
@@ -141,7 +147,10 @@ services:
       - "traefik.enable=true"
       # Frontend routes - everything except /api, /ws, and /preview
       - "traefik.http.routers.app.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
+      - "traefik.http.routers.app.entrypoints=web,websecure"
       - "traefik.http.routers.app.priority=10"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
       - "traefik.http.services.app.loadbalancer.server.port=5173"
       # Handle websocket upgrade for HMR
       - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"

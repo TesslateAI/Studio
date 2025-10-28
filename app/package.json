@@ -14,6 +14,7 @@
     "@hello-pangea/dnd": "^18.0.1",
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.10",
+    "@radix-ui/react-slot": "^1.2.3",
     "@tiptap/extension-code-block-lowlight": "^3.7.2",
     "@tiptap/extension-highlight": "^3.7.2",
     "@tiptap/extension-image": "^3.7.2",
@@ -32,6 +33,8 @@
     "@types/react-router-dom": "^5.3.3",
     "axios": "^1.11.0",
     "chart.js": "^4.5.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "framer-motion": "^12.23.24",
     "jszip": "^3.10.1",
     "lowlight": "^3.3.0",
@@ -41,7 +44,8 @@
     "react-chartjs-2": "^5.3.0",
     "react-dom": "^19.1.1",
     "react-hot-toast": "^2.6.0",
-    "react-router-dom": "^7.8.2"
+    "react-router-dom": "^7.8.2",
+    "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
