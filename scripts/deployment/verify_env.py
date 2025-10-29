@@ -75,19 +75,19 @@ def check_configuration():
 
     # Check if .env exists
     if not Path('.env').exists():
-        print(f"{Colors.RED}❌ ERROR: .env file not found!")
+        print(f"{Colors.RED}[ERROR] .env file not found!")
         print(f"{Colors.YELLOW}   Run: copy .env.example .env (Windows)")
         print(f"   Run: cp .env.example .env (Mac/Linux){Colors.RESET}")
         return False
 
-    print(f"{Colors.GREEN}✅ .env file found{Colors.RESET}")
+    print(f"{Colors.GREEN}[OK] .env file found{Colors.RESET}")
     print()
 
     # Read environment variables
     env_vars = read_env_file()
 
     if not env_vars:
-        print(f"{Colors.RED}❌ ERROR: Could not parse .env file!{Colors.RESET}")
+        print(f"{Colors.RED}[ERROR] Could not parse .env file!{Colors.RESET}")
         return False
 
     # Display current configuration
@@ -98,10 +98,10 @@ def check_configuration():
     protocol = env_vars.get('APP_PROTOCOL', 'http')
     app_url = f"{protocol}://{domain}"
 
-    print(f"{Colors.CYAN}🌐 Domain: {domain}")
-    print(f"🔒 Protocol: {protocol}")
-    print(f"🔗 Full URL: {app_url}")
-    print(f"🚪 Ports:")
+    print(f"{Colors.CYAN}Domain: {domain}")
+    print(f"Protocol: {protocol}")
+    print(f"Full URL: {app_url}")
+    print(f"Ports:")
     print(f"{Colors.GRAY}   - Web: {env_vars.get('APP_PORT', '80')}")
     print(f"   - Secure: {env_vars.get('APP_SECURE_PORT', '443')}")
     print(f"   - Backend: {env_vars.get('BACKEND_PORT', '8000')}")
@@ -118,23 +118,50 @@ def check_configuration():
 
     # Check SECRET_KEY
     secret_key = env_vars.get('SECRET_KEY', '')
-    if not secret_key or secret_key == 'change-this-to-a-random-secret-key-for-security':
-        print(f"{Colors.RED}❌ SECRET_KEY not configured (using default is insecure){Colors.RESET}")
+    default_secret_keys = [
+        'your-secret-key-here-change-this-in-production',
+        'your_secret_key_here',
+        'change-this-in-production',
+        'change-this-to-a-random-secret-key-for-security'
+    ]
+    if not secret_key or secret_key in default_secret_keys:
+        print(f"{Colors.RED}[ERROR] SECRET_KEY not configured (using default is insecure){Colors.RESET}")
+        print(f"{Colors.GRAY}   Generate with: openssl rand -base64 64{Colors.RESET}")
         has_errors = True
     else:
-        print(f"{Colors.GREEN}✅ SECRET_KEY is configured{Colors.RESET}")
+        print(f"{Colors.GREEN}[OK] SECRET_KEY is configured{Colors.RESET}")
+
+    # Check Database Configuration
+    db_url = env_vars.get('DATABASE_URL', '')
+    db_password = env_vars.get('POSTGRES_PASSWORD', '')
+    default_db_passwords = ['dev_password_change_me', 'your_postgres_password_here']
+
+    if not db_url:
+        print(f"{Colors.RED}[ERROR] DATABASE_URL not configured{Colors.RESET}")
+        has_errors = True
+    elif db_password in default_db_passwords:
+        print(f"{Colors.YELLOW}[WARNING] POSTGRES_PASSWORD using default (change for production){Colors.RESET}")
+        print(f"{Colors.GRAY}   Generate with: openssl rand -base64 32{Colors.RESET}")
+        has_warnings = True
+    else:
+        print(f"{Colors.GREEN}[OK] Database configured{Colors.RESET}")
 
     # Check LiteLLM Configuration
     litellm_base = env_vars.get('LITELLM_API_BASE', '')
     litellm_key = env_vars.get('LITELLM_MASTER_KEY', '')
     litellm_models = env_vars.get('LITELLM_DEFAULT_MODELS', '')
 
-    if not litellm_key or litellm_key == 'your-litellm-master-key-here':
-        print(f"{Colors.YELLOW}⚠️  LITELLM_MASTER_KEY not configured (AI features won't work){Colors.RESET}")
-        print(f"{Colors.GRAY}      Using LiteLLM proxy at: {litellm_base}{Colors.RESET}")
+    default_litellm_keys = ['your-litellm-master-key-here', 'your_litellm_master_key_here']
+
+    if not litellm_base or litellm_base.startswith('https://your-litellm'):
+        print(f"{Colors.YELLOW}[WARNING] LITELLM_API_BASE not configured (AI features won't work){Colors.RESET}")
+        has_warnings = True
+    elif not litellm_key or litellm_key in default_litellm_keys:
+        print(f"{Colors.YELLOW}[WARNING] LITELLM_MASTER_KEY not configured (AI features won't work){Colors.RESET}")
+        print(f"{Colors.GRAY}   Using LiteLLM proxy at: {litellm_base}{Colors.RESET}")
         has_warnings = True
     else:
-        print(f"{Colors.GREEN}✅ LiteLLM proxy configured at {litellm_base}{Colors.RESET}")
+        print(f"{Colors.GREEN}[OK] LiteLLM proxy configured at {litellm_base}{Colors.RESET}")
 
         # Display configured models
         if litellm_models:
@@ -151,30 +178,65 @@ def check_configuration():
 
     # GitHub OAuth
     github_id = env_vars.get('GITHUB_CLIENT_ID', '')
-    if github_id and github_id != 'your_github_client_id_here':
-        print(f"{Colors.GREEN}✅ GitHub OAuth configured{Colors.RESET}")
+    github_secret = env_vars.get('GITHUB_CLIENT_SECRET', '')
+    default_github_values = ['your_github_client_id', 'your_github_client_secret']
+
+    if (github_id and github_id not in default_github_values and
+        github_secret and github_secret not in default_github_values):
+        print(f"{Colors.GREEN}[OK] GitHub OAuth configured{Colors.RESET}")
     else:
-        print(f"{Colors.GRAY}ℹ️  GitHub OAuth not configured (optional){Colors.RESET}")
+        print(f"{Colors.GRAY}[INFO] GitHub OAuth not configured (optional){Colors.RESET}")
+
+    # Deployment mode
+    deployment_mode = env_vars.get('DEPLOYMENT_MODE', 'docker')
+    print(f"{Colors.CYAN}[INFO] Deployment mode: {deployment_mode}{Colors.RESET}")
+
+    # Traefik configuration (Docker mode only)
+    if deployment_mode == 'docker':
+        cert_resolver = env_vars.get('TRAEFIK_CERT_RESOLVER', 'letsencrypt')
+        print(f"{Colors.CYAN}[INFO] SSL certificate resolver: {cert_resolver}{Colors.RESET}")
+
+        traefik_auth = env_vars.get('TRAEFIK_BASIC_AUTH', '')
+        default_traefik_hash = 'admin:$$2y$$10$$EIHbchqg0sjZLr9iZINqA.6Za7wPjGAVdTER2ob5whDLtHkkZSGbC'
+        if traefik_auth == default_traefik_hash or not traefik_auth:
+            print(f"{Colors.YELLOW}[WARNING] TRAEFIK_BASIC_AUTH using default (admin:admin) - Change for production!{Colors.RESET}")
+            has_warnings = True
+        else:
+            print(f"{Colors.GREEN}[OK] Traefik dashboard auth configured{Colors.RESET}")
 
     print()
     print(f"{Colors.CYAN}{'='*60}{Colors.RESET}")
 
     # Final status
     if has_errors:
-        print(f"{Colors.RED}❌ Configuration has errors. Please fix them before starting.{Colors.RESET}")
+        print(f"{Colors.RED}[ERROR] Configuration has errors. Please fix them before starting.{Colors.RESET}")
         return False
     elif has_warnings:
-        print(f"{Colors.YELLOW}⚠️  Configuration has warnings. Some features may not work.{Colors.RESET}")
+        print(f"{Colors.YELLOW}[WARNING] Configuration has warnings. Some features may not work.{Colors.RESET}")
     else:
-        print(f"{Colors.GREEN}✅ Configuration is perfect!{Colors.RESET}")
+        print(f"{Colors.GREEN}[OK] Configuration is perfect!{Colors.RESET}")
 
     print()
-    print(f"{Colors.WHITE}To start the application:")
-    print(f"{Colors.GRAY}  docker-compose up -d{Colors.RESET}")
+    print(f"{Colors.WHITE}To start the application:{Colors.RESET}")
+
+    deployment_mode = env_vars.get('DEPLOYMENT_MODE', 'docker')
+    if deployment_mode == 'docker':
+        print(f"{Colors.GRAY}  Docker Compose (Development):{Colors.RESET}")
+        print(f"{Colors.CYAN}    docker compose up -d{Colors.RESET}")
+        print(f"{Colors.GRAY}  Docker Compose (Production):{Colors.RESET}")
+        print(f"{Colors.CYAN}    docker compose -f docker-compose.prod.yml up -d{Colors.RESET}")
+    else:
+        print(f"{Colors.GRAY}  Kubernetes:{Colors.RESET}")
+        print(f"{Colors.CYAN}    cd k8s && ./scripts/deployment/deploy-all.sh{Colors.RESET}")
+
     print()
-    print(f"{Colors.WHITE}Then access at:")
-    print(f"{Colors.GREEN}  🚀 Application: {app_url}")
-    print(f"  📊 Traefik Dashboard: {app_url}/traefik (admin:admin){Colors.RESET}")
+    print(f"{Colors.WHITE}Then access at:{Colors.RESET}")
+    print(f"{Colors.GREEN}  Application: {app_url}{Colors.RESET}")
+
+    if deployment_mode == 'docker':
+        print(f"{Colors.GREEN}  Traefik Dashboard: {app_url}/traefik{Colors.RESET}")
+        print(f"{Colors.GRAY}     (default: admin/admin - change TRAEFIK_BASIC_AUTH!){Colors.RESET}")
+
     print(f"{Colors.CYAN}{'='*60}{Colors.RESET}")
 
     return not has_errors

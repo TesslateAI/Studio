@@ -1,16 +1,15 @@
 # Tesslate Studio - Scripts Directory
 
-This directory contains utility scripts for managing Tesslate Studio in different deployment modes.
+This directory contains utility scripts for managing Tesslate Studio deployment, seeding data, and maintenance tasks.
 
 ## 📁 Directory Structure
 
 ```
 scripts/
 ├── deployment/        # Local development and deployment scripts
-├── kubernetes/        # Kubernetes management and operations
-├── database/          # Database migrations and schema updates
-├── litellm/          # LiteLLM integration and user management
-└── utilities/        # Testing and maintenance utilities
+├── litellm/          # LiteLLM integration and user key management
+├── seed/             # Database seeding scripts for agents and bases
+└── utilities/        # Maintenance and cleanup utilities
 ```
 
 ## 🚀 Quick Start
@@ -18,188 +17,225 @@ scripts/
 ### Local Development
 ```bash
 # Windows (Hybrid mode - recommended)
-scripts/deployment/start-all-with-traefik.bat
+scripts\deployment\start-all-with-traefik.bat
+
+# Windows (Legacy - without Traefik)
+scripts\deployment\start-all.bat
 
 # Unix (individual services)
 ./scripts/deployment/run-backend.sh    # Terminal 1
 ./scripts/deployment/run-frontend.sh   # Terminal 2
 
 # Docker setup
-./scripts/deployment/setup-docker-dev.bat   # Windows
-./scripts/deployment/setup-docker-dev.sh    # Unix
+scripts\deployment\setup-docker-dev.bat   # Windows
+./scripts/deployment/setup-docker-dev.sh  # Unix
+
+# Verify environment configuration
+scripts\deployment\verify-env.bat         # Windows CMD
+scripts\deployment\verify-env.ps1         # Windows PowerShell
+python scripts/deployment/verify_env.py   # All platforms
 ```
 
-### Kubernetes Production
+### Initial Setup
 ```bash
-# Deploy complete application
-./scripts/kubernetes/manage-k8s.sh deploy
+# 1. Seed marketplace bases (Next.js, Vite+React+FastAPI, Vite+React+Go)
+python scripts/seed/seed_marketplace_bases.py
 
-# Check status
-./scripts/kubernetes/manage-k8s.sh status
+# 2. Seed default agents (Stream Builder, Tesslate Agent, etc.)
+python scripts/seed/seed_marketplace_agents.py
 
-# View logs
-./scripts/kubernetes/manage-k8s.sh logs backend
-
-# Update after code changes
-./scripts/kubernetes/manage-k8s.sh update
+# 3. (Optional) Seed additional open source agents
+python scripts/seed/seed_opensource_agents.py
 ```
 
 ## 📂 Script Categories
 
 ### deployment/ - Local Development & Deployment
 
-- **`start-all-with-traefik.bat`** (Windows)
-  - Starts all services natively (orchestrator, frontend, AI service) + Traefik in Docker
+**Startup Scripts:**
+
+- **`start-all-with-traefik.bat`** (Windows) - ⭐ **RECOMMENDED**
+  - Starts all services natively (orchestrator, frontend) + Traefik in Docker
   - Best for fast iteration and development
   - Requires: Python, Node.js, Docker Desktop
-  - Usage: `scripts/deployment/start-all-with-traefik.bat`
+  - Usage: `scripts\deployment\start-all-with-traefik.bat`
 
 - **`start-all.bat`** (Windows) - ⚠️ **LEGACY**
   - Starts services natively WITHOUT Traefik
-  - User containers won't work without Traefik
+  - User development containers won't work without Traefik
   - Use `start-all-with-traefik.bat` instead
 
 - **`run-backend.sh`** (Unix)
-  - Starts orchestrator service only
+  - Starts orchestrator backend service only
   - Usage: `./scripts/deployment/run-backend.sh`
 
 - **`run-frontend.sh`** (Unix)
   - Starts frontend development server only
   - Usage: `./scripts/deployment/run-frontend.sh`
 
+**Setup & Configuration:**
+
 - **`setup-docker-dev.bat`** / **`setup-docker-dev.sh`**
   - Sets up Docker development environment
-  - Creates necessary directories and configurations
-  - Usage: `scripts/deployment/setup-docker-dev.bat` (Windows)
+  - Creates necessary directories and network configurations
+  - Usage: `scripts\deployment\setup-docker-dev.bat` (Windows)
   - Usage: `./scripts/deployment/setup-docker-dev.sh` (Unix)
 
 - **`verify-env.bat`** / **`verify-env.ps1`** / **`verify_env.py`**
-  - Validates environment configuration
+  - Validates environment configuration (.env file)
   - Checks required dependencies and settings
-  - Usage: `scripts/deployment/verify-env.bat` (Windows CMD)
-  - Usage: `scripts/deployment/verify-env.ps1` (Windows PowerShell)
+  - Displays current configuration
+  - Usage: `scripts\deployment\verify-env.bat` (Windows CMD)
+  - Usage: `scripts\deployment\verify-env.ps1` (Windows PowerShell)
   - Usage: `python scripts/deployment/verify_env.py` (All platforms)
 
-### kubernetes/ - Production Kubernetes Management
+**Docker Images:**
 
-- **`manage-k8s.sh`** (Unix)
-  - Complete Kubernetes management script
-  - Commands: status, logs, restart, scale, backup, restore, deploy, update
-  - Usage: `./scripts/kubernetes/manage-k8s.sh [command]`
-  - Examples:
-    ```bash
-    ./scripts/kubernetes/manage-k8s.sh status        # View all resources
-    ./scripts/kubernetes/manage-k8s.sh logs backend  # View backend logs
-    ./scripts/kubernetes/manage-k8s.sh restart backend  # Restart backend
-    ./scripts/kubernetes/manage-k8s.sh backup        # Backup database
-    ./scripts/kubernetes/manage-k8s.sh update        # Build & deploy new images
-    ```
-
-- **`cleanup-k8s.sh`** (Unix)
-  - Kubernetes cleanup script
+- **`build-dev-image.bat`** / **`build-dev-image.sh`**
+  - Builds the development server Docker image for user project containers
+  - Contains pre-installed dependencies (Node.js, Python, Go, etc.)
   - Options:
-    1. Clean user environments only (safe)
-    2. Clean everything including database (destructive)
-  - Usage: `./scripts/kubernetes/cleanup-k8s.sh`
+    - `--push`: Build and push to container registry
+    - `--no-cache`: Force rebuild without cache
+  - Usage: `scripts\deployment\build-dev-image.bat` (Windows)
+  - Usage: `./scripts/deployment/build-dev-image.sh [--push] [--no-cache]` (Unix)
 
-### database/ - Database Migrations
-
-- **`create_marketplace_tables.py`**
-  - Creates marketplace database tables
-  - Sets up agent marketplace schema
-  - Usage: `python scripts/database/create_marketplace_tables.py`
-
-- **`add_marketplace_columns.py`**
-  - Adds marketplace-related columns to existing tables
-  - Usage: `python scripts/database/add_marketplace_columns.py`
-
-- **`add_name_column.py`**
-  - Adds name column to database tables
-  - Usage: `python scripts/database/add_name_column.py`
-
-### litellm/ - LiteLLM Integration
+### litellm/ - LiteLLM Integration & User Key Management
 
 - **`create_litellm_team.py`**
-  - Creates LiteLLM team/access group
+  - Creates the "internal" team in LiteLLM for access control
+  - Required for users to access models (e.g., cerebras/qwen-3-coder-480b)
   - Usage: `python scripts/litellm/create_litellm_team.py`
 
-- **`setup_user_litellm.py`**
-  - Sets up LiteLLM virtual keys for users
-  - Initializes user budgets and permissions
-  - Usage: `python scripts/litellm/setup_user_litellm.py`
+- **`create_virtual_key_for_user.py`**
+  - Creates a proper LiteLLM virtual key for a specific user
+  - Sets up user budgets and model access
+  - Usage: `python scripts/litellm/create_virtual_key_for_user.py <username>`
 
-- **`migrate_litellm_keys.py`**
-  - Migrates existing LiteLLM keys to new format
-  - Usage: `python scripts/litellm/migrate_litellm_keys.py`
+- **`create_key_direct.py`**
+  - Lower-level script to create LiteLLM keys directly
+  - Bypasses normal user creation flow
+  - Usage: `python scripts/litellm/create_key_direct.py <username>`
 
-- **`update_litellm_models.py`**
-  - Updates available LiteLLM models
-  - Usage: `python scripts/litellm/update_litellm_models.py`
+### seed/ - Database Seeding Scripts
 
-- **`update_litellm_team.py`**
-  - Updates LiteLLM team configuration
-  - Usage: `python scripts/litellm/update_litellm_team.py`
+- **`seed_marketplace_bases.py`**
+  - Seeds initial project templates/bases
+  - Creates: Next.js 15, Vite+React+FastAPI, Vite+React+Go bases
+  - Run this first to populate the marketplace with starter templates
+  - Usage: `python scripts/seed/seed_marketplace_bases.py`
 
-### utilities/ - Testing & Maintenance
+- **`seed_marketplace_agents.py`**
+  - Seeds core marketplace agents
+  - Creates: Stream Builder, Tesslate Agent, React Component Builder, API Integration Agent
+  - Automatically adds Stream Builder to all existing users
+  - Usage: `python scripts/seed/seed_marketplace_agents.py`
 
-- **`cleanup-local.py`** (All platforms)
-  - Complete cleanup for local Docker development
-  - Removes all containers, projects, and database data
+- **`seed_opensource_agents.py`**
+  - Seeds additional open source agents
+  - Creates: Code Analyzer, Documentation Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer
+  - All agents are forkable and support model swapping
+  - Usage: `python scripts/seed/seed_opensource_agents.py`
+
+- **`delete_seeded_agents.py`**
+  - Removes seeded marketplace agents and their user purchases
+  - Useful for resetting the marketplace during development
+  - Usage: `python scripts/seed/delete_seeded_agents.py`
+
+### utilities/ - Maintenance & Debugging
+
+- **`cleanup-local.py`**
+  - Complete cleanup for local Docker development mode
+  - Removes all containers, projects, files, and database entries
+  - **WARNING**: Destructive operation - requires confirmation
   - Usage: `python scripts/utilities/cleanup-local.py`
 
-- **`test_all_endpoints.sh`** (Unix)
-  - Tests all API endpoints
-  - Validates API functionality
-  - Usage: `./scripts/utilities/test_all_endpoints.sh`
-
 - **`check_agents.py`**
-  - Checks agent configuration and status
+  - Checks agent configuration and status in the database
+  - Displays all agents, their active status, and user count
+  - Useful for debugging marketplace agent issues
   - Usage: `python scripts/utilities/check_agents.py`
 
-## 🧹 Cleanup
+## 🎯 Common Workflows
 
-### Local (Docker)
+### First Time Setup
 ```bash
-python scripts/utilities/cleanup-local.py
+# 1. Verify your environment configuration
+python scripts/deployment/verify_env.py
+
+# 2. Setup Docker environment
+scripts\deployment\setup-docker-dev.bat  # Windows
+./scripts/deployment/setup-docker-dev.sh # Unix
+
+# 3. Start the application
+scripts\deployment\start-all-with-traefik.bat  # Windows
+
+# 4. Seed marketplace data (in separate terminal)
+python scripts/seed/seed_marketplace_bases.py
+python scripts/seed/seed_marketplace_agents.py
+python scripts/seed/seed_opensource_agents.py  # Optional
+
+# 5. (Optional) Setup LiteLLM team
+python scripts/litellm/create_litellm_team.py
 ```
 
-### Production (Kubernetes)
+### Development Workflow
 ```bash
-./scripts/kubernetes/cleanup-k8s.sh
-# Choose option 1 (user envs only) or 2 (complete reset)
+# Start development (Windows)
+scripts\deployment\start-all-with-traefik.bat
+
+# Start development (Unix - separate terminals)
+./scripts/deployment/run-backend.sh
+./scripts/deployment/run-frontend.sh
+
+# Check agents
+python scripts/utilities/check_agents.py
+```
+
+### Clean Slate Reset
+```bash
+# Complete local cleanup (removes everything)
+python scripts/utilities/cleanup-local.py
+
+# Re-seed marketplace
+python scripts/seed/seed_marketplace_bases.py
+python scripts/seed/seed_marketplace_agents.py
 ```
 
 ## 📚 More Information
 
 - **Deployment Guide**: See `DEPLOYMENT.md` in the root directory
-- **Kubernetes Setup**: See `k8s/` directory for manifests and deployment scripts
 - **Docker Compose**: See `docker-compose.yml` for full Docker setup
+- **Environment Setup**: Copy `.env.example` to `.env` and configure
 
 ## ⚠️ Important Notes
 
 1. **Traefik is required** for user development containers, even in hybrid mode
-2. **PostgreSQL** is used in all deployment modes (Docker and Kubernetes)
-3. Always use **`scripts/kubernetes/manage-k8s.sh`** for production operations (not kubectl directly)
-4. **Backup before cleanup** - cleanups are destructive and irreversible!
-5. **Script paths have changed** - all scripts are now organized into subdirectories by category
+2. **PostgreSQL** is used as the database in all deployment modes
+3. **Run seeding scripts** after first setup to populate marketplace with agents and bases
+4. **Cleanup operations are destructive** - they permanently remove data
+5. **LiteLLM setup** is required for AI features to work properly
+6. All Python scripts should be run from the project root directory
 
-## 🔨 Building Docker Images
+## 🔧 Troubleshooting
 
-### Dev Server Image
-The development server image contains pre-installed dependencies for user project containers:
-
+### Environment Issues
 ```bash
-# Build for local development
-./scripts/deployment/build-dev-image.sh
-
-# Build and push to DigitalOcean Container Registry (production)
-./scripts/deployment/build-dev-image.sh --push
-
-# Force rebuild without cache
-./scripts/deployment/build-dev-image.sh --no-cache
-
-# Windows
-scripts\deployment\build-dev-image.bat --push
+# Check your configuration
+python scripts/deployment/verify_env.py
 ```
 
-This image is used by both Docker (local) and Kubernetes (production) deployment modes.
+### Missing Agents in Marketplace
+```bash
+# Check what agents exist
+python scripts/utilities/check_agents.py
+
+# Re-seed agents if needed
+python scripts/seed/seed_marketplace_agents.py
+```
+
+### LiteLLM Key Issues
+```bash
+# Create virtual key for a user
+python scripts/litellm/create_virtual_key_for_user.py <username>
+```
