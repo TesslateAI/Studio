@@ -1,0 +1,31 @@
+# Namespace for all user development environments
+# This namespace isolates user workloads from the main application namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tesslate-user-environments
+  labels:
+    name: tesslate-user-environments
+    app: tesslate
+    tier: user-workloads
+    managed-by: tesslate-backend
+---
+# Wildcard SSL Certificate for User Development Environments
+# This certificate covers *.studio-test.tesslate.com for all user environments
+# Must be in the same namespace as the Ingress resources
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tesslate-wildcard-cert
+  namespace: tesslate-user-environments
+  labels:
+    app: tesslate
+    tier: user-workloads
+    component: ssl
+spec:
+  secretName: tesslate-wildcard-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - "*.studio-test.tesslate.com"

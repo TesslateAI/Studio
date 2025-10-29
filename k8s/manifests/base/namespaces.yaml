@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tesslate
+  labels:
+    name: tesslate
+    app: tesslate-studio
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tesslate-user-environments
+  labels:
+    name: tesslate-user-environments
+    app: tesslate-studio
+    component: user-workloads
+# ---
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: tesslate-monitoring
+#   labels:
+#     name: tesslate-monitoring
+#     app: tesslate-studio
+#     # Note: Placeholder namespace for future monitoring infrastructure

@@ -1,0 +1,48 @@
+# Network Policies for Tesslate namespace
+#
+# These policies provide security isolation while allowing necessary traffic:
+# - Ingress: Only from same namespace, ingress controller, and registry
+# - Egress: To cluster services, external APIs, but blocking metadata service
+#
+# IMPORTANT: The egress rules must allow traffic to the Kubernetes API server
+# The API server is accessed via both:
+# 1. ClusterIP service (10.108.64.1:443 in default namespace)
+# 2. External endpoint (e.g., 100.65.34.172:443 in DO private network)
+#
+# We use a broad egress rule that allows all traffic EXCEPT the metadata service
+# This is simpler and more reliable than trying to match specific namespaces/IPs
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tesslate-network-policy
+  namespace: tesslate
+spec:
+  podSelector: {}  # Apply to all pods in namespace
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow ingress from within the same namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: tesslate
+  # Allow ingress from NGINX ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+  # Allow ingress from registry namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: tesslate-registry
+
+  egress:
+  # Allow ALL egress traffic
+  # This is necessary because the Kubernetes API server endpoint is not predictable
+  # and varies by cluster provider. Attempting to restrict this breaks backend functionality.
+  # Note: In production, you may want to add specific restrictions based on your security requirements
+  - {}

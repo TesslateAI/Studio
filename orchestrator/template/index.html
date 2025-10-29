@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + React</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Communication with Tesslate Studio parent frame -->
+    <script>
+      (function() {
+        // Send URL updates to parent frame
+        function notifyParentOfUrlChange() {
+          if (window.parent && window.parent !== window) {
+            const url = window.location.href;
+            window.parent.postMessage({
+              type: 'url-change',
+              url: url
+            }, '*');
+          }
+        }
+
+        // Listen for navigation events (back/forward buttons from parent)
+        window.addEventListener('message', function(event) {
+          if (event.data && event.data.type === 'navigate') {
+            if (event.data.direction === 'back') {
+              window.history.back();
+            } else if (event.data.direction === 'forward') {
+              window.history.forward();
+            }
+          }
+        });
+
+        // Notify on initial load
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', notifyParentOfUrlChange);
+        } else {
+          notifyParentOfUrlChange();
+        }
+
+        // Notify on popstate (browser back/forward)
+        window.addEventListener('popstate', notifyParentOfUrlChange);
+
+        // Notify on hash change
+        window.addEventListener('hashchange', notifyParentOfUrlChange);
+
+        // Monitor for React Router navigation by watching history API
+        const originalPushState = history.pushState;
+        const originalReplaceState = history.replaceState;
+
+        history.pushState = function() {
+          originalPushState.apply(history, arguments);
+          notifyParentOfUrlChange();
+        };
+
+        history.replaceState = function() {
+          originalReplaceState.apply(history, arguments);
+          notifyParentOfUrlChange();
+        };
+      })();
+    </script>
+  </body>
+</html>

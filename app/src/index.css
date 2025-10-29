@@ -1,0 +1,448 @@
+@import "tailwindcss";
+
+@layer base {
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+:root {
+  --primary: #FF6B00;
+  --accent: #00D9FF;
+  --hue1: 25;
+  --hue2: 240;
+  --bg-dark: #0a0a0a;
+  --surface: #1a1a1a;
+  --text: #e2e2e2;
+  --border-color: hsl(var(--hue2), 12%, 20%);
+  --radius: 22px;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Mode (default) */
+body.dark-mode {
+  --bg-dark: #0a0a0a;
+  --surface: #1a1a1a;
+  --text: #e2e2e2;
+  --border-color: hsl(var(--hue2), 12%, 20%);
+  background-color: var(--bg-dark);
+  color: var(--text);
+}
+
+/* Light Mode */
+body.light-mode {
+  --bg-dark: #f8f9fa;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --border-color: hsl(var(--hue2), 12%, 80%);
+  background-color: var(--bg-dark);
+  color: var(--text);
+}
+
+/* Hide dark-mode-only elements in light mode */
+body.light-mode .dark-mode-only {
+  display: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom utilities */
+.bg-gradient-radial {
+  background-image: radial-gradient(var(--tw-gradient-stops));
+}
+
+.pause-animations * {
+  animation-play-state: paused !important;
+}
+
+/* Custom scrollbar - Global styles matching design */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Custom scrollbar utilities */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thumb-orange-200\/50::-webkit-scrollbar-thumb {
+  background-color: rgba(254, 215, 170, 0.5);
+  border-radius: 3px;
+}
+
+.scrollbar-track-transparent::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/* Enhanced animations for smooth UI */
+/* Ensure Tailwind's animate-spin works */
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-top {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-bottom {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-left {
+  from {
+    transform: translateX(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-right {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-in {
+  animation-fill-mode: both;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+.slide-in-from-top {
+  animation-name: slide-in-from-top;
+}
+
+.slide-in-from-bottom {
+  animation-name: slide-in-from-bottom;
+}
+
+.slide-in-from-left {
+  animation-name: slide-in-from-left;
+}
+
+.slide-in-from-right {
+  animation-name: slide-in-from-right;
+}
+
+.scale-in {
+  animation-name: scale-in;
+}
+
+.duration-300 {
+  animation-duration: 300ms;
+}
+
+.duration-500 {
+  animation-duration: 500ms;
+}
+
+.duration-700 {
+  animation-duration: 700ms;
+}
+
+/* Smooth transitions for interactive elements */
+button, a, input, select, textarea {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Mermaid Diagram Styles */
+.mermaid-container {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.mermaid-container svg {
+  height: auto !important;
+  max-width: none !important;
+  display: block;
+}
+
+/* Mermaid diagram scrollbar - more visible */
+.diagram-scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) transparent;
+}
+
+.diagram-scroll-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.diagram-scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.diagram-scroll-container::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 6px;
+  border: 2px solid var(--surface);
+}
+
+.diagram-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: #ff8533;
+}
+
+.diagram-scroll-container::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.mermaid-container svg .node rect,
+.mermaid-container svg .node circle,
+.mermaid-container svg .node ellipse,
+.mermaid-container svg .node polygon {
+  stroke: var(--primary) !important;
+  fill: var(--surface) !important;
+}
+
+.mermaid-container svg .node text {
+  fill: var(--text) !important;
+}
+
+.mermaid-container svg .edgeLabel {
+  background-color: var(--surface) !important;
+  color: var(--text) !important;
+}
+
+.mermaid-container svg .edgeLabel rect {
+  fill: var(--surface) !important;
+}
+
+.mermaid-container svg .edgeLabel text {
+  fill: var(--text) !important;
+}
+
+.mermaid-container svg .edgePath .path {
+  stroke: var(--primary) !important;
+}
+
+.mermaid-container svg {
+  background-color: transparent !important;
+}
+
+/* Tiptap Editor Styles */
+.tiptap-editor {
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror {
+  outline: none;
+  min-height: 400px;
+  padding: 1rem;
+}
+
+.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  height: 0;
+}
+
+.tiptap-editor .ProseMirror h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.75;
+}
+
+.tiptap-editor .ProseMirror ul,
+.tiptap-editor .ProseMirror ol {
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap-editor .ProseMirror ul {
+  list-style-type: disc;
+}
+
+.tiptap-editor .ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.tiptap-editor .ProseMirror li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.tiptap-editor .ProseMirror code {
+  background-color: rgba(255, 107, 0, 0.1);
+  color: #ff6b00;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.9em;
+}
+
+.tiptap-editor .ProseMirror pre {
+  background-color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
+}
+
+.tiptap-editor .ProseMirror pre code {
+  background-color: transparent;
+  color: #e2e2e2;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.875em;
+  line-height: 1.7;
+}
+
+.tiptap-editor .ProseMirror blockquote {
+  border-left: 4px solid var(--primary);
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
+}
+
+.tiptap-editor .ProseMirror strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tiptap-editor .ProseMirror em {
+  font-style: italic;
+}
+
+.tiptap-editor .ProseMirror a {
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.tiptap-editor .ProseMirror a:hover {
+  color: #ff8533;
+}

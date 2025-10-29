@@ -1,0 +1,139 @@
+# PRODUCTION NGINX INGRESS - Single ingress controller for all traffic
+# This replaces Traefik in Kubernetes environment
+# Local development uses Traefik (see docker-compose.yml)
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tesslate-ingress
+  namespace: tesslate
+  annotations:
+    # DigitalOcean specific annotations
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/use-proxy-protocol: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    # CORS is handled by backend FastAPI middleware to avoid conflicts
+    # SSL and ACME configuration
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+  - secretName: tesslate-tls
+  - hosts:
+    - studio-test.tesslate.com
+    secretName: tesslate-domain-tls
+  rules:
+  # Domain-based rule for studio-test.tesslate.com
+  - host: studio-test.tesslate.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-backend-service
+            port:
+              number: 8005
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-frontend-service
+            port:
+              number: 80
+  # Fallback rule for IP access
+  - http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-backend-service
+            port:
+              number: 8005
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-frontend-service
+            port:
+              number: 80
+  # Optional: Custom domain rule (configure when domain is available)
+  # - host: tesslate.yourdomain.com
+  #   http:
+  #     paths:
+  #     - path: /api(/|$)(.*)
+  #       pathType: ImplementationSpecific
+  #       backend:
+  #         service:
+  #           name: tesslate-backend-service
+  #           port:
+  #             number: 8005
+  #     - path: /
+  #       pathType: Prefix
+  #       backend:
+  #         service:
+  #           name: tesslate-frontend-service
+  #           port:
+  #             number: 80
+---
+---
+# Let's Encrypt certificate for domain
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tesslate-domain-cert
+  namespace: tesslate
+spec:
+  secretName: tesslate-domain-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - studio-test.tesslate.com
+---
+# Self-signed certificate for IP access (fallback)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tesslate-tls-cert
+  namespace: tesslate
+spec:
+  secretName: tesslate-tls
+  issuerRef:
+    name: tesslate-selfsigned-issuer
+    kind: Issuer
+  commonName: "134.199.242.35"
+  ipAddresses:
+  - "134.199.242.35"
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: tesslate-selfsigned-issuer
+  namespace: tesslate
+spec:
+  selfSigned: {}
+---
+# Wildcard SSL Certificate for Development Environments
+# This certificate covers *.studio-test.tesslate.com for all user environments
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tesslate-wildcard-cert
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: ssl
+spec:
+  secretName: tesslate-wildcard-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - "*.studio-test.tesslate.com"
+  - "studio-test.tesslate.com"  # Include the base domain as well

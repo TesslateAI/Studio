@@ -1,0 +1,74 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dev-environment-cleanup
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: cleanup
+spec:
+  # Run every 30 minutes to cleanup idle environments
+  schedule: "*/30 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid  # Don't run multiple cleanup jobs simultaneously
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: tesslate-cleanup
+        spec:
+          serviceAccountName: tesslate-backend-sa
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: docr-secret
+          containers:
+          - name: cleanup
+            image: registry.digitalocean.com/finetune/tesslate-backend:latest
+            imagePullPolicy: Always
+            command: ["python", "-c"]
+            args:
+              - |
+                import asyncio
+                import sys
+                sys.path.append('/app')
+
+                from app.dev_server_manager import dev_container_manager
+                import logging
+
+                logging.basicConfig(level=logging.INFO)
+                logger = logging.getLogger(__name__)
+
+                async def cleanup_idle_environments():
+                    """Clean up idle development environments (30 min timeout)."""
+                    try:
+                        logger.info("Starting idle environment cleanup...")
+
+                        # Cleanup environments idle for more than 30 minutes
+                        cleaned = await dev_container_manager.cleanup_idle_environments(
+                            idle_timeout_minutes=30
+                        )
+
+                        logger.info(f"Cleanup completed. Removed {len(cleaned)} idle environments")
+
+                        if cleaned:
+                            for env in cleaned:
+                                logger.info(f"  - Cleaned: {env}")
+
+                    except Exception as e:
+                        logger.error(f"Cleanup error: {e}", exc_info=True)
+                        sys.exit(1)
+
+                # Run the cleanup
+                asyncio.run(cleanup_idle_environments())
+            env:
+              - name: KUBERNETES_NAMESPACE
+                value: tesslate
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"

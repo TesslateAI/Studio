@@ -1,0 +1,216 @@
+# Resource Management for Development Environments
+# Implements resource quotas and limits to prevent resource exhaustion
+# and ensure fair resource allocation across all users
+
+---
+# Namespace-level Resource Quota
+# Limits the total resources that can be consumed by all dev environments
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-environments-quota
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: resource-management
+spec:
+  hard:
+    # Pod limits - prevent too many concurrent environments
+    pods: "100"                          # Maximum 100 development environments
+
+    # CPU quotas (requests and limits)
+    requests.cpu: "10"                   # 10 CPU cores total requests
+    limits.cpu: "50"                     # 50 CPU cores total limits
+
+    # Memory quotas (requests and limits)
+    requests.memory: 20Gi                # 20GB total memory requests
+    limits.memory: 40Gi                  # 40GB total memory limits
+
+    # Storage quotas
+    requests.storage: 100Gi              # 100GB total storage requests
+    persistentvolumeclaims: "20"         # Maximum 20 PVCs
+
+    # Service and Ingress quotas
+    services: "100"                      # Maximum 100 services (1 per env)
+    count/ingresses.networking.k8s.io: "100"  # Maximum 100 ingresses
+
+    # Secret quotas (for any environment-specific secrets)
+    secrets: "50"                        # Maximum 50 secrets
+
+---
+# LimitRange for Development Environment Pods
+# Sets default and maximum resource limits for individual pods
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-environment-limits
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: resource-management
+spec:
+  limits:
+  # Container-level limits for dev environment containers
+  - type: Container
+    default:
+      # Default resource limits (applied if not specified)
+      cpu: "500m"                        # 0.5 CPU cores default limit
+      memory: "512Mi"                    # 512MB default memory limit
+    defaultRequest:
+      # Default resource requests (applied if not specified)
+      cpu: "100m"                        # 0.1 CPU cores default request
+      memory: "256Mi"                    # 256MB default memory request
+    max:
+      # Maximum allowed limits per container
+      cpu: "2"                           # Maximum 2 CPU cores per container
+      memory: "2Gi"                      # Maximum 2GB memory per container
+    min:
+      # Minimum required resources per container
+      cpu: "50m"                         # Minimum 0.05 CPU cores
+      memory: "128Mi"                    # Minimum 128MB memory
+
+  # Pod-level limits (sum of all containers in a pod)
+  - type: Pod
+    max:
+      cpu: "2"                           # Maximum 2 CPU cores per pod
+      memory: "2Gi"                      # Maximum 2GB memory per pod
+
+  # PVC limits for storage
+  - type: PersistentVolumeClaim
+    max:
+      storage: 10Gi                      # Maximum 10GB per PVC
+    min:
+      storage: 1Gi                       # Minimum 1GB per PVC
+
+---
+# NetworkPolicy for Development Environment Isolation
+# Restricts network traffic between development environments for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dev-environment-isolation
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: security
+spec:
+  # Apply to all dev environment pods
+  podSelector:
+    matchLabels:
+      app: dev-environment
+
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow traffic from NGINX Ingress Controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+
+  # Allow traffic from the same namespace (backend API calls)
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app: tesslate-backend
+
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow HTTPS traffic (for npm installs, API calls, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+
+  # Allow HTTP traffic (for npm registry, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+
+---
+# Cleanup CronJob for Orphaned Resources
+# Automatically removes development environments that are no longer tracked
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dev-environment-cleanup
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: cleanup
+spec:
+  # Run every 6 hours
+  schedule: "0 */6 * * *"
+
+  # Keep only the last successful job
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: tesslate-cleanup
+        spec:
+          serviceAccountName: tesslate-backend-sa
+          restartPolicy: OnFailure
+
+          containers:
+          - name: cleanup
+            image: registry.digitalocean.com/finetune/tesslate-backend:latest
+            command: ["python", "-c"]
+            args:
+            - |
+              import asyncio
+              import sys
+              sys.path.append('/app')
+
+              from app.k8s_client import k8s_manager
+              import logging
+
+              logging.basicConfig(level=logging.INFO)
+              logger = logging.getLogger(__name__)
+
+              async def cleanup_orphaned_resources():
+                  """Clean up orphaned development environments."""
+                  try:
+                      # List all dev environments
+                      environments = await k8s_manager.list_dev_environments()
+
+                      logger.info(f"Found {len(environments)} development environments")
+
+                      # For now, just log the environments
+                      # In the future, we could implement logic to detect truly orphaned resources
+                      for env in environments:
+                          logger.info(f"Environment: user{env['user_id']}-project{env['project_id']} - {env['status']}")
+
+                      logger.info("Cleanup scan completed")
+
+                  except Exception as e:
+                      logger.error(f"Cleanup error: {e}")
+                      sys.exit(1)
+
+              # Run the cleanup
+              asyncio.run(cleanup_orphaned_resources())
+
+            resources:
+              requests:
+                cpu: "50m"
+                memory: "128Mi"
+              limits:
+                cpu: "200m"
+                memory: "256Mi"
+
+            env:
+            - name: KUBERNETES_NAMESPACE
+              value: "tesslate"

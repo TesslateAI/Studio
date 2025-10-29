@@ -1,0 +1,37 @@
+api:
+  dashboard: true
+  insecure: false  # Secure dashboard in production
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: "tesslate-network"
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# Let's Encrypt SSL certificates via Cloudflare DNS challenge
+certificatesResolvers:
+  cloudflare:
+    acme:
+      email: admin@tesslate.com
+      storage: /etc/traefik/acme.json
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100

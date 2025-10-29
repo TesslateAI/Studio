@@ -1,0 +1,145 @@
+:root {
+  /* Brand Colors */
+  --primary: #FF6B00;
+  --accent: #00D9FF;
+  --hue1: 25;
+  --hue2: 240;
+
+  /* Backgrounds */
+  --bg-dark: #0a0a0a;
+  --surface: #1a1a1a;
+  --text: #e2e2e2;
+  --border-color: hsl(var(--hue2), 12%, 20%);
+
+  /* Spacing & Effects */
+  --radius: 22px;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  margin: 0;
+  overflow-x: hidden; /* Prevent horizontal scroll */
+  overflow-y: auto; /* Allow vertical scroll */
+}
+
+/* Light mode - dots background */
+body.light-mode {
+  --text: #1a1a1a;
+  --surface: #ffffff;
+  --bg-dark: #ffffff;
+  background: #ffffff;
+  background-image: radial-gradient(circle, #e0e0e0 1px, transparent 1px);
+  background-size: 20px 20px;
+  color: #1a1a1a;
+}
+
+/* Dark mode - textured background */
+body.dark-mode {
+  --text: #e2e2e2;
+  --surface: #1a1a1a;
+  --bg-dark: #0a0a0a;
+  background-color: #1a1a1a;
+  background-image: url("data:image/svg+xml,%3Csvg width='6' height='6' viewBox='0 0 6 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%233a3a3a' fill-opacity='0.4' fill-rule='evenodd'%3E%3Cpath d='M5 0h1L0 6V5zM6 5v1H5z'/%3E%3C/g%3E%3C/svg%3E");
+  color: #e2e2e2;
+}
+
+.font-heading {
+  font-family: 'DM Sans', sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Animation utilities */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Utility classes */
+.animate-slide-in {
+  animation: slideIn 0.4s var(--ease);
+}
+
+.animate-typing {
+  animation: typing 1.4s infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s infinite;
+}
+
+.animate-modal-in {
+  animation: modalIn 0.3s var(--ease);
+}

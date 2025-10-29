@@ -1,0 +1,172 @@
+# LOCAL DEVELOPMENT ONLY - Traefik for *.localhost routing
+# Production uses NGINX Ingress Controller in Kubernetes
+# See k8s/manifests/app/08-ingress.yaml for production routing
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: tesslate-traefik
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:80"
+      - "${APP_SECURE_PORT:-443}:443"
+      - "${TRAEFIK_DASHBOARD_PORT:-8080}:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/etc/traefik
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      # Traefik dashboard at /traefik
+      - "traefik.http.routers.traefik.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik.entrypoints=web,websecure"
+      - "traefik.http.routers.traefik.priority=200"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.middlewares=traefik-stripprefix,traefik-auth"
+      - "traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes=/traefik"
+      # ⚠️ SECURITY WARNING: Change TRAEFIK_BASIC_AUTH in .env file! Default is admin:admin
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH:-admin:$$2y$$10$$EIHbchqg0sjZLr9iZINqA.6Za7wPjGAVdTER2ob5whDLtHkkZSGbC}"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=tesslate-network"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=dev@localhost"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
+      - "--log.level=INFO"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: tesslate-postgres-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-tesslate_dev}
+      - POSTGRES_USER=${POSTGRES_USER:-tesslate_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_password_change_me}
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    networks:
+      - tesslate-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tesslate_user} -d ${POSTGRES_DB:-tesslate_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"  # Expose for debugging with pgAdmin/DBeaver
+
+  orchestrator:
+    build: ./orchestrator
+    container_name: tesslate-orchestrator
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./orchestrator/app:/app/app
+      - ./orchestrator/pyproject.toml:/app/pyproject.toml
+      - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver
+      - ./orchestrator/users:/app/users
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DEPLOYMENT_MODE=docker
+      - LITELLM_API_BASE=${LITELLM_API_BASE}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS}
+      - LITELLM_TEAM_ID=${LITELLM_TEAM_ID}
+      - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN}
+      - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET}
+      - APP_PROTOCOL=${APP_PROTOCOL:-http}
+      - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
+      - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-studio.localhost}}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
+      - DEV_SERVER_BASE_URL=${DEV_SERVER_BASE_URL:-}
+      - PYTHONUNBUFFERED=1
+      - WATCHFILES_FORCE_POLLING=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      # API routes - handle both /api and websocket paths
+      - "traefik.http.routers.orchestrator.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      - "traefik.http.routers.orchestrator.entrypoints=web,websecure"
+      - "traefik.http.routers.orchestrator.priority=100"
+      - "traefik.http.routers.orchestrator.tls=true"
+      - "traefik.http.routers.orchestrator.tls.certresolver=letsencrypt"
+      - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
+      # Enable websocket support
+      - "traefik.http.middlewares.orchestrator-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
+      - "traefik.http.routers.orchestrator.middlewares=orchestrator-headers"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  app:
+    build: ./app
+    container_name: tesslate-app
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./app/src:/app/src
+      - ./app/public:/app/public
+      - ./app/index.html:/app/index.html
+      - ./app/vite.config.ts:/app/vite.config.ts
+      - ./app/tsconfig.json:/app/tsconfig.json
+      - ./app/tsconfig.app.json:/app/tsconfig.app.json
+      - ./app/tsconfig.node.json:/app/tsconfig.node.json
+      - ./app/tailwind.config.ts:/app/tailwind.config.ts
+      - ./app/package.json:/app/package.json
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-}
+      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
+      - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
+      - FRONTEND_PORT=${FRONTEND_PORT:-5173}
+      - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-docker}
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      # Frontend routes - everything except /api, /ws, and /preview
+      - "traefik.http.routers.app.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
+      - "traefik.http.routers.app.entrypoints=web,websecure"
+      - "traefik.http.routers.app.priority=10"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app.loadbalancer.server.port=5173"
+      # Handle websocket upgrade for HMR
+      - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
+      - "traefik.http.routers.app.middlewares=app-headers"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5173/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  tesslate-network:
+    name: tesslate-network
+    driver: bridge
+
+volumes:
+  postgres-dev-data:
+    name: tesslate-postgres-dev-data

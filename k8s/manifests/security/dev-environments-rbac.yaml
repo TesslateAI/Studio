@@ -1,0 +1,87 @@
+# RBAC Configuration for Development Environment Management
+# Grants the backend service the minimal required permissions to manage
+# Kubernetes resources for user development environments across all namespaces
+
+---
+# Service Account for the backend pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tesslate-backend-sa
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: rbac
+---
+# ClusterRole defining the permissions needed for dev environment management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tesslate-dev-environments-manager
+  labels:
+    app: tesslate-backend
+    component: rbac
+rules:
+# Namespace permissions - for discovery and validation (read-only)
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+
+# Deployment permissions - for managing dev environment containers
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
+
+# Service permissions - for creating internal services
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
+
+# Ingress permissions - for creating external access routes
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
+
+# Pod permissions - for status checking and monitoring (read-only)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+# Pod exec - for executing commands in pods (required for file operations)
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create", "get"]
+
+# Pod logs - for debugging (read-only)
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+
+# ReplicaSet permissions - for deployment status checking (read-only)
+- apiGroups: ["apps"]
+  resources: ["replicasets"]
+  verbs: ["get", "list", "watch"]
+
+# Event permissions - for troubleshooting and monitoring (read-only)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding - grants cluster-wide permissions to the backend service account
+# This allows the backend to manage resources in any namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tesslate-backend-cluster-access
+  labels:
+    app: tesslate-backend
+    component: rbac
+subjects:
+- kind: ServiceAccount
+  name: tesslate-backend-sa
+  namespace: tesslate
+roleRef:
+  kind: ClusterRole
+  name: tesslate-dev-environments-manager
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,68 @@
+# Tesslate Dev Server Image
+# Universal Alpine-based image supporting Node.js, Python, and Go
+# Pre-installed dependencies for fast user environment startup
+# Used by both Docker (local) and Kubernetes (production) deployment modes
+# - K8s: Built and pushed to registry via k8s/scripts/deployment/build-push-images.sh
+# - Docker: Built on-demand by docker_container_manager.py from this file
+
+FROM node:20-alpine
+
+# Install system dependencies for Node.js, Python, and Go development
+RUN apk add --no-cache \
+    git \
+    curl \
+    python3 \
+    py3-pip \
+    make \
+    g++ \
+    go \
+    bash
+
+# Set up Go environment
+ENV GOPATH=/go
+ENV PATH=$PATH:/go/bin
+RUN mkdir -p /go/bin
+
+# Allow pip to install packages globally (needed for FastAPI bases)
+# This is safe because the container is ephemeral
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# Install Air for Go hot reloading (use v1.61.5 compatible with Go 1.22+)
+RUN go install github.com/air-verse/air@v1.61.5
+
+WORKDIR /template
+
+# Copy package files first for better layer caching
+COPY template/package.json template/package-lock.json ./
+
+# Install dependencies with optimizations for production use
+# --prefer-offline: Use cached packages when available
+# --no-audit: Skip security audit (faster builds)
+# --production=false: Install both prod and dev dependencies
+RUN npm ci --prefer-offline --no-audit --production=false
+
+# Copy rest of template files
+COPY template/ ./
+
+# Verify critical binaries are present
+RUN test -f node_modules/.bin/vite || (echo "ERROR: Vite not found" && exit 1)
+RUN test -f node_modules/.bin/eslint || (echo "ERROR: ESLint not found" && exit 1)
+
+# Set ownership for non-root user (uid 1000)
+# This matches the security context used in both Docker and K8s deployments
+RUN chown -R 1000:1000 /template
+
+# Switch to non-root user for security
+USER 1000
+
+# Metadata
+LABEL maintainer="Tesslate Studio"
+LABEL description="Development server image with pre-installed React/Vite dependencies"
+LABEL version="1.0"
+
+# Health check (optional, for container monitoring)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node --version || exit 1
+
+# Default command (will be overridden by deployment configuration)
+CMD ["sh", "-c", "echo 'Tesslate dev server ready' && sleep infinity"]

@@ -1,0 +1,36 @@
+# LimitRange for user environment containers
+# Sets default resource limits for containers that don't specify them
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: user-environment-limits
+  namespace: tesslate-user-environments
+  labels:
+    app: tesslate
+    tier: user-workloads
+spec:
+  limits:
+  - type: Container
+    # Maximum limits per container
+    max:
+      memory: 1Gi
+      cpu: 1000m
+    # Minimum requests per container
+    # Note: Set low to allow cert-manager ACME HTTP solver pods (10m CPU, 64Mi memory)
+    min:
+      memory: 64Mi
+      cpu: 10m
+    # Default limits if not specified
+    default:
+      memory: 512Mi
+      cpu: 500m
+    # Default requests if not specified
+    defaultRequest:
+      memory: 256Mi
+      cpu: 100m
+  - type: PersistentVolumeClaim
+    # PVC limits
+    max:
+      storage: 10Gi
+    min:
+      storage: 1Gi
