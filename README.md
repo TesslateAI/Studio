@@ -1,10 +1,12 @@
 <div align="center">
 
+<img src="images/banner.png" alt="Tesslate Studio Banner" width="100%">
+
 # Tesslate Studio
 
 **The Open-Source AI Development Platform Built for Self-Hosting**
 
-AI-powered development environment with advanced agent orchestration—designed for complete data sovereignty and infrastructure control.
+AI-powered development environment with advanced agent orchestration - designed for complete data sovereignty and infrastructure control.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
@@ -18,15 +20,9 @@ AI-powered development environment with advanced agent orchestration—designed 
 
 ---
 
-## Demo
-
-> **Note**: Add a GIF or screenshot of Tesslate Studio in action here. Show the AI generating code, live preview updating, and the project dashboard.
-
-```
-[ Your demo GIF/screenshot will go here ]
-```
-
-**What you're seeing:** A developer describes "build a todo app with dark mode" in plain English, and Tesslate Studio generates a complete React application with live preview in under 30 seconds.
+<div align="center">
+<img src="images/screenshot.png" alt="Tesslate Studio Screenshot" width="100%">
+</div>
 
 ---
 
@@ -34,7 +30,7 @@ AI-powered development environment with advanced agent orchestration—designed 
 
 **Infrastructure-first AI development platform designed for complete ownership and control.**
 
-Tesslate Studio isn't just another code generation tool—it's a complete development platform architected from the ground up for self-hosting and data sovereignty:
+Tesslate Studio isn't just another code generation tool - it's a complete development platform architected from the ground up for self-hosting and data sovereignty:
 
 ### Self-Hosted Architecture
 - **Run anywhere**: Your machine, your cloud, your datacenter
@@ -46,7 +42,7 @@ Tesslate Studio isn't just another code generation tool—it's a complete develo
 - **Iterative Agents**: Autonomous "think-act-reflect" loops that debug, research, and iterate independently
 - **Tool Registry**: File operations (read/write/patch), persistent shell sessions, web fetch, planning tools
 - **Command Validation**: Security sandboxing with allowlists, blocklists, and injection protection
-- **Multi-agent orchestration**: Built on TframeX framework—agents collaborate across frontend, backend, database concerns
+- **Multi-agent orchestration**: Built on TframeX framework - agents collaborate across frontend, backend, database concerns
 - **Model Context Protocol (MCP)**: Inter-agent communication for complex task coordination
 
 ### Enterprise-Grade Security
@@ -60,7 +56,7 @@ Tesslate Studio isn't just another code generation tool—it's a complete develo
 - **Kanban project management**: Built-in task tracking with priorities, assignees, and comments
 - **Architecture visualization**: AI-generated Mermaid diagrams of your codebase
 - **Git integration**: Full version control with commit history, branching, and GitHub push/pull
-- **Agent marketplace**: Pluggable architecture—fork agents, swap models, customize prompts
+- **Agent marketplace**: Pluggable architecture - fork agents, swap models, customize prompts
 - **Database integration**: PostgreSQL with migration scripts and schema management
 
 ### Extensibility & Customization
@@ -132,7 +128,7 @@ Natural language to full-stack applications. Describe what you want, watch it bu
 Every project gets its own subdomain (`your-app.studio.localhost`) with hot module replacement. See changes instantly as AI writes code.
 
 ### Customizable AI Agents Marketplace
-10 pre-built, open-source agents: Stream Builder, Full Stack Agent, Code Analyzer, Test Generator, API Designer, and more. Fork them, swap models (GPT-5, Claude, local LLMs), edit prompts—it's your code.
+10 pre-built, open-source agents: Stream Builder, Full Stack Agent, Code Analyzer, Test Generator, API Designer, and more. Fork them, swap models (GPT-5, Claude, local LLMs), edit prompts - it's your code.
 
 ### Project Templates
 Start fast with production-ready templates:
@@ -159,13 +155,13 @@ Your code never leaves your infrastructure. GitHub OAuth, encrypted secrets, com
 
 **Why we built this:**
 
-We needed an AI development platform that could run on our own infrastructure without sacrificing data sovereignty or architectural control. Every existing solution required choosing between convenience and control—cloud platforms were fast but locked us in, while local tools lacked the sophistication we needed.
+We needed an AI development platform that could run on our own infrastructure without sacrificing data sovereignty or architectural control. Every existing solution required choosing between convenience and control - cloud platforms were fast but locked us in, while local tools lacked the sophistication we needed.
 
 So we built Tesslate Studio as infrastructure-first: Docker for simple deployment, container isolation for project sandboxing, and enterprise security built-in. It's designed for developers and organizations that need the power of AI-assisted development while maintaining complete ownership of their code and data.
 
-**The name "Tesslate"** comes from tessellation—the mathematical concept of tiles fitting together perfectly without gaps. That's our architecture: AI agents, human developers, isolated environments, and scalable infrastructure working together seamlessly.
+**The name "Tesslate"** comes from tessellation - the mathematical concept of tiles fitting together perfectly without gaps. That's our architecture: AI agents, human developers, isolated environments, and scalable infrastructure working together seamlessly.
 
-**Open source from the start:** We believe critical development infrastructure should be transparent, auditable, and owned by the teams using it—not controlled by vendors who can change terms overnight.
+**Open source from the start:** We believe critical development infrastructure should be transparent, auditable, and owned by the teams using it - not controlled by vendors who can change terms overnight.
 
 ---
 
@@ -470,7 +466,7 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 <details>
 <summary><b>Q: Do I need to pay for OpenAI/Claude API?</b></summary>
 
-**A:** You bring your own API keys. Tesslate Studio doesn't charge for AI—you pay your provider directly (usually pennies per request). You can also use free local models via Ollama.
+**A:** You bring your own API keys. Tesslate Studio doesn't charge for AI - you pay your provider directly (usually pennies per request). You can also use free local models via Ollama.
 
 </details>
 
@@ -484,7 +480,7 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 <details>
 <summary><b>Q: Is my code/data sent to Tesslate's servers?</b></summary>
 
-**A:** No. Tesslate Studio is self-hosted—everything runs on YOUR infrastructure. We never see your code or data.
+**A:** No. Tesslate Studio is self-hosted - everything runs on YOUR infrastructure. We never see your code or data.
 
 </details>
 
