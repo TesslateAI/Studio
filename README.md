@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="images/banner.png" alt="Tesslate Studio Banner" width="100%">
+<img src="images/Banner.png" alt="Tesslate Studio Banner" width="100%">
 
 # Tesslate Studio
 
@@ -14,9 +14,12 @@ AI-powered development environment with advanced agent orchestration - designed 
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Ready-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-[Quick Start](#quick-start) · [Features](#key-features) · [Documentation](#documentation) · [Contributing](#contributing)
+[Quick Start](#quick-start) · [Features](#key-features) · [Documentation](https://docs.tesslate.com) · [Contributing](#contributing)
 
+**Includes support for llama.cpp, LM Studio, Ollama, Openrouter, and any provider you choose.**
 </div>
+
+
 
 ---
 
@@ -42,8 +45,8 @@ Tesslate Studio isn't just another code generation tool - it's a complete develo
 - **Iterative Agents**: Autonomous "think-act-reflect" loops that debug, research, and iterate independently
 - **Tool Registry**: File operations (read/write/patch), persistent shell sessions, web fetch, planning tools
 - **Command Validation**: Security sandboxing with allowlists, blocklists, and injection protection
-- **Multi-agent orchestration**: Built on TframeX framework - agents collaborate across frontend, backend, database concerns
-- **Model Context Protocol (MCP)**: Inter-agent communication for complex task coordination
+- (Coming soon) **Multi-agent orchestration**: Built on TframeX framework - agents collaborate across frontend, backend, database concerns
+- (Coming soon) **Model Context Protocol (MCP)**: Inter-agent communication for complex task coordination
 
 ### Enterprise-Grade Security
 - **JWT authentication** with refresh token rotation and revocable sessions
@@ -131,7 +134,7 @@ Every project gets its own subdomain (`your-app.studio.localhost`) with hot modu
 10 pre-built, open-source agents: Stream Builder, Full Stack Agent, Code Analyzer, Test Generator, API Designer, and more. Fork them, swap models (GPT-5, Claude, local LLMs), edit prompts - it's your code.
 
 ### Project Templates
-Start fast with production-ready templates:
+Start fast with ready templates:
 - Next.js 15 (App Router, SSR, API routes)
 - Vite + React + FastAPI (Python backend)
 - Vite + React + Go (high-performance backend)
@@ -448,14 +451,10 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 ## Roadmap
 
 **Coming soon:**
-- [ ] GitHub Copilot integration
-- [ ] VSCode extension for direct editing
-- [ ] Multiplayer editing (real-time collaboration)
-- [ ] Built-in Git integration (commits, branches, PRs)
-- [ ] Mobile app for iOS/Android
+- [ ] Multi Multi Agent ;)
+- [ ] Local to Cloud Agent marketplace
+- [ ] Two Way Git Sync
 - [ ] Plugin system for custom integrations
-- [ ] Self-hosted AI model support (Ollama by default)
-- [ ] Advanced analytics dashboard
 
 **Have an idea?** [Open a feature request](https://github.com/TesslateAI/Studio/issues/new?template=feature_request.md)
 
