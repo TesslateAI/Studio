@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, useEffect, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
 import { ToolDropdown } from './ToolDropdown';
 import toast from 'react-hot-toast';
@@ -38,6 +38,16 @@ export function ChatInput({
   disabled = false
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
+
+  // Check for landing page prompt on component mount
+  useEffect(() => {
+    const landingPrompt = localStorage.getItem('landingPrompt');
+    if (landingPrompt) {
+      setMessage(landingPrompt);
+      // Clear the prompt after using it
+      localStorage.removeItem('landingPrompt');
+    }
+  }, []);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
