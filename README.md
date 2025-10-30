@@ -1,565 +1,556 @@
+<div align="center">
+
 # Tesslate Studio
 
-AI-powered web application builder with natural language code generation and live preview. Deploy locally with Docker or scale to production with Kubernetes.
+**The Open-Source AI Development Platform Built for Self-Hosting**
 
-## 🎯 Quick Start
+AI-powered development environment with advanced agent orchestration—designed for complete data sovereignty and infrastructure control.
 
-### Choose Your Deployment
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Ready-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-**Local Development (Recommended for Beginners)**
-```bash
-# 1. Configure environment
-cp .env.example .env
-# Edit .env and set SECRET_KEY and LITELLM_MASTER_KEY
+[Quick Start](#quick-start) · [Features](#key-features) · [Documentation](#documentation) · [Contributing](#contributing)
 
-# 2. Start all services
-docker compose up -d
-
-# 3. Access at http://studio.localhost
-```
-
-**Local Development (Fast Iteration)**
-```bash
-# Windows - starts native services + Traefik
-scripts\start-all-with-traefik.bat
-
-# Access at http://localhost:5173
-```
-
-**Production (Kubernetes)**
-```bash
-cd k8s
-./scripts/deployment/deploy-all.sh
-
-# Access at https://studio-test.tesslate.com
-```
-
-## 📚 Table of Contents
-
-- [Features](#-features)
-- [Architecture](#️-architecture)
-- [Deployment Options](#-deployment-options)
-- [Configuration](#-configuration)
-- [Common Commands](#-common-commands)
-- [Troubleshooting](#-troubleshooting)
-- [Documentation](#-documentation)
-
-## ✨ Features
-
-- **AI-Powered Code Generation** - Natural language to React/Vite applications
-- **Live Preview** - Real-time application preview with hot module replacement
-- **Multi-User Support** - Isolated development environments per user/project
-- **Dual Deployment** - Same codebase runs on Docker or Kubernetes
-- **Agent Chat Mode** - Interactive AI assistance with streaming responses
-- **Monaco Editor** - Full-featured code editor with syntax highlighting
-- **Project Management** - Create, edit, and organize multiple projects
-- **Template System** - Pre-configured React/Vite starter templates
-
-## 🏗️ Architecture
-
-### Deployment Modes
-
-Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment variable:
-
-**Docker Mode** (Local Development)
-- User projects run as Docker containers
-- Traefik reverse proxy with subdomain routing
-- URLs: `{project-slug}.studio.localhost` (e.g., `my-app-k3x8n2.studio.localhost`)
-- Storage: Local file system
-- **Browser:** Chrome or Firefox recommended (auto-resolves `*.localhost`)
-
-**Kubernetes Mode** (Production)
-- User projects run as K8s Pods/Deployments
-- NGINX Ingress Controller with SSL
-- URLs: `{project-slug}.studio-test.tesslate.com` (e.g., `my-app-k3x8n2.studio-test.tesslate.com`)
-- Storage: Shared PVC with subPath isolation
-
-### Services
-
-```
-┌─────────────────────────────────────────┐
-│         Tesslate Studio                 │
-├─────────────────────────────────────────┤
-│                                         │
-│  ┌──────────────┐  ┌─────────────┐    │
-│  │ Orchestrator │  │  Frontend   │    │
-│  │  (FastAPI)   │  │ (React+Vite)│    │
-│  │              │  │             │    │
-│  │ • Auth/JWT   │  │ • Monaco    │    │
-│  │ • Projects   │  │ • Preview   │    │
-│  │ • AI Agent   │  │ • Chat UI   │    │
-│  │ • Container  │  │             │    │
-│  │   Mgmt       │  │             │    │
-│  └──────────────┘  └─────────────┘    │
-│                                        │
-│  ┌────────────────────────────────┐   │
-│  │  User Dev Containers (Dynamic) │   │
-│  │  • my-app-k3x8n2.studio.localhost   │
-│  │  • blog-cms-h7y2k1.studio.localhost │
-│  └────────────────────────────────┘   │
-└────────────────────────────────────────┘
-```
-
-**1. Orchestrator** (`orchestrator/`)
-- FastAPI backend with JWT authentication
-- Project and file management
-- Dual container orchestration (Docker/K8s)
-- Built-in AI agent system with OpenAI/Anthropic integration
-- Streaming chat with tool calling support
-- SQLAlchemy ORM with SQLite/PostgreSQL
-
-**2. Frontend** (`app/`)
-- React + TypeScript + Vite
-- Monaco Editor integration
-- Real-time preview with live updates
-- Agent chat interface with streaming
-- Tailwind CSS styling
-
-## 🚀 Deployment Options
-
-### Comparison Matrix
-
-| Feature | Docker Compose | Hybrid Mode | Kubernetes |
-|---------|---------------|-------------|------------|
-| Setup Complexity | ⭐ Low | ⭐⭐ Medium | ⭐⭐⭐ High |
-| Hot Reload | 🐢 Slow | ⚡ Fast | N/A |
-| Production Ready | ❌ No | ❌ No | ✅ Yes |
-| Scalability | Limited | None | Excellent |
-| Cost | Free | Free | $$$ |
-| Best For | Testing | Development | Production |
-
-### Option 1: Full Docker Compose (Simplest)
-
-**Best for:** Quick setup, testing, beginners
-
-```bash
-# Start all services
-docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Stop services
-docker compose down
-
-# Rebuild after changes
-docker compose up -d --build
-```
-
-**Access:**
-- Frontend: http://studio.localhost
-- API: http://api.localhost
-- Traefik Dashboard: http://traefik.localhost:8080
-- User Projects: http://{project-slug}.studio.localhost (subdomain routing)
-
-**Advantages:**
-- ✅ Single command to start
-- ✅ Consistent environment
-- ✅ Easy cleanup
-
-**Disadvantages:**
-- ❌ Slow hot reload
-- ❌ Higher resource usage
-- ❌ Not production-ready
-
-### Option 2: Hybrid Mode (Fastest Development)
-
-**Best for:** Active development with fast hot reload
-
-**Windows:**
-```bash
-scripts\start-all-with-traefik.bat
-```
-
-**Manual Setup:**
-```bash
-# 1. Start Traefik (required for user containers)
-docker compose up -d traefik
-
-# 2. Start orchestrator
-cd orchestrator
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# 3. Start frontend
-cd app
-npm run dev
-```
-
-**Access:**
-- Frontend: http://localhost:5173
-- API: http://localhost:8000
-- User Projects: http://{project-slug}.studio.localhost (subdomain routing)
-
-**Advantages:**
-- ✅ Fastest hot reload
-- ✅ Full debugging support
-- ✅ Lower resource usage
-
-**Disadvantages:**
-- ❌ Multiple terminal windows
-- ❌ Requires Traefik in Docker
-- ❌ More manual setup
-
-### Option 3: Kubernetes (Production)
-
-**Best for:** Production deployment, auto-scaling, high availability
-
-**Quick Deploy:**
-```bash
-cd k8s
-cp .env.example .env
-# Edit .env and add DOCR_TOKEN
-
-./scripts/deployment/deploy-all.sh
-```
-
-**Management:**
-```bash
-# Use the management script
-./scripts/manage-k8s.sh status
-./scripts/manage-k8s.sh logs backend
-./scripts/manage-k8s.sh restart backend
-./scripts/manage-k8s.sh backup
-./scripts/manage-k8s.sh update
-```
-
-**Access:**
-- Frontend: https://studio-test.tesslate.com
-- API: https://studio-test.tesslate.com/api
-- User Projects: https://{project-slug}.studio-test.tesslate.com (subdomain routing)
-
-**Advantages:**
-- ✅ Auto-scaling (HPA)
-- ✅ High availability
-- ✅ Self-healing
-- ✅ Rolling updates
-- ✅ SSL/TLS certificates
-
-**Disadvantages:**
-- ❌ Complex setup
-- ❌ Higher cost
-- ❌ Requires K8s knowledge
-
-**See:** [Detailed Kubernetes Guide](k8s/README.md)
-
-## 🔧 Configuration
-
-### Environment Variables
-
-**Root `.env` (Docker Compose):**
-```env
-SECRET_KEY=your-secret-key-here-change-this-in-production
-LITELLM_MASTER_KEY=your-litellm-master-key-here
-LITELLM_API_BASE=http://localhost:4000/v1
-```
-
-**`orchestrator/.env` (Individual Services):**
-```env
-SECRET_KEY=your-secret-key-here
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/tesslate
-DEPLOYMENT_MODE=docker  # or "kubernetes"
-LITELLM_API_BASE=http://localhost:4000/v1
-LITELLM_MASTER_KEY=your-litellm-master-key
-OPENAI_API_BASE=http://localhost:4000/v1  # Points to LiteLLM proxy
-OPENAI_MODEL=gpt-4  # Model available in your LiteLLM instance
-
-# CORS and Security (optional - has sensible defaults)
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
-ALLOWED_HOSTS=localhost,*.localhost
-```
-
-**`k8s/.env` (Kubernetes):**
-```env
-DOCR_TOKEN=your-digitalocean-container-registry-token
-```
-
-**Kubernetes Secrets:**
-
-Configure secrets in `k8s/manifests/security/app-secrets.yaml`:
-```yaml
-SECRET_KEY: <base64-encoded>
-JWT_SECRET: <base64-encoded>
-LITELLM_MASTER_KEY: <base64-encoded>
-DATABASE_URL: <base64-encoded>
-CORS_ORIGINS: "https://studio-test.tesslate.com,https://studio-demo.tesslate.com"
-ALLOWED_HOSTS: "studio-test.tesslate.com,*.studio-test.tesslate.com"
-```
-
-> **Note**: To add new domains after deployment, simply update the secrets file and restart the deployments. No image rebuild needed!
-
-### Service Ports
-
-| Service | Docker | Hybrid | Kubernetes |
-|---------|--------|--------|------------|
-| Frontend | 5173 | 5173 | 80/443 |
-| Orchestrator | 8000 | 8000 | 80/443 |
-| Traefik | 80, 8080 | 80, 8080 | N/A |
-| PostgreSQL | N/A | N/A | 5432 |
-
-## ⚡ Common Commands
-
-### Docker Compose
-
-```bash
-# Start all services
-docker compose up -d
-
-# View logs (all services)
-docker compose logs -f
-
-# View logs (specific service)
-docker compose logs -f orchestrator
-
-# Stop all services
-docker compose down
-
-# Rebuild after code changes
-docker compose up -d --build
-
-# Clean slate (removes data!)
-docker compose down -v
-
-# Check service status
-docker compose ps
-```
-
-### Kubernetes
-
-```bash
-# Using the management script (recommended)
-./scripts/manage-k8s.sh status        # View all resources
-./scripts/manage-k8s.sh logs backend  # View logs
-./scripts/manage-k8s.sh restart backend  # Restart service
-./scripts/manage-k8s.sh scale backend 3  # Scale to 3 replicas
-./scripts/manage-k8s.sh backup        # Backup database
-./scripts/manage-k8s.sh update        # Build & deploy new images
-
-# Or use kubectl directly
-kubectl get pods -n tesslate
-kubectl logs -f deployment/tesslate-backend -n tesslate
-kubectl rollout restart deployment/tesslate-backend -n tesslate
-kubectl get pods -n tesslate-user-environments
-```
-
-### Cleanup Scripts
-
-```bash
-# Local Docker development
-python scripts/cleanup-local.py
-
-# Kubernetes (production)
-./scripts/cleanup-k8s.sh
-```
-
-## 🐛 Troubleshooting
-
-### Docker Issues
-
-**Problem: "Docker daemon is not running"**
-```bash
-# Windows/Mac: Start Docker Desktop
-# Linux: sudo systemctl start docker
-```
-
-**Problem: "Network tesslate-network not found"**
-```bash
-docker network create tesslate-network
-```
-
-**Problem: "Port already in use"**
-```bash
-# Windows
-netstat -ano | findstr :8000
-
-# Linux/Mac
-lsof -i :8000
-
-# Kill the process or change port in .env
-```
-
-**Problem: "User containers not accessible" or "Subdomain not resolving"**
-```bash
-# 1. Use Chrome or Firefox (auto-resolve *.localhost subdomains)
-# Other browsers may require DNS configuration
-
-# 2. Check Traefik is running
-docker ps | grep traefik
-
-# 3. Check container exists
-docker ps | grep tesslate
-
-# 4. View Traefik dashboard for routing rules
-# Open http://localhost:8080
-# Look for Host(`{project-slug}.studio.localhost`) rules
-
-# 5. Test with curl using Host header
-curl -H "Host: test.studio.localhost" http://localhost/
-```
-
-### Kubernetes Issues
-
-**Problem: "Pods not starting"**
-```bash
-kubectl get pods -n tesslate
-kubectl describe pod <pod-name> -n tesslate
-kubectl logs <pod-name> -n tesslate
-```
-
-**Problem: "Ingress not working"**
-```bash
-kubectl get ingress -n tesslate
-kubectl describe ingress -n tesslate
-nslookup studio-test.tesslate.com
-```
-
-**Problem: "Image pull errors"**
-```bash
-# Recreate registry secret
-cd k8s
-./scripts/deployment/setup-registry-auth.sh
-```
-
-### Database Issues
-
-**Problem: "Database connection failed"**
-```bash
-# Docker mode - check PostgreSQL connection
-docker compose ps postgres
-docker compose logs postgres
-
-# K8s mode - check PostgreSQL
-kubectl get pods -n tesslate | grep postgres
-kubectl logs postgres-0 -n tesslate
-```
-
-### Authentication Issues
-
-**Problem: "Invalid token / JWT errors"**
-```bash
-# Verify SECRET_KEY is set and consistent
-# Docker: check orchestrator/.env
-# K8s: kubectl get secret tesslate-app-secrets -n tesslate -o yaml
-```
-
-## 📚 Documentation
-
-### Project Documentation
-- **[CLAUDE.md](CLAUDE.md)** - Developer guide and architecture
-- **[Orchestrator API](orchestrator/README.md)** - Backend API docs
-- **[Frontend App](app/README.md)** - React frontend docs
-
-### Deployment Guides
-- **[Kubernetes README](k8s/README.md)** - K8s overview
-- **[Kubernetes Deployment](k8s/docs/KUBERNETES_DEPLOYMENT_GUIDE.md)** - Complete K8s guide
-- **[K3s Deployment](k8s/docs/K3S_DEPLOYMENT_GUIDE.md)** - Lightweight K8s
-- **[Production Strategy](k8s/docs/PRODUCTION_DEPLOYMENT_STRATEGY.md)** - Production planning
-- **[Deployment Checklist](k8s/docs/DEPLOYMENT_CHECKLIST.md)** - Pre-deployment checklist
-
-### Script Documentation
-- **[Scripts README](scripts/README.md)** - Utility scripts guide
-
-## 🏗️ Project Structure
-
-```
-tesslate-studio/
-├── orchestrator/          # Backend orchestration service (FastAPI)
-│   ├── app/              # Main application code
-│   │   ├── main.py       # FastAPI application entry point
-│   │   ├── routers/      # API route handlers
-│   │   ├── models.py     # SQLAlchemy database models
-│   │   ├── k8s_client.py # Kubernetes client manager
-│   │   └── dev_server_manager.py # Container orchestration
-│   └── template/         # React/Vite project template
-├── app/                   # Frontend application (React + Vite)
-│   ├── src/
-│   │   ├── pages/        # Page components
-│   │   ├── components/   # Reusable components
-│   │   └── lib/          # API client and utilities
-│   └── package.json
-├── k8s/                  # Kubernetes configurations
-│   ├── manifests/        # K8s resource definitions
-│   ├── scripts/          # Deployment and management scripts
-│   └── docs/             # K8s documentation
-├── scripts/              # Utility scripts
-│   ├── cleanup-local.py  # Docker cleanup
-│   ├── cleanup-k8s.sh    # K8s cleanup
-│   └── manage-k8s.sh     # K8s management
-├── traefik/              # Traefik configuration (Docker mode)
-├── docker-compose.yml     # Local development setup
-├── docker-compose.prod.yml # Production Docker setup
-└── README.md             # This file
-
-Note: All AI functionality is handled directly by the orchestrator service with
-      built-in support for OpenAI, Anthropic, and Cerebras models.
-```
-
-## 💡 Pro Tips
-
-### Development Workflow
-1. Use **Hybrid Mode** for active development (fast hot reload)
-2. Test with **Full Docker** before deploying
-3. Always use `.env` files (never commit secrets!)
-4. Check logs in separate terminal windows
-
-### Production Workflow
-1. Use **Kubernetes** for production (scalable, reliable)
-2. Setup monitoring and alerts
-3. Enable automated backups
-4. Use managed PostgreSQL database
-5. Setup staging environment for testing
-
-### Common Mistakes to Avoid
-- ❌ Forgetting to start Traefik in Hybrid mode (user containers won't work!)
-- ❌ Using browsers other than Chrome/Firefox for local dev (subdomain DNS may not work)
-- ❌ Using weak `SECRET_KEY` in production
-- ❌ Not setting `DEPLOYMENT_MODE` correctly
-- ❌ Exposing `.env` files in version control
-- ❌ Running SQLite in production (use PostgreSQL!)
-
-## 🧪 Testing
-
-```bash
-# Kubernetes integration tests
-cd k8s/scripts/testing
-python test_k8s_integration.py
-python test_user_environment_api.py
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Commit your changes (`git commit -m 'Add amazing feature'`)
-5. Push to the branch (`git push origin feature/amazing-feature`)
-6. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) file for details.
-
-### Third-Party Software
-
-Tesslate Studio uses various third-party open-source software components. The licenses and notices for these components can be found in:
-
-- **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** - Complete list of third-party licenses
-- **[NOTICE](NOTICE)** - Brief attribution notices
-
-Key third-party components include:
-
-- **Traefik** (MIT License) - Reverse proxy for routing
-- **PostgreSQL** (PostgreSQL License) - Database system
-- **React** (MIT License) - Frontend framework
-- **FastAPI** (MIT License) - Backend framework
-
-All third-party licenses are compatible with the Apache License 2.0 under which this project is released.
+</div>
 
 ---
 
-**Need Help?**
-- Check the [Troubleshooting](#-troubleshooting) section above
-- Review detailed guides in [Documentation](#-documentation)
-- File an issue on GitHub
-- Check server logs for detailed errors
+## Demo
 
-**Happy Building! 🎉**
+> **Note**: Add a GIF or screenshot of Tesslate Studio in action here. Show the AI generating code, live preview updating, and the project dashboard.
+
+```
+[ Your demo GIF/screenshot will go here ]
+```
+
+**What you're seeing:** A developer describes "build a todo app with dark mode" in plain English, and Tesslate Studio generates a complete React application with live preview in under 30 seconds.
+
+---
+
+## What Makes Tesslate Studio Different?
+
+**Infrastructure-first AI development platform designed for complete ownership and control.**
+
+Tesslate Studio isn't just another code generation tool—it's a complete development platform architected from the ground up for self-hosting and data sovereignty:
+
+### Self-Hosted Architecture
+- **Run anywhere**: Your machine, your cloud, your datacenter
+- **Container isolation**: Each project runs in its own sandboxed Docker container
+- **Subdomain routing**: Clean URLs (`project.studio.localhost`) for easy project access
+- **Data sovereignty**: Your code never leaves your infrastructure
+
+### Advanced Multi-Agent System
+- **Iterative Agents**: Autonomous "think-act-reflect" loops that debug, research, and iterate independently
+- **Tool Registry**: File operations (read/write/patch), persistent shell sessions, web fetch, planning tools
+- **Command Validation**: Security sandboxing with allowlists, blocklists, and injection protection
+- **Multi-agent orchestration**: Built on TframeX framework—agents collaborate across frontend, backend, database concerns
+- **Model Context Protocol (MCP)**: Inter-agent communication for complex task coordination
+
+### Enterprise-Grade Security
+- **JWT authentication** with refresh token rotation and revocable sessions
+- **Encrypted credential storage** using Fernet encryption for API keys and tokens
+- **Audit logging**: Complete command history for compliance
+- **Container isolation**: Projects run in isolated environments
+- **Command sanitization**: AI-generated shell commands validated before execution
+
+### Full Development Lifecycle
+- **Kanban project management**: Built-in task tracking with priorities, assignees, and comments
+- **Architecture visualization**: AI-generated Mermaid diagrams of your codebase
+- **Git integration**: Full version control with commit history, branching, and GitHub push/pull
+- **Agent marketplace**: Pluggable architecture—fork agents, swap models, customize prompts
+- **Database integration**: PostgreSQL with migration scripts and schema management
+
+### Extensibility & Customization
+- **Tesslate Forge**: Train, fine-tune, and deploy custom models as agents
+- **Open source agents**: All 10 marketplace agents are forkable and modifiable
+- **Model flexibility**: OpenAI, Anthropic, Google, local LLMs via Ollama/LM Studio
+- **Platform customization**: Fork the entire platform for proprietary workflows
+
+**Built for:**
+- **Developers** who want complete control over their AI development environment
+- **Teams** needing data privacy and on-premises deployment
+- **Regulated industries** (healthcare, finance, government) requiring data sovereignty
+- **Organizations** building AI-powered internal tools
+- **Engineers** wanting to customize the platform itself
+
+---
+
+## Quick Start
+
+**Get running in 3 steps, 3 minutes:**
+
+```bash
+# 1. Clone and configure
+git clone https://github.com/TesslateAI/Studio.git
+cd Studio
+cp .env.example .env
+
+# 2. Add your API keys (OpenAI, Anthropic, etc.) to .env
+# Edit .env: Set SECRET_KEY and LITELLM_MASTER_KEY
+
+# 3. Start everything
+docker compose up -d
+```
+
+**That's it!** Open http://studio.localhost
+
+**What's included:**
+- 10 AI agents ready to use
+- 3 project templates pre-loaded
+- Live preview with hot reload
+- Authentication system ready
+
+<details>
+<summary><b>First time with Docker? Click here for help</b></summary>
+
+**Install Docker:**
+- **Windows/Mac**: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- **Linux**: `curl -fsSL https://get.docker.com | sh`
+
+**Generate secure keys:**
+```bash
+# SECRET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# LITELLM_MASTER_KEY
+python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
+```
+
+</details>
+
+---
+
+## Key Features
+
+### AI-Powered Code Generation
+Natural language to full-stack applications. Describe what you want, watch it build in real-time with streaming responses.
+
+### Live Preview with Real URLs
+Every project gets its own subdomain (`your-app.studio.localhost`) with hot module replacement. See changes instantly as AI writes code.
+
+### Customizable AI Agents Marketplace
+10 pre-built, open-source agents: Stream Builder, Full Stack Agent, Code Analyzer, Test Generator, API Designer, and more. Fork them, swap models (GPT-5, Claude, local LLMs), edit prompts—it's your code.
+
+### Project Templates
+Start fast with production-ready templates:
+- Next.js 15 (App Router, SSR, API routes)
+- Vite + React + FastAPI (Python backend)
+- Vite + React + Go (high-performance backend)
+
+### Docker-Based Architecture
+- **One command deployment**: `docker compose up -d`
+- **Container per project**: Isolated development environments
+- **PostgreSQL** for persistent data
+- **Traefik** ingress with subdomain routing
+- **JWT authentication**, audit logging, secrets management
+
+### Monaco Code Editor
+Full VSCode-like editing experience in the browser. Syntax highlighting, IntelliSense, multi-file editing.
+
+### Privacy & Security First
+Your code never leaves your infrastructure. GitHub OAuth, encrypted secrets, comprehensive audit logs, role-based access control.
+
+---
+
+## The Story
+
+**Why we built this:**
+
+We needed an AI development platform that could run on our own infrastructure without sacrificing data sovereignty or architectural control. Every existing solution required choosing between convenience and control—cloud platforms were fast but locked us in, while local tools lacked the sophistication we needed.
+
+So we built Tesslate Studio as infrastructure-first: Docker for simple deployment, container isolation for project sandboxing, and enterprise security built-in. It's designed for developers and organizations that need the power of AI-assisted development while maintaining complete ownership of their code and data.
+
+**The name "Tesslate"** comes from tessellation—the mathematical concept of tiles fitting together perfectly without gaps. That's our architecture: AI agents, human developers, isolated environments, and scalable infrastructure working together seamlessly.
+
+**Open source from the start:** We believe critical development infrastructure should be transparent, auditable, and owned by the teams using it—not controlled by vendors who can change terms overnight.
+
+---
+
+## Architecture
+
+Tesslate Studio creates **isolated containerized environments** for each project:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Your Machine / Your Cloud / Your Datacenter       │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  ┌──────────────────────────────────────────┐     │
+│  │  Tesslate Studio (You control this)     │     │
+│  │                                           │     │
+│  │  • FastAPI Orchestrator (Python)         │     │
+│  │  • React Frontend (TypeScript)           │     │
+│  │  • PostgreSQL Database                    │     │
+│  │  • AI Agent Marketplace                   │     │
+│  └───────────┬──────────────────────────────┘     │
+│              │                                      │
+│              ▼                                      │
+│  ┌──────────────────────────────────────────┐     │
+│  │  Project Containers (Isolated)           │     │
+│  │                                           │     │
+│  │  todo-app.studio.localhost               │     │
+│  │  dashboard.studio.localhost              │     │
+│  │  prototype.studio.localhost              │     │
+│  └──────────────────────────────────────────┘     │
+│                                                     │
+│  ┌──────────────────────────────────────────┐     │
+│  │  Your AI Models (You choose)             │     │
+│  │                                           │     │
+│  │  • OpenAI GPT-5 (API)                    │     │
+│  │  • Anthropic Claude (API)                │     │
+│  │  • Local LLMs via Ollama                 │     │
+│  │  • Or any LiteLLM-compatible provider    │     │
+│  └──────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────────┘
+```
+
+**Key Architecture Principles:**
+1. **Container-per-project** - True isolation, no conflicts
+2. **Subdomain routing** - Clean URLs, easy project access
+3. **Bring your own models** - No vendor lock-in for AI
+4. **Self-hosted** - Complete infrastructure control
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- **Docker Desktop** (Windows/Mac) or **Docker Engine** (Linux)
+- **8GB RAM minimum** (16GB recommended)
+- **OpenAI or Anthropic API key** (or run local LLMs with Ollama)
+
+### Installation
+
+**Step 1: Clone the repository**
+
+```bash
+git clone https://github.com/TesslateAI/Studio.git
+cd Studio
+```
+
+**Step 2: Configure environment**
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set these required values:
+
+```env
+# Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+SECRET_KEY=your-generated-secret-key
+
+# Your LiteLLM master key
+LITELLM_MASTER_KEY=sk-your-litellm-key
+
+# AI provider API keys (at least one required)
+OPENAI_API_KEY=sk-your-openai-key
+ANTHROPIC_API_KEY=sk-your-anthropic-key
+```
+
+**Step 3: Start Tesslate Studio**
+
+```bash
+docker compose up -d
+```
+
+**Step 4: Create your account**
+
+Open http://studio.localhost and sign up. The first user becomes admin automatically.
+
+**Step 5: Start building**
+
+1. Click "New Project" → Choose a template
+2. Describe what you want in natural language
+3. Watch AI generate your app in real-time
+4. Open live preview at `{your-project}.studio.localhost`
+
+### Development Modes
+
+**Full Docker** (Recommended for most users)
+```bash
+docker compose up -d
+```
+Everything runs in containers. One command, fully isolated.
+
+**Hybrid Mode** (Fastest for active development)
+```bash
+# Start infrastructure
+docker compose up -d traefik postgres
+
+# Run services natively (separate terminals)
+cd orchestrator && uv run uvicorn app.main:app --reload
+cd app && npm run dev
+```
+Native services for instant hot reload, Docker for infrastructure.
+
+---
+
+## Configuration
+
+### AI Models
+
+Tesslate uses [LiteLLM](https://github.com/BerriAI/litellm) as a unified gateway. This means you can use:
+
+- **OpenAI** (GPT-5, GPT-4, GPT-3.5)
+- **Anthropic** (Claude 3.5, Claude 3)
+- **Google** (Gemini Pro)
+- **Local LLMs** (Ollama, LocalAI)
+- **100+ other providers**
+
+Configure in `.env`:
+
+```env
+# Default models
+LITELLM_DEFAULT_MODELS=gpt-5o-mini,claude-3-haiku,gemini-pro
+
+# Per-user budget (USD)
+LITELLM_INITIAL_BUDGET=10.0
+```
+
+### Database
+
+**Development:** PostgreSQL runs in Docker automatically.
+
+**Production:** Use a managed database:
+```env
+DATABASE_URL=postgresql+asyncpg://user:pass@your-postgres:5432/tesslate
+```
+
+### Domain Configuration
+
+**Local development:**
+```env
+APP_DOMAIN=studio.localhost
+```
+
+**Production:**
+```env
+APP_DOMAIN=studio.yourcompany.com
+APP_PROTOCOL=https
+```
+
+Projects will be accessible at `{project}.studio.yourcompany.com`
+
+---
+
+## Contributing
+
+We'd love your help making Tesslate Studio better!
+
+### Quick Contribution Guide
+
+1. **Fork the repo** and clone your fork
+2. **Create a branch**: `git checkout -b feature/amazing-feature`
+3. **Make your changes** and test locally
+4. **Commit**: `git commit -m 'Add amazing feature'`
+5. **Push**: `git push origin feature/amazing-feature`
+6. **Open a Pull Request** with a clear description
+
+### Good First Issues
+
+New to the project? Check out issues labeled [`good first issue`](https://github.com/TesslateAI/Studio/labels/good%20first%20issue).
+
+### Development Setup
+
+```bash
+# Clone your fork
+git clone https://github.com/YOUR-USERNAME/Studio.git
+cd Studio
+
+# Start in hybrid mode (fastest for development)
+docker compose up -d traefik postgres
+cd orchestrator && uv run uvicorn app.main:app --reload
+cd app && npm run dev
+```
+
+### Contribution Guidelines
+
+- **Tests**: Add tests for new features
+- **Docs**: Update documentation if you change functionality
+- **Commits**: Use clear, descriptive commit messages
+- **PRs**: One feature per PR, keep them focused
+
+**Before submitting:**
+- Run tests: `npm test` (frontend), `pytest` (backend)
+- Update docs if needed
+- Test with `docker compose up -d`
+
+---
+
+## Documentation
+
+### Guides
+- **[Quick Start Guide](docs/quickstart.md)** - Get running in 5 minutes
+- **[Configuration Guide](docs/configuration.md)** - All environment variables explained
+- **[API Documentation](orchestrator/README.md)** - Backend API reference
+- **[Architecture Deep Dive](docs/architecture.md)** - How everything works
+
+### Deployment
+- **[Docker Deployment](docs/DEPLOYMENT.md)** - Self-hosted deployment guide
+- **[Security Best Practices](docs/security.md)** - Hardening your installation
+
+### Customization
+- **[Creating Custom Agents](docs/custom-agents.md)** - Build your own AI agents
+- **[Project Templates](docs/templates.md)** - Create custom starter templates
+- **[Theming Guide](docs/theming.md)** - Customize the UI
+
+---
+
+## Security
+
+We take security seriously. Found a vulnerability?
+
+**Please DO NOT open a public issue.** Instead:
+
+**Email us:** security@tesslate.com
+
+We'll respond within 24 hours and work with you to address it.
+
+### Security Features
+
+- **JWT authentication** with refresh tokens
+- **Encrypted secrets** storage (GitHub tokens, API keys)
+- **Audit logging** (who did what, when)
+- **Role-based access** control (admin, user, viewer)
+- **Container isolation** (projects can't access each other)
+- **HTTPS/TLS** in production (automatic Let's Encrypt)
+
+---
+
+## License
+
+Tesslate Studio is **Apache 2.0 licensed**. See [LICENSE](LICENSE).
+
+**What this means:**
+- **Commercial use** - Build paid products with it
+- **Modification** - Fork and customize freely
+- **Distribution** - Share your modifications
+- **Patent grant** - Protected from patent claims
+- **Trademark** - "Tesslate" name is reserved
+- **Liability** - Provided "as is" (standard for open source)
+
+### Third-Party Licenses
+
+This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=TesslateAI/Studio&type=Date)](https://star-history.com/#TesslateAI/Studio&Date)
+
+---
+
+## Roadmap
+
+**Coming soon:**
+- [ ] GitHub Copilot integration
+- [ ] VSCode extension for direct editing
+- [ ] Multiplayer editing (real-time collaboration)
+- [ ] Built-in Git integration (commits, branches, PRs)
+- [ ] Mobile app for iOS/Android
+- [ ] Plugin system for custom integrations
+- [ ] Self-hosted AI model support (Ollama by default)
+- [ ] Advanced analytics dashboard
+
+**Have an idea?** [Open a feature request](https://github.com/TesslateAI/Studio/issues/new?template=feature_request.md)
+
+---
+
+## FAQ
+
+<details>
+<summary><b>Q: Do I need to pay for OpenAI/Claude API?</b></summary>
+
+**A:** You bring your own API keys. Tesslate Studio doesn't charge for AI—you pay your provider directly (usually pennies per request). You can also use free local models via Ollama.
+
+</details>
+
+<details>
+<summary><b>Q: Can I use this commercially?</b></summary>
+
+**A:** Yes! Apache 2.0 license allows commercial use. Build SaaS products, internal tools, whatever you want.
+
+</details>
+
+<details>
+<summary><b>Q: Is my code/data sent to Tesslate's servers?</b></summary>
+
+**A:** No. Tesslate Studio is self-hosted—everything runs on YOUR infrastructure. We never see your code or data.
+
+</details>
+
+<details>
+<summary><b>Q: Can I modify the AI agents?</b></summary>
+
+**A:** Absolutely! All 10 agents are open source. Fork them, edit prompts, swap models (GPT → Claude → local LLM), or create entirely new agents.
+
+</details>
+
+<details>
+<summary><b>Q: Can I run this without Docker?</b></summary>
+
+**A:** While Docker is recommended, you can run services natively. You'll need to manually set up PostgreSQL, Traefik, and configure networking.
+
+</details>
+
+<details>
+<summary><b>Q: What hardware do I need?</b></summary>
+
+**A:** Minimum 8GB RAM, 16GB recommended. Works on Windows, Mac, and Linux. An internet connection is needed for AI API calls (unless using local models).
+
+</details>
+
+---
+
+## Community & Support
+
+### Get Help
+
+- **[Documentation](docs/)** - Comprehensive guides
+- **[GitHub Discussions](https://github.com/TesslateAI/Studio/discussions)** - Ask questions, share ideas
+- **[Issues](https://github.com/TesslateAI/Studio/issues)** - Report bugs, request features
+- **[Email](mailto:support@tesslate.com)** - Direct support (response within 24h)
+
+### Stay Updated
+
+- **Star this repo** to get notified of updates
+- **Watch releases** for new versions
+- **[Follow on Twitter/X](https://twitter.com/tesslate)** - News and tips
+
+### Contributing
+
+Contributions are **welcome and encouraged**! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**Special thanks to our contributors:**
+
+[![Contributors](https://contrib.rocks/image?repo=TesslateAI/Studio)](https://github.com/TesslateAI/Studio/graphs/contributors)
+
+---
+
+## Acknowledgments
+
+Tesslate Studio wouldn't exist without these amazing open-source projects:
+
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
+- [React](https://react.dev/) - UI library
+- [Vite](https://vitejs.dev/) - Lightning-fast build tool
+- [Monaco Editor](https://microsoft.github.io/monaco-editor/) - VSCode's editor
+- [LiteLLM](https://github.com/BerriAI/litellm) - Unified AI gateway
+- [Traefik](https://traefik.io/) - Cloud-native proxy
+- [PostgreSQL](https://www.postgresql.org/) - Reliable database
+
+---
+
+<div align="center">
+
+**Built by developers who believe critical infrastructure should be open**
+
+[Star this repo](https://github.com/TesslateAI/Studio) · [Fork it](https://github.com/TesslateAI/Studio/fork) · [Share it](https://twitter.com/intent/tweet?text=Check%20out%20Tesslate%20Studio%20-%20Open%20source%20AI%20development%20platform%20for%20self-hosting!&url=https://github.com/TesslateAI/Studio)
+
+</div>

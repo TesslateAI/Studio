@@ -51,8 +51,8 @@ async def get_available_models(
     # These are typical costs - actual costs may vary
     model_pricing = {
         # OpenAI
-        "gpt-4": {"input": 30.0, "output": 60.0},
-        "gpt-4-turbo": {"input": 10.0, "output": 30.0},
+        "gpt-5": {"input": 30.0, "output": 60.0},
+        "gpt-5-turbo": {"input": 10.0, "output": 30.0},
         "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
 
         # Anthropic

@@ -66,10 +66,28 @@ export default function Project() {
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
+  const [initialChatMessage, setInitialChatMessage] = useState<string>('');
   // Note: We still have projectId for internal use, but it comes from the loaded project object
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
+
+  // Load initial prompt from terminal landing page (once)
+  useEffect(() => {
+    const storedPrompt = sessionStorage.getItem('project_prompt');
+    if (storedPrompt) {
+      setInitialChatMessage(storedPrompt);
+      // Clear it from sessionStorage after loading
+      sessionStorage.removeItem('project_prompt');
+      sessionStorage.removeItem('terminal_theme');
+
+      // Show a toast to let the user know their prompt is ready
+      toast.success('Your prompt from the landing page is ready!', {
+        duration: 4000,
+        icon: '✨'
+      });
+    }
+  }, []);
 
   useEffect(() => {
     if (slug) {
@@ -568,6 +586,7 @@ export default function Project() {
           onFileUpdate={handleFileUpdate}
           projectFiles={files}
           projectName={project?.name}
+          initialMessage={initialChatMessage}
         />
       ) : (
         <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">

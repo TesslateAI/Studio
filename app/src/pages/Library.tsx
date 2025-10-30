@@ -30,9 +30,9 @@ import {
   ListChecks,
   Wrench,
   Desktop,
-  Microchip,
   ArrowsClockwise,
-  X
+  X,
+  Link
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { DiscordSupport } from '../components/DiscordSupport';
@@ -962,7 +962,7 @@ function ModelsTab({
       <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/20 rounded-xl p-6">
         <div className="flex items-start gap-4 mb-4">
           <div className="p-3 bg-yellow-500/20 rounded-lg">
-            <Microchip size={24} className="text-yellow-400" />
+            <Cpu size={24} className="text-yellow-400" />
           </div>
           <div className="flex-1">
             <div className="flex items-center justify-between mb-2">
@@ -2500,7 +2500,7 @@ function LlamaCppConfigModal({
       <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Microchip size={24} className="text-yellow-400" />
+            <Cpu size={24} className="text-yellow-400" />
             Connect to llama.cpp
           </h2>
           <button

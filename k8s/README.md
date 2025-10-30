@@ -188,7 +188,7 @@ Edit `k8s/manifests/security/app-secrets.yaml`:
 4. **AI Service Credentials**:
    - `OPENAI_API_KEY`: Your AI provider API key
    - `OPENAI_API_BASE`: API endpoint URL (e.g., `https://api.openai.com/v1`)
-   - `OPENAI_MODEL`: Model identifier (e.g., `gpt-4-turbo`)
+   - `OPENAI_MODEL`: Model identifier (e.g., `gpt-5-turbo`)
 
 #### Step 5: Verify Secret Files
 

@@ -49,7 +49,7 @@ async def get_llm_client(
 
     Args:
         user_id: The user ID
-        model_name: The model identifier (e.g., "gpt-4o", "openrouter/model", "ollama/llama2")
+        model_name: The model identifier (e.g., "gpt-5o", "openrouter/model", "ollama/llama2")
         db: Database session
 
     Returns:
@@ -232,7 +232,7 @@ class OpenAIAdapter(ModelAdapter):
         Initialize OpenAI adapter with a pre-configured client.
 
         Args:
-            model_name: Model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
+            model_name: Model identifier (e.g., "gpt-5o", "openrouter/anthropic/claude-3.5-sonnet")
             client: Pre-configured AsyncOpenAI client (from get_llm_client())
             temperature: Sampling temperature (0-2)
             max_tokens: Maximum tokens in response
@@ -407,7 +407,7 @@ async def create_model_adapter(
     Auto-detects provider from model name if not specified.
 
     Args:
-        model_name: Model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
+        model_name: Model identifier (e.g., "gpt-5o", "openrouter/anthropic/claude-3.5-sonnet")
         user_id: User ID for fetching API keys
         db: Database session
         provider: Force specific provider ("openai", "anthropic", etc.)
@@ -418,7 +418,7 @@ async def create_model_adapter(
 
     Examples:
         # OpenAI GPT-4 (via LiteLLM)
-        adapter = await create_model_adapter("gpt-4o", user_id=1, db=db)
+        adapter = await create_model_adapter("gpt-5o", user_id=1, db=db)
 
         # OpenRouter model (uses user's OpenRouter key)
         adapter = await create_model_adapter("openrouter/anthropic/claude-3.5-sonnet", user_id=1, db=db)

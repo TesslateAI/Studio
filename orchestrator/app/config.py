@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""
-    litellm_default_models: str = "gpt-4o-mini"  # Comma-separated list
+    litellm_default_models: str = "gpt-5o-mini"  # Comma-separated list
     litellm_team_id: str = "default"  # Team/access group for users
     litellm_email_domain: str = "localhost"  # Domain for internal emails
     litellm_initial_budget: float = 10.0  # Initial budget per user in USD
@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     # Deployment mode: "docker" (local with Docker+Traefik) or "kubernetes" (K8s cluster)
     deployment_mode: str = "docker"
+
+    # Database seeding: automatically seed marketplace agents and bases on startup
+    # Safe to leave enabled - seeding is idempotent and skipped if data exists
+    # Set to False if you want to manage marketplace content manually
+    auto_seed_database: bool = True
 
     @property
     def container_project_path(self) -> str:

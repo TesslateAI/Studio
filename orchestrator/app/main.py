@@ -279,8 +279,27 @@ async def startup():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
 
-    # Seed default agents if they don't exist
-    await seed_default_agents()
+    # Automatic database seeding (marketplace agents, bases, OSS agents)
+    if settings.auto_seed_database:
+        try:
+            from .seed_data import run_all_seeds
+            result = await run_all_seeds()
+
+            if result["total_created"] > 0:
+                logger.info(
+                    f"✨ Marketplace seeding complete! Created {result['total_created']} items: "
+                    f"{result['marketplace_agents']['created']} agents, "
+                    f"{result['marketplace_bases']['created']} bases, "
+                    f"{result['opensource_agents']['created']} OSS agents"
+                )
+            else:
+                logger.info(f"Marketplace already seeded ({result['total_existing']} existing items)")
+
+        except Exception as e:
+            logger.error(f"Error during automatic seeding: {e}", exc_info=True)
+            logger.warning("Continuing startup without seeding...")
+    else:
+        logger.info("Automatic database seeding disabled (AUTO_SEED_DATABASE=false)")
 
     # Start background cleanup tasks
     asyncio.create_task(shell_session_cleanup_loop())

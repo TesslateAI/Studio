@@ -43,14 +43,7 @@ async def seed_bases():
     async with AsyncSessionLocal() as db:
         print("=== Seeding Marketplace Bases ===\n")
 
-        # Check if bases already exist
-        existing_check = await db.execute(select(MarketplaceBase))
-        if existing_check.scalars().first():
-            print("⚠️  Bases already exist. Skipping seed.")
-            print("    If you want to re-seed, delete existing bases first.\n")
-            return
-
-        bases = [
+        bases_data = [
             MarketplaceBase(
                 name="Next.js 15",
                 slug="nextjs-15",
@@ -113,12 +106,31 @@ async def seed_bases():
             )
         ]
 
-        for base in bases:
-            db.add(base)
-            print(f"✓ Adding base: {base.name}")
+        created_count = 0
+        skipped_count = 0
 
-        await db.commit()
-        print(f"\n=== Successfully seeded {len(bases)} marketplace bases! ===\n")
+        for base_data in bases_data:
+            # Check if base already exists by slug
+            existing = await db.execute(
+                select(MarketplaceBase).where(MarketplaceBase.slug == base_data.slug)
+            )
+            if existing.scalars().first():
+                print(f"⏭️  Base '{base_data.name}' already exists, skipping")
+                skipped_count += 1
+                continue
+
+            db.add(base_data)
+            print(f"✓ Adding base: {base_data.name}")
+            created_count += 1
+
+        if created_count > 0:
+            await db.commit()
+            print(f"\n=== Successfully seeded {created_count} marketplace bases! ===")
+
+        if skipped_count > 0:
+            print(f"=== Skipped {skipped_count} existing bases ===")
+
+        print()
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import { ThemeProvider } from './theme';
 import Layout from './components/Layout';
 import Landing from './pages/Landing';
 import NewLandingPage from './pages/NewLandingPage';
+import TerminalLandingPage from './pages/TerminalLandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -167,8 +168,9 @@ function AppContent() {
           }}
         />
         <Routes>
-          <Route path="/" element={<NewLandingPage />} />
+          <Route path="/" element={<TerminalLandingPage />} />
           <Route path="/landing-old" element={<Landing />} />
+          <Route path="/landing-new" element={<NewLandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/logout" element={<Logout />} />

@@ -67,7 +67,7 @@ The orchestrator supports two deployment modes configured via `DEPLOYMENT_MODE`:
    - `LITELLM_API_BASE`: LiteLLM proxy URL (e.g., http://localhost:4000/v1)
    - `LITELLM_MASTER_KEY`: LiteLLM master API key for managing user keys
    - `OPENAI_API_BASE`: Points to LiteLLM proxy (same as LITELLM_API_BASE)
-   - `OPENAI_MODEL`: Model to use via LiteLLM (e.g., gpt-4, cerebras/llama3.1-8b)
+   - `OPENAI_MODEL`: Model to use via LiteLLM (e.g., gpt-5, cerebras/llama3.1-8b)
 
 ## 🏃 Running the Service
 

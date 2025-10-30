@@ -51,6 +51,7 @@ interface ChatContainerProps {
   projectFiles?: ProjectFile[];
   projectName?: string;
   className?: string;
+  initialMessage?: string;
 }
 
 export function ChatContainer({
@@ -61,7 +62,8 @@ export function ChatContainer({
   onFileUpdate,
   projectFiles = [],
   projectName = 'project',
-  className = ''
+  className = '',
+  initialMessage = ''
 }: ChatContainerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -640,6 +642,7 @@ export function ChatContainer({
           projectFiles={projectFiles}
           projectName={projectName}
           disabled={isStreaming || agentExecuting}
+          initialMessage={initialMessage}
         />
       </div>
     </div>

@@ -435,7 +435,7 @@ CF_DNS_API_TOKEN=<your-cloudflare-api-token-from-step-1c>
 # ----------------------------------------------------------------------------
 LITELLM_API_BASE=https://your-litellm-proxy.com/v1
 LITELLM_MASTER_KEY=<your-litellm-master-key>
-LITELLM_DEFAULT_MODELS=gpt-4o-mini,gpt-3.5-turbo
+LITELLM_DEFAULT_MODELS=gpt-5o-mini,gpt-3.5-turbo
 LITELLM_TEAM_ID=default
 LITELLM_EMAIL_DOMAIN=tesslate.com
 LITELLM_INITIAL_BUDGET=10.0

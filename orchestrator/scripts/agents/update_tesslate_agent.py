@@ -87,7 +87,7 @@ async def update_tesslate_agent():
                 item_type="agent",
                 agent_type="IterativeAgent",
                 mode="agent",
-                model="gpt-4o-mini",
+                model="gpt-5o-mini",
                 icon="🤖",
                 pricing_type="free",
                 price=0,
@@ -129,7 +129,7 @@ This is the reference implementation that showcases Tesslate's core methodology 
             "Git integration",
             "Self-correction"
         ]
-        agent.required_models = ["gpt-4o-mini"]
+        agent.required_models = ["gpt-5o-mini"]
         agent.tags = ["official", "autonomous", "fullstack", "open-source", "methodology"]
 
         print("✓ Updated system_prompt")

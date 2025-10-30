@@ -25,6 +25,7 @@ interface ChatInputProps {
   projectName?: string;
   placeholder?: string;
   disabled?: boolean;
+  initialMessage?: string;
 }
 
 export function ChatInput({
@@ -35,9 +36,10 @@ export function ChatInput({
   projectFiles = [],
   projectName = 'project',
   placeholder = 'Ask AI to build something...',
-  disabled = false
+  disabled = false,
+  initialMessage = ''
 }: ChatInputProps) {
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(initialMessage);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
