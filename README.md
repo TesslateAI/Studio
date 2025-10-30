@@ -384,20 +384,23 @@ cd app && npm run dev
 
 ## Documentation
 
-### Guides
-- **[Quick Start Guide](docs/quickstart.md)** - Get running in 5 minutes
-- **[Configuration Guide](docs/configuration.md)** - All environment variables explained
-- **[API Documentation](orchestrator/README.md)** - Backend API reference
-- **[Architecture Deep Dive](docs/architecture.md)** - How everything works
+Visit our complete documentation at **[docs.tesslate.com](https://docs.tesslate.com)**
 
-### Deployment
-- **[Docker Deployment](docs/DEPLOYMENT.md)** - Self-hosted deployment guide
-- **[Security Best Practices](docs/security.md)** - Hardening your installation
+### Self-Hosting Guides
+- **[Self-Hosting Quickstart](https://docs.tesslate.com/self-hosting/quickstart)** - Get running in 5 minutes
+- **[Configuration Guide](https://docs.tesslate.com/self-hosting/configuration)** - All environment variables explained
+- **[Production Deployment](https://docs.tesslate.com/self-hosting/deployment)** - Deploy with custom domains and SSL
+- **[Architecture Overview](https://docs.tesslate.com/self-hosting/architecture)** - How everything works under the hood
 
-### Customization
-- **[Creating Custom Agents](docs/custom-agents.md)** - Build your own AI agents
-- **[Project Templates](docs/templates.md)** - Create custom starter templates
-- **[Theming Guide](docs/theming.md)** - Customize the UI
+### Development Guides
+- **[Development Setup](https://docs.tesslate.com/development/guide)** - Contributor and developer guide
+- **[API Documentation](https://docs.tesslate.com/api-reference/introduction)** - Backend API reference
+
+### Using Tesslate Studio
+- **[Getting Started](https://docs.tesslate.com/quickstart)** - Cloud version quickstart
+- **[Working with Projects](https://docs.tesslate.com/guides/creating-projects)** - Create and manage projects
+- **[AI Agents Guide](https://docs.tesslate.com/guides/agents)** - Understanding and using AI agents
+- **[FAQ](https://docs.tesslate.com/faq)** - Frequently asked questions
 
 ---
 
@@ -512,7 +515,7 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 
 ### Get Help
 
-- **[Documentation](docs/)** - Comprehensive guides
+- **[Documentation](https://docs.tesslate.com)** - Comprehensive guides
 - **[GitHub Discussions](https://github.com/TesslateAI/Studio/discussions)** - Ask questions, share ideas
 - **[Issues](https://github.com/TesslateAI/Studio/issues)** - Report bugs, request features
 - **[Email](mailto:support@tesslate.com)** - Direct support (response within 24h)
@@ -525,7 +528,7 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 
 ### Contributing
 
-Contributions are **welcome and encouraged**! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are **welcome and encouraged**! See our **[Development Guide](https://docs.tesslate.com/development/guide)** for setup instructions and contribution guidelines.
 
 **Special thanks to our contributors:**
 
