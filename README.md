@@ -17,17 +17,67 @@ AI-powered development environment with advanced agent orchestration - designed 
 [Quick Start](#quick-start) · [Features](#key-features) · [Documentation](https://docs.tesslate.com) · [Contributing](#contributing)
 
 **Includes support for llama.cpp, LM Studio, Ollama, Openrouter, and any provider you choose.**
+
 </div>
-
-
 
 ---
 
 <div align="center">
+
 <img src="images/screenshot.png" alt="Tesslate Studio Screenshot" width="100%">
+
 </div>
 
 ---
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+<div align="center">
+
+### TL;DR? Get an AI Summary
+
+**Click to auto-load the summary:**
+
+[![ChatGPT](https://img.shields.io/badge/Ask-ChatGPT-74aa9c?style=for-the-badge&logo=openai&logoColor=white)](https://chatgpt.com/?q=Summarize%20https%3A%2F%2Fgithub.com%2FTesslateAI%2FStudio)
+
+[![Claude](https://img.shields.io/badge/Ask-Claude-191919?style=for-the-badge&logo=anthropic&logoColor=d4a574)](https://claude.ai/new?q=Summarize%20https%3A%2F%2Fgithub.com%2FTesslateAI%2FStudio)
+
+[![Gemini](https://img.shields.io/badge/Ask-Gemini-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://www.google.com/search?udm=50&q=Summarize+https://github.com/TesslateAI/Studio)
+
+[![Perplexity](https://img.shields.io/badge/Ask-Perplexity-20808d?style=for-the-badge&logo=perplexity&logoColor=white)](https://www.perplexity.ai/?q=Summarize%20https://github.com/TesslateAI/Studio)
+
+<sub>Links open with the prompt pre-loaded</sub>
+
+</div>
+
+</td>
+<td width="50%" valign="top">
+
+<div align="center">
+
+### Community & Resources
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YOUR_DISCORD_INVITE)
+[![Website](https://img.shields.io/badge/Website-tesslate.com-FF6B6B?style=for-the-badge&logo=google-chrome&logoColor=white)](https://tesslate.com)
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97-Models-FFD21E?style=for-the-badge)](https://huggingface.co/Tesslate)
+
+[![Twitter](https://img.shields.io/badge/Twitter-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/TesslateAI)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/company/tesslate-ai)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/@TesslateAI)
+[![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://instagram.com/tesslateai)
+
+**Email:** [team@tesslate.com](mailto:team@tesslate.com)
+
+</div>
+
+</td>
+</tr>
+</table>
+
+---
+
 
 ## What Makes Tesslate Studio Different?
 
