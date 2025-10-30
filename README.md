@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="images/banner.png" alt="Tesslate Studio Banner" width="100%">
+<img src="images/Banner.png" alt="Tesslate Studio Banner" width="100%">
 
 # Tesslate Studio
 
@@ -14,17 +14,70 @@ AI-powered development environment with advanced agent orchestration - designed 
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Ready-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-[Quick Start](#quick-start) · [Features](#key-features) · [Documentation](#documentation) · [Contributing](#contributing)
+[Quick Start](#quick-start) · [Features](#key-features) · [Documentation](https://docs.tesslate.com) · [Contributing](#contributing)
+
+**Includes support for llama.cpp, LM Studio, Ollama, Openrouter, and any provider you choose.**
 
 </div>
 
 ---
 
 <div align="center">
+
 <img src="images/screenshot.png" alt="Tesslate Studio Screenshot" width="100%">
+
 </div>
 
 ---
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+<div align="center">
+
+### TL;DR? Get an AI Summary
+
+**Click to auto-load the summary:**
+
+[![ChatGPT](https://img.shields.io/badge/Ask-ChatGPT-74aa9c?style=for-the-badge&logo=openai&logoColor=white)](https://chatgpt.com/?q=Summarize%20https%3A%2F%2Fgithub.com%2FTesslateAI%2FStudio)
+
+[![Claude](https://img.shields.io/badge/Ask-Claude-191919?style=for-the-badge&logo=anthropic&logoColor=d4a574)](https://claude.ai/new?q=Summarize%20https%3A%2F%2Fgithub.com%2FTesslateAI%2FStudio)
+
+[![Gemini](https://img.shields.io/badge/Ask-Gemini-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://www.google.com/search?udm=50&q=Summarize+https://github.com/TesslateAI/Studio)
+
+[![Perplexity](https://img.shields.io/badge/Ask-Perplexity-20808d?style=for-the-badge&logo=perplexity&logoColor=white)](https://www.perplexity.ai/?q=Summarize%20https://github.com/TesslateAI/Studio)
+
+<sub>Links open with the prompt pre-loaded</sub>
+
+</div>
+
+</td>
+<td width="50%" valign="top">
+
+<div align="center">
+
+### Community & Resources
+
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YOUR_DISCORD_INVITE)
+[![Website](https://img.shields.io/badge/Website-tesslate.com-FF6B6B?style=for-the-badge&logo=google-chrome&logoColor=white)](https://tesslate.com)
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97-Models-FFD21E?style=for-the-badge)](https://huggingface.co/Tesslate)
+
+[![Twitter](https://img.shields.io/badge/Twitter-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://twitter.com/TesslateAI)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/company/tesslate-ai)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/@TesslateAI)
+[![Instagram](https://img.shields.io/badge/Instagram-E4405F?style=for-the-badge&logo=instagram&logoColor=white)](https://instagram.com/tesslateai)
+
+**Email:** [team@tesslate.com](mailto:team@tesslate.com)
+
+</div>
+
+</td>
+</tr>
+</table>
+
+---
+
 
 ## What Makes Tesslate Studio Different?
 
@@ -42,8 +95,8 @@ Tesslate Studio isn't just another code generation tool - it's a complete develo
 - **Iterative Agents**: Autonomous "think-act-reflect" loops that debug, research, and iterate independently
 - **Tool Registry**: File operations (read/write/patch), persistent shell sessions, web fetch, planning tools
 - **Command Validation**: Security sandboxing with allowlists, blocklists, and injection protection
-- **Multi-agent orchestration**: Built on TframeX framework - agents collaborate across frontend, backend, database concerns
-- **Model Context Protocol (MCP)**: Inter-agent communication for complex task coordination
+- (Coming soon) **Multi-agent orchestration**: Built on TframeX framework - agents collaborate across frontend, backend, database concerns
+- (Coming soon) **Model Context Protocol (MCP)**: Inter-agent communication for complex task coordination
 
 ### Enterprise-Grade Security
 - **JWT authentication** with refresh token rotation and revocable sessions
@@ -131,7 +184,7 @@ Every project gets its own subdomain (`your-app.studio.localhost`) with hot modu
 10 pre-built, open-source agents: Stream Builder, Full Stack Agent, Code Analyzer, Test Generator, API Designer, and more. Fork them, swap models (GPT-5, Claude, local LLMs), edit prompts - it's your code.
 
 ### Project Templates
-Start fast with production-ready templates:
+Start fast with ready templates:
 - Next.js 15 (App Router, SSR, API routes)
 - Vite + React + FastAPI (Python backend)
 - Vite + React + Go (high-performance backend)
@@ -448,14 +501,10 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 ## Roadmap
 
 **Coming soon:**
-- [ ] GitHub Copilot integration
-- [ ] VSCode extension for direct editing
-- [ ] Multiplayer editing (real-time collaboration)
-- [ ] Built-in Git integration (commits, branches, PRs)
-- [ ] Mobile app for iOS/Android
+- [ ] Multi Multi Agent ;)
+- [ ] Local to Cloud Agent marketplace
+- [ ] Two Way Git Sync
 - [ ] Plugin system for custom integrations
-- [ ] Self-hosted AI model support (Ollama by default)
-- [ ] Advanced analytics dashboard
 
 **Have an idea?** [Open a feature request](https://github.com/TesslateAI/Studio/issues/new?template=feature_request.md)
 
