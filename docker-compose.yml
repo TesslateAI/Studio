@@ -45,18 +45,18 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    container_name: tesslate-postgres-dev
+    container_name: tesslate-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=${POSTGRES_DB:-tesslate_dev}
+      - POSTGRES_DB=${POSTGRES_DB:-tesslate}
       - POSTGRES_USER=${POSTGRES_USER:-tesslate_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_password_change_me}
     volumes:
-      - postgres-dev-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - tesslate-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tesslate_user} -d ${POSTGRES_DB:-tesslate_dev}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tesslate_user} -d ${POSTGRES_DB:-tesslate}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -77,7 +77,7 @@ services:
       - ./orchestrator/users:/app/users
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
       - DEPLOYMENT_MODE=docker
       - LITELLM_API_BASE=${LITELLM_API_BASE}
@@ -168,5 +168,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres-dev-data:
-    name: tesslate-postgres-dev-data
+  postgres-data:
+    name: tesslate-postgres-data
