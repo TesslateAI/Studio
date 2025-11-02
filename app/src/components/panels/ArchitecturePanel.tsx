@@ -137,31 +137,10 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
               </p>
             </div>
           </div>
-          <button
-            onClick={handleGenerateDiagram}
-            disabled={loading}
-            className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50 rounded-lg text-white transition-colors flex items-center gap-2 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <>
-                <RefreshCw size={16} className="animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Sparkle size={16} />
-                Generate Diagram
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Diagram Display */}
-        {diagram ? (
-          <div className="space-y-4 flex-1 flex flex-col min-h-0">
-            <div className="diagram-scroll-container bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg flex-1 overflow-auto p-4 relative">
-              {/* Zoom Controls */}
-              <div className="absolute top-4 right-4 z-10 flex gap-2">
+          <div className="flex items-center gap-3">
+            {/* Zoom Controls - In header */}
+            {diagram && (
+              <div className="flex gap-2">
                 <button
                   onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
                   className="p-2 bg-[var(--surface)] border border-[var(--text)]/20 rounded-lg hover:bg-orange-500/10 hover:border-orange-500/50 transition-colors"
@@ -187,13 +166,39 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
                   {Math.round(zoom * 100)}%
                 </div>
               </div>
+            )}
+            <button
+              onClick={handleGenerateDiagram}
+              disabled={loading}
+              className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50 rounded-lg text-white transition-colors flex items-center gap-2 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkle size={16} />
+                  Generate Diagram
+                </>
+              )}
+            </button>
+          </div>
+        </div>
 
+        {/* Diagram Display */}
+        {diagram ? (
+          <div className="flex-1 flex flex-col min-h-0 space-y-4">
+            {/* Scrollable Diagram Container */}
+            <div className="diagram-scroll-container bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg flex-1 overflow-auto p-4">
               <div
                 className="mermaid-container"
                 style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
                 dangerouslySetInnerHTML={{ __html: diagramSvg }}
               />
             </div>
+
             {modelUsed && (
               <div className="flex items-center justify-between text-xs text-[var(--text)]/60">
                 <span>Generated with {modelUsed}</span>

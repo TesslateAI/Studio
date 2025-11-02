@@ -24,6 +24,7 @@ import {
 import { FloatingSidebar } from '../components/ui/FloatingSidebar';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
+import { Tooltip } from '../components/ui/Tooltip';
 import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
@@ -302,35 +303,35 @@ export default function Project() {
 
   const leftSidebarItems = [
     {
-      icon: <Monitor size={20} />,
+      icon: <Monitor size={18} />,
       title: 'Preview',
       onClick: () => setActiveView('preview'),
       active: activeView === 'preview'
     },
     {
-      icon: <Code size={20} />,
+      icon: <Code size={18} />,
       title: 'Code',
       onClick: () => setActiveView('code'),
       active: activeView === 'code'
     },
     {
-      icon: <Kanban size={20} />,
+      icon: <Kanban size={18} />,
       title: 'Kanban Board',
       onClick: () => setActiveView('kanban'),
       active: activeView === 'kanban'
     },
     {
-      icon: <Folder size={20} />,
+      icon: <Folder size={18} />,
       title: 'Files',
       onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
     },
     {
-      icon: <Cube size={20} />,
+      icon: <Cube size={18} />,
       title: 'Components',
       onClick: () => toast('Components library coming soon!', { icon: '🧩' })
     },
     {
-      icon: <FlowArrow size={20} />,
+      icon: <FlowArrow size={18} />,
       title: 'Architecture',
       onClick: () => togglePanel('architecture'),
       active: activePanel === 'architecture'
@@ -339,90 +340,128 @@ export default function Project() {
 
   const rightSidebarItems = [
     {
-      icon: theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />,
+      icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
       title: 'Toggle Theme',
       onClick: toggleTheme
     },
     {
-      icon: <BookOpen size={20} />,
+      icon: <BookOpen size={18} />,
       title: 'Notes',
       onClick: () => togglePanel('notes'),
       active: activePanel === 'notes'
     },
     {
-      icon: <GitBranch size={20} />,
+      icon: <GitBranch size={18} />,
       title: 'GitHub Sync',
       onClick: () => togglePanel('github'),
       active: activePanel === 'github'
     },
     {
-      icon: <Image size={20} />,
+      icon: <Image size={18} />,
       title: 'Assets',
       onClick: () => togglePanel('assets'),
       active: activePanel === 'assets'
     },
     {
-      icon: <Storefront size={20} />,
+      icon: <Storefront size={18} />,
       title: 'Agent Marketplace',
       onClick: () => navigate('/marketplace')
     },
     {
-      icon: <Gear size={20} />,
+      icon: <Gear size={18} />,
       title: 'Settings',
       onClick: () => togglePanel('settings'),
       active: activePanel === 'settings'
     },
     {
-      icon: <Rocket size={20} />,
+      icon: <Rocket size={18} />,
       title: 'Deploy',
       onClick: () => toast('Deploy feature coming soon!', { icon: '🚀' })
     },
     {
-      icon: <ShareNetwork size={20} />,
+      icon: <ShareNetwork size={18} />,
       title: 'Share',
       onClick: () => toast('Share feature coming soon!', { icon: '🔗' })
     }
   ];
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden relative">
+    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
       {/* Mobile Warning */}
       <MobileWarning />
 
       {/* Mobile Menu - Shows on mobile only */}
       <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
 
-      {/* Back Button */}
-      <div className="absolute top-4 left-4 md:top-6 md:left-6 z-50">
-        <button
-          onClick={() => navigate('/dashboard')}
-          className="flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-[var(--text)]/80 hover:text-[var(--text)] transition-all"
-        >
-          <ArrowLeft size={18} className="md:w-5 md:h-5" />
-          <span className="font-medium text-sm md:text-base hidden sm:inline">Back to Projects</span>
-        </button>
+      {/* Fixed Left Sidebar */}
+      <div className="hidden md:flex flex-col w-12 bg-[var(--surface)] border-r border-white/10 py-3 gap-1">
+        {/* Back Button */}
+        <Tooltip content="Back to Projects" side="right" delay={200}>
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        </Tooltip>
+
+        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+
+        {/* Main View Toggles */}
+        {leftSidebarItems.map((item, index) => (
+          <Tooltip key={index} content={item.title} side="right" delay={200}>
+            <button
+              onClick={item.onClick}
+              className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+                item.active
+                  ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
+                  : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+              }`}
+            >
+              {item.icon}
+            </button>
+          </Tooltip>
+        ))}
+
+        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+
+        {/* Settings & Tools */}
+        {rightSidebarItems.map((item, index) => (
+          <Tooltip key={index} content={item.title} side="right" delay={200}>
+            <button
+              onClick={item.onClick}
+              className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+                item.active
+                  ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
+                  : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+              }`}
+            >
+              {item.icon}
+            </button>
+          </Tooltip>
+        ))}
       </div>
 
-      {/* Project Title - Hidden on mobile */}
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 hidden md:flex items-center gap-3">
-        <h1 className="font-heading text-xl lg:text-2xl font-bold text-[var(--text)]">{project.name}</h1>
-      </div>
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Bar with Project Title */}
+        <div className="h-12 bg-[var(--surface)] border-b border-white/10 flex items-center justify-between px-4 md:px-6">
+          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">{project.name}</h1>
 
-      {/* Left Sidebar - Desktop only */}
-      <FloatingSidebar
-        position="left"
-        items={leftSidebarItems}
-      />
+          {/* Mobile hamburger menu */}
+          <button
+            onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+            className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+            aria-label="Open menu"
+          >
+            <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        </div>
 
-      {/* Right Sidebar - Desktop only */}
-      <FloatingSidebar
-        position="right"
-        items={rightSidebarItems}
-      />
-
-      {/* Main Preview/Code Container */}
-      <div className="h-screen w-screen flex items-center justify-center px-2 sm:px-8 md:px-20 lg:px-32 py-16 sm:py-20 md:py-24 transition-all duration-500 relative z-10">
-        <div className="w-full h-full relative bg-[var(--surface)] rounded-[20px] overflow-hidden border border-white/8 transition-all duration-500 shadow-2xl">
+        {/* Main View Container */}
+        <div className="flex-1 overflow-hidden bg-[var(--bg)]">
           {/* Preview View */}
           <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
             {devServerUrl ? (
@@ -439,29 +478,24 @@ export default function Project() {
               ) : (
                 <>
                   {/* Browser-style chrome */}
-                  <div className="bg-[var(--surface)] border-b border-white/10 p-3 flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-red-500" />
-                      <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                      <div className="w-3 h-3 rounded-full bg-green-500" />
-                    </div>
+                  <div className="bg-[var(--surface)] border-b border-white/10 p-2 md:p-3 flex items-center gap-2 md:gap-3">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={navigateBack}
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
                         title="Go back"
                       >
                         <CaretLeft size={18} weight="bold" />
                       </button>
                       <button
                         onClick={navigateForward}
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
                         title="Go forward"
                       >
                         <CaretRight size={18} weight="bold" />
                       </button>
                     </div>
-                    <div className="flex-1">
+                    <div className="hidden md:block flex-1">
                       <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
                         <span className="text-yellow-500 mr-2">🔒</span>
                         <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
@@ -469,7 +503,7 @@ export default function Project() {
                     </div>
                     <button
                       onClick={refreshPreview}
-                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                      className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
                       title="Refresh"
                     >
                       <ArrowsClockwise size={16} />

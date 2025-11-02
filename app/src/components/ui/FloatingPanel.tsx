@@ -110,6 +110,9 @@ export function FloatingPanel({
   }, [isDragging, isResizing, dragOffset, position, dockHoverPosition]);
 
   const handleDragStart = (e: React.MouseEvent) => {
+    // Disable dragging on mobile
+    if (window.innerWidth < 768) return;
+
     // Calculate offset based on current position
     const rect = panelRef.current?.getBoundingClientRect();
     if (rect) {
@@ -156,10 +159,13 @@ export function FloatingPanel({
         height: `${size.height}px`
       };
 
+  // On mobile, override with empty object (fullscreen handled by CSS)
+  const mobileStyleOverride = window.innerWidth < 768 ? {} : panelStyle;
+
   return (
     <>
-      {/* Dock indicator - only show during drag when hovering over dock zone */}
-      {isDragging && dockHoverPosition && (
+      {/* Dock indicator - only show during drag when hovering over dock zone (desktop only) */}
+      {isDragging && dockHoverPosition && window.innerWidth >= 768 && (
         <div
           className={`
             fixed bg-orange-500/20 border-2 border-dashed border-orange-500
@@ -176,28 +182,30 @@ export function FloatingPanel({
         className={`
           floating-panel fixed flex flex-col
           backdrop-blur-xl
-          border rounded-lg
           shadow-2xl overflow-hidden
           z-[200]
           ${theme === 'dark'
-            ? 'bg-[rgba(30,30,30,0.98)] border-white/20'
-            : 'bg-[rgba(248,249,250,0.98)] border-black/10'
+            ? 'bg-[rgba(30,30,30,0.98)] md:border-white/20'
+            : 'bg-[rgba(248,249,250,0.98)] md:border-black/10'
           }
-          ${isDocked ? 'resize-none rounded-none h-screen' : 'min-w-[300px] min-h-[200px]'}
+          ${isDocked ? 'resize-none rounded-none h-screen' : 'md:min-w-[300px] md:min-h-[200px]'}
           ${isDragging || isResizing ? 'cursor-grabbing transition-none select-none' : 'transition-all duration-200'}
+
+          md:border md:rounded-lg
+          max-md:inset-0 max-md:w-full max-md:h-full max-md:border-0 max-md:rounded-none
         `}
         style={{
-          ...panelStyle,
+          ...mobileStyleOverride,
           userSelect: isDragging || isResizing ? 'none' : 'auto'
         }}
       >
         {/* Drag handle */}
         <div
-          className={`panel-drag-handle h-10 border-b select-none flex items-center justify-between px-3 rounded-t-lg ${
+          className={`panel-drag-handle h-10 border-b select-none flex items-center justify-between px-3 md:rounded-t-lg md:cursor-grab ${
             theme === 'dark'
               ? 'bg-black/20 border-white/10'
               : 'bg-white/40 border-black/5'
-          } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+          } ${isDragging ? 'md:cursor-grabbing' : ''} max-md:cursor-default`}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
@@ -206,13 +214,13 @@ export function FloatingPanel({
           </div>
           <button
             onClick={onClose}
-            className={`panel-close p-1 rounded transition-colors ${
+            className={`panel-close rounded transition-colors p-1 md:p-1 max-md:p-2 ${
               theme === 'dark'
-                ? 'hover:bg-white/10 text-gray-400 hover:text-white'
-                : 'hover:bg-black/5 text-gray-600 hover:text-black'
+                ? 'hover:bg-white/10 active:bg-white/20 text-gray-400 hover:text-white'
+                : 'hover:bg-black/5 active:bg-black/10 text-gray-600 hover:text-black'
             }`}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -223,12 +231,12 @@ export function FloatingPanel({
           {children}
         </div>
 
-        {/* Resize handle */}
+        {/* Resize handle - Desktop only */}
         {!isDocked && (
           <div
             className={`resize-handle absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize z-10 after:content-[''] after:absolute after:bottom-1 after:right-1 after:w-2.5 after:h-2.5 after:border-r-2 after:border-b-2 ${
               theme === 'dark' ? 'after:border-white/30' : 'after:border-black/20'
-            }`}
+            } hidden md:block`}
             onMouseDown={handleResizeStart}
           />
         )}

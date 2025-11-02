@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Loader2, FileCode } from 'lucide-react';
+import { Loader2, FileCode, X } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { TypingIndicator } from './TypingIndicator';
@@ -309,22 +309,24 @@ export function ChatContainer({
     }
   }, [messages, currentStream, isExpanded]);
 
-  // Collapse chat when clicking outside (including clicks on iframe/preview)
+  // Collapse chat when clicking outside (including clicks on iframe/preview) - desktop only
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      // Only auto-close on desktop (md breakpoint is 768px)
+      if (window.innerWidth >= 768 && containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsExpanded(false);
       }
     };
 
     const handleWindowBlur = () => {
-      // Close chat when clicking on iframe (preview window)
-      // Small delay to ensure we're clicking on iframe, not just tabbing away
-      setTimeout(() => {
-        if (document.activeElement?.tagName === 'IFRAME' && isExpanded) {
-          setIsExpanded(false);
-        }
-      }, 0);
+      // Close chat when clicking on iframe (preview window) - desktop only
+      if (window.innerWidth >= 768) {
+        setTimeout(() => {
+          if (document.activeElement?.tagName === 'IFRAME' && isExpanded) {
+            setIsExpanded(false);
+          }
+        }, 0);
+      }
     };
 
     if (isExpanded) {
@@ -501,31 +503,53 @@ export function ChatContainer({
   const isTyping = isStreaming || agentExecuting;
 
   return (
-    <div
-      ref={containerRef}
-      className={`
-        chat-container
-        fixed bottom-6 left-1/2 -translate-x-1/2
-        z-[150]
-        flex flex-col
-        bg-[var(--surface)]/95
-        backdrop-blur-xl saturate-180
-        rounded-3xl
-        border border-[var(--border-color)]
-        shadow-2xl
-        transition-all duration-400 ease-[var(--ease)]
-        max-h-[calc(100vh-48px)]
-        ${isExpanded
-          ? 'w-[min(800px,calc(100vw-48px))]'
-          : isHovered
-          ? 'w-[min(650px,calc(100vw-48px))]'
-          : 'w-[min(600px,calc(100vw-48px))]'
-        }
-        ${className}
-      `}
-      onMouseEnter={() => !isExpanded && setIsHovered(true)}
-      onMouseLeave={() => !isExpanded && setIsHovered(false)}
-    >
+    <>
+      {/* Mobile: Floating chat button - only show when collapsed */}
+      <button
+        onClick={() => setIsExpanded(true)}
+        className={`
+          md:hidden fixed bottom-20 right-4 z-[150]
+          w-14 h-14 rounded-full
+          bg-orange-500 hover:bg-orange-600 active:bg-orange-700
+          shadow-lg
+          flex items-center justify-center
+          transition-all duration-300
+          ${isExpanded ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'}
+        `}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 161.9 126.66" className="text-white" fill="currentColor">
+          <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"/>
+          <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"/>
+          <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"/>
+        </svg>
+      </button>
+
+      {/* Chat container */}
+      <div
+        ref={containerRef}
+        className={`
+          chat-container
+          fixed
+          z-[150]
+          flex flex-col
+          bg-[var(--surface)]/95
+          backdrop-blur-xl saturate-180
+          border border-[var(--border-color)]
+          shadow-2xl
+          transition-all duration-400 ease-[var(--ease)]
+          rounded-3xl
+          max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-b-none max-md:w-full
+          md:bottom-6 md:left-1/2 md:-translate-x-1/2
+          ${isExpanded
+            ? 'md:w-[min(800px,calc(100vw-48px))] md:max-h-[calc(100vh-48px)] max-md:max-h-[90vh] max-md:translate-y-0'
+            : 'md:w-[min(600px,calc(100vw-48px))] max-md:translate-y-full max-md:opacity-0 max-md:pointer-events-none'
+          }
+          ${!isExpanded && isHovered ? 'md:w-[min(650px,calc(100vw-48px))]' : ''}
+          ${className}
+        `}
+        onMouseEnter={() => !isExpanded && setIsHovered(true)}
+        onMouseLeave={() => !isExpanded && setIsHovered(false)}
+      >
       {/* Glow effects */}
       <div
         className={`
@@ -556,15 +580,27 @@ export function ChatContainer({
         style={{ zIndex: -1 }}
       />
 
+      {/* Mobile header with close button */}
+      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-white/10">
+        <h3 className="text-sm font-semibold text-[var(--text)]">Chat</h3>
+        <button
+          onClick={() => setIsExpanded(false)}
+          className="p-2 hover:bg-[var(--text)]/10 rounded-lg transition-colors -mr-2"
+          aria-label="Close chat"
+        >
+          <X size={20} className="text-[var(--text)]/60" />
+        </button>
+      </div>
+
       {/* Chat messages - only shown when expanded */}
       <div
         className={`
           chat-messages
-          flex-1 overflow-y-auto px-5
+          flex-1 overflow-y-auto px-3
           transition-all duration-300
           ${isExpanded ? 'pointer-events-auto' : 'pointer-events-none'}
           ${isExpanded
-            ? 'opacity-100 max-h-[calc(100vh-400px)] py-5'
+            ? 'opacity-100 max-h-[calc(100vh-400px)] py-3'
             : 'opacity-0 max-h-0 py-0'
           }
         `}
@@ -631,7 +667,7 @@ export function ChatContainer({
       <TypingIndicator visible={isTyping && isExpanded} />
 
       {/* Chat input */}
-      <div onFocus={handleInputFocus} className="px-5 py-3 pointer-events-auto">
+      <div onFocus={handleInputFocus} className="px-3 py-2 pointer-events-auto">
         <ChatInput
           agents={agents}
           currentAgent={currentAgent}
@@ -643,5 +679,6 @@ export function ChatContainer({
         />
       </div>
     </div>
+    </>
   );
 }

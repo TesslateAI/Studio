@@ -45,18 +45,18 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    container_name: tesslate-postgres
+    container_name: tesslate-postgres-dev
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=${POSTGRES_DB:-tesslate}
+      - POSTGRES_DB=${POSTGRES_DB:-tesslate_dev}
       - POSTGRES_USER=${POSTGRES_USER:-tesslate_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_password_change_me}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-dev-data:/var/lib/postgresql/data
     networks:
       - tesslate-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tesslate_user} -d ${POSTGRES_DB:-tesslate}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tesslate_user} -d ${POSTGRES_DB:-tesslate_dev}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -77,7 +77,7 @@ services:
       - ./orchestrator/users:/app/users
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
       - DEPLOYMENT_MODE=docker
       - LITELLM_API_BASE=${LITELLM_API_BASE}
@@ -102,10 +102,9 @@ services:
       - "traefik.enable=true"
       # API routes - handle both /api and websocket paths
       - "traefik.http.routers.orchestrator.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
-      - "traefik.http.routers.orchestrator.entrypoints=web,websecure"
+      - "traefik.http.routers.orchestrator.entrypoints=web"
       - "traefik.http.routers.orchestrator.priority=100"
-      - "traefik.http.routers.orchestrator.tls=true"
-      - "traefik.http.routers.orchestrator.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.orchestrator.service=orchestrator"
       - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
       # Enable websocket support
       - "traefik.http.middlewares.orchestrator-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
@@ -147,10 +146,9 @@ services:
       - "traefik.enable=true"
       # Frontend routes - everything except /api, /ws, and /preview
       - "traefik.http.routers.app.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
-      - "traefik.http.routers.app.entrypoints=web,websecure"
+      - "traefik.http.routers.app.entrypoints=web"
       - "traefik.http.routers.app.priority=10"
-      - "traefik.http.routers.app.tls=true"
-      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.app.service=app"
       - "traefik.http.services.app.loadbalancer.server.port=5173"
       # Handle websocket upgrade for HMR
       - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=${APP_PROTOCOL:-http}"
@@ -168,5 +166,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres-data:
-    name: tesslate-postgres-data
+  postgres-dev-data:
+    name: tesslate-postgres-dev-data
