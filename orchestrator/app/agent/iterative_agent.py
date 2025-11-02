@@ -191,9 +191,20 @@ class IterativeAgent(AbstractAgent):
             logger.info(f"[IterativeAgent] Iteration {iteration}/{self.max_iterations}")
 
             try:
-                # Step 1: Get model response
-                response = await self.model.chat(self.messages)
-                logger.debug(f"[IterativeAgent] Model response: {response[:200]}...")
+                # Step 1: Get model response (streaming)
+                response = ""
+                async for chunk in self.model.chat(self.messages):
+                    response += chunk
+                    # Yield text chunk to keep connection alive and show real-time generation
+                    yield {
+                        'type': 'text_chunk',
+                        'data': {
+                            'content': chunk,
+                            'iteration': iteration
+                        }
+                    }
+
+                logger.debug(f"[IterativeAgent] Model response complete: {response[:200]}...")
 
                 # Step 2: Parse response
                 tool_calls = self.parser.parse(response)

@@ -1435,6 +1435,35 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
         elif diagram_code.startswith("```"):
             diagram_code = diagram_code.replace("```", "").strip()
 
+        # Sanitize Mermaid syntax to prevent parsing errors
+        # Remove quotes from node labels and escape special characters
+        import re
+
+        # Fix: Remove double quotes around node labels that contain special chars
+        # Match patterns like: A["@vitejs/plugin-react"] or B["some text"]
+        diagram_code = re.sub(r'\["([^"]+)"\]', r'[\1]', diagram_code)
+        diagram_code = re.sub(r'\("([^"]+)"\)', r'(\1)', diagram_code)
+        diagram_code = re.sub(r'\{"([^"]+)"\}', r'{\1}', diagram_code)
+
+        # Fix: Replace problematic characters in node labels
+        # Replace @ symbol which can cause issues
+        diagram_code = diagram_code.replace('@', 'at-')
+
+        # Fix: Escape any remaining quotes in text
+        lines = diagram_code.split('\n')
+        sanitized_lines = []
+        for line in lines:
+            # Skip directive lines and graph declarations
+            if line.strip().startswith(('graph', 'flowchart', '%%', 'classDef', 'class ', 'style ')):
+                sanitized_lines.append(line)
+            else:
+                # For node and edge definitions, ensure labels don't have problematic chars
+                # Remove any stray quotes that might break parsing
+                line = line.replace('"', '')
+                sanitized_lines.append(line)
+
+        diagram_code = '\n'.join(sanitized_lines)
+
         # Save diagram to database
         project.architecture_diagram = diagram_code
         await db.commit()

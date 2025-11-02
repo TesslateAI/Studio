@@ -367,6 +367,58 @@ export function ChatContainer({
     }));
   };
 
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [escPressCount, setEscPressCount] = useState(0);
+  const escTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ESC key handler for stopping execution
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && agentExecuting) {
+        setEscPressCount(prev => {
+          const newCount = prev + 1;
+
+          // Clear previous timeout
+          if (escTimeoutRef.current) {
+            clearTimeout(escTimeoutRef.current);
+          }
+
+          // Reset count after 500ms
+          escTimeoutRef.current = setTimeout(() => {
+            setEscPressCount(0);
+          }, 500);
+
+          // Stop execution on double ESC
+          if (newCount >= 2) {
+            stopAgentExecution();
+            setEscPressCount(0);
+            toast.success('Agent stopped (ESC pressed twice)');
+          } else {
+            toast('Press ESC again to stop agent', { duration: 500 });
+          }
+
+          return newCount;
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (escTimeoutRef.current) {
+        clearTimeout(escTimeoutRef.current);
+      }
+    };
+  }, [agentExecuting]);
+
+  const stopAgentExecution = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setAgentExecuting(false);
+    }
+  };
+
   const sendAgentMessage = async (message: string) => {
     if (!message.trim() || agentExecuting) return;
 
@@ -378,61 +430,155 @@ export function ChatContainer({
     setMessages(prev => [...prev, userMessage]);
     setAgentExecuting(true);
 
+    // Create abort controller
+    const controller = new AbortController();
+    setAbortController(controller);
+
+    // Create placeholder AI message for streaming
+    const agentMessageId = `msg-${Date.now()}-agent`;
+    const initialAgentMessage: Message = {
+      id: agentMessageId,
+      type: 'ai',
+      content: '',
+      agentData: {
+        steps: [],
+        iterations: 0,
+        tool_calls_made: 0,
+        completion_reason: 'in_progress',
+      },
+    };
+    setMessages(prev => [...prev, initialAgentMessage]);
+
+    let currentRawContent = '';
+    let currentSteps: any[] = [];
+    let iterations = 0;
+    let toolCallsMade = 0;
+
     try {
-      const response = await chatApi.sendAgentMessage({
-        project_id: projectId,
-        message,
-        agent_id: currentAgent.backendId,  // Include agent_id for proper agent selection
-        max_iterations: 20,
-      });
+      await chatApi.sendAgentMessageStreaming(
+        {
+          project_id: projectId.toString(),
+          message,
+          agent_id: currentAgent.backendId?.toString() || '',
+          max_iterations: 20,
+        },
+        (event) => {
+          if (event.type === 'text_chunk') {
+            // Accumulate raw content but don't display it
+            // The structured steps will be displayed instead
+            currentRawContent += event.data.content;
+          } else if (event.type === 'agent_step') {
+            // Transform tool_results array to match HTTP format
+            // HTTP embeds result in each tool_call, SSE sends separate tool_results array
+            const transformedStep = {
+              ...event.data,
+              tool_calls: event.data.tool_calls?.map((tc: any, index: number) => ({
+                name: tc.name,
+                parameters: tc.parameters,
+                result: event.data.tool_results?.[index] || {}
+              })) || []
+            };
 
-      if (response.success) {
-        const agentMessage: Message = {
-          id: `msg-${Date.now()}`,
-          type: 'ai',
-          content: response.final_response,
-          agentData: {
-            steps: response.steps,
-            iterations: response.iterations,
-            tool_calls_made: response.tool_calls_made,
-            completion_reason: response.completion_reason,
-          },
-        };
-        setMessages(prev => [...prev, agentMessage]);
-        toast.success('Task completed successfully');
-      } else {
-        // Agent execution failed - add error message to chat
-        const errorMessage: Message = {
-          id: `msg-${Date.now()}`,
-          type: 'ai',
-          content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
-        };
-        setMessages(prev => [...prev, errorMessage]);
+            // Remove tool_results from step since they're now embedded in tool_calls
+            delete transformedStep.tool_results;
 
-        // Show technical error in toast
-        toast.error(response.error || 'Agent execution failed', {
-          duration: 5000,
-        });
-      }
+            currentSteps.push(transformedStep);
+            iterations = event.data.iteration || iterations;
+            toolCallsMade += event.data.tool_calls?.length || 0;
+
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === agentMessageId
+                  ? {
+                      ...msg,
+                      agentData: {
+                        ...msg.agentData!,
+                        steps: currentSteps,
+                        iterations,
+                        tool_calls_made: toolCallsMade,
+                      },
+                    }
+                  : msg
+              )
+            );
+          } else if (event.type === 'complete') {
+            // Use final_response from complete event (conversational response)
+            const finalContent = event.data.final_response || 'Task completed.';
+            iterations = event.data.iterations || iterations;
+            toolCallsMade = event.data.tool_calls_made || toolCallsMade;
+
+            setMessages(prev =>
+              prev.map(msg =>
+                msg.id === agentMessageId
+                  ? {
+                      ...msg,
+                      content: finalContent,
+                      agentData: {
+                        ...msg.agentData!,
+                        steps: currentSteps,
+                        iterations,
+                        tool_calls_made: toolCallsMade,
+                        completion_reason: event.data.completion_reason || 'task_complete',
+                      },
+                    }
+                  : msg
+              )
+            );
+
+            toast.success('Task completed successfully');
+          } else if (event.type === 'error') {
+            // Handle error event
+            throw new Error(event.data.message || 'Agent execution failed');
+          }
+        },
+        controller.signal // Pass abort signal
+      );
     } catch (error: any) {
-      console.error('[AGENT] Execution error:', error);
+      // Check if it was aborted
+      if (error.name === 'AbortError') {
+        console.log('[AGENT] Execution aborted by user');
 
-      // Add error message to chat
-      const errorMessage: Message = {
-        id: `msg-${Date.now()}`,
-        type: 'ai',
-        content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
-      };
-      setMessages(prev => [...prev, errorMessage]);
+        // Update message to show it was stopped
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === agentMessageId
+              ? {
+                  ...msg,
+                  content: (msg.content || '') + '\n\n_[Execution stopped by user]_',
+                  agentData: {
+                    ...msg.agentData!,
+                    completion_reason: 'stopped_by_user',
+                  },
+                }
+              : msg
+          )
+        );
+
+        return; // Don't show error toast for intentional stops
+      }
+
+      console.error('[AGENT] Streaming execution error:', error);
+
+      // Update message with error
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === agentMessageId
+            ? {
+                ...msg,
+                content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
+              }
+            : msg
+        )
+      );
 
       // Show technical error in toast
-      const detail = error?.response?.data?.detail;
-      const errorDetail = typeof detail === 'string' ? detail : (error?.message || 'Failed to execute agent');
+      const errorDetail = error?.message || 'Failed to execute agent';
       toast.error(errorDetail, {
         duration: 5000,
       });
     } finally {
       setAgentExecuting(false);
+      setAbortController(null);
     }
   };
 
@@ -676,6 +822,8 @@ export function ChatContainer({
           projectFiles={projectFiles}
           projectName={projectName}
           disabled={isStreaming || agentExecuting}
+          isExecuting={agentExecuting}
+          onStop={stopAgentExecution}
         />
       </div>
     </div>

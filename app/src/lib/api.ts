@@ -222,6 +222,88 @@ export const chatApi = {
     const response = await api.post('/api/chat/agent', request);
     return response.data;
   },
+  sendAgentMessageStreaming: async (
+    request: AgentChatRequest,
+    onEvent: (event: { type: string; data: any }) => void,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    let token = localStorage.getItem('token');
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+
+    let response = await fetch(`${API_URL}/api/chat/agent/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(request),
+      signal, // Pass abort signal
+    });
+
+    // Handle 401 by refreshing token and retrying
+    if (response.status === 401) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        // Retry with new token
+        response = await fetch(`${API_URL}/api/chat/agent/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${newToken}`,
+          },
+          body: JSON.stringify(request),
+          signal,
+        });
+      } else {
+        // Refresh failed - redirect to login
+        window.location.href = '/login';
+        throw new Error('Authentication failed');
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('Response body is not readable');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        // Decode chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete lines (SSE format: "data: {JSON}\n\n")
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6); // Remove "data: " prefix
+            try {
+              const event = JSON.parse(jsonStr);
+              onEvent(event);
+            } catch (e) {
+              console.error('Failed to parse SSE event:', e, jsonStr);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  },
 };
 
 export const marketplaceApi = {

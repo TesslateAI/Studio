@@ -66,9 +66,11 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             file_path=file_path
         )
     else:
-        # Docker mode: Read from local filesystem
+        # Docker mode: Read from orchestrator's users volume mount
+        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
         project_dir = get_project_path(user_id, project_id)
-        full_path = os.path.join(project_dir, file_path)
+        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
+        full_path = os.path.join("/app", project_dir, file_path)
 
         if os.path.exists(full_path):
             with open(full_path, 'r', encoding='utf-8') as f:
@@ -110,9 +112,11 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 file_path=file_path
             )
     else:
-        # Docker mode: Write to local filesystem
+        # Docker mode: Write to orchestrator's users volume mount
+        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
         project_dir = get_project_path(user_id, project_id)
-        full_path = os.path.join(project_dir, file_path)
+        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
+        full_path = os.path.join("/app", project_dir, file_path)
 
         try:
             with open(full_path, 'w', encoding='utf-8') as f:
@@ -215,9 +219,11 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             file_path=file_path
         )
     else:
-        # Docker mode: Read from local filesystem
+        # Docker mode: Read from orchestrator's users volume mount
+        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
         project_dir = get_project_path(user_id, project_id)
-        full_path = os.path.join(project_dir, file_path)
+        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
+        full_path = os.path.join("/app", project_dir, file_path)
 
         if os.path.exists(full_path):
             with open(full_path, 'r', encoding='utf-8') as f:
@@ -284,9 +290,11 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 file_path=file_path
             )
     else:
-        # Docker mode: Write to local filesystem
+        # Docker mode: Write to orchestrator's users volume mount
+        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
         project_dir = get_project_path(user_id, project_id)
-        full_path = os.path.join(project_dir, file_path)
+        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
+        full_path = os.path.join("/app", project_dir, file_path)
 
         try:
             with open(full_path, 'w', encoding='utf-8') as f:

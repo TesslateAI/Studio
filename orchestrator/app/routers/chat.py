@@ -628,6 +628,247 @@ async def agent_chat(
         )
 
 
+@router.post("/agent/stream")
+async def agent_chat_stream(
+    request: AgentChatRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    SSE Streaming Agent Chat - uses IterativeAgent with real-time event streaming.
+
+    This endpoint streams agent execution events in real-time using Server-Sent Events (SSE).
+    Prevents Cloudflare timeouts by continuously sending data during long-running tasks.
+
+    **Event Types:**
+    - text_chunk: LLM text generation as it happens
+    - agent_step: Tool calls and results when iteration completes
+    - complete: Final response when task finishes
+    - error: Error information if execution fails
+
+    Args:
+        request: Agent chat request with project_id, message, agent_id
+        current_user: Authenticated user
+        db: Database session
+
+    Returns:
+        StreamingResponse with SSE format events
+    """
+    from fastapi.responses import StreamingResponse
+    import json
+
+    logger.info(f"[SSE-AGENT] Starting streaming agent chat - user: {current_user.id}, project: {request.project_id}")
+
+    async def event_generator():
+        try:
+            # Verify project ownership
+            result = await db.execute(
+                select(Project).where(
+                    Project.id == request.project_id,
+                    Project.owner_id == current_user.id
+                )
+            )
+            project = result.scalar_one_or_none()
+
+            if not project:
+                error_event = {
+                    'type': 'error',
+                    'data': {'message': 'Project not found or access denied'}
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                return
+
+            # Get or create chat for message history persistence
+            chat_result = await db.execute(
+                select(Chat).where(
+                    Chat.user_id == current_user.id,
+                    Chat.project_id == request.project_id
+                )
+            )
+            chat = chat_result.scalar_one_or_none()
+
+            if not chat:
+                chat = Chat(user_id=current_user.id, project_id=request.project_id)
+                db.add(chat)
+                await db.commit()
+                await db.refresh(chat)
+
+            # Save user message before streaming
+            user_message = Message(
+                chat_id=chat.id,
+                role="user",
+                content=request.message
+            )
+            db.add(user_message)
+            await db.commit()
+
+            # Create agent using same pattern as HTTP endpoint
+            from ..agent.factory import create_agent_from_db_model
+            from ..agent.models import create_model_adapter
+            from ..config import get_settings
+
+            settings = get_settings()
+
+            # 1. Fetch agent from database
+            agent_model = None
+            if request.agent_id:
+                agent_result = await db.execute(
+                    select(MarketplaceAgent).where(
+                        MarketplaceAgent.id == request.agent_id,
+                        MarketplaceAgent.is_active == True
+                    )
+                )
+                agent_model = agent_result.scalar_one_or_none()
+
+                if not agent_model:
+                    error_event = {
+                        'type': 'error',
+                        'data': {'message': f'Agent with ID {request.agent_id} not found or inactive'}
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
+            else:
+                # Default: Use first IterativeAgent available
+                agent_result = await db.execute(
+                    select(MarketplaceAgent).where(
+                        MarketplaceAgent.is_active == True,
+                        MarketplaceAgent.agent_type == 'IterativeAgent'
+                    ).limit(1)
+                )
+                agent_model = agent_result.scalar_one_or_none()
+
+                if not agent_model:
+                    error_event = {
+                        'type': 'error',
+                        'data': {'message': 'No IterativeAgent found. Please configure an agent.'}
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
+
+            # 2. Get user's selected model
+            user_purchase_result = await db.execute(
+                select(UserPurchasedAgent).where(
+                    UserPurchasedAgent.user_id == current_user.id,
+                    UserPurchasedAgent.agent_id == agent_model.id
+                )
+            )
+            user_purchase = user_purchase_result.scalar_one_or_none()
+
+            model_name = (user_purchase.selected_model if user_purchase and user_purchase.selected_model
+                         else agent_model.model or settings.litellm_default_models.split(",")[0])
+
+            # 3. Create model adapter
+            model_adapter = await create_model_adapter(
+                model_name=model_name,
+                user_id=current_user.id,
+                db=db
+            )
+
+            # 4. Create agent via factory
+            agent_instance = await create_agent_from_db_model(
+                agent_model=agent_model,
+                model_adapter=model_adapter
+            )
+
+            # Set max_iterations
+            if hasattr(agent_instance, 'max_iterations'):
+                agent_instance.max_iterations = request.max_iterations or 20
+
+            # Prepare execution context
+            context = {
+                "user_id": current_user.id,
+                "project_id": request.project_id,
+                "db": db
+            }
+
+            # Accumulate results for database persistence
+            collected_steps = []
+            final_response = ""
+            iterations = 0
+            tool_calls_made = 0
+            completion_reason = "task_complete"
+
+            # Stream events from agent and collect metadata
+            async for event in agent_instance.run(request.message, context):
+                # Collect step data for persistence
+                if event['type'] == 'agent_step':
+                    collected_steps.append(event['data'])
+                elif event['type'] == 'complete':
+                    final_response = event['data'].get('final_response', '')
+                    iterations = event['data'].get('iterations', iterations)
+                    tool_calls_made = event['data'].get('tool_calls_made', tool_calls_made)
+                    completion_reason = event['data'].get('completion_reason', completion_reason)
+
+                # Send event in SSE format
+                yield f"data: {json.dumps(event)}\n\n"
+
+            # Increment usage_count for the agent
+            if agent_model:
+                agent_model.usage_count = (agent_model.usage_count or 0) + 1
+                db.add(agent_model)
+                logger.info(f"[USAGE-TRACKING] Incremented usage_count for agent {agent_model.name} to {agent_model.usage_count}")
+
+            # Save agent response with metadata (same format as HTTP endpoint)
+            agent_metadata = {
+                "agent_mode": True,
+                "agent_type": agent_model.agent_type,
+                "iterations": iterations,
+                "tool_calls_made": tool_calls_made,
+                "completion_reason": completion_reason,
+                "steps": [
+                    {
+                        "iteration": step.get('iteration'),
+                        "thought": step.get('thought'),
+                        "tool_calls": [
+                            {
+                                "name": tc.get('name'),
+                                "parameters": _convert_uuids_to_strings(tc.get('parameters', {})),
+                                "result": _convert_uuids_to_strings(step.get('tool_results', [])[idx] if idx < len(step.get('tool_results', [])) else {})
+                            }
+                            for idx, tc in enumerate(step.get('tool_calls', []))
+                        ],
+                        "response_text": step.get('response_text', ''),
+                        "is_complete": step.get('is_complete', False),
+                        "timestamp": step.get('timestamp', '')
+                    }
+                    for step in collected_steps
+                ]
+            }
+
+            assistant_message = Message(
+                chat_id=chat.id,
+                role="assistant",
+                content=final_response,
+                message_metadata=agent_metadata
+            )
+            db.add(assistant_message)
+            await db.commit()
+
+            logger.info(f"[SSE-AGENT] Streaming complete - user: {current_user.id}, project: {request.project_id}, saved to database")
+
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"SSE Agent error: {e}")
+            logger.error(f"Full traceback:\n{error_traceback}")
+
+            error_event = {
+                'type': 'error',
+                'data': {'message': str(e)}
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Connection": "keep-alive"
+        }
+    )
+
+
 class ConnectionManager:
     def __init__(self):
         # Use (user_id, project_id) tuple as key to support multiple projects per user

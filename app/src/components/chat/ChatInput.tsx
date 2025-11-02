@@ -25,6 +25,8 @@ interface ChatInputProps {
   projectName?: string;
   placeholder?: string;
   disabled?: boolean;
+  isExecuting?: boolean;
+  onStop?: () => void;
 }
 
 export function ChatInput({
@@ -35,7 +37,9 @@ export function ChatInput({
   projectFiles = [],
   projectName = 'project',
   placeholder = 'Ask AI to build something...',
-  disabled = false
+  disabled = false,
+  isExecuting = false,
+  onStop
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
 
@@ -143,13 +147,20 @@ export function ChatInput({
           />
         </div>
         <button
-          type="submit"
-          disabled={!message.trim() || disabled}
+          type={isExecuting ? "button" : "submit"}
+          onClick={isExecuting ? onStop : undefined}
+          disabled={!isExecuting && (!message.trim() || disabled)}
           className="send-btn w-10 h-10 bg-gradient-to-br from-[var(--primary)] to-orange-400 rounded-xl border-none text-white flex items-center justify-center flex-shrink-0 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mb-1"
         >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-            <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z" />
-          </svg>
+          {isExecuting ? (
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+              <rect x="64" y="64" width="128" height="128" rx="8"/>
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+              <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z" />
+            </svg>
+          )}
         </button>
       </div>
 
@@ -183,15 +194,22 @@ export function ChatInput({
           />
         </div>
 
-        {/* Send button */}
+        {/* Send button / Stop button */}
         <button
-          type="submit"
-          disabled={!message.trim() || disabled}
+          type={isExecuting ? "button" : "submit"}
+          onClick={isExecuting ? onStop : undefined}
+          disabled={!isExecuting && (!message.trim() || disabled)}
           className="send-btn w-9 h-9 bg-gradient-to-br from-[var(--primary)] to-orange-400 rounded-xl border-none text-white flex items-center justify-center flex-shrink-0 transition-all hover:scale-105 hover:shadow-[0_4px_12px_rgba(255,107,0,0.4)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
         >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-            <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z" />
-          </svg>
+          {isExecuting ? (
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+              <rect x="64" y="64" width="128" height="128" rx="8"/>
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+              <path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z" />
+            </svg>
+          )}
         </button>
       </div>
     </form>

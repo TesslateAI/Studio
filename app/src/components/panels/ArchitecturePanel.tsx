@@ -89,14 +89,46 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
     }
   };
 
+  const sanitizeDiagram = (diagramCode: string): string => {
+    // Client-side sanitization for Mermaid syntax
+    let sanitized = diagramCode;
+
+    // Remove double quotes from node labels: ["text"] -> [text]
+    sanitized = sanitized.replace(/\["([^"]+)"\]/g, '[$1]');
+    sanitized = sanitized.replace(/\("([^"]+)"\)/g, '($1)');
+    sanitized = sanitized.replace(/\{"([^"]+)"\}/g, '{$1}');
+
+    // Replace @ symbol which causes parsing issues
+    sanitized = sanitized.replace(/@/g, 'at-');
+
+    // Remove stray quotes from node/edge definitions
+    const lines = sanitized.split('\n');
+    const cleanedLines = lines.map(line => {
+      // Skip directive lines
+      if (line.trim().startsWith('graph') ||
+          line.trim().startsWith('flowchart') ||
+          line.trim().startsWith('%%') ||
+          line.trim().startsWith('classDef') ||
+          line.trim().startsWith('class ') ||
+          line.trim().startsWith('style ')) {
+        return line;
+      }
+      // Remove stray quotes from other lines
+      return line.replace(/"/g, '');
+    });
+
+    return cleanedLines.join('\n');
+  };
+
   const renderDiagram = async () => {
     try {
+      const sanitized = sanitizeDiagram(diagram);
       const uniqueId = `mermaid-diagram-${Date.now()}`;
-      const { svg } = await mermaid.render(uniqueId, diagram);
+      const { svg } = await mermaid.render(uniqueId, sanitized);
       setDiagramSvg(svg);
     } catch (error) {
       console.error('Failed to render Mermaid diagram:', error);
-      toast.error('Failed to render diagram');
+      toast.error('Failed to render diagram. Try regenerating it.');
     }
   };
 
