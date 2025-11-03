@@ -68,7 +68,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
       parts.forEach((part: string, index: number) => {
         const fullPath = currentPath ? `${currentPath}/${part}` : part;
         const isFile = index === parts.length - 1;
-        
+
         if (!pathMap.has(fullPath)) {
           const node: FileNode = {
             name: part,
@@ -77,9 +77,9 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
             children: !isFile ? [] : undefined,
             content: isFile ? file.content : undefined
           };
-          
+
           pathMap.set(fullPath, node);
-          
+
           if (currentPath === '') {
             tree.push(node);
           } else {
@@ -89,7 +89,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
             }
           }
         }
-        
+
         currentPath = fullPath;
       });
     });
@@ -100,7 +100,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
     if (!selectedFile && files.length > 0) {
       setSelectedFile(files[0].file_path);
     }
-  }, [files, selectedFile]);
+  }, [files]);
 
 
   const toggleDirectory = (path: string) => {
@@ -206,7 +206,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
           </div>
         </div>
         
-        <div className="flex-1 p-2 overflow-y-auto">
+        <div className="flex-1 p-2 overflow-y-auto" key={files.length}>
           {fileTree.length > 0 ? renderFileTree(fileTree) : (
             <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
               <Code size={32} className="mx-auto mb-3 opacity-50" />
@@ -249,6 +249,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
             {/* Monaco Editor */}
             <div className="flex-1 overflow-hidden">
               <Editor
+                key={selectedFile}
                 height="100%"
                 language={getLanguage(selectedFile)}
                 value={selectedFileContent.content}
