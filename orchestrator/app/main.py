@@ -5,8 +5,12 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from .database import engine, Base
-from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals
+from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals
 from .config import get_settings
+from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
+from .users import fastapi_users, cookie_backend, bearer_backend
+from .schemas_auth import UserRead, UserCreate, UserUpdate
+from .oauth import get_available_oauth_clients
 import os
 import logging
 import re
@@ -75,7 +79,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                         "Access-Control-Allow-Origin": origin,
                         "Access-Control-Allow-Credentials": "true",
                         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token",
                         "Access-Control-Max-Age": "600",
                     }
                 )
@@ -91,13 +95,16 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token"
             response.headers["Access-Control-Expose-Headers"] = "Content-Length, X-Total-Count"
 
         return response
 
 # Use custom dynamic CORS middleware
 app.add_middleware(DynamicCORSMiddleware)
+
+# Add CSRF protection middleware (must be after CORS)
+app.add_middleware(CSRFProtectionMiddleware)
 
 def load_agents_config():
     """Load agent definitions from agents_config.json file."""
@@ -290,8 +297,80 @@ async def startup():
 # In Kubernetes-native mode, user files are served directly from user dev pods
 # app.mount("/preview", StaticFiles(directory="users"), name="preview")
 
-# Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+# ============================================================================
+# FastAPI-Users Authentication Routes
+# ============================================================================
+
+# Auth router with Bearer token (JWT) support
+app.include_router(
+    fastapi_users.get_auth_router(bearer_backend),
+    prefix="/api/auth/jwt",
+    tags=["auth"],
+)
+
+# Auth router with Cookie support
+app.include_router(
+    fastapi_users.get_auth_router(cookie_backend),
+    prefix="/api/auth/cookie",
+    tags=["auth"],
+)
+
+# Register router (user registration)
+app.include_router(
+    fastapi_users.get_register_router(UserRead, UserCreate),
+    prefix="/api/auth",
+    tags=["auth"],
+)
+
+# Reset password router
+app.include_router(
+    fastapi_users.get_reset_password_router(),
+    prefix="/api/auth",
+    tags=["auth"],
+)
+
+# Verify email router
+app.include_router(
+    fastapi_users.get_verify_router(UserRead),
+    prefix="/api/auth",
+    tags=["auth"],
+)
+
+# User management router (get/update current user)
+app.include_router(
+    fastapi_users.get_users_router(UserRead, UserUpdate),
+    prefix="/api/users",
+    tags=["users"],
+)
+
+# OAuth routers (Google and GitHub) - only include if configured
+oauth_clients = get_available_oauth_clients()
+for provider_name, oauth_client in oauth_clients.items():
+    # Redirect to frontend OAuth callback page after successful authentication
+    frontend_redirect = f"{settings.cors_origins.split(',')[0]}/oauth/callback" if settings.cors_origins else None
+
+    app.include_router(
+        fastapi_users.get_oauth_router(
+            oauth_client,
+            bearer_backend,
+            settings.secret_key,
+            redirect_url=frontend_redirect,
+        ),
+        prefix=f"/api/auth/{provider_name}",
+        tags=["auth"],
+    )
+    logger.info(f"✅ Registered OAuth router for: {provider_name}")
+
+# CSRF token endpoint
+@app.get("/api/auth/csrf", tags=["auth"])
+async def get_csrf_token():
+    """Get CSRF token for cookie-based authentication."""
+    return get_csrf_token_response()
+
+# ============================================================================
+# Include Other Routers
+# ============================================================================
+
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
@@ -302,7 +381,6 @@ app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(shell.router, prefix="/api/shell", tags=["shell"])
 app.include_router(secrets.router, prefix="/api/secrets", tags=["secrets"])
-app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(kanban.router, tags=["kanban"])
 app.include_router(referrals.router, prefix="/api", tags=["referrals"])
 

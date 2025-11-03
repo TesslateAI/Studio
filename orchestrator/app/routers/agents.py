@@ -5,14 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
 from ..models import MarketplaceAgent, User
-from ..auth import get_current_active_user
+from ..users import current_active_user, current_superuser
 
 router = APIRouter()
 
 @router.get("/")
 async def get_agents(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get all active marketplace agents.
@@ -47,7 +47,7 @@ async def get_agents(
 async def get_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get a specific marketplace agent by ID."""
     result = await db.execute(

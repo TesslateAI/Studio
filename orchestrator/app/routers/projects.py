@@ -7,10 +7,10 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..database import get_db
 from ..models import Project, User, ProjectFile, Chat, Message
 from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema
-from ..auth import get_current_active_user
 from ..config import get_settings
 from ..utils.slug_generator import generate_project_slug
 from ..utils.resource_naming import get_project_path
+from ..users import current_active_user, current_superuser
 import os
 import shutil
 import asyncio
@@ -67,7 +67,7 @@ async def get_project_by_slug(
 
 @router.get("/", response_model=List[ProjectSchema])
 async def get_projects(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
@@ -79,7 +79,7 @@ async def get_projects(
 @router.post("/", response_model=ProjectSchema)
 async def create_project(
     project: ProjectCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -664,7 +664,7 @@ async def create_project(
 @router.get("/{project_slug}", response_model=ProjectSchema)
 async def get_project(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get a project by its slug."""
@@ -674,7 +674,7 @@ async def get_project(
 @router.get("/{project_slug}/files", response_model=List[ProjectFileSchema])
 async def get_project_files(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
     from_pod: bool = False  # Optional query param to force reading from pod
 ):
@@ -753,7 +753,7 @@ async def get_project_files(
 @router.post("/{project_slug}/start-dev-container")
 async def start_dev_container(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Start a development environment for the project."""
@@ -780,7 +780,7 @@ async def start_dev_container(
 @router.post("/{project_slug}/restart-dev-container")
 async def restart_dev_container(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     # Get project and verify ownership
@@ -800,7 +800,7 @@ async def restart_dev_container(
 @router.post("/{project_slug}/stop-dev-container")
 async def stop_dev_container(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     # Get project and verify ownership
@@ -820,7 +820,7 @@ async def stop_dev_container(
 @router.get("/{project_slug}/dev-server-url")
 async def get_dev_server_url(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -988,7 +988,7 @@ async def get_dev_server_url(
 @router.get("/{project_slug}/container-status")
 async def get_container_status(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1067,7 +1067,7 @@ async def get_container_status(
 async def save_project_file(
     project_slug: str,
     file_data: dict,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1188,7 +1188,7 @@ async def save_project_file(
 @router.get("/{project_slug}/container-info")
 async def get_container_info(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1237,7 +1237,7 @@ async def get_container_info(
 
 @router.get("/containers/all")
 async def get_all_dev_containers(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get all running development containers (for admin/debugging)."""
     try:
@@ -1257,7 +1257,7 @@ async def get_all_dev_containers(
 @router.delete("/{project_slug}")
 async def delete_project(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a project and ALL associated data including chats, messages, files, and containers."""
@@ -1323,14 +1323,18 @@ async def delete_project(
 @router.post("/{project_slug}/generate-architecture-diagram")
 async def generate_architecture_diagram(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    diagram_type: str = "mermaid",  # "mermaid" or "c4_plantuml"
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Generate a Mermaid architecture diagram for the project using the user's selected model.
+    Generate an architecture diagram for the project using the user's selected model.
 
-    This endpoint analyzes the project files and generates a Mermaid diagram
-    showing the architecture, component relationships, and data flow.
+    This endpoint analyzes the project files and generates either a Mermaid diagram
+    or a C4 PlantUML diagram showing the architecture, component relationships, and data flow.
+
+    Args:
+        diagram_type: Type of diagram to generate ("mermaid" or "c4_plantuml")
     """
     # Get project and verify ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
@@ -1344,7 +1348,7 @@ async def generate_architecture_diagram(
         )
 
     try:
-        logger.info(f"[DIAGRAM] Generating architecture diagram for project {project_id} using model {current_user.diagram_model}")
+        logger.info(f"[DIAGRAM] Generating {diagram_type} architecture diagram for project {project_id} using model {current_user.diagram_model}")
 
         # Get project files from database
         files_result = await db.execute(
@@ -1366,8 +1370,44 @@ async def generate_architecture_diagram(
 
             file_structure[file.file_path] = file.content[:5000]  # Limit content to first 5000 chars
 
-        # Create prompt for diagram generation
-        prompt = f"""Analyze this project and generate a Mermaid diagram showing the architecture.
+        # Create prompt for diagram generation based on type
+        if diagram_type == "c4_plantuml":
+            prompt = f"""Analyze this project and generate a C4 PlantUML diagram showing the architecture.
+
+Project Name: {project.name}
+Project Description: {project.description or 'No description'}
+
+Files in the project:
+{chr(10).join(file_structure.keys())}
+
+Key file contents (truncated):
+{chr(10).join([f"--- {path} ---{chr(10)}{content[:500]}" for path, content in list(file_structure.items())[:10]])}
+
+Please generate a C4 PlantUML diagram that shows:
+1. System Context or Container level view (choose appropriately based on project size)
+2. The main components/containers of the application
+3. How they interact with each other
+4. External dependencies or services if any
+
+Use C4-PlantUML syntax with proper directives. Return ONLY the PlantUML code starting with '@startuml', no explanations or markdown code blocks.
+
+Example format:
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(user, "User", "End user of the application")
+System_Boundary(c1, "Application") {{
+    Container(frontend, "Frontend", "React", "User interface")
+    Container(backend, "Backend", "FastAPI", "Business logic and API")
+    ContainerDb(database, "Database", "PostgreSQL", "Stores data")
+}}
+
+Rel(user, frontend, "Uses", "HTTPS")
+Rel(frontend, backend, "Calls", "REST API")
+Rel(backend, database, "Reads/Writes", "SQL")
+@enduml"""
+        else:  # mermaid (default)
+            prompt = f"""Analyze this project and generate a Mermaid diagram showing the architecture.
 
 Project Name: {project.name}
 Project Description: {project.description or 'No description'}
@@ -1411,7 +1451,7 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
                 json={
                     "model": current_user.diagram_model,
                     "messages": [
-                        {"role": "system", "content": "You are an expert software architect. Generate clear, accurate Mermaid diagrams."},
+                        {"role": "system", "content": f"You are an expert software architect. Generate clear, accurate {'C4 PlantUML' if diagram_type == 'c4_plantuml' else 'Mermaid'} diagrams."},
                         {"role": "user", "content": prompt}
                     ],
                     "max_tokens": 2000,
@@ -1430,49 +1470,68 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
         diagram_code = result_data["choices"][0]["message"]["content"].strip()
 
         # Clean up the diagram code (remove markdown code blocks if present)
-        if diagram_code.startswith("```mermaid"):
+        if diagram_code.startswith("```plantuml") or diagram_code.startswith("```puml"):
+            diagram_code = diagram_code.replace("```plantuml", "").replace("```puml", "").replace("```", "").strip()
+        elif diagram_code.startswith("```mermaid"):
             diagram_code = diagram_code.replace("```mermaid", "").replace("```", "").strip()
         elif diagram_code.startswith("```"):
             diagram_code = diagram_code.replace("```", "").strip()
 
-        # Sanitize Mermaid syntax to prevent parsing errors
-        # Remove quotes from node labels and escape special characters
+        # Sanitize based on diagram type
         import re
 
-        # Fix: Remove double quotes around node labels that contain special chars
-        # Match patterns like: A["@vitejs/plugin-react"] or B["some text"]
-        diagram_code = re.sub(r'\["([^"]+)"\]', r'[\1]', diagram_code)
-        diagram_code = re.sub(r'\("([^"]+)"\)', r'(\1)', diagram_code)
-        diagram_code = re.sub(r'\{"([^"]+)"\}', r'{\1}', diagram_code)
+        if diagram_type == "c4_plantuml":
+            # PlantUML sanitization is minimal - just ensure it has proper start/end tags
+            if not diagram_code.startswith("@startuml"):
+                diagram_code = "@startuml\n" + diagram_code
+            if not diagram_code.endswith("@enduml"):
+                diagram_code = diagram_code + "\n@enduml"
+        else:
+            # Sanitize Mermaid syntax to prevent parsing errors
+            # Remove quotes from node labels and escape special characters
 
-        # Fix: Replace problematic characters in node labels
-        # Replace @ symbol which can cause issues
-        diagram_code = diagram_code.replace('@', 'at-')
+            # Fix: Remove double quotes around node labels that contain special chars
+            # Match patterns like: A["@vitejs/plugin-react"] or B["some text"]
+            diagram_code = re.sub(r'\["([^"]+)"\]', r'[\1]', diagram_code)
+            diagram_code = re.sub(r'\("([^"]+)"\)', r'(\1)', diagram_code)
+            diagram_code = re.sub(r'\{"([^"]+)"\}', r'{\1}', diagram_code)
 
-        # Fix: Escape any remaining quotes in text
-        lines = diagram_code.split('\n')
-        sanitized_lines = []
-        for line in lines:
-            # Skip directive lines and graph declarations
-            if line.strip().startswith(('graph', 'flowchart', '%%', 'classDef', 'class ', 'style ')):
-                sanitized_lines.append(line)
-            else:
-                # For node and edge definitions, ensure labels don't have problematic chars
-                # Remove any stray quotes that might break parsing
-                line = line.replace('"', '')
-                sanitized_lines.append(line)
+            # Fix: Replace problematic characters in node labels
+            # Replace @ symbol which can cause issues
+            diagram_code = diagram_code.replace('@', 'at-')
 
-        diagram_code = '\n'.join(sanitized_lines)
+            # Fix: Escape any remaining quotes in text
+            lines = diagram_code.split('\n')
+            sanitized_lines = []
+            for line in lines:
+                # Skip directive lines and graph declarations
+                if line.strip().startswith(('graph', 'flowchart', '%%', 'classDef', 'class ', 'style ')):
+                    sanitized_lines.append(line)
+                else:
+                    # For node and edge definitions, ensure labels don't have problematic chars
+                    # Remove any stray quotes that might break parsing
+                    line = line.replace('"', '')
+                    sanitized_lines.append(line)
 
-        # Save diagram to database
+            diagram_code = '\n'.join(sanitized_lines)
+
+        # Save diagram and diagram type to database
         project.architecture_diagram = diagram_code
+
+        # Store diagram type in project settings
+        if not project.settings:
+            project.settings = {}
+        project.settings['diagram_type'] = diagram_type
+        flag_modified(project, 'settings')
+
         await db.commit()
         await db.refresh(project)
 
-        logger.info(f"[DIAGRAM] Successfully generated and saved diagram for project {project_id}")
+        logger.info(f"[DIAGRAM] Successfully generated and saved {diagram_type} diagram for project {project_id}")
 
         return {
             "diagram": diagram_code,
+            "diagram_type": diagram_type,
             "model_used": current_user.diagram_model,
             "project_id": project_id
         }
@@ -1487,16 +1546,18 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
 @router.get("/{project_slug}/settings")
 async def get_project_settings(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get project settings."""
     # Get project and verify ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
+    settings = project.settings or {}
     return {
-        "settings": project.settings or {},
-        "architecture_diagram": project.architecture_diagram
+        "settings": settings,
+        "architecture_diagram": project.architecture_diagram,
+        "diagram_type": settings.get('diagram_type', 'mermaid')  # Default to mermaid for backwards compatibility
     }
 
 
@@ -1504,7 +1565,7 @@ async def get_project_settings(
 async def update_project_settings(
     project_slug: str,
     settings_data: dict,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Update project settings."""
@@ -1537,7 +1598,7 @@ async def update_project_settings(
 @router.post("/{project_id}/fork", response_model=ProjectSchema)
 async def fork_project(
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """

@@ -72,6 +72,8 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./orchestrator/app:/app/app
+      - ./orchestrator/alembic:/app/alembic
+      - ./orchestrator/alembic.ini:/app/alembic.ini
       - ./orchestrator/pyproject.toml:/app/pyproject.toml
       - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver
       - ./orchestrator/users:/app/users
@@ -91,6 +93,19 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-studio.localhost}}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
       - DEV_SERVER_BASE_URL=${DEV_SERVER_BASE_URL:-}
+      # OAuth Configuration (optional)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_OAUTH_REDIRECT_URI=${GITHUB_OAUTH_REDIRECT_URI:-}
+      # CSRF and Cookie Security
+      - CSRF_SECRET_KEY=${CSRF_SECRET_KEY:-}
+      - CSRF_TOKEN_MAX_AGE=${CSRF_TOKEN_MAX_AGE:-86400}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
       - PYTHONUNBUFFERED=1
       - WATCHFILES_FORCE_POLLING=true
     depends_on:

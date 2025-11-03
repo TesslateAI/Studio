@@ -4,7 +4,7 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from ..database import get_db
 from ..models import User
-from ..auth import get_current_active_user
+from ..users import current_active_user, current_superuser
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class UserPreferencesResponse(BaseModel):
 
 @router.get("/preferences", response_model=UserPreferencesResponse)
 async def get_user_preferences(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get user preferences including diagram generation model."""
@@ -34,7 +34,7 @@ async def get_user_preferences(
 @router.patch("/preferences")
 async def update_user_preferences(
     preferences: UserPreferencesUpdate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Update user preferences."""

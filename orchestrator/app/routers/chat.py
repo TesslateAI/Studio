@@ -9,7 +9,6 @@ from ..schemas import (
     Chat as ChatSchema, Message as MessageSchema, MessageCreate,
     AgentChatRequest, AgentChatResponse, AgentStepResponse
 )
-from ..auth import get_current_active_user
 from ..config import get_settings
 from ..utils.resource_naming import get_project_path
 from openai import AsyncOpenAI
@@ -24,6 +23,7 @@ import logging
 from ..agent import create_agent_from_db_model
 from ..agent.models import create_model_adapter
 from ..agent.iterative_agent import _convert_uuids_to_strings
+from ..users import current_active_user, current_superuser
 
 settings = get_settings()
 router = APIRouter()
@@ -192,7 +192,7 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
 
 @router.get("/", response_model=List[ChatSchema])
 async def get_chats(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
@@ -204,7 +204,7 @@ async def get_chats(
 @router.post("/", response_model=ChatSchema)
 async def create_chat(
     chat_data: dict,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     project_id = chat_data.get('project_id')
@@ -233,7 +233,7 @@ async def create_chat(
 @router.get("/{project_id}/messages", response_model=List[MessageSchema])
 async def get_project_messages(
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all messages for a specific project's chat."""
@@ -263,7 +263,7 @@ async def get_project_messages(
 @router.post("/agent", response_model=AgentChatResponse)
 async def agent_chat(
     request: AgentChatRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -631,7 +631,7 @@ async def agent_chat(
 @router.post("/agent/stream")
 async def agent_chat_stream(
     request: AgentChatRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -893,7 +893,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
     project_id = None
     try:
         # Verify token and get user
-        from ..auth import jwt, settings, JWTError
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         username = payload.get("sub")
 

@@ -13,8 +13,8 @@ import base64
 import logging
 
 from ..database import get_db
-from ..auth import get_current_active_user
 from ..models import User, UserAPIKey
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -36,7 +36,7 @@ def decode_key(encoded: str) -> str:
 @router.get("/api-keys")
 async def list_api_keys(
     provider: Optional[str] = None,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -81,7 +81,7 @@ async def add_api_key(
     key_name: Optional[str] = Body(None, description="Optional name for this key"),
     provider_metadata: Optional[dict] = Body(default={}, description="Provider-specific metadata"),
     expires_at: Optional[str] = Body(None, description="Optional expiration date"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -148,7 +148,7 @@ async def update_api_key(
     key_name: Optional[str] = Body(None, description="New name for this key"),
     provider_metadata: Optional[dict] = Body(None, description="Updated metadata"),
     expires_at: Optional[str] = Body(None, description="Updated expiration date"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -188,7 +188,7 @@ async def update_api_key(
 @router.delete("/api-keys/{key_id}")
 async def delete_api_key(
     key_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -220,7 +220,7 @@ async def delete_api_key(
 async def get_api_key(
     key_id: str,
     reveal: bool = False,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -255,7 +255,7 @@ async def get_api_key(
 
 @router.get("/providers")
 async def list_supported_providers(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     List all supported providers and their configuration.

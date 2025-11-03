@@ -8,53 +8,8 @@ from .database import Base
 # Import kanban models so they're included in Base.metadata
 from .models_kanban import KanbanBoard, KanbanColumn, KanbanTask, KanbanTaskComment, ProjectNote
 
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    name = Column(String, nullable=False)  # Display name, not unique
-    username = Column(String, unique=True, index=True, nullable=False)  # Login identifier (email-based)
-    slug = Column(String, unique=True, index=True, nullable=False)  # URL-safe identifier (e.g., "ernest-k3x8n2")
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    is_active = Column(Boolean, default=True)
-    is_admin = Column(Boolean, default=False)
-    last_active_at = Column(DateTime(timezone=True), nullable=True)
-    litellm_api_key = Column(String, unique=True, nullable=True)
-    litellm_user_id = Column(String, unique=True, nullable=True)
-    subscription_tier = Column(String, default="free")  # free, pro, enterprise
-    stripe_customer_id = Column(String, nullable=True)
-    total_spend = Column(Integer, default=0)  # In cents for precision
-    credits_balance = Column(Integer, default=0)  # In cents
-    diagram_model = Column(String, nullable=True)  # Selected model for architecture diagram generation
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
-    chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
-    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    agent_commands = relationship("AgentCommandLog", back_populates="user", cascade="all, delete-orphan")
-    github_credential = relationship("GitHubCredential", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    git_repositories = relationship("GitRepository", back_populates="user", cascade="all, delete-orphan")
-    purchased_agents = relationship("UserPurchasedAgent", back_populates="user", cascade="all, delete-orphan")
-    agent_reviews = relationship("AgentReview", back_populates="user", cascade="all, delete-orphan")
-    purchased_bases = relationship("UserPurchasedBase", back_populates="user", cascade="all, delete-orphan")
-    api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
-    custom_models = relationship("UserCustomModel", back_populates="user", cascade="all, delete-orphan")
-
-
-class RefreshToken(Base):
-    """Store refresh tokens for automatic token renewal."""
-    __tablename__ = "refresh_tokens"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    token = Column(String, unique=True, index=True, nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    revoked = Column(Boolean, default=False)
-
-    user = relationship("User", back_populates="refresh_tokens")
+# Import fastapi-users compatible auth models
+from .models_auth import User, OAuthAccount, AccessToken
 
 class Project(Base):
     __tablename__ = "projects"
