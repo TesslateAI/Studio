@@ -18,6 +18,7 @@ import aiofiles
 import re
 import asyncio
 import logging
+import jwt
 
 # Agent imports - new factory-based system
 from ..agent import create_agent_from_db_model
@@ -893,11 +894,26 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
     project_id = None
     try:
         # Verify token and get user
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        username = payload.get("sub")
+        # Accept both old tokens (no audience) and new fastapi-users tokens (audience: ["fastapi-users:auth"])
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+            options={"verify_aud": False}  # Don't verify audience for backward compatibility
+        )
+        user_id_or_username = payload.get("sub")
 
-        result = await db.execute(select(User).where(User.username == username))
-        user = result.scalar_one_or_none()
+        # Try to find user by ID (UUID) first (fastapi-users), then by username (old system)
+        try:
+            from uuid import UUID
+            user_uuid = UUID(user_id_or_username)
+            result = await db.execute(select(User).where(User.id == user_uuid))
+            user = result.scalar_one_or_none()
+        except (ValueError, TypeError):
+            # Not a valid UUID, try username lookup
+            result = await db.execute(select(User).where(User.username == user_id_or_username))
+            user = result.scalar_one_or_none()
+
         if not user:
             await websocket.close(code=1008)
             return

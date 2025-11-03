@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from .database import engine, Base
-from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals
+from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals, auth
 from .config import get_settings
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .users import fastapi_users, cookie_backend, bearer_backend
@@ -379,6 +379,7 @@ app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketp
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(shell.router, prefix="/api/shell", tags=["shell"])
 app.include_router(secrets.router, prefix="/api/secrets", tags=["secrets"])
 app.include_router(kanban.router, tags=["kanban"])

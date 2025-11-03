@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/verify")
+@router.get("/verify-access")
 async def verify_dev_environment_access(
     request: Request,
     current_user: User = Depends(current_active_user),
@@ -24,13 +24,16 @@ async def verify_dev_environment_access(
 ):
     """
     Verify user access to development environment.
-    Called by NGINX Ingress Controller for each request to dev environments.
 
-    Headers expected from NGINX:
-    - X-Original-URI: The original request URI
-    - X-Expected-User-ID: The user ID that should match the token
+    Supports two authentication modes:
+    1. NGINX Ingress (Kubernetes): Uses X-Expected-User-ID header
+    2. Traefik forwardAuth (Docker): Extracts user from project slug in hostname
+
+    Headers expected:
+    - X-Original-URI: The original request URI (NGINX)
+    - X-Expected-User-ID: The user ID that should match the token (NGINX only)
+    - X-Forwarded-Host or Host: Request hostname (Traefik & NGINX)
     - X-Forwarded-For: Client IP address
-    - X-Forwarded-Host: Request hostname
     - User-Agent: Client user agent
 
     Returns:
@@ -42,30 +45,101 @@ async def verify_dev_environment_access(
     - Failed attempts trigger security monitoring alerts
     """
     # Extract request metadata for audit logging
-    original_uri = request.headers.get("X-Original-URI", "")
+    original_uri = request.headers.get("X-Original-URI", request.url.path)
     expected_user_id_str = request.headers.get("X-Expected-User-ID", "")
     request_host = request.headers.get("X-Forwarded-Host", request.headers.get("Host", ""))
     ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     user_agent = request.headers.get("User-Agent", "")
 
     # Extract project_id from hostname if available
-    # Hostname format: {user_uuid}-{project_uuid}.domain.com
+    # Hostname format: {project-slug}.domain.com (Docker/Traefik)
+    # or {user_uuid}-{project_uuid}.domain.com (K8s/NGINX)
     project_id = None
+    project_slug = None
+
     try:
-        from ..utils.resource_naming import parse_hostname
-        from uuid import UUID
-        _, project_id_str = parse_hostname(request_host)
-        project_id = UUID(project_id_str)
-    except (ValueError, IndexError, Exception):
-        pass  # Could not extract project ID, log without it
+        # Extract subdomain from hostname
+        # e.g., "ff-9en0cx.studio.localhost" -> "ff-9en0cx"
+        subdomain = request_host.split('.')[0] if '.' in request_host else request_host
+
+        # Try parsing as K8s format first
+        try:
+            from ..utils.resource_naming import parse_hostname
+            from uuid import UUID
+            _, project_id_str = parse_hostname(request_host)
+            project_id = UUID(project_id_str)
+        except (ValueError, IndexError, Exception):
+            # Not K8s format, treat as project slug (Docker/Traefik)
+            project_slug = subdomain
+    except Exception as e:
+        logger.debug(f"Could not extract project info from hostname: {e}")
 
     success = False
     failure_reason = None
+    expected_user_id = None
 
     try:
-        # Validate expected user ID header
-        if not expected_user_id_str:
-            failure_reason = "Missing X-Expected-User-ID header"
+        # MODE 1: NGINX Ingress (Kubernetes) - X-Expected-User-ID header present
+        if expected_user_id_str:
+            from uuid import UUID
+            expected_user_id = UUID(expected_user_id_str)
+
+            # Verify user matches expected user
+            if current_user.id != expected_user_id:
+                failure_reason = f"User mismatch: user {current_user.id} attempted to access user {expected_user_id}'s environment"
+                logger.warning(
+                    f"[SECURITY] User {current_user.id} ({current_user.username}) attempted to access "
+                    f"environment for user {expected_user_id}. "
+                    f"URI: {original_uri}, Host: {request_host}, IP: {ip_address}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Access denied - user mismatch"
+                )
+
+        # MODE 2: Traefik forwardAuth (Docker) - Look up project by slug
+        elif project_slug:
+            from sqlalchemy import select
+            from ..models import Project
+
+            # Look up project by slug
+            result = await db.execute(
+                select(Project).where(Project.slug == project_slug)
+            )
+            project = result.scalar_one_or_none()
+
+            if not project:
+                failure_reason = f"Project not found: {project_slug}"
+                logger.warning(
+                    f"[SECURITY] User {current_user.id} ({current_user.username}) attempted to access "
+                    f"non-existent project {project_slug}. "
+                    f"Host: {request_host}, IP: {ip_address}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Project not found"
+                )
+
+            # Verify current user owns this project
+            if current_user.id != project.owner_id:
+                failure_reason = f"User {current_user.id} attempted to access project {project_slug} owned by {project.owner_id}"
+                logger.warning(
+                    f"[SECURITY] User {current_user.id} ({current_user.username}) attempted to access "
+                    f"project {project_slug} owned by user {project.owner_id}. "
+                    f"Host: {request_host}, IP: {ip_address}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Access denied - you do not own this project"
+                )
+
+            # Set expected_user_id for audit logging
+            expected_user_id = project.owner_id
+            project_id = project.id
+
+        # Neither mode available
+        else:
+            failure_reason = "Missing X-Expected-User-ID header and could not extract project from hostname"
             logger.warning(f"[SECURITY] {failure_reason}. URI: {original_uri}, IP: {ip_address}")
 
             # Log failed attempt to database
@@ -86,39 +160,6 @@ async def verify_dev_environment_access(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid request - missing user verification data"
-            )
-
-        from uuid import UUID
-        expected_user_id = UUID(expected_user_id_str)
-
-        # Verify user matches expected user
-        if current_user.id != expected_user_id:
-            failure_reason = f"User mismatch: user {current_user.id} attempted to access user {expected_user_id}'s environment"
-
-            logger.warning(
-                f"[SECURITY] User {current_user.id} ({current_user.username}) attempted to access "
-                f"environment for user {expected_user_id}. "
-                f"URI: {original_uri}, Host: {request_host}, IP: {ip_address}"
-            )
-
-            # Log unauthorized access attempt to database
-            access_log = PodAccessLog(
-                user_id=current_user.id,
-                expected_user_id=expected_user_id,
-                project_id=project_id,
-                success=False,
-                request_uri=original_uri,
-                request_host=request_host,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                failure_reason=failure_reason
-            )
-            db.add(access_log)
-            await db.commit()
-
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Access denied - user mismatch"
             )
 
         # Access granted - log successful verification
