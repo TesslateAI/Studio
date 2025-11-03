@@ -260,8 +260,30 @@ bearer_transport = BearerTransport(tokenUrl="auth/jwt/login")
 
 
 def get_jwt_strategy() -> JWTStrategy:
-    """JWT strategy for stateless authentication."""
-    return JWTStrategy(
+    """
+    JWT strategy for stateless authentication.
+
+    Custom strategy that includes is_admin field in token payload.
+    """
+    from datetime import datetime, timedelta, timezone
+    from jose import jwt as jose_jwt
+
+    class CustomJWTStrategy(JWTStrategy):
+        async def write_token(self, user: User) -> str:
+            """Override to include is_admin in token payload."""
+            data = {
+                "sub": str(user.id),
+                "aud": self.token_audience,
+                "is_admin": user.is_superuser,  # Add is_admin field
+            }
+
+            # Add expiration
+            data["exp"] = datetime.now(timezone.utc) + timedelta(seconds=self.lifetime_seconds)
+
+            # Encode the JWT token
+            return jose_jwt.encode(data, self.secret, algorithm=self.algorithm)
+
+    return CustomJWTStrategy(
         secret=SECRET,
         lifetime_seconds=settings.access_token_expire_minutes * 60,
         algorithm=settings.algorithm,

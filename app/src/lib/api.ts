@@ -142,6 +142,14 @@ export const projectsApi = {
     const response = await api.post(`/api/projects/${slug}/restart-dev-container`);
     return response.data;
   },
+  stopDevServer: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/stop-dev-container`);
+    return response.data;
+  },
+  getContainerStatus: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/container-status`);
+    return response.data;
+  },
   saveFile: async (slug: string, filePath: string, content: string) => {
     const response = await api.post(`/api/projects/${slug}/files/save`, {
       file_path: filePath,
@@ -498,6 +506,79 @@ export const diagramApi = {
   generateDiagram: async (slug: string, diagramType: 'mermaid' | 'c4_plantuml' = 'mermaid') => {
     const response = await api.post(`/api/projects/${slug}/generate-architecture-diagram`, null, {
       params: { diagram_type: diagramType }
+    });
+    return response.data;
+  },
+};
+
+export const assetsApi = {
+  // List all directories that contain assets
+  listDirectories: async (projectSlug: string) => {
+    const response = await api.get(`/api/projects/${projectSlug}/assets/directories`);
+    return response.data;
+  },
+
+  // Create a new asset directory
+  createDirectory: async (projectSlug: string, path: string) => {
+    const response = await api.post(`/api/projects/${projectSlug}/assets/directories`, { path });
+    return response.data;
+  },
+
+  // List all assets, optionally filtered by directory
+  listAssets: async (projectSlug: string, directory?: string) => {
+    const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+    const response = await api.get(`/api/projects/${projectSlug}/assets${params}`);
+    return response.data;
+  },
+
+  // Upload an asset file
+  uploadAsset: async (
+    projectSlug: string,
+    file: File,
+    directory: string,
+    onProgress?: (progress: number) => void
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('directory', directory);
+
+    const response = await api.post(`/api/projects/${projectSlug}/assets/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          onProgress(percentCompleted);
+        }
+      },
+    });
+    return response.data;
+  },
+
+  // Get asset file URL
+  getAssetUrl: (projectSlug: string, assetId: string) => {
+    return `${API_URL}/api/projects/${projectSlug}/assets/${assetId}/file`;
+  },
+
+  // Delete an asset
+  deleteAsset: async (projectSlug: string, assetId: string) => {
+    const response = await api.delete(`/api/projects/${projectSlug}/assets/${assetId}`);
+    return response.data;
+  },
+
+  // Rename an asset
+  renameAsset: async (projectSlug: string, assetId: string, new_filename: string) => {
+    const response = await api.patch(`/api/projects/${projectSlug}/assets/${assetId}/rename`, {
+      new_filename,
+    });
+    return response.data;
+  },
+
+  // Move asset to a different directory
+  moveAsset: async (projectSlug: string, assetId: string, directory: string) => {
+    const response = await api.patch(`/api/projects/${projectSlug}/assets/${assetId}/move`, {
+      directory,
     });
     return response.data;
   },

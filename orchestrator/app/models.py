@@ -28,6 +28,7 @@ class Project(Base):
 
     owner = relationship("User", back_populates="projects")
     files = relationship("ProjectFile", back_populates="project", cascade="all, delete-orphan")
+    assets = relationship("ProjectAsset", back_populates="project", cascade="all, delete-orphan")
     git_repository = relationship("GitRepository", back_populates="project", uselist=False, cascade="all, delete-orphan")
     project_agents = relationship("ProjectAgent", back_populates="project", cascade="all, delete-orphan")
     shell_sessions = relationship("ShellSession", back_populates="project", cascade="all, delete-orphan")
@@ -47,6 +48,26 @@ class ProjectFile(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     project = relationship("Project", back_populates="files")
+
+class ProjectAsset(Base):
+    """Track uploaded assets (images, videos, fonts, etc.) for projects."""
+    __tablename__ = "project_assets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    directory = Column(String, nullable=False)  # e.g., "/public/images"
+    file_path = Column(String, nullable=False)  # full path on disk
+    file_type = Column(String, nullable=False)  # image, video, font, document, other
+    file_size = Column(Integer, nullable=False)  # bytes
+    mime_type = Column(String, nullable=False)
+    width = Column(Integer, nullable=True)  # for images
+    height = Column(Integer, nullable=True)  # for images
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project", back_populates="assets")
 
 class Chat(Base):
     __tablename__ = "chats"
