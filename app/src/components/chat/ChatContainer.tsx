@@ -52,6 +52,7 @@ interface ChatContainerProps {
   projectFiles?: ProjectFile[];
   projectName?: string;
   className?: string;
+  sidebarExpanded?: boolean;
 }
 
 export function ChatContainer({
@@ -62,7 +63,8 @@ export function ChatContainer({
   onFileUpdate,
   projectFiles = [],
   projectName = 'project',
-  className = ''
+  className = '',
+  sidebarExpanded = true
 }: ChatContainerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -729,7 +731,7 @@ export function ChatContainer({
           transition-all duration-400 ease-[var(--ease)]
           rounded-3xl
           max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-b-none max-md:w-full
-          md:bottom-6 md:left-1/2 md:-translate-x-1/2
+          md:bottom-6 md:-translate-x-1/2
           ${isExpanded
             ? 'md:w-[min(800px,calc(100vw-48px))] md:max-h-[calc(100vh-48px)] max-md:max-h-[90vh] max-md:translate-y-0'
             : 'md:w-[min(600px,calc(100vw-48px))] max-md:translate-y-full max-md:opacity-0 max-md:pointer-events-none'
@@ -737,6 +739,10 @@ export function ChatContainer({
           ${!isExpanded && isHovered ? 'md:w-[min(650px,calc(100vw-48px))]' : ''}
           ${className}
         `}
+        style={{
+          left: sidebarExpanded ? 'calc(96px + 50vw)' : 'calc(24px + 50vw)',
+          transition: 'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.4s var(--ease), max-height 0.4s var(--ease)'
+        }}
         onMouseEnter={() => !isExpanded && setIsHovered(true)}
         onMouseLeave={() => !isExpanded && setIsHovered(false)}
       >

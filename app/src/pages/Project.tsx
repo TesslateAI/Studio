@@ -19,7 +19,8 @@ import {
   ShareNetwork,
   ArrowsClockwise,
   Kanban,
-  FlowArrow
+  FlowArrow,
+  List
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -42,6 +43,7 @@ import { projectsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
+import { motion, AnimatePresence } from 'framer-motion';
 
 type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets';
@@ -67,6 +69,10 @@ export default function Project() {
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
+  const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
+    const saved = localStorage.getItem('projectSidebarExpanded');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
   // Note: We still have projectId for internal use, but it comes from the loaded project object
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -80,6 +86,10 @@ export default function Project() {
       loadAgents(); // Load user's enabled agents from library
     }
   }, [slug]);
+
+  useEffect(() => {
+    localStorage.setItem('projectSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
+  }, [isLeftSidebarExpanded]);
 
   const loadSettings = async () => {
     if (!slug) return;
@@ -477,64 +487,143 @@ export default function Project() {
       <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
 
       {/* Fixed Left Sidebar */}
-      <div className="hidden md:flex flex-col w-12 bg-[var(--surface)] border-r border-white/10 py-3 gap-1">
+      <motion.div
+        initial={false}
+        animate={{ width: isLeftSidebarExpanded ? 192 : 48 }}
+        transition={{
+          type: "spring",
+          stiffness: 700,
+          damping: 28,
+          mass: 0.4
+        }}
+        className="hidden md:flex flex-col bg-[var(--surface)] border-r border-white/10 overflow-x-hidden"
+      >
         {/* Tesslate Logo */}
-        <div className="flex items-center justify-center h-9 mb-1 flex-shrink-0">
-          <svg className="w-5 h-5 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
+        <div className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-white/10`}>
+          <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
             <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
             <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
             <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
           </svg>
+          {isLeftSidebarExpanded && (
+            <span className="text-lg font-bold text-[var(--text)]">Tesslate</span>
+          )}
         </div>
 
-        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+        <div className="py-3 gap-1 flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
 
         {/* Back Button */}
-        <Tooltip content="Back to Projects" side="right" delay={200}>
+        {isLeftSidebarExpanded ? (
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
+            className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
           >
             <ArrowLeft size={18} />
+            <span className="text-sm font-medium">Back to Projects</span>
           </button>
-        </Tooltip>
+        ) : (
+          <Tooltip content="Back to Projects" side="right" delay={200}>
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
+            >
+              <ArrowLeft size={18} />
+            </button>
+          </Tooltip>
+        )}
 
         <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
 
         {/* Main View Toggles */}
         {leftSidebarItems.map((item, index) => (
-          <Tooltip key={index} content={item.title} side="right" delay={200}>
+          isLeftSidebarExpanded ? (
             <button
+              key={index}
               onClick={item.onClick}
-              className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+              className={`flex items-center h-9 transition-all w-full flex-shrink-0 px-3 gap-3 ${
                 item.active
                   ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
                   : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
               }`}
             >
               {item.icon}
+              <span className="text-sm font-medium">{item.title}</span>
             </button>
-          </Tooltip>
+          ) : (
+            <Tooltip key={index} content={item.title} side="right" delay={200}>
+              <button
+                onClick={item.onClick}
+                className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+                  item.active
+                    ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
+                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                }`}
+              >
+                {item.icon}
+              </button>
+            </Tooltip>
+          )
         ))}
 
         <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
 
         {/* Settings & Tools */}
         {rightSidebarItems.map((item, index) => (
-          <Tooltip key={index} content={item.title} side="right" delay={200}>
+          isLeftSidebarExpanded ? (
             <button
+              key={index}
               onClick={item.onClick}
-              className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+              className={`flex items-center h-9 transition-all w-full flex-shrink-0 px-3 gap-3 ${
                 item.active
                   ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
                   : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
               }`}
             >
               {item.icon}
+              <span className="text-sm font-medium">{item.title}</span>
+            </button>
+          ) : (
+            <Tooltip key={index} content={item.title} side="right" delay={200}>
+              <button
+                onClick={item.onClick}
+                className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+                  item.active
+                    ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
+                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                }`}
+              >
+                {item.icon}
+              </button>
+            </Tooltip>
+          )
+        ))}
+
+        {/* Spacer to push collapse button to bottom */}
+        <div className="flex-1" />
+
+        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+
+        {/* Collapse/Expand Toggle */}
+        {isLeftSidebarExpanded ? (
+          <button
+            onClick={() => setIsLeftSidebarExpanded(false)}
+            className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
+          >
+            <List size={18} weight="bold" />
+            <span className="text-sm font-medium">Collapse</span>
+          </button>
+        ) : (
+          <Tooltip content="Expand" side="right" delay={200}>
+            <button
+              onClick={() => setIsLeftSidebarExpanded(true)}
+              className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
+            >
+              <List size={18} weight="bold" />
             </button>
           </Tooltip>
-        ))}
-      </div>
+        )}
+        </div>
+      </motion.div>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -692,6 +781,7 @@ export default function Project() {
           onFileUpdate={handleFileUpdate}
           projectFiles={files}
           projectName={project?.name}
+          sidebarExpanded={isLeftSidebarExpanded}
         />
       ) : (
         <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">

@@ -12,6 +12,7 @@ interface FloatingPanelProps {
 }
 
 type DockPosition = 'left' | 'right' | 'top' | 'bottom' | null;
+type ResizeDirection = 'se' | 'sw' | 'ne' | 'nw' | 'n' | 's' | 'e' | 'w';
 
 export function FloatingPanel({
   title,
@@ -27,27 +28,43 @@ export function FloatingPanel({
   const [size, setSize] = useState(defaultSize);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const [dockHoverPosition, setDockHoverPosition] = useState<DockPosition>(null); // Preview only
-  const [actualDockPosition, setActualDockPosition] = useState<DockPosition>(null); // Actually docked
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [resizeDirection, setResizeDirection] = useState<ResizeDirection>('se');
+  const [dockHoverPosition, setDockHoverPosition] = useState<DockPosition>(null);
+  const [actualDockPosition, setActualDockPosition] = useState<DockPosition>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  const dragStartPosRef = useRef({ x: 0, y: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0, panelX: 0, panelY: 0 });
+  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, panelX: 0, panelY: 0 });
 
   useEffect(() => {
     if (!isDragging && !isResizing) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       if (isDragging && panelRef.current) {
-        // Use CSS transform for smooth dragging - no React state updates
-        const newX = e.clientX - dragOffset.x;
-        const newY = e.clientY - dragOffset.y;
+        // Calculate new position with bounds checking
+        const deltaX = e.clientX - dragStartRef.current.x;
+        const deltaY = e.clientY - dragStartRef.current.y;
 
-        // Apply transform directly to DOM
-        panelRef.current.style.transform = `translate(${newX - dragStartPosRef.current.x}px, ${newY - dragStartPosRef.current.y}px)`;
-        panelRef.current.style.willChange = 'transform';
+        let newX = dragStartRef.current.panelX + deltaX;
+        let newY = dragStartRef.current.panelY + deltaY;
 
-        // Check for dock zones - only for preview (this is lightweight)
+        // Clamp to viewport with some padding
+        const minX = -size.width + 100; // Allow dragging mostly off-screen but keep 100px visible
+        const maxX = window.innerWidth - 100;
+        const minY = 0; // Don't allow dragging above viewport
+        const maxY = window.innerHeight - 40; // Keep title bar visible
+
+        newX = Math.max(minX, Math.min(maxX, newX));
+        newY = Math.max(minY, Math.min(maxY, newY));
+
+        // Apply transform directly for smooth dragging
+        requestAnimationFrame(() => {
+          if (panelRef.current) {
+            panelRef.current.style.transform = `translate(${newX - dragStartRef.current.panelX}px, ${newY - dragStartRef.current.panelY}px)`;
+          }
+        });
+
+        // Check for dock zones
         const DOCK_THRESHOLD = 80;
         let newDockHover: DockPosition = null;
 
@@ -65,35 +82,88 @@ export function FloatingPanel({
           setDockHoverPosition(newDockHover);
         }
       } else if (isResizing && panelRef.current) {
-        const newWidth = Math.max(300, e.clientX - position.x);
-        const newHeight = Math.max(200, e.clientY - position.y);
-        panelRef.current.style.width = `${newWidth}px`;
-        panelRef.current.style.height = `${newHeight}px`;
+        const deltaX = e.clientX - resizeStartRef.current.x;
+        const deltaY = e.clientY - resizeStartRef.current.y;
+
+        let newWidth = resizeStartRef.current.width;
+        let newHeight = resizeStartRef.current.height;
+        let newX = resizeStartRef.current.panelX;
+        let newY = resizeStartRef.current.panelY;
+
+        // Calculate new dimensions based on resize direction
+        const dir = resizeDirection;
+
+        // East: drag right to expand, left to shrink
+        if (dir.includes('e')) {
+          newWidth = Math.max(300, resizeStartRef.current.width + deltaX);
+        }
+
+        // West: drag left to expand, right to shrink
+        if (dir.includes('w')) {
+          const proposedWidth = Math.max(300, resizeStartRef.current.width - deltaX);
+          const actualDelta = proposedWidth - resizeStartRef.current.width;
+          newWidth = proposedWidth;
+          newX = resizeStartRef.current.panelX - actualDelta;
+        }
+
+        // South: drag down to expand, up to shrink
+        if (dir.includes('s')) {
+          newHeight = Math.max(200, resizeStartRef.current.height + deltaY);
+        }
+
+        // North: drag up to expand, down to shrink
+        if (dir.includes('n')) {
+          const proposedHeight = Math.max(200, resizeStartRef.current.height - deltaY);
+          const actualDelta = proposedHeight - resizeStartRef.current.height;
+          newHeight = proposedHeight;
+          newY = resizeStartRef.current.panelY - actualDelta;
+        }
+
+        // Apply resize directly to DOM
+        requestAnimationFrame(() => {
+          if (panelRef.current) {
+            panelRef.current.style.width = `${newWidth}px`;
+            panelRef.current.style.height = `${newHeight}px`;
+            panelRef.current.style.left = `${newX}px`;
+            panelRef.current.style.top = `${newY}px`;
+          }
+        });
       }
     };
 
     const handleMouseUp = (e: MouseEvent) => {
       if (isDragging && panelRef.current) {
         // Calculate final position
-        const newX = e.clientX - dragOffset.x;
-        const newY = e.clientY - dragOffset.y;
+        const deltaX = e.clientX - dragStartRef.current.x;
+        const deltaY = e.clientY - dragStartRef.current.y;
+
+        let newX = dragStartRef.current.panelX + deltaX;
+        let newY = dragStartRef.current.panelY + deltaY;
+
+        // Clamp to viewport
+        const minX = -size.width + 100;
+        const maxX = window.innerWidth - 100;
+        const minY = 0;
+        const maxY = window.innerHeight - 40;
+
+        newX = Math.max(minX, Math.min(maxX, newX));
+        newY = Math.max(minY, Math.min(maxY, newY));
 
         // Reset transform
         panelRef.current.style.transform = '';
-        panelRef.current.style.willChange = 'auto';
 
-        // Only apply docking on mouse up if hovering over dock zone
+        // Apply docking or update position
         if (dockHoverPosition) {
           setActualDockPosition(dockHoverPosition);
+          setDockHoverPosition(null);
         } else {
-          // Update position state for next drag
           setPosition({ x: newX, y: newY });
         }
-        setDockHoverPosition(null);
       } else if (isResizing && panelRef.current) {
         // Commit resize to state
         const rect = panelRef.current.getBoundingClientRect();
         setSize({ width: rect.width, height: rect.height });
+        setPosition({ x: rect.left, y: rect.top });
       }
 
       setIsDragging(false);
@@ -107,34 +177,32 @@ export function FloatingPanel({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, isResizing, dragOffset, position, dockHoverPosition]);
+  }, [isDragging, isResizing, size, dockHoverPosition, resizeDirection]);
 
   const handleDragStart = (e: React.MouseEvent) => {
     // Disable dragging on mobile
     if (window.innerWidth < 768) return;
 
-    // Calculate offset based on current position
     const rect = panelRef.current?.getBoundingClientRect();
-    if (rect) {
-      setDragOffset({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
-      });
+    if (!rect) return;
 
-      // Store the starting position for transform calculations
-      dragStartPosRef.current = { x: rect.left, y: rect.top };
-    }
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panelX: rect.left,
+      panelY: rect.top
+    };
 
     // If docked, undock and restore to a floating position
     if (actualDockPosition !== null) {
       setPosition(defaultPosition);
       setSize(defaultSize);
       setActualDockPosition(null);
-      // Update drag start ref after undocking
       setTimeout(() => {
         const rect = panelRef.current?.getBoundingClientRect();
         if (rect) {
-          dragStartPosRef.current = { x: rect.left, y: rect.top };
+          dragStartRef.current.panelX = rect.left;
+          dragStartRef.current.panelY = rect.top;
         }
       }, 0);
     }
@@ -142,8 +210,22 @@ export function FloatingPanel({
     setIsDragging(true);
   };
 
-  const handleResizeStart = (e: React.MouseEvent) => {
+  const handleResizeStart = (e: React.MouseEvent, direction: ResizeDirection) => {
     e.stopPropagation();
+
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    resizeStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: rect.width,
+      height: rect.height,
+      panelX: rect.left,
+      panelY: rect.top
+    };
+
+    setResizeDirection(direction);
     setIsResizing(true);
   };
 
@@ -231,14 +313,49 @@ export function FloatingPanel({
           {children}
         </div>
 
-        {/* Resize handle - Desktop only */}
+        {/* Resize handles - Desktop only */}
         {!isDocked && (
-          <div
-            className={`resize-handle absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize z-10 after:content-[''] after:absolute after:bottom-1 after:right-1 after:w-2.5 after:h-2.5 after:border-r-2 after:border-b-2 ${
-              theme === 'dark' ? 'after:border-white/30' : 'after:border-black/20'
-            } hidden md:block`}
-            onMouseDown={handleResizeStart}
-          />
+          <>
+            {/* Corner handles */}
+            <div
+              className="hidden md:block absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 'se')}
+            >
+              <div className={`absolute bottom-0.5 right-0.5 w-2.5 h-2.5 border-r-2 border-b-2 ${
+                theme === 'dark' ? 'border-white/30' : 'border-black/20'
+              }`} />
+            </div>
+            <div
+              className="hidden md:block absolute bottom-0 left-0 w-4 h-4 cursor-nesw-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 'sw')}
+            />
+            <div
+              className="hidden md:block absolute top-0 right-0 w-4 h-4 cursor-nesw-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 'ne')}
+            />
+            <div
+              className="hidden md:block absolute top-0 left-0 w-4 h-4 cursor-nwse-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 'nw')}
+            />
+
+            {/* Edge handles */}
+            <div
+              className="hidden md:block absolute top-0 left-4 right-4 h-1 cursor-ns-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 'n')}
+            />
+            <div
+              className="hidden md:block absolute bottom-0 left-4 right-4 h-1 cursor-ns-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 's')}
+            />
+            <div
+              className="hidden md:block absolute top-4 bottom-4 left-0 w-1 cursor-ew-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 'w')}
+            />
+            <div
+              className="hidden md:block absolute top-4 bottom-4 right-0 w-1 cursor-ew-resize z-10"
+              onMouseDown={(e) => handleResizeStart(e, 'e')}
+            />
+          </>
         )}
       </div>
     </>

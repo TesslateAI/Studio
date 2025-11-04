@@ -192,7 +192,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
       <div className={`bg-[var(--background)] border-r border-[var(--border-color)] overflow-y-auto flex flex-col transition-all duration-300 ${
         isSidebarCollapsed ? 'w-0 border-0' : 'w-72'
       }`}>
-        <div className="p-4 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm">
+        <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-pink-600 rounded-lg flex items-center justify-center shadow-lg">
               <FileText size={16} className="text-white" />
@@ -222,7 +222,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
         {selectedFile && selectedFileContent ? (
           <>
             {/* File header */}
-            <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm">
+            <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center">
               <div className="flex items-center gap-3">
                 {/* Toggle sidebar button */}
                 <button
