@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectsApi, marketplaceApi } from '../lib/api';
+import { projectsApi, marketplaceApi, authApi } from '../lib/api';
 import { githubApi } from '../lib/github-api';
 import { useTheme } from '../theme/ThemeContext';
 import {
-  FloatingSidebar,
   MobileMenu,
+  NavigationSidebar,
   ProjectCard,
   MarketplaceCard
 } from '../components/ui';
@@ -16,28 +16,19 @@ import { MobileWarning } from '../components/MobileWarning';
 import { DiscordSupport } from '../components/DiscordSupport';
 import toast from 'react-hot-toast';
 import {
-  Atom,
-  Database,
-  ShieldCheck,
-  Sparkle,
-  Lightning as LightningIcon,
   Folder,
   Storefront,
   Package,
   Gear,
   Sun,
   Moon,
-  Question,
   FilePlus,
-  FolderOpen,
   GithubLogo,
   GitBranch,
-  ShoppingCart,
-  DiscordLogo,
+  Books,
   SignOut,
   CaretDown,
-  Check,
-  ArrowSquareOut
+  Check
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -74,23 +65,54 @@ export default function Dashboard() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [userName, setUserName] = useState<string>('');
+  const [containerStatuses, setContainerStatuses] = useState<Record<string, 'starting' | 'running' | 'stopped' | 'error'>>({});
 
-  // Get user name from JWT token
+  // Fetch current user data
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
+    const fetchUserData = async () => {
       try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setUserName(payload.sub || 'there');
+        const user = await authApi.getCurrentUser();
+        setUserName(user.name || user.username || 'there');
       } catch (e) {
+        console.error('Failed to fetch user data:', e);
         setUserName('there');
       }
-    }
+    };
+    fetchUserData();
   }, []);
 
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // Poll container statuses
+  useEffect(() => {
+    const pollContainerStatuses = async () => {
+      if (projects.length === 0) return;
+
+      for (const project of projects) {
+        try {
+          const status = await projectsApi.getContainerStatus(project.slug);
+          setContainerStatuses(prev => ({
+            ...prev,
+            [project.slug]: status.running ? (status.health === 'healthy' ? 'running' : 'starting') : 'stopped'
+          }));
+        } catch (error) {
+          // Container might not exist yet, that's okay
+          setContainerStatuses(prev => ({
+            ...prev,
+            [project.slug]: 'stopped'
+          }));
+        }
+      }
+    };
+
+    // Poll immediately and then every 10 seconds
+    pollContainerStatuses();
+    const interval = setInterval(pollContainerStatuses, 10000);
+
+    return () => clearInterval(interval);
+  }, [projects]);
 
   useEffect(() => {
     if (showCreateModal) {
@@ -203,6 +225,30 @@ export default function Dashboard() {
     }
   };
 
+  const handleRestartContainer = async (slug: string) => {
+    const restartToast = toast.loading('Restarting container...');
+    try {
+      setContainerStatuses(prev => ({ ...prev, [slug]: 'starting' }));
+      await projectsApi.restartDevServer(slug);
+      toast.success('Container restarted successfully', { id: restartToast });
+      // Status will be updated by the polling
+    } catch (error) {
+      toast.error('Failed to restart container', { id: restartToast });
+      setContainerStatuses(prev => ({ ...prev, [slug]: 'error' }));
+    }
+  };
+
+  const handleStopContainer = async (slug: string) => {
+    const stopToast = toast.loading('Stopping container...');
+    try {
+      await projectsApi.stopDevServer(slug);
+      toast.success('Container stopped successfully', { id: stopToast });
+      setContainerStatuses(prev => ({ ...prev, [slug]: 'stopped' }));
+    } catch (error) {
+      toast.error('Failed to stop container', { id: stopToast });
+    }
+  };
+
   const confirmDeleteProject = async () => {
     if (!projectToDelete) return;
 
@@ -310,51 +356,49 @@ export default function Dashboard() {
     }
   };
 
-  // Sidebar items
-  const leftSidebarItems = [
-    {
-      icon: <Folder className="w-5 h-5" weight="fill" />,
-      title: 'Projects',
-      onClick: () => {},
-      active: true,
-      dataTour: 'dashboard-link'
-    },
-    {
-      icon: <Storefront className="w-5 h-5" weight="fill" />,
-      title: 'Marketplace',
-      onClick: () => navigate('/marketplace'),
-      dataTour: 'marketplace-link'
-    },
-    {
-      icon: <ShoppingCart className="w-5 h-5" weight="fill" />,
-      title: 'Library',
-      onClick: () => navigate('/library'),
-      dataTour: 'library-link'
-    },
-    {
-      icon: <Package className="w-5 h-5" weight="fill" />,
-      title: 'Components',
-      onClick: () => toast('Components library coming soon!')
-    },
-    {
-      icon: <SignOut className="w-5 h-5" weight="fill" />,
-      title: 'Logout',
-      onClick: logout
-    }
-  ];
-
-  const rightSidebarItems = [
-    {
-      icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
-      title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
-      onClick: toggleTheme
-    },
-    {
-      icon: <Question className="w-5 h-5" weight="fill" />,
-      title: 'Help',
-      onClick: () => toast('Help & support coming soon!')
-    }
-  ];
+  // Sidebar items for mobile menu
+  const mobileMenuItems = {
+    left: [
+      {
+        icon: <Folder className="w-5 h-5" weight="fill" />,
+        title: 'Projects',
+        onClick: () => {},
+        active: true
+      },
+      {
+        icon: <Storefront className="w-5 h-5" weight="fill" />,
+        title: 'Marketplace',
+        onClick: () => navigate('/marketplace')
+      },
+      {
+        icon: <Books className="w-5 h-5" weight="fill" />,
+        title: 'Library',
+        onClick: () => navigate('/library')
+      },
+      {
+        icon: <Package className="w-5 h-5" weight="fill" />,
+        title: 'Components',
+        onClick: () => toast('Components library coming soon!')
+      }
+    ],
+    right: [
+      {
+        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
+        onClick: toggleTheme
+      },
+      {
+        icon: <Gear className="w-5 h-5" weight="fill" />,
+        title: 'Settings',
+        onClick: () => toast('Settings coming soon!')
+      },
+      {
+        icon: <SignOut className="w-5 h-5" weight="fill" />,
+        title: 'Logout',
+        onClick: logout
+      }
+    ]
+  };
 
   if (loading) {
     return (
@@ -365,48 +409,79 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24 relative flex flex-col">
+    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
       {/* Mobile Warning */}
       <MobileWarning />
 
       {/* Mobile Menu - Shows on mobile only */}
-      <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
+      <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
 
-      {/* Floating Sidebars - Desktop only */}
-      <FloatingSidebar position="left" items={leftSidebarItems} />
-      <FloatingSidebar position="right" items={rightSidebarItems} />
+      {/* Navigation Sidebar */}
+      <NavigationSidebar activePage="dashboard" />
 
-      {/* Main Content */}
-      <div className="flex-grow">
-        {/* Header */}
-        <div className="mb-6 md:mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="font-heading text-2xl sm:text-3xl md:text-4xl font-bold text-[var(--text)]">
-              Welcome, {userName}! 👋
-            </h1>
-            <p className="text-[var(--text)]/60 mt-2">Ready to build something amazing?</p>
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Bar */}
+        <div className="h-12 bg-[var(--surface)] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
+          <div className="flex items-center gap-4 md:gap-6">
+            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
+
+            {/* Tab Filters - Desktop */}
+            <div className="hidden md:flex items-center gap-1">
+              {[
+                { key: 'all', label: 'All', enabled: true },
+                { key: 'build', label: 'Build', enabled: true },
+                { key: 'idea', label: 'Idea', enabled: false },
+                { key: 'launch', label: 'Launch', enabled: false }
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => tab.enabled ? setActiveTab(tab.key as TabFilter) : toast('Coming soon!')}
+                  className={`
+                    px-3 py-1 rounded-lg text-xs font-medium transition-all
+                    ${activeTab === tab.key
+                      ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
+                      : tab.enabled
+                        ? 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                        : 'text-[var(--text)]/30 cursor-not-allowed'
+                    }
+                  `}
+                >
+                  {tab.label}{!tab.enabled && ' 🔒'}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Mobile hamburger menu */}
+          <button
+            onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+            className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+          >
+            <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
+        {/* Tab Filters - Mobile */}
+        <div className="md:hidden bg-[var(--surface)] border-b border-white/10 px-4 py-2 flex items-center gap-2 overflow-x-auto">
           {[
-            { key: 'all', label: 'All Projects', enabled: true },
-            { key: 'idea', label: 'Idea', enabled: false },
+            { key: 'all', label: 'All', enabled: true },
             { key: 'build', label: 'Build', enabled: true },
+            { key: 'idea', label: 'Idea', enabled: false },
             { key: 'launch', label: 'Launch', enabled: false }
           ].map((tab) => (
             <button
               key={tab.key}
               onClick={() => tab.enabled ? setActiveTab(tab.key as TabFilter) : toast('Coming soon!')}
               className={`
-                font-heading text-sm sm:text-lg md:text-xl pb-2 border-b-2 transition-all whitespace-nowrap
+                px-3 py-1 rounded-lg text-xs font-medium transition-all whitespace-nowrap
                 ${activeTab === tab.key
-                  ? 'text-[var(--primary)] border-[var(--primary)]'
+                  ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
                   : tab.enabled
-                    ? 'text-gray-400 border-transparent hover:text-[var(--text)]'
-                    : 'text-gray-600 border-transparent cursor-not-allowed opacity-50'
+                    ? 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                    : 'text-[var(--text)]/30 cursor-not-allowed'
                 }
               `}
             >
@@ -414,70 +489,68 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
-      </div>
 
-      {/* Marketplace Section */}
-      <div className="bg-white/[0.02] dark:bg-white/[0.02] border border-white/[0.08] rounded-2xl p-8 mb-8">
-        <div className="flex items-center justify-center">
-          <h2 className="font-heading text-xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Sparkle className="w-5 h-5 text-orange-400" weight="fill" />
-            Recommendations coming soon for your project
-          </h2>
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-auto bg-[var(--bg)]">
+          <div className="p-4 md:p-6">
+            {/* Projects Grid */}
+            <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"}>
+              {/* Create New Project Card */}
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className={`
+                  group bg-white/[0.01] rounded-2xl p-6
+                  border-2 border-dashed border-[rgba(255,107,0,0.3)]
+                  hover:border-[rgba(255,107,0,0.6)]
+                  transition-all duration-300
+                  hover:transform hover:-translate-y-1
+                  flex flex-col items-center justify-center gap-3
+                  ${filteredProjects.length === 0 ? 'w-full min-h-[400px]' : 'min-h-[240px]'}
+                `}
+              >
+                <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(255,107,0,0.3)] transition-colors">
+                  <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
+                </div>
+                <div className="text-center">
+                  <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">Create New Project</h3>
+                  <p className="text-sm text-gray-500">Start building something amazing</p>
+                </div>
+              </button>
+
+              {/* Project Cards */}
+              {filteredProjects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={{
+                    id: project.id,
+                    name: project.name,
+                    description: project.description || 'No description',
+                    status: project.status || 'build',
+                    agents: project.agents || [],
+                    lastUpdated: formatDate(project.updated_at),
+                    isLive: project.status === 'launch',
+                    containerStatus: containerStatuses[project.slug],
+                    slug: project.slug
+                  }}
+                  onOpen={() => navigate(`/project/${project.slug}`)}
+                  onDelete={() => deleteProject(project.id)}
+                  onStatusChange={(status) => updateProjectStatus(project.id, status)}
+                  onFork={() => handleForkProject(project.id)}
+                  onRestartContainer={() => handleRestartContainer(project.slug)}
+                  onStopContainer={() => handleStopContainer(project.slug)}
+                  isDeleting={deletingProjectIds.has(project.id)}
+                />
+              ))}
+            </div>
+
+            {/* Empty State */}
+            {filteredProjects.length === 0 && (
+              <div className="text-center py-16">
+                <p className="text-[var(--text)]/40 text-sm">No projects found. Create one to get started!</p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* Projects Grid */}
-      <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"}>
-        {/* Create New Project Card */}
-        <button
-          onClick={() => setShowCreateModal(true)}
-          data-tour="create-project"
-          className={`
-            group bg-white/[0.01] dark:bg-white/[0.01] rounded-2xl p-6 sm:p-8
-            border-2 border-dashed border-[rgba(255,107,0,0.3)]
-            hover:border-[rgba(255,107,0,0.6)]
-            transition-all duration-300
-            hover:transform hover:-translate-y-1
-            flex flex-col items-center justify-center gap-3 sm:gap-4
-            ${filteredProjects.length === 0 ? 'w-full min-h-[300px] sm:min-h-[400px]' : 'min-h-[240px] sm:min-h-[280px]'}
-          `}
-        >
-          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(255,107,0,0.3)] transition-colors">
-            <FilePlus className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" weight="fill" />
-          </div>
-          <div className="text-center">
-            <h3 className="font-heading text-base sm:text-lg font-bold text-[var(--text)] mb-1.5 sm:mb-2">Create New Project</h3>
-            <p className="text-xs sm:text-sm text-gray-500">Start building something amazing</p>
-          </div>
-        </button>
-
-        {/* Project Cards */}
-        {filteredProjects.map((project) => (
-          <ProjectCard
-            key={project.id}
-            project={{
-              id: project.id,
-              name: project.name,
-              description: project.description || 'No description',
-              status: project.status || 'build',
-              agents: project.agents || [],
-              lastUpdated: formatDate(project.updated_at),
-              isLive: project.status === 'launch'
-            }}
-            onOpen={() => navigate(`/project/${project.slug}`)}
-            onDelete={() => deleteProject(project.id)}
-            onStatusChange={(status) => updateProjectStatus(project.id, status)}
-            onFork={() => handleForkProject(project.id)}
-            isDeleting={deletingProjectIds.has(project.id)}
-          />
-        ))}
-      </div>
-
-        {/* Empty State */}
-        {filteredProjects.length === 0 && (
-          <div className="text-center py-16">
-          </div>
-        )}
       </div>
 
       {/* Create Project Modal */}
@@ -827,48 +900,6 @@ export default function Dashboard() {
 
       {/* Discord Support Bubble */}
       <DiscordSupport />
-
-      {/* Tesslate Footer */}
-      <div className="mt-16 pt-6 border-t border-white/5">
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-gray-400">
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
-              <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-              <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-              <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
-            </svg>
-            <span className="font-semibold text-[var(--text)]">Tesslate.</span>
-            <span className="text-[var(--primary)] font-semibold">Build beyond limits</span>
-          </div>
-          <span className="hidden sm:inline text-gray-600">•</span>
-          <span>We're committed to open sourcing AI to empower builders everywhere</span>
-          <span className="hidden sm:inline text-gray-600">•</span>
-          <a
-            href="https://tesslate.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-[var(--primary)] transition-colors flex items-center gap-1.5"
-          >
-            Learn more
-            <ArrowSquareOut className="w-4 h-4" weight="bold" />
-          </a>
-          <span className="hidden sm:inline text-gray-600">•</span>
-          <a
-            href="https://docs.tesslate.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-[var(--primary)] transition-colors flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
-              <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-              <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-              <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
-            </svg>
-            Documentation for <span className="font-semibold">Studio</span>
-            <ArrowSquareOut className="w-4 h-4" weight="bold" />
-          </a>
-        </div>
-      </div>
     </div>
   );
 }

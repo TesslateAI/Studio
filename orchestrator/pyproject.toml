@@ -1,3 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["users*", "k8s*", "template*"]
+
 [project]
 name = "tesslate-studio-orchestrator"
 version = "0.1.0"
@@ -26,6 +35,14 @@ dependencies = [
     "kubernetes>=28.1.0",
     "docker>=7.0.0",
     "nanoid>=2.0.0",
+    # Authentication
+    "fastapi-users[sqlalchemy]>=13.0.0",
+    "httpx-oauth>=0.14.1",
+    "itsdangerous>=2.1.2",
+    # Rate limiting
+    "slowapi>=0.1.9",
+    # Encryption
+    "cryptography>=41.0.0",
 ]
 
 [dependency-groups]

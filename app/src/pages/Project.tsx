@@ -21,7 +21,6 @@ import {
   Kanban,
   FlowArrow
 } from '@phosphor-icons/react';
-import { FloatingSidebar } from '../components/ui/FloatingSidebar';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
 import { Tooltip } from '../components/ui/Tooltip';
@@ -42,9 +41,10 @@ import CodeEditor from '../components/CodeEditor';
 import { projectsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
+import { fileEvents } from '../utils/fileEvents';
 
-type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | 'assets' | null;
-type MainViewType = 'preview' | 'code' | 'kanban';
+type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
+type MainViewType = 'preview' | 'code' | 'kanban' | 'assets';
 
 interface UIAgent {
   id: string;
@@ -147,6 +147,73 @@ export default function Project() {
     }
   }, [devServerUrl]);
 
+  // Listen for file change events from Assets panel and other components
+  useEffect(() => {
+    const unsubscribe = fileEvents.on((detail) => {
+      console.log('File event received:', detail.type, detail.filePath);
+      // Refresh the file list when any file changes
+      loadFiles();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [slug]);
+
+  // Smart polling to catch file changes from agents using bash/exec commands
+  // This is a backup mechanism since agents can modify files via shell commands
+  useEffect(() => {
+    if (!slug) return;
+
+    let pollInterval: NodeJS.Timeout | null = null;
+    let isTabVisible = true;
+
+    // Only poll when tab is visible to minimize server load
+    const handleVisibilityChange = () => {
+      isTabVisible = !document.hidden;
+
+      if (isTabVisible && !pollInterval) {
+        // Resume polling when tab becomes visible
+        startPolling();
+      } else if (!isTabVisible && pollInterval) {
+        // Stop polling when tab is hidden
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
+    const startPolling = () => {
+      // Poll every 30 seconds - events handle most changes, this catches edge cases
+      pollInterval = setInterval(() => {
+        if (isTabVisible && slug) {
+          loadFiles();
+        }
+      }, 30000);
+    };
+
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Start polling if tab is visible
+    if (isTabVisible) {
+      startPolling();
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [slug]);
+
+  // Refresh files when switching to code view
+  useEffect(() => {
+    if (activeView === 'code' && slug) {
+      loadFiles();
+    }
+  }, [activeView, slug]);
+
   const loadProject = async () => {
     if (!slug) return;
     try {
@@ -159,6 +226,16 @@ export default function Project() {
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
+    }
+  };
+
+  const loadFiles = async () => {
+    if (!slug) return;
+    try {
+      const filesData = await projectsApi.getFiles(slug);
+      setFiles(filesData);
+    } catch (error) {
+      console.error('Failed to load files:', error);
     }
   };
 
@@ -187,8 +264,11 @@ export default function Project() {
   const handleFileUpdate = useCallback(async (filePath: string, content: string) => {
     if (!slug) return;
 
+    // Track if this is a new file or an update
+    let isNewFile = false;
     setFiles(prev => {
       const existing = prev.find(f => f.file_path === filePath);
+      isNewFile = !existing;
       if (existing) {
         return prev.map(f =>
           f.file_path === filePath ? { ...f, content } : f
@@ -199,6 +279,9 @@ export default function Project() {
 
     try {
       await projectsApi.saveFile(slug, filePath, content);
+
+      // Emit file event to refresh the code editor file tree
+      fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
     } catch (error) {
       console.error('Failed to save file:', error);
       toast.error(`Failed to save ${filePath}`);
@@ -321,6 +404,12 @@ export default function Project() {
       active: activeView === 'kanban'
     },
     {
+      icon: <Image size={18} />,
+      title: 'Assets',
+      onClick: () => setActiveView('assets'),
+      active: activeView === 'assets'
+    },
+    {
       icon: <Folder size={18} />,
       title: 'Files',
       onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
@@ -357,12 +446,6 @@ export default function Project() {
       active: activePanel === 'github'
     },
     {
-      icon: <Image size={18} />,
-      title: 'Assets',
-      onClick: () => togglePanel('assets'),
-      active: activePanel === 'assets'
-    },
-    {
       icon: <Storefront size={18} />,
       title: 'Agent Marketplace',
       onClick: () => navigate('/marketplace')
@@ -395,6 +478,17 @@ export default function Project() {
 
       {/* Fixed Left Sidebar */}
       <div className="hidden md:flex flex-col w-12 bg-[var(--surface)] border-r border-white/10 py-3 gap-1">
+        {/* Tesslate Logo */}
+        <div className="flex items-center justify-center h-9 mb-1 flex-shrink-0">
+          <svg className="w-5 h-5 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
+            <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
+            <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
+            <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+          </svg>
+        </div>
+
+        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+
         {/* Back Button */}
         <Tooltip content="Back to Projects" side="right" delay={200}>
           <button
@@ -541,6 +635,11 @@ export default function Project() {
           <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
             <KanbanPanel projectId={project?.id} />
           </div>
+
+          {/* Assets View */}
+          <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
+            <AssetsPanel projectSlug={slug!} />
+          </div>
         </div>
       </div>
 
@@ -581,15 +680,6 @@ export default function Project() {
         onClose={() => setActivePanel(null)}
       >
         <SettingsPanel projectSlug={slug!} />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="Assets"
-        icon={<Image size={20} />}
-        isOpen={activePanel === 'assets'}
-        onClose={() => setActivePanel(null)}
-      >
-        <AssetsPanel projectId={project?.id} />
       </FloatingPanel>
 
       {/* Chat Interface or Empty State */}

@@ -1,20 +1,24 @@
-from typing import List
+from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm.attributes import flag_modified
 from ..database import get_db
-from ..models import Project, User, ProjectFile, Chat, Message
+from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset
 from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema
-from ..auth import get_current_active_user
 from ..config import get_settings
 from ..utils.slug_generator import generate_project_slug
 from ..utils.resource_naming import get_project_path
+from ..users import current_active_user, current_superuser
 import os
 import shutil
 import asyncio
 import logging
+import re
+from pathlib import Path
+import mimetypes
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +71,7 @@ async def get_project_by_slug(
 
 @router.get("/", response_model=List[ProjectSchema])
 async def get_projects(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
@@ -79,7 +83,7 @@ async def get_projects(
 @router.post("/", response_model=ProjectSchema)
 async def create_project(
     project: ProjectCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -664,7 +668,7 @@ async def create_project(
 @router.get("/{project_slug}", response_model=ProjectSchema)
 async def get_project(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get a project by its slug."""
@@ -674,7 +678,7 @@ async def get_project(
 @router.get("/{project_slug}/files", response_model=List[ProjectFileSchema])
 async def get_project_files(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
     from_pod: bool = False  # Optional query param to force reading from pod
 ):
@@ -753,7 +757,7 @@ async def get_project_files(
 @router.post("/{project_slug}/start-dev-container")
 async def start_dev_container(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Start a development environment for the project."""
@@ -780,7 +784,7 @@ async def start_dev_container(
 @router.post("/{project_slug}/restart-dev-container")
 async def restart_dev_container(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     # Get project and verify ownership
@@ -800,7 +804,7 @@ async def restart_dev_container(
 @router.post("/{project_slug}/stop-dev-container")
 async def stop_dev_container(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     # Get project and verify ownership
@@ -820,7 +824,7 @@ async def stop_dev_container(
 @router.get("/{project_slug}/dev-server-url")
 async def get_dev_server_url(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -988,7 +992,7 @@ async def get_dev_server_url(
 @router.get("/{project_slug}/container-status")
 async def get_container_status(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1067,7 +1071,7 @@ async def get_container_status(
 async def save_project_file(
     project_slug: str,
     file_data: dict,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1188,7 +1192,7 @@ async def save_project_file(
 @router.get("/{project_slug}/container-info")
 async def get_container_info(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1237,7 +1241,7 @@ async def get_container_info(
 
 @router.get("/containers/all")
 async def get_all_dev_containers(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get all running development containers (for admin/debugging)."""
     try:
@@ -1257,7 +1261,7 @@ async def get_all_dev_containers(
 @router.delete("/{project_slug}")
 async def delete_project(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a project and ALL associated data including chats, messages, files, and containers."""
@@ -1323,14 +1327,18 @@ async def delete_project(
 @router.post("/{project_slug}/generate-architecture-diagram")
 async def generate_architecture_diagram(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    diagram_type: str = "mermaid",  # "mermaid" or "c4_plantuml"
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Generate a Mermaid architecture diagram for the project using the user's selected model.
+    Generate an architecture diagram for the project using the user's selected model.
 
-    This endpoint analyzes the project files and generates a Mermaid diagram
-    showing the architecture, component relationships, and data flow.
+    This endpoint analyzes the project files and generates either a Mermaid diagram
+    or a C4 PlantUML diagram showing the architecture, component relationships, and data flow.
+
+    Args:
+        diagram_type: Type of diagram to generate ("mermaid" or "c4_plantuml")
     """
     # Get project and verify ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
@@ -1344,7 +1352,7 @@ async def generate_architecture_diagram(
         )
 
     try:
-        logger.info(f"[DIAGRAM] Generating architecture diagram for project {project_id} using model {current_user.diagram_model}")
+        logger.info(f"[DIAGRAM] Generating {diagram_type} architecture diagram for project {project_id} using model {current_user.diagram_model}")
 
         # Get project files from database
         files_result = await db.execute(
@@ -1366,8 +1374,44 @@ async def generate_architecture_diagram(
 
             file_structure[file.file_path] = file.content[:5000]  # Limit content to first 5000 chars
 
-        # Create prompt for diagram generation
-        prompt = f"""Analyze this project and generate a Mermaid diagram showing the architecture.
+        # Create prompt for diagram generation based on type
+        if diagram_type == "c4_plantuml":
+            prompt = f"""Analyze this project and generate a C4 PlantUML diagram showing the architecture.
+
+Project Name: {project.name}
+Project Description: {project.description or 'No description'}
+
+Files in the project:
+{chr(10).join(file_structure.keys())}
+
+Key file contents (truncated):
+{chr(10).join([f"--- {path} ---{chr(10)}{content[:500]}" for path, content in list(file_structure.items())[:10]])}
+
+Please generate a C4 PlantUML diagram that shows:
+1. System Context or Container level view (choose appropriately based on project size)
+2. The main components/containers of the application
+3. How they interact with each other
+4. External dependencies or services if any
+
+Use C4-PlantUML syntax with proper directives. Return ONLY the PlantUML code starting with '@startuml', no explanations or markdown code blocks.
+
+Example format:
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(user, "User", "End user of the application")
+System_Boundary(c1, "Application") {{
+    Container(frontend, "Frontend", "React", "User interface")
+    Container(backend, "Backend", "FastAPI", "Business logic and API")
+    ContainerDb(database, "Database", "PostgreSQL", "Stores data")
+}}
+
+Rel(user, frontend, "Uses", "HTTPS")
+Rel(frontend, backend, "Calls", "REST API")
+Rel(backend, database, "Reads/Writes", "SQL")
+@enduml"""
+        else:  # mermaid (default)
+            prompt = f"""Analyze this project and generate a Mermaid diagram showing the architecture.
 
 Project Name: {project.name}
 Project Description: {project.description or 'No description'}
@@ -1411,7 +1455,7 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
                 json={
                     "model": current_user.diagram_model,
                     "messages": [
-                        {"role": "system", "content": "You are an expert software architect. Generate clear, accurate Mermaid diagrams."},
+                        {"role": "system", "content": f"You are an expert software architect. Generate clear, accurate {'C4 PlantUML' if diagram_type == 'c4_plantuml' else 'Mermaid'} diagrams."},
                         {"role": "user", "content": prompt}
                     ],
                     "max_tokens": 2000,
@@ -1430,49 +1474,68 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
         diagram_code = result_data["choices"][0]["message"]["content"].strip()
 
         # Clean up the diagram code (remove markdown code blocks if present)
-        if diagram_code.startswith("```mermaid"):
+        if diagram_code.startswith("```plantuml") or diagram_code.startswith("```puml"):
+            diagram_code = diagram_code.replace("```plantuml", "").replace("```puml", "").replace("```", "").strip()
+        elif diagram_code.startswith("```mermaid"):
             diagram_code = diagram_code.replace("```mermaid", "").replace("```", "").strip()
         elif diagram_code.startswith("```"):
             diagram_code = diagram_code.replace("```", "").strip()
 
-        # Sanitize Mermaid syntax to prevent parsing errors
-        # Remove quotes from node labels and escape special characters
+        # Sanitize based on diagram type
         import re
 
-        # Fix: Remove double quotes around node labels that contain special chars
-        # Match patterns like: A["@vitejs/plugin-react"] or B["some text"]
-        diagram_code = re.sub(r'\["([^"]+)"\]', r'[\1]', diagram_code)
-        diagram_code = re.sub(r'\("([^"]+)"\)', r'(\1)', diagram_code)
-        diagram_code = re.sub(r'\{"([^"]+)"\}', r'{\1}', diagram_code)
+        if diagram_type == "c4_plantuml":
+            # PlantUML sanitization is minimal - just ensure it has proper start/end tags
+            if not diagram_code.startswith("@startuml"):
+                diagram_code = "@startuml\n" + diagram_code
+            if not diagram_code.endswith("@enduml"):
+                diagram_code = diagram_code + "\n@enduml"
+        else:
+            # Sanitize Mermaid syntax to prevent parsing errors
+            # Remove quotes from node labels and escape special characters
 
-        # Fix: Replace problematic characters in node labels
-        # Replace @ symbol which can cause issues
-        diagram_code = diagram_code.replace('@', 'at-')
+            # Fix: Remove double quotes around node labels that contain special chars
+            # Match patterns like: A["@vitejs/plugin-react"] or B["some text"]
+            diagram_code = re.sub(r'\["([^"]+)"\]', r'[\1]', diagram_code)
+            diagram_code = re.sub(r'\("([^"]+)"\)', r'(\1)', diagram_code)
+            diagram_code = re.sub(r'\{"([^"]+)"\}', r'{\1}', diagram_code)
 
-        # Fix: Escape any remaining quotes in text
-        lines = diagram_code.split('\n')
-        sanitized_lines = []
-        for line in lines:
-            # Skip directive lines and graph declarations
-            if line.strip().startswith(('graph', 'flowchart', '%%', 'classDef', 'class ', 'style ')):
-                sanitized_lines.append(line)
-            else:
-                # For node and edge definitions, ensure labels don't have problematic chars
-                # Remove any stray quotes that might break parsing
-                line = line.replace('"', '')
-                sanitized_lines.append(line)
+            # Fix: Replace problematic characters in node labels
+            # Replace @ symbol which can cause issues
+            diagram_code = diagram_code.replace('@', 'at-')
 
-        diagram_code = '\n'.join(sanitized_lines)
+            # Fix: Escape any remaining quotes in text
+            lines = diagram_code.split('\n')
+            sanitized_lines = []
+            for line in lines:
+                # Skip directive lines and graph declarations
+                if line.strip().startswith(('graph', 'flowchart', '%%', 'classDef', 'class ', 'style ')):
+                    sanitized_lines.append(line)
+                else:
+                    # For node and edge definitions, ensure labels don't have problematic chars
+                    # Remove any stray quotes that might break parsing
+                    line = line.replace('"', '')
+                    sanitized_lines.append(line)
 
-        # Save diagram to database
+            diagram_code = '\n'.join(sanitized_lines)
+
+        # Save diagram and diagram type to database
         project.architecture_diagram = diagram_code
+
+        # Store diagram type in project settings
+        if not project.settings:
+            project.settings = {}
+        project.settings['diagram_type'] = diagram_type
+        flag_modified(project, 'settings')
+
         await db.commit()
         await db.refresh(project)
 
-        logger.info(f"[DIAGRAM] Successfully generated and saved diagram for project {project_id}")
+        logger.info(f"[DIAGRAM] Successfully generated and saved {diagram_type} diagram for project {project_id}")
 
         return {
             "diagram": diagram_code,
+            "diagram_type": diagram_type,
             "model_used": current_user.diagram_model,
             "project_id": project_id
         }
@@ -1487,16 +1550,18 @@ Return ONLY the Mermaid diagram code starting with 'graph' or 'flowchart', no ex
 @router.get("/{project_slug}/settings")
 async def get_project_settings(
     project_slug: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get project settings."""
     # Get project and verify ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
+    settings = project.settings or {}
     return {
-        "settings": project.settings or {},
-        "architecture_diagram": project.architecture_diagram
+        "settings": settings,
+        "architecture_diagram": project.architecture_diagram,
+        "diagram_type": settings.get('diagram_type', 'mermaid')  # Default to mermaid for backwards compatibility
     }
 
 
@@ -1504,7 +1569,7 @@ async def get_project_settings(
 async def update_project_settings(
     project_slug: str,
     settings_data: dict,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Update project settings."""
@@ -1537,7 +1602,7 @@ async def update_project_settings(
 @router.post("/{project_id}/fork", response_model=ProjectSchema)
 async def fork_project(
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1621,3 +1686,665 @@ async def fork_project(
             except:
                 pass
         raise HTTPException(status_code=500, detail=f"Failed to fork project: {str(e)}")
+
+
+# ============================================================================
+# Asset Management Endpoints
+# ============================================================================
+
+# Allowed file types for asset uploads
+ALLOWED_MIME_TYPES = {
+    # Images
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/svg+xml', 'image/webp', 'image/bmp', 'image/ico', 'image/x-icon',
+    # Videos
+    'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-msvideo',
+    # Fonts
+    'font/woff', 'font/woff2', 'font/ttf', 'font/otf', 'application/font-woff', 'application/font-woff2', 'application/x-font-ttf', 'application/x-font-otf',
+    # Documents
+    'application/pdf',
+    # Audio
+    'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm',
+}
+
+# Maximum file size: 20MB
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB in bytes
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to prevent security issues."""
+    # Remove path components
+    filename = os.path.basename(filename)
+    # Replace spaces with hyphens
+    filename = filename.replace(' ', '-')
+    # Remove special characters except alphanumeric, dash, underscore, and dot
+    filename = re.sub(r'[^\w\-.]', '_', filename)
+    # Remove multiple dots (except before extension)
+    name, ext = os.path.splitext(filename)
+    name = name.replace('.', '_')
+    return f"{name}{ext}"
+
+
+def get_file_type(mime_type: str) -> str:
+    """Determine file type category from MIME type."""
+    if mime_type.startswith('image/'):
+        return 'image'
+    elif mime_type.startswith('video/'):
+        return 'video'
+    elif mime_type.startswith('font/') or 'font' in mime_type:
+        return 'font'
+    elif mime_type == 'application/pdf':
+        return 'document'
+    elif mime_type.startswith('audio/'):
+        return 'audio'
+    else:
+        return 'other'
+
+
+async def get_image_dimensions(file_path: str) -> tuple:
+    """Get image dimensions using PIL."""
+    try:
+        from PIL import Image
+        with Image.open(file_path) as img:
+            return img.size  # Returns (width, height)
+    except Exception as e:
+        logger.warning(f"Could not get image dimensions for {file_path}: {e}")
+        return (None, None)
+
+
+@router.get("/{project_slug}/assets/directories")
+async def list_asset_directories(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List all asset directories for this project.
+    Scans the filesystem for directories and merges with database records.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id
+
+    directories_set = set()
+
+    # Get directories from database (directories with assets)
+    result = await db.execute(
+        select(ProjectAsset.directory).where(ProjectAsset.project_id == project_id).distinct()
+    )
+    db_directories = [row[0] for row in result.all()]
+    directories_set.update(db_directories)
+
+    # Also scan filesystem for empty directories
+    try:
+        settings = get_settings()
+        project_path = get_project_path(current_user.id, project_id)
+
+        if settings.deployment_mode == "docker":
+            # Scan filesystem for directories
+            if os.path.exists(project_path):
+                for root, dirs, files in os.walk(project_path):
+                    for dir_name in dirs:
+                        dir_full_path = os.path.join(root, dir_name)
+                        # Get relative path from project root
+                        rel_path = os.path.relpath(dir_full_path, project_path)
+                        # Convert to forward slashes and add leading slash
+                        rel_path = '/' + rel_path.replace('\\', '/')
+                        # Skip hidden directories and common exclusions
+                        if not any(part.startswith('.') for part in rel_path.split('/')):
+                            directories_set.add(rel_path)
+        else:
+            # Kubernetes mode - directories are created via exec, so rely on DB + manual tracking
+            # For K8s, we could use kubectl exec to list directories, but for now use DB
+            pass
+
+    except Exception as e:
+        logger.warning(f"Failed to scan filesystem for directories: {e}")
+
+    return {"directories": sorted(list(directories_set))}
+
+
+@router.post("/{project_slug}/assets/directories")
+async def create_asset_directory(
+    project_slug: str,
+    directory_data: dict,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a new directory for assets.
+    This creates the physical directory in the project filesystem.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id
+
+    directory_path = directory_data.get('path', '').strip('/')
+    if not directory_path:
+        raise HTTPException(status_code=400, detail="Directory path is required")
+
+    # Validate directory path (prevent path traversal)
+    if '..' in directory_path or directory_path.startswith('/'):
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+
+    try:
+        settings = get_settings()
+        project_path = get_project_path(current_user.id, project_id)
+        full_dir_path = os.path.join(project_path, directory_path)
+
+        if settings.deployment_mode == "docker":
+            # Create directory on filesystem
+            os.makedirs(full_dir_path, exist_ok=True)
+            logger.info(f"[ASSETS] Created directory: {full_dir_path}")
+        else:
+            # Kubernetes mode - create directory in pod
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+
+            # Use exec to create directory in pod
+            command = f"mkdir -p /app/{directory_path}"
+            await k8s_manager.exec_command_in_pod(
+                current_user.id,
+                str(project_id),
+                command
+            )
+            logger.info(f"[ASSETS] Created directory in pod: {directory_path}")
+
+        return {"message": "Directory created", "path": directory_path}
+
+    except Exception as e:
+        logger.error(f"[ASSETS] Failed to create directory: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create directory: {str(e)}")
+
+
+@router.post("/{project_slug}/assets/upload")
+async def upload_asset(
+    project_slug: str,
+    file: UploadFile = File(...),
+    directory: str = Form(...),
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Upload an asset file to a specified directory.
+
+    Validates:
+    - File size (20MB max)
+    - File type (images, videos, fonts, PDFs only)
+    - Filename (sanitized)
+
+    Stores the file in the project's filesystem and records metadata in the database.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id
+
+    # Validate directory path
+    directory = directory.strip('/')
+    if '..' in directory or directory.startswith('/'):
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+
+    try:
+        # Read file content
+        content = await file.read()
+        file_size = len(content)
+
+        # Validate file size (20MB max)
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size ({file_size / 1024 / 1024:.2f}MB) exceeds maximum allowed size (20MB)"
+            )
+
+        # Detect MIME type
+        mime_type = file.content_type or mimetypes.guess_type(file.filename)[0] or 'application/octet-stream'
+
+        # Validate file type
+        if mime_type not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type {mime_type} is not allowed. Only images, videos, fonts, and PDFs are supported."
+            )
+
+        # Sanitize filename
+        safe_filename = sanitize_filename(file.filename)
+        file_type = get_file_type(mime_type)
+
+        # Get project path
+        settings = get_settings()
+        project_path = get_project_path(current_user.id, project_id)
+
+        # Create assets directory path
+        assets_dir = os.path.join(project_path, directory)
+        file_path_relative = f"{directory}/{safe_filename}".lstrip('/')
+        file_path_absolute = os.path.join(project_path, file_path_relative)
+
+        # Check for duplicate filename
+        existing_asset = await db.scalar(
+            select(ProjectAsset).where(
+                ProjectAsset.project_id == project_id,
+                ProjectAsset.directory == f"/{directory}",
+                ProjectAsset.filename == safe_filename
+            )
+        )
+
+        if existing_asset:
+            # Auto-increment filename
+            name, ext = os.path.splitext(safe_filename)
+            counter = 1
+            while existing_asset:
+                safe_filename = f"{name}-{counter}{ext}"
+                file_path_relative = f"{directory}/{safe_filename}".lstrip('/')
+                file_path_absolute = os.path.join(project_path, file_path_relative)
+                existing_asset = await db.scalar(
+                    select(ProjectAsset).where(
+                        ProjectAsset.project_id == project_id,
+                        ProjectAsset.directory == f"/{directory}",
+                        ProjectAsset.filename == safe_filename
+                    )
+                )
+                counter += 1
+
+        # Write file to filesystem or pod
+        if settings.deployment_mode == "docker":
+            # Create directory if it doesn't exist
+            os.makedirs(assets_dir, exist_ok=True)
+
+            # Write file
+            with open(file_path_absolute, 'wb') as f:
+                f.write(content)
+
+            logger.info(f"[ASSETS] Saved file to: {file_path_absolute}")
+        else:
+            # Kubernetes mode - write to pod
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+
+            # Ensure directory exists
+            await k8s_manager.exec_command_in_pod(
+                current_user.id,
+                str(project_id),
+                f"mkdir -p /app/{directory}"
+            )
+
+            # Write file to pod
+            success = await k8s_manager.write_file_to_pod(
+                user_id=current_user.id,
+                project_id=str(project_id),
+                file_path=file_path_relative,
+                content=content.decode('latin-1')  # Binary content
+            )
+
+            if not success:
+                raise RuntimeError("Failed to write file to pod")
+
+            logger.info(f"[ASSETS] Saved file to pod: {file_path_relative}")
+
+        # Get image dimensions if it's an image
+        width, height = None, None
+        if file_type == 'image' and settings.deployment_mode == "docker":
+            width, height = await get_image_dimensions(file_path_absolute)
+
+        # Create database record
+        db_asset = ProjectAsset(
+            project_id=project_id,
+            filename=safe_filename,
+            directory=f"/{directory}",
+            file_path=file_path_relative,
+            file_type=file_type,
+            file_size=file_size,
+            mime_type=mime_type,
+            width=width,
+            height=height
+        )
+        db.add(db_asset)
+        await db.commit()
+        await db.refresh(db_asset)
+
+        logger.info(f"[ASSETS] Asset uploaded successfully: {safe_filename}")
+
+        return {
+            "id": str(db_asset.id),
+            "filename": db_asset.filename,
+            "directory": db_asset.directory,
+            "file_path": db_asset.file_path,
+            "file_type": db_asset.file_type,
+            "file_size": db_asset.file_size,
+            "mime_type": db_asset.mime_type,
+            "width": db_asset.width,
+            "height": db_asset.height,
+            "created_at": db_asset.created_at.isoformat(),
+            "url": f"/api/projects/{project_slug}/assets/{db_asset.id}/file"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[ASSETS] Upload failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to upload asset: {str(e)}")
+
+
+@router.get("/{project_slug}/assets")
+async def list_assets(
+    project_slug: str,
+    directory: Optional[str] = Query(None),
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List all assets for a project, optionally filtered by directory.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    query = select(ProjectAsset).where(ProjectAsset.project_id == project.id)
+
+    if directory:
+        directory = f"/{directory.strip('/')}"
+        query = query.where(ProjectAsset.directory == directory)
+
+    query = query.order_by(ProjectAsset.created_at.desc())
+
+    result = await db.execute(query)
+    assets = result.scalars().all()
+
+    return {
+        "assets": [
+            {
+                "id": str(asset.id),
+                "filename": asset.filename,
+                "directory": asset.directory,
+                "file_path": asset.file_path,
+                "file_type": asset.file_type,
+                "file_size": asset.file_size,
+                "mime_type": asset.mime_type,
+                "width": asset.width,
+                "height": asset.height,
+                "created_at": asset.created_at.isoformat(),
+                "url": f"/api/projects/{project_slug}/assets/{asset.id}/file"
+            }
+            for asset in assets
+        ]
+    }
+
+
+@router.get("/{project_slug}/assets/{asset_id}/file")
+async def get_asset_file(
+    project_slug: str,
+    asset_id: UUID,
+    auth_token: Optional[str] = Query(None),
+    current_user: Optional[User] = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Serve the actual asset file.
+    Supports both Bearer token and query parameter token for image loading.
+    """
+    # If no current_user from Bearer, try auth_token query parameter
+    if not current_user and auth_token:
+        from ..users import fastapi_users
+        from ..database import User as DBUser
+        try:
+            user_payload = await fastapi_users.authenticator.decode_token(auth_token)
+            if user_payload:
+                user_id = user_payload.get("sub")
+                current_user = await db.get(DBUser, UUID(user_id))
+        except Exception:
+            pass
+
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    asset = await db.get(ProjectAsset, asset_id)
+    if not asset or asset.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    settings = get_settings()
+    project_path = get_project_path(current_user.id, project.id)
+    file_path = os.path.join(project_path, asset.file_path)
+
+    if settings.deployment_mode == "docker":
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Asset file not found on disk")
+
+        return FileResponse(
+            file_path,
+            media_type=asset.mime_type,
+            filename=asset.filename
+        )
+    else:
+        # Kubernetes mode - read from pod and return
+        from ..k8s_client import get_k8s_manager
+        k8s_manager = get_k8s_manager()
+
+        content = await k8s_manager.read_file_from_pod(
+            current_user.id,
+            str(project.id),
+            asset.file_path
+        )
+
+        if not content:
+            raise HTTPException(status_code=404, detail="Asset file not found in pod")
+
+        from fastapi.responses import Response
+        return Response(content=content.encode('latin-1'), media_type=asset.mime_type)
+
+
+@router.delete("/{project_slug}/assets/{asset_id}")
+async def delete_asset(
+    project_slug: str,
+    asset_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete an asset and its file from the filesystem.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    asset = await db.get(ProjectAsset, asset_id)
+    if not asset or asset.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    try:
+        settings = get_settings()
+        project_path = get_project_path(current_user.id, project.id)
+        file_path = os.path.join(project_path, asset.file_path)
+
+        # Delete file from filesystem or pod
+        if settings.deployment_mode == "docker":
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"[ASSETS] Deleted file: {file_path}")
+        else:
+            # Kubernetes mode - delete from pod
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+
+            await k8s_manager.exec_command_in_pod(
+                current_user.id,
+                str(project.id),
+                f"rm -f /app/{asset.file_path}"
+            )
+            logger.info(f"[ASSETS] Deleted file from pod: {asset.file_path}")
+
+        # Delete database record
+        await db.delete(asset)
+        await db.commit()
+
+        return {"message": "Asset deleted successfully"}
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[ASSETS] Delete failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete asset: {str(e)}")
+
+
+@router.patch("/{project_slug}/assets/{asset_id}/rename")
+async def rename_asset(
+    project_slug: str,
+    asset_id: UUID,
+    rename_data: dict,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Rename an asset file.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    asset = await db.get(ProjectAsset, asset_id)
+    if not asset or asset.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    new_filename = rename_data.get('new_filename', '').strip()
+    if not new_filename:
+        raise HTTPException(status_code=400, detail="New filename is required")
+
+    # Sanitize new filename
+    new_filename = sanitize_filename(new_filename)
+
+    # Check for duplicates
+    existing_asset = await db.scalar(
+        select(ProjectAsset).where(
+            ProjectAsset.project_id == project.id,
+            ProjectAsset.directory == asset.directory,
+            ProjectAsset.filename == new_filename,
+            ProjectAsset.id != asset_id
+        )
+    )
+
+    if existing_asset:
+        raise HTTPException(status_code=400, detail="An asset with this name already exists in this directory")
+
+    try:
+        settings = get_settings()
+        project_path = get_project_path(current_user.id, project.id)
+
+        old_file_path = os.path.join(project_path, asset.file_path)
+        new_file_path_relative = f"{asset.directory.strip('/')}/{new_filename}".lstrip('/')
+        new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
+
+        # Rename file in filesystem or pod
+        if settings.deployment_mode == "docker":
+            if os.path.exists(old_file_path):
+                os.rename(old_file_path, new_file_path_absolute)
+                logger.info(f"[ASSETS] Renamed file: {old_file_path} -> {new_file_path_absolute}")
+        else:
+            # Kubernetes mode
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+
+            await k8s_manager.exec_command_in_pod(
+                current_user.id,
+                str(project.id),
+                f"mv /app/{asset.file_path} /app/{new_file_path_relative}"
+            )
+            logger.info(f"[ASSETS] Renamed file in pod: {asset.file_path} -> {new_file_path_relative}")
+
+        # Update database record
+        asset.filename = new_filename
+        asset.file_path = new_file_path_relative
+        await db.commit()
+        await db.refresh(asset)
+
+        return {
+            "id": str(asset.id),
+            "filename": asset.filename,
+            "file_path": asset.file_path,
+            "message": "Asset renamed successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[ASSETS] Rename failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to rename asset: {str(e)}")
+
+
+@router.patch("/{project_slug}/assets/{asset_id}/move")
+async def move_asset(
+    project_slug: str,
+    asset_id: UUID,
+    move_data: dict,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Move an asset to a different directory.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    asset = await db.get(ProjectAsset, asset_id)
+    if not asset or asset.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    new_directory = move_data.get('directory', '').strip('/')
+    if not new_directory:
+        raise HTTPException(status_code=400, detail="New directory is required")
+
+    # Validate directory path
+    if '..' in new_directory:
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+
+    new_directory = f"/{new_directory}"
+
+    # Check if moving to same directory
+    if new_directory == asset.directory:
+        return {"message": "Asset is already in this directory"}
+
+    try:
+        settings = get_settings()
+        project_path = get_project_path(current_user.id, project.id)
+
+        old_file_path = os.path.join(project_path, asset.file_path)
+        new_file_path_relative = f"{new_directory.strip('/')}/{asset.filename}".lstrip('/')
+        new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
+
+        # Move file in filesystem or pod
+        if settings.deployment_mode == "docker":
+            # Ensure new directory exists
+            new_dir_absolute = os.path.dirname(new_file_path_absolute)
+            os.makedirs(new_dir_absolute, exist_ok=True)
+
+            if os.path.exists(old_file_path):
+                shutil.move(old_file_path, new_file_path_absolute)
+                logger.info(f"[ASSETS] Moved file: {old_file_path} -> {new_file_path_absolute}")
+        else:
+            # Kubernetes mode
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+
+            # Ensure directory exists
+            await k8s_manager.exec_command_in_pod(
+                current_user.id,
+                str(project.id),
+                f"mkdir -p /app/{new_directory.strip('/')}"
+            )
+
+            # Move file
+            await k8s_manager.exec_command_in_pod(
+                current_user.id,
+                str(project.id),
+                f"mv /app/{asset.file_path} /app/{new_file_path_relative}"
+            )
+            logger.info(f"[ASSETS] Moved file in pod: {asset.file_path} -> {new_file_path_relative}")
+
+        # Update database record
+        asset.directory = new_directory
+        asset.file_path = new_file_path_relative
+        await db.commit()
+        await db.refresh(asset)
+
+        return {
+            "id": str(asset.id),
+            "directory": asset.directory,
+            "file_path": asset.file_path,
+            "message": "Asset moved successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[ASSETS] Move failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to move asset: {str(e)}")

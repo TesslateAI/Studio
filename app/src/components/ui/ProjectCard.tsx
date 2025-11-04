@@ -14,6 +14,8 @@ interface Project {
   hasGitRepo?: boolean;
   gitRepoName?: string;
   gitSyncStatus?: 'synced' | 'ahead' | 'behind' | 'diverged' | 'error';
+  containerStatus?: 'starting' | 'running' | 'stopped' | 'error';
+  slug?: string;
 }
 
 interface ProjectCardProps {
@@ -23,6 +25,8 @@ interface ProjectCardProps {
   onFork?: () => void;
   onStatusChange: (status: Status) => void;
   onAddAgent?: () => void;
+  onRestartContainer?: () => void;
+  onStopContainer?: () => void;
   isDeleting?: boolean;
 }
 
@@ -33,6 +37,8 @@ export function ProjectCard({
   onFork,
   onStatusChange,
   onAddAgent,
+  onRestartContainer,
+  onStopContainer,
   isDeleting = false
 }: ProjectCardProps) {
   // Status badge configuration (read-only, no dropdown)
@@ -48,6 +54,50 @@ export function ProjectCard({
     launch: {
       label: 'Launch',
       className: 'bg-green-500/10 text-green-400 border border-green-500/20'
+    }
+  };
+
+  // Container status configuration
+  const containerStatusConfig = {
+    starting: {
+      label: 'Starting',
+      icon: (
+        <svg className="w-4 h-4 animate-spin" viewBox="0 0 50 50">
+          <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" opacity="0.25"/>
+          <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeDasharray="31.4 94.2" strokeLinecap="round"/>
+        </svg>
+      ),
+      className: 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+    },
+    running: {
+      label: 'Running',
+      icon: (
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+          <circle cx="128" cy="128" r="96" opacity="0.2"/>
+          <circle cx="128" cy="128" r="96" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"/>
+          <circle cx="128" cy="128" r="40"/>
+        </svg>
+      ),
+      className: 'bg-green-500/10 text-green-400 border border-green-500/20'
+    },
+    stopped: {
+      label: 'Stopped',
+      icon: (
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+          <rect x="56" y="56" width="144" height="144" rx="8" opacity="0.2"/>
+          <rect x="56" y="56" width="144" height="144" rx="8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"/>
+        </svg>
+      ),
+      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+    },
+    error: {
+      label: 'Error',
+      icon: (
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+          <path d="M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM120,104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,88a12,12,0,1,1,12-12A12,12,0,0,1,128,192Z"/>
+        </svg>
+      ),
+      className: 'bg-red-500/10 text-red-400 border border-red-500/20'
     }
   };
 
@@ -124,9 +174,19 @@ export function ProjectCard({
               )}
             </div>
 
-            {/* Read-only status badge */}
-            <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${statusConfig[project.status].className}`}>
-              {statusConfig[project.status].label}
+            {/* Status badges */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${statusConfig[project.status].className}`}>
+                {statusConfig[project.status].label}
+              </div>
+
+              {/* Container status indicator */}
+              {project.containerStatus && (
+                <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${containerStatusConfig[project.containerStatus].className}`}>
+                  {containerStatusConfig[project.containerStatus].icon}
+                  <span>{containerStatusConfig[project.containerStatus].label}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -170,6 +230,42 @@ export function ProjectCard({
         <div className="text-xs text-gray-500 mb-3">
           {project.isLive ? `Live • ${project.userCount} users` : `Updated ${project.lastUpdated}`}
         </div>
+
+        {/* Container Control Buttons */}
+        {project.containerStatus && (project.containerStatus === 'running' || project.containerStatus === 'starting') && (onRestartContainer || onStopContainer) && (
+          <div className="flex gap-1.5 sm:gap-2 mb-2">
+            {onRestartContainer && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRestartContainer();
+                }}
+                className="flex-1 bg-white/5 hover:bg-white/10 text-[var(--text)] font-medium py-1.5 px-2 rounded-lg border border-white/10 hover:border-white/20 transition-all duration-200 flex items-center justify-center gap-1.5 text-xs"
+                title="Restart container"
+              >
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z"/>
+                </svg>
+                Restart
+              </button>
+            )}
+            {onStopContainer && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStopContainer();
+                }}
+                className="flex-1 bg-white/5 hover:bg-red-500/10 text-gray-400 hover:text-red-400 font-medium py-1.5 px-2 rounded-lg border border-white/10 hover:border-red-500/30 transition-all duration-200 flex items-center justify-center gap-1.5 text-xs"
+                title="Stop container"
+              >
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 256 256">
+                  <rect x="56" y="56" width="144" height="144" rx="8"/>
+                </svg>
+                Stop
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex gap-1.5 sm:gap-2">

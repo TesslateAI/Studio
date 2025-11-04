@@ -21,10 +21,10 @@ from ..schemas import (
     AgentCommandLogSchema,
     AgentCommandStatsResponse
 )
-from ..auth import get_current_active_user
 from ..dev_server_manager import get_container_manager
 from ..services.command_validator import get_command_validator, CommandRisk
 from ..services.agent_audit import get_audit_service
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,7 +68,7 @@ def check_rate_limit(user_id: UUID) -> bool:
 @router.post("/execute", response_model=AgentCommandResponse)
 async def execute_command(
     request: AgentCommandRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -334,7 +334,7 @@ async def execute_command(
 async def get_command_history(
     project_id: str,
     limit: int = 50,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -382,7 +382,7 @@ async def get_command_history(
 @router.get("/stats", response_model=AgentCommandStatsResponse)
 async def get_command_stats(
     days: int = 7,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """

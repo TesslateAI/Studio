@@ -11,7 +11,6 @@ import {
   X,
   GitFork,
   LockSimpleOpen,
-  ArrowLeft,
   ChartLine,
   Cpu,
   Wrench,
@@ -22,10 +21,19 @@ import {
   Terminal,
   Globe,
   ListChecks,
-  Pencil
+  Pencil,
+  Folder,
+  Storefront,
+  Books,
+  Sun,
+  Moon,
+  Gear,
+  SignOut
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { DiscordSupport } from '../components/DiscordSupport';
+import { MobileMenu, NavigationSidebar } from '../components/ui';
+import { MobileWarning } from '../components/MobileWarning';
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
@@ -62,7 +70,7 @@ interface MarketplaceItem {
 
 export default function Marketplace() {
   const navigate = useNavigate();
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<MarketplaceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +78,55 @@ export default function Marketplace() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showItemDetail, setShowItemDetail] = useState<MarketplaceItem | null>(null);
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    navigate('/login');
+  };
+
+  // Sidebar items for mobile menu
+  const mobileMenuItems = {
+    left: [
+      {
+        icon: <Folder className="w-5 h-5" weight="fill" />,
+        title: 'Projects',
+        onClick: () => navigate('/dashboard')
+      },
+      {
+        icon: <Storefront className="w-5 h-5" weight="fill" />,
+        title: 'Marketplace',
+        onClick: () => {},
+        active: true
+      },
+      {
+        icon: <Books className="w-5 h-5" weight="fill" />,
+        title: 'Library',
+        onClick: () => navigate('/library')
+      },
+      {
+        icon: <Package className="w-5 h-5" weight="fill" />,
+        title: 'Components',
+        onClick: () => toast('Components library coming soon!')
+      }
+    ],
+    right: [
+      {
+        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
+        onClick: toggleTheme
+      },
+      {
+        icon: <Gear className="w-5 h-5" weight="fill" />,
+        title: 'Settings',
+        onClick: () => toast('Settings coming soon!')
+      },
+      {
+        icon: <SignOut className="w-5 h-5" weight="fill" />,
+        title: 'Logout',
+        onClick: logout
+      }
+    ]
+  };
 
   const categories = [
     { id: 'all', name: 'All Agents' },
@@ -168,138 +225,132 @@ export default function Marketplace() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+      <div className="h-screen flex items-center justify-center bg-[var(--bg)]">
         <LoadingSpinner message="Loading marketplace..." size={80} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24">
-      {/* Header with Navigation */}
-      <div className="mb-10">
-        <div className="flex items-center justify-between mb-8">
-          {/* Back Button */}
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-2 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors"
-          >
-            <ArrowLeft size={20} weight="bold" />
-            <span className="font-medium">Back</span>
-          </button>
+    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
+      {/* Mobile Warning */}
+      <MobileWarning />
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-3">
+      {/* Mobile Menu */}
+      <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
+
+      {/* Navigation Sidebar */}
+      <NavigationSidebar activePage="marketplace" />
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Bar with Search and Filters */}
+        <div className="bg-[var(--surface)] border-b border-white/10">
+          <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
+            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Marketplace</h1>
+
+            {/* Mobile hamburger menu */}
             <button
-              onClick={() => navigate('/library')}
-              data-tour="library-link"
-              className="px-6 py-2.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl text-white font-semibold transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-105"
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
             >
-              <Package size={20} weight="fill" />
-              Library
+              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
             </button>
           </div>
-        </div>
 
-        {/* Main Title */}
-        <div className="text-center mb-10">
-          <h1 className="font-heading text-4xl md:text-5xl font-bold text-[var(--text)] mb-3">
-            Build Faster with AI Agents, Bases & Tools
-          </h1>
-          <p className="text-[var(--text)]/60 text-lg">Explore powerful building blocks for your next project</p>
-        </div>
-
-        {/* Search Bar */}
-        <div className="relative mb-8 max-w-2xl mx-auto">
-          <MagnifyingGlass className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text)]/40" size={20} />
-          <input
-            type="text"
-            placeholder="Search agents by name, category, or tags..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className={`w-full pl-12 pr-4 py-4 border rounded-xl text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${
-              theme === 'light' ? 'bg-black/5 border-black/20' : 'bg-white/5 border-white/10'
-            }`}
-          />
-        </div>
-
-        {/* Item Type Tabs */}
-        <div className="mb-8">
-          <div className="flex flex-wrap items-center gap-3 mb-6">
-            <button
-              onClick={() => { setSelectedItemType('agent'); setSelectedCategory('all'); }}
-              className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-                selectedItemType === 'agent'
-                  ? 'bg-[var(--primary)] text-white shadow-lg'
-                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-              }`}
-            >
-              <Cpu size={20} weight={selectedItemType === 'agent' ? 'fill' : 'regular'} />
-              Agents
-            </button>
-            <button
-              onClick={() => { setSelectedItemType('base'); setSelectedCategory('all'); }}
-              className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-                selectedItemType === 'base'
-                  ? 'bg-[var(--primary)] text-white shadow-lg'
-                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-              }`}
-            >
-              <Package size={20} weight={selectedItemType === 'base' ? 'fill' : 'regular'} />
-              Bases
-            </button>
-            <button
-              onClick={() => { setSelectedItemType('tool'); setSelectedCategory('all'); }}
-              className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-                selectedItemType === 'tool'
-                  ? 'bg-[var(--primary)] text-white shadow-lg'
-                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-              }`}
-            >
-              <Wrench size={20} weight={selectedItemType === 'tool' ? 'fill' : 'regular'} />
-              Tools
-            </button>
-            <button
-              onClick={() => { setSelectedItemType('integration'); setSelectedCategory('all'); }}
-              className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-                selectedItemType === 'integration'
-                  ? 'bg-[var(--primary)] text-white shadow-lg'
-                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-              }`}
-            >
-              <Plug size={20} weight={selectedItemType === 'integration' ? 'fill' : 'regular'} />
-              Integrations
-            </button>
-          </div>
-        </div>
-
-        {/* Filter Pills - Only show for agents */}
-        {selectedItemType === 'agent' && (
-          <div className="mb-8">
-            <div className="flex items-center gap-2 mb-4">
-              <FunnelSimple size={18} className="text-[var(--text)]/60" />
-              <span className="text-sm font-medium text-[var(--text)]/80">Filter by</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              {categories.map(category => (
-                <button
-                  key={category.id}
-                  onClick={() => setSelectedCategory(category.id)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                    selectedCategory === category.id
-                      ? 'bg-[var(--primary)] text-white shadow-lg'
-                      : theme === 'light'
-                        ? 'bg-black/10 text-black/70 hover:bg-black/20'
-                        : 'bg-white/10 text-white/70 hover:bg-white/20'
-                  }`}
-                >
-                  {category.name}
-                </button>
-              ))}
+          {/* Search Bar */}
+          <div className="p-4 md:px-6">
+            <div className="relative max-w-2xl">
+              <MagnifyingGlass className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text)]/40" size={20} />
+              <input
+                type="text"
+                placeholder="Search marketplace..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={`w-full pl-12 pr-4 py-2.5 border rounded-lg text-sm text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${
+                  theme === 'light' ? 'bg-black/5 border-black/20' : 'bg-white/5 border-white/10'
+                }`}
+              />
             </div>
           </div>
-        )}
-      </div>
+
+          {/* Item Type Tabs */}
+          <div className="px-4 md:px-6 pb-3">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <button
+                onClick={() => { setSelectedItemType('agent'); setSelectedCategory('all'); }}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  selectedItemType === 'agent'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Cpu size={16} weight={selectedItemType === 'agent' ? 'fill' : 'regular'} />
+                Agents
+              </button>
+              <button
+                onClick={() => { setSelectedItemType('base'); setSelectedCategory('all'); }}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  selectedItemType === 'base'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Package size={16} weight={selectedItemType === 'base' ? 'fill' : 'regular'} />
+                Bases
+              </button>
+              <button
+                onClick={() => { setSelectedItemType('tool'); setSelectedCategory('all'); }}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  selectedItemType === 'tool'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Wrench size={16} weight={selectedItemType === 'tool' ? 'fill' : 'regular'} />
+                Tools
+              </button>
+              <button
+                onClick={() => { setSelectedItemType('integration'); setSelectedCategory('all'); }}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  selectedItemType === 'integration'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Plug size={16} weight={selectedItemType === 'integration' ? 'fill' : 'regular'} />
+                Integrations
+              </button>
+            </div>
+
+            {/* Filter Pills - Only show for agents */}
+            {selectedItemType === 'agent' && (
+              <div className="mt-3 flex items-center gap-2 overflow-x-auto">
+                {categories.map(category => (
+                  <button
+                    key={category.id}
+                    onClick={() => setSelectedCategory(category.id)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap ${
+                      selectedCategory === category.id
+                        ? 'bg-[var(--primary)] text-white'
+                        : theme === 'light'
+                          ? 'bg-black/10 text-black/70 hover:bg-black/20'
+                          : 'bg-white/10 text-white/70 hover:bg-white/20'
+                    }`}
+                  >
+                    {category.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-auto bg-[var(--bg)]">
+          <div className="p-4 md:p-6">
 
       {/* Featured Section */}
       {filteredItems.filter(item => item.is_featured).length > 0 && (
@@ -357,6 +408,10 @@ export default function Marketplace() {
           <p className="text-[var(--text)]/60">No agents found matching your criteria</p>
         </div>
       )}
+
+          </div>
+        </div>
+      </div>
 
       {/* Detail Modal */}
       {showItemDetail && (

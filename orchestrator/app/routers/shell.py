@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 from ..database import get_db
 from ..models import User, ShellSession
-from ..auth import get_current_active_user
 from ..services.shell_session_manager import get_shell_session_manager
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -72,7 +72,7 @@ class SessionListResponse(BaseModel):
 @router.post("/sessions", response_model=CreateSessionResponse)
 async def create_shell_session(
     request: CreateSessionRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -97,7 +97,7 @@ async def create_shell_session(
 async def write_to_session(
     session_id: str,
     request: WriteRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -134,7 +134,7 @@ async def write_to_session(
 @router.get("/sessions/{session_id}/output", response_model=OutputResponse)
 async def read_session_output(
     session_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -168,7 +168,7 @@ async def read_session_output(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_shell_sessions(
     project_id: Optional[UUID] = None,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all active shell sessions for the current user."""
@@ -186,7 +186,7 @@ async def list_shell_sessions(
 @router.delete("/sessions/{session_id}")
 async def close_shell_session(
     session_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Close a shell session."""
@@ -214,7 +214,7 @@ async def close_shell_session(
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_shell_session(
     session_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get shell session details."""

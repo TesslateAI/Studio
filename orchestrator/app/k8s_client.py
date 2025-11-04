@@ -340,7 +340,7 @@ VITECONFIG
                 annotations={
                     # ===== AUTHENTICATION & AUTHORIZATION =====
                     # External authentication via backend API to verify user ownership
-                    "nginx.ingress.kubernetes.io/auth-url": "https://studio-test.tesslate.com/api/auth/verify",
+                    "nginx.ingress.kubernetes.io/auth-url": "https://studio-test.tesslate.com/api/auth/verify-access",
                     "nginx.ingress.kubernetes.io/auth-method": "GET",
                     "nginx.ingress.kubernetes.io/auth-response-headers": "X-User-ID",
 

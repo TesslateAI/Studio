@@ -59,14 +59,28 @@ class Settings(BaseSettings):
     # Production: "cloudflare" (DNS challenge for wildcard certs)
     traefik_cert_resolver: str = "letsencrypt"
 
-    # GitHub OAuth Configuration
+    # GitHub OAuth Configuration (for login)
     github_client_id: str = ""
     github_client_secret: str = ""
     github_oauth_redirect_uri: str = ""  # Frontend callback URL - should be configured via environment
 
+    # Google OAuth Configuration (for login)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_oauth_redirect_uri: str = ""  # Frontend callback URL
+
     # Encryption key for GitHub tokens (base64 encoded Fernet key)
     # This is derived from secret_key if not provided
     github_token_encryption_key: str = ""
+
+    # CSRF Protection
+    csrf_secret_key: str = ""  # Separate secret for CSRF tokens (defaults to secret_key if not set)
+    csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)
+
+    # Cookie Security Settings
+    cookie_secure: bool = False  # Set to True in production (requires HTTPS)
+    cookie_samesite: str = "lax"  # lax, strict, or none
+    cookie_domain: str = ""  # Leave empty for default, or set to .yourdomain.com for subdomains
 
     class Config:
         # For Docker Compose: environment variables are passed directly

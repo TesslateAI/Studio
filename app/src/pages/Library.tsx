@@ -9,7 +9,6 @@ import {
   LockSimpleOpen,
   LockKey,
   Sparkle,
-  ArrowLeft,
   Check,
   XCircle,
   Rocket,
@@ -28,13 +27,23 @@ import {
   Terminal,
   Globe,
   ListChecks,
-  Wrench
+  Wrench,
+  Folder,
+  Storefront,
+  Books,
+  Sun,
+  Moon,
+  Gear,
+  SignOut
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { DiscordSupport } from '../components/DiscordSupport';
+import { MobileMenu, NavigationSidebar } from '../components/ui';
+import { MobileWarning } from '../components/MobileWarning';
 import { ConfirmDialog } from '../components/modals';
 import { marketplaceApi, secretsApi, usersApi } from '../lib/api';
 import toast from 'react-hot-toast';
+import { useTheme } from '../theme/ThemeContext';
 
 interface LibraryAgent {
   id: string;
@@ -143,11 +152,61 @@ const getToolIcon = (toolName: string): { icon: React.ReactNode; label: string }
 
 export default function Library() {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<TabType>('agents');
   const [agents, setAgents] = useState<LibraryAgent[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [externalProviders, setExternalProviders] = useState<ExternalProvider[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    navigate('/login');
+  };
+
+  // Sidebar items for mobile menu
+  const mobileMenuItems = {
+    left: [
+      {
+        icon: <Folder className="w-5 h-5" weight="fill" />,
+        title: 'Projects',
+        onClick: () => navigate('/dashboard')
+      },
+      {
+        icon: <Storefront className="w-5 h-5" weight="fill" />,
+        title: 'Marketplace',
+        onClick: () => navigate('/marketplace')
+      },
+      {
+        icon: <Books className="w-5 h-5" weight="fill" />,
+        title: 'Library',
+        onClick: () => {},
+        active: true
+      },
+      {
+        icon: <Package className="w-5 h-5" weight="fill" />,
+        title: 'Components',
+        onClick: () => toast('Components library coming soon!')
+      }
+    ],
+    right: [
+      {
+        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
+        onClick: toggleTheme
+      },
+      {
+        icon: <Gear className="w-5 h-5" weight="fill" />,
+        title: 'Settings',
+        onClick: () => toast('Settings coming soon!')
+      },
+      {
+        icon: <SignOut className="w-5 h-5" weight="fill" />,
+        title: 'Logout',
+        onClick: logout
+      }
+    ]
+  };
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
@@ -264,87 +323,84 @@ export default function Library() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+      <div className="h-screen flex items-center justify-center bg-[var(--bg)]">
         <LoadingSpinner message="Loading..." size={80} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24">
-      {/* Header */}
-      <div className="mb-10">
-        <div className="flex items-center justify-between mb-8">
-          {/* Back Button */}
-          <button
-            onClick={() => navigate('/dashboard')}
-            data-tour="dashboard-link"
-            className="flex items-center gap-2 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors"
-          >
-            <ArrowLeft size={20} weight="bold" />
-            <span className="font-medium">Back</span>
-          </button>
+    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
+      {/* Mobile Warning */}
+      <MobileWarning />
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-3">
+      {/* Mobile Menu */}
+      <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
+
+      {/* Navigation Sidebar */}
+      <NavigationSidebar activePage="library" />
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Bar with Tabs */}
+        <div className="bg-[var(--surface)] border-b border-white/10">
+          <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
+            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Library</h1>
+
+            {/* Mobile hamburger menu */}
             <button
-              onClick={() => navigate('/marketplace')}
-              className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 rounded-xl text-white font-semibold transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-105"
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
             >
-              <Sparkle size={20} weight="fill" />
-              Browse Marketplace
+              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
             </button>
+          </div>
+
+          {/* Tabs */}
+          <div className="px-4 md:px-6 pb-3 pt-2">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <button
+                onClick={() => setActiveTab('agents')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'agents'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Package size={16} weight={activeTab === 'agents' ? 'fill' : 'regular'} />
+                Agents ({agents.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('models')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'models'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Cpu size={16} weight={activeTab === 'models' ? 'fill' : 'regular'} />
+                Model Management
+              </button>
+              <button
+                onClick={() => setActiveTab('api-keys')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'api-keys'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Key size={16} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
+                API Keys ({apiKeys.length})
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Main Title */}
-        <div className="mb-8">
-          <h1 className="font-heading text-4xl md:text-5xl font-bold text-[var(--text)] mb-3">
-            My Library
-          </h1>
-          <p className="text-[var(--text)]/60 text-lg">Manage your agents, models, and API keys</p>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setActiveTab('agents')}
-            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-              activeTab === 'agents'
-                ? 'bg-[var(--primary)] text-white shadow-lg'
-                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-            }`}
-          >
-            <Package size={20} weight={activeTab === 'agents' ? 'fill' : 'regular'} />
-            Agents ({agents.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('models')}
-            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-              activeTab === 'models'
-                ? 'bg-[var(--primary)] text-white shadow-lg'
-                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-            }`}
-          >
-            <Cpu size={20} weight={activeTab === 'models' ? 'fill' : 'regular'} />
-            Model Management
-          </button>
-          <button
-            onClick={() => setActiveTab('api-keys')}
-            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-              activeTab === 'api-keys'
-                ? 'bg-[var(--primary)] text-white shadow-lg'
-                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-            }`}
-          >
-            <Key size={20} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
-            API Keys ({apiKeys.length})
-          </button>
-        </div>
-      </div>
-
-      {/* Tab Content */}
-      <div>
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-auto bg-[var(--bg)]">
+          <div className="p-4 md:p-6">
         {activeTab === 'agents' && (
           <AgentsTab
             agents={agents}
@@ -372,6 +428,8 @@ export default function Library() {
             onReload={loadApiKeys}
           />
         )}
+          </div>
+        </div>
       </div>
 
       {/* Edit Agent Modal */}

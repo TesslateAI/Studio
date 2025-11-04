@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 import logging
 
 from ..database import get_db
-from ..auth import get_current_active_user
 from ..models import (
     User, MarketplaceAgent, UserPurchasedAgent,
     ProjectAgent, AgentReview, Project,
@@ -24,6 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 from ..config import get_settings
+from ..users import current_active_user, current_superuser
 settings = get_settings()
 
 
@@ -33,7 +33,7 @@ settings = get_settings()
 
 @router.get("/models")
 async def get_available_models(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -169,7 +169,7 @@ async def add_custom_model(
     model_name: str = Body(...),
     pricing_input: Optional[float] = Body(None),
     pricing_output: Optional[float] = Body(None),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -222,7 +222,7 @@ async def add_custom_model(
 @router.delete("/models/custom/{model_id}")
 async def delete_custom_model(
     model_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -264,7 +264,7 @@ async def get_marketplace_agents(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Browse marketplace agents with filtering and sorting.
@@ -377,7 +377,7 @@ async def get_marketplace_agents(
 async def get_agent_details(
     slug: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get detailed information about a specific agent.
@@ -455,7 +455,7 @@ async def get_agent_details(
 async def purchase_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Purchase or add a free agent to user's library.
@@ -549,7 +549,7 @@ async def fork_agent(
     system_prompt: Optional[str] = None,
     model: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Fork an open source agent to create a custom version with optional customizations.
@@ -634,7 +634,7 @@ async def create_custom_agent(
     model: str = "cerebras/qwen-3-coder-480b",
     category: str = "custom",
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Create a custom agent from scratch.
@@ -705,7 +705,7 @@ async def update_custom_agent(
     agent_id: str,
     update_data: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Update a custom or forked agent.
@@ -834,7 +834,7 @@ async def update_custom_agent(
 @router.get("/my-agents")
 async def get_user_agents(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get all agents in the user's library.
@@ -887,7 +887,7 @@ async def toggle_agent(
     agent_id: str,
     enabled: bool,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Toggle an agent enabled/disabled in user's library.
@@ -920,7 +920,7 @@ async def toggle_agent(
 async def remove_agent_from_library(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Remove an agent from user's library (delete purchase record).
@@ -964,7 +964,7 @@ async def select_agent_model(
     agent_id: str,
     model: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Set the user's selected model for an agent in their library.
@@ -1014,7 +1014,7 @@ async def select_agent_model(
 async def publish_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Publish a user's custom/forked agent to the community marketplace.
@@ -1061,7 +1061,7 @@ async def publish_agent(
 async def unpublish_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Unpublish a user's agent from the community marketplace.
@@ -1099,7 +1099,7 @@ async def unpublish_agent(
 async def get_available_agents_for_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get agents that the user owns and can add to this project.
@@ -1159,7 +1159,7 @@ async def add_agent_to_project(
     project_id: str,
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Add an agent from user's library to a project.
@@ -1225,7 +1225,7 @@ async def remove_agent_from_project(
     project_id: str,
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Remove an agent from a project.
@@ -1265,7 +1265,7 @@ async def remove_agent_from_project(
 async def get_project_agents(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get all active agents for a project.
@@ -1324,7 +1324,7 @@ async def create_agent_review(
     rating: int = Query(ge=1, le=5),
     comment: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Create or update a review for an agent.
@@ -1398,7 +1398,7 @@ async def get_marketplace_bases(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Browse marketplace bases with filtering and sorting."""
     query = select(MarketplaceBase).where(MarketplaceBase.is_active == True)
@@ -1484,7 +1484,7 @@ async def get_marketplace_bases(
 async def get_base_details(
     slug: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get detailed information about a specific base."""
     result = await db.execute(
@@ -1554,7 +1554,7 @@ async def get_base_details(
 async def purchase_base(
     base_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Purchase or add a free base to user's library."""
     # Get base
@@ -1608,7 +1608,7 @@ async def purchase_base(
 @router.get("/my-bases")
 async def get_user_bases(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get all bases in the user's library."""
     result = await db.execute(
