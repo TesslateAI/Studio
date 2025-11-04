@@ -9,6 +9,17 @@
       transform: rotate(360deg);
     }
   }
+
+  @keyframes typing {
+    0%, 60%, 100% {
+      transform: translateY(0);
+      opacity: 0.5;
+    }
+    30% {
+      transform: translateY(-10px);
+      opacity: 1;
+    }
+  }
 }
 
 :root {
@@ -115,6 +126,19 @@ body {
 /* Ensure Tailwind's animate-spin works */
 .animate-spin {
   animation: spin 1s linear infinite !important;
+}
+
+/* Typing indicator animation */
+.animate-typing {
+  animation: typing 1.4s ease-in-out infinite;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
 }
 
 @keyframes fade-in {

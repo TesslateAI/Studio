@@ -110,15 +110,29 @@ export default function AgentMessage({ agentData, finalResponse }: AgentMessageP
           </div>
         )}
 
-        {/* Final Response */}
-        <div className="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]">
-          <div className="text-xs font-semibold text-[var(--text)]/60 mb-2 uppercase tracking-wide">
-            Result
+        {/* Final Response - Only show when execution is complete */}
+        {agentData.completion_reason !== 'in_progress' && finalResponse && (
+          <div className="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]">
+            <div className="text-xs font-semibold text-[var(--text)]/60 mb-2 uppercase tracking-wide">
+              Result
+            </div>
+            <div className="whitespace-pre-wrap">
+              {finalResponse}
+            </div>
           </div>
-          <div className="whitespace-pre-wrap">
-            {finalResponse}
+        )}
+
+        {/* In Progress Indicator */}
+        {agentData.completion_reason === 'in_progress' && (
+          <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-[var(--text)]/5 border border-[var(--border-color)]">
+            <div className="flex gap-1">
+              <div className="w-2 h-2 rounded-full bg-[hsl(var(--hue2)_60%_50%)] animate-pulse"></div>
+              <div className="w-2 h-2 rounded-full bg-[hsl(var(--hue2)_60%_50%)] animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+              <div className="w-2 h-2 rounded-full bg-[hsl(var(--hue2)_60%_50%)] animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+            </div>
+            <span className="text-xs text-[var(--text)]/60">Working on it...</span>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

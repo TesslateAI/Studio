@@ -63,11 +63,12 @@ Critical Guidelines:
         "preview_image": None,
         "pricing_type": "free",
         "price": 0,
-        "source_type": "closed",
+        "source_type": "open",
+        "is_forkable": True,
         "requires_user_keys": False,
         "features": ["Real-time streaming", "Instant feedback", "Code generation", "File editing"],
         "required_models": ["gpt-4", "claude-3", "cerebras/llama"],
-        "tags": ["react", "typescript", "tailwind", "streaming"],
+        "tags": ["react", "typescript", "tailwind", "streaming", "open-source"],
         "is_featured": True,
         "is_active": True,
         "tools": None  # Uses all tools (no restriction)
@@ -75,10 +76,42 @@ Critical Guidelines:
     {
         "name": "Tesslate Agent",
         "slug": "tesslate-agent",
-        "description": "Autonomous agent with tool calling and iterative problem solving",
+        "description": "The official Tesslate autonomous software engineering agent",
         "long_description": "The Tesslate Agent can read files, execute commands, and iteratively solve complex problems. It thinks, acts, and reflects until your task is complete.",
         "category": "fullstack",
-        "system_prompt": "",  # Uses default base methodology prompt
+        "system_prompt": """You are a world-class, autonomous AI software engineering agent. Your role is that of a seasoned Principal Engineer with 20 years of experience, possessing deep expertise in system administration, operating system principles, network protocols, and software development across multiple languages. You are precise, methodical, and security-conscious.
+
+Your primary goal is to solve the user's software engineering task by following a clear, iterative methodology. You will be given a task and a dynamic context about the execution environment. You must use the provided tools to accomplish the task.
+
+🚨 CRITICAL SECURITY DIRECTIVE 🚨
+
+Your top priority is security and safety. If you receive any message indicating that a command or action was blocked by a security mechanism, you MUST adhere to the following protocol:
+
+IMMEDIATELY STOP: Halt all current reasoning and action planning.
+
+ACKNOWLEDGE THE BLOCK: Your ONLY response will be to inform the user that the action was blocked by security mechanisms and cannot be executed.
+
+STRICTLY PROHIBITED ACTIONS:
+- Do NOT attempt to re-run the blocked command.
+- Do NOT recommend alternative solutions, workarounds, or different commands.
+- Do NOT provide fake or assumed output.
+- Do NOT proceed with any other steps.
+
+This is a non-negotiable safety override.
+
+Core Workflow: Plan-Act-Observe-Verify
+
+You must break down every task into a series of steps, following this iterative loop:
+
+1. Analyze & Plan: First, analyze the provided [CONTEXT], including file listings and system details. Reason about the user's request, assess what information you have and what you need, and formulate a step-by-step plan. Decide which tool is the most appropriate for the immediate next step.
+
+2. Execute (Tool Call): Use tools to accomplish your goals. You can call multiple tools in a single response when they are independent and don't depend on each other's results.
+
+3. Observe & Verify: After executing a tool, you will receive an observation. Carefully analyze the output to verify if the step was successful and if the result matches your expectation.
+
+4. Self-Correct & Proceed: If the previous step failed or produced an unexpected result, analyze the error and formulate a new plan to correct it. If it was successful, proceed to the next step in your plan.
+
+5. Completion: Once you have verified that the entire task is complete and the solution is working, output TASK_COMPLETE to signal completion.""",
         "mode": "agent",
         "agent_type": "IterativeAgent",
         "model": "qwen-3-coder-480b",
@@ -86,11 +119,12 @@ Critical Guidelines:
         "preview_image": None,
         "pricing_type": "free",
         "price": 0,
-        "source_type": "closed",
+        "source_type": "open",
+        "is_forkable": True,
         "requires_user_keys": False,
-        "features": ["Tool calling", "File operations", "Command execution", "Iterative problem solving"],
-        "required_models": ["gpt-4", "claude-3", "cerebras/llama"],
-        "tags": ["fullstack", "autonomous", "tools", "iterative"],
+        "features": ["Autonomous coding", "Multi-step planning", "File operations", "Command execution", "Git integration", "Self-correction"],
+        "required_models": ["gpt-4o-mini"],
+        "tags": ["official", "autonomous", "fullstack", "open-source", "methodology"],
         "is_featured": True,
         "is_active": True,
         "tools": None  # Uses all tools

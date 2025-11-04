@@ -75,7 +75,10 @@ export function ChatContainer({
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const isUserScrollingRef = useRef(false);
+  const lastScrollHeightRef = useRef(0);
 
   // Load chat history from database
   useEffect(() => {
@@ -302,12 +305,43 @@ export function ChatContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // Auto-scroll to latest message
+  // Track user scroll behavior
   useEffect(() => {
-    if (isExpanded && messagesEndRef.current) {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+
+      // User is scrolling up if not near bottom
+      isUserScrollingRef.current = !isNearBottom;
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Smart auto-scroll: only scroll if user hasn't manually scrolled up
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!isExpanded || !container || !messagesEndRef.current) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+
+    // Only auto-scroll if:
+    // 1. User hasn't manually scrolled up (isUserScrollingRef is false)
+    // 2. OR user is already near the bottom
+    // 3. OR this is a new user message (messages array grew and last message is user type)
+    const lastMessage = messages[messages.length - 1];
+    const isNewUserMessage = lastMessage?.type === 'user';
+
+    if (isNewUserMessage || !isUserScrollingRef.current || isNearBottom) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      isUserScrollingRef.current = false; // Reset after scrolling
     }
-  }, [messages, currentStream, isExpanded]);
+  }, [messages.length, currentStream, isExpanded]); // Only depend on messages.length, not messages object itself
 
   // Collapse chat when clicking outside (including clicks on iframe/preview) - desktop only
   useEffect(() => {
@@ -740,6 +774,7 @@ export function ChatContainer({
 
       {/* Chat messages - only shown when expanded */}
       <div
+        ref={messagesContainerRef}
         className={`
           chat-messages
           flex-1 overflow-y-auto px-3
