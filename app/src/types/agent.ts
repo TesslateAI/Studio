@@ -16,6 +16,13 @@ export interface AgentStep {
   response_text: string;
   is_complete: boolean;
   timestamp: string;
+  _debug?: {
+    full_response?: string;
+    context_messages_count?: number;
+    raw_tool_calls?: Array<{ name: string; params: any }>;
+    raw_thought?: string;
+    is_complete?: boolean;
+  };
 }
 
 export interface AgentChatRequest {
