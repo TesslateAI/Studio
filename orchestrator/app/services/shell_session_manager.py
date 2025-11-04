@@ -85,7 +85,7 @@ class ShellSessionManager:
         container_name = self._get_container_name(user_id, project_id)
 
         # 5. Verify container is running
-        is_running = await self._is_container_running(user_id, project_id)
+        is_running = await self._is_container_running(user_id, project_id, project.slug)
         if not is_running:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -301,12 +301,12 @@ class ShellSessionManager:
                     # Last resort fallback (should not happen in production)
                     return get_container_name(user_id, project_id, mode="docker")
 
-    async def _is_container_running(self, user_id: UUID, project_id: str) -> bool:
+    async def _is_container_running(self, user_id: UUID, project_id: str, project_slug: str = None) -> bool:
         """Check if container/pod is running."""
         from ..dev_server_manager import get_container_manager
 
         manager = get_container_manager()
-        status = await manager.get_container_status(str(project_id), user_id)
+        status = await manager.get_container_status(str(project_id), user_id, project_slug)
         return status.get("running", False)
 
     async def _get_user_active_sessions(
