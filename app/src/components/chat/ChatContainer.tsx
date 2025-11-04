@@ -1,8 +1,7 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Loader2, FileCode, X } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { TypingIndicator } from './TypingIndicator';
 import { createWebSocket, chatApi, agentsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
@@ -11,7 +10,7 @@ import { type AgentMessageData, type Agent as BackendAgent, type DBMessage } fro
 interface Agent {
   id: string;
   name: string;
-  icon: ReactNode;
+  icon: string;  // Emoji string from backend
   active?: boolean;
   backendId?: number;  // Link to backend agent ID
   mode?: 'stream' | 'agent';
@@ -22,6 +21,8 @@ interface Message {
   type: 'user' | 'ai';
   content: string;
   agentData?: AgentMessageData;
+  agentIcon?: string;
+  agentType?: string;
   toolCalls?: Array<{
     name: string;
     description: string;
@@ -75,36 +76,77 @@ export function ChatContainer({
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const isUserScrollingRef = useRef(false);
+  const lastScrollHeightRef = useRef(0);
 
   // Load chat history from database
   useEffect(() => {
+    // Only load chat history if we have agents (prevents icon from disappearing on refresh)
+    if (initialAgents.length === 0) return;
+
     const loadChatHistory = async () => {
       try {
         const dbMessages: DBMessage[] = await chatApi.getProjectMessages(projectId);
 
-        setMessages(dbMessages.map((msg, idx) => {
+        const expandedMessages: Message[] = [];
+
+        dbMessages.forEach((msg, idx) => {
           // Map 'assistant' role to 'ai' type for frontend
           const messageType = msg.role === 'assistant' ? 'ai' : 'user';
 
-          const message: Message = {
-            id: `msg-${idx}`,
-            type: messageType,
-            content: msg.content
-          };
-
-          // Restore agent data from metadata if available
-          if (msg.message_metadata?.agent_mode) {
-            message.agentData = {
-              steps: msg.message_metadata.steps || [],
-              iterations: msg.message_metadata.iterations || 0,
-              tool_calls_made: msg.message_metadata.tool_calls_made || 0,
-              completion_reason: msg.message_metadata.completion_reason || 'unknown'
-            };
+          // For user messages or non-agent assistant messages, add as-is
+          if (messageType === 'user' || !msg.message_metadata?.agent_mode) {
+            expandedMessages.push({
+              id: `msg-${idx}`,
+              type: messageType,
+              content: msg.content
+            });
+            return;
           }
 
-          return message;
-        }));
+          // For agent messages, split iterations into separate messages
+          const agentData = initialAgents.find(a => a.name === msg.message_metadata?.agent_type);
+          const agentIcon = agentData?.icon;
+          const agentType = msg.message_metadata.agent_type;
+
+          // Add each step as a separate message (filter out steps with no content)
+          if (msg.message_metadata.steps && msg.message_metadata.steps.length > 0) {
+            msg.message_metadata.steps.forEach((step, stepIdx) => {
+              // Only add steps that have tool calls or thoughts (match AgentMessage filtering)
+              const hasContent = (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim());
+              if (!hasContent) return;
+
+              expandedMessages.push({
+                id: `msg-${idx}-step-${stepIdx}`,
+                type: 'ai',
+                content: '',
+                agentData: {
+                  steps: [step],
+                  iterations: step.iteration || stepIdx + 1,
+                  tool_calls_made: step.tool_calls?.length || 0,
+                  completion_reason: 'step_complete'
+                },
+                agentIcon,
+                agentType
+              });
+            });
+          }
+
+          // Add final response as separate message if it exists
+          if (msg.content && msg.content.trim()) {
+            expandedMessages.push({
+              id: `msg-${idx}-result`,
+              type: 'ai',
+              content: msg.content,
+              agentIcon,
+              agentType
+            });
+          }
+        });
+
+        setMessages(expandedMessages);
       } catch (error) {
         console.error('[CHAT] Failed to load chat history:', error);
         setMessages([]);
@@ -112,7 +154,7 @@ export function ChatContainer({
     };
 
     loadChatHistory();
-  }, [projectId]);
+  }, [projectId, initialAgents]);
 
   // Update agents when initialAgents prop changes
   useEffect(() => {
@@ -302,12 +344,43 @@ export function ChatContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // Auto-scroll to latest message
+  // Track user scroll behavior
   useEffect(() => {
-    if (isExpanded && messagesEndRef.current) {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+
+      // User is scrolling up if not near bottom
+      isUserScrollingRef.current = !isNearBottom;
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Smart auto-scroll: only scroll if user hasn't manually scrolled up
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!isExpanded || !container || !messagesEndRef.current) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+
+    // Only auto-scroll if:
+    // 1. User hasn't manually scrolled up (isUserScrollingRef is false)
+    // 2. OR user is already near the bottom
+    // 3. OR this is a new user message (messages array grew and last message is user type)
+    const lastMessage = messages[messages.length - 1];
+    const isNewUserMessage = lastMessage?.type === 'user';
+
+    if (isNewUserMessage || !isUserScrollingRef.current || isNearBottom) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      isUserScrollingRef.current = false; // Reset after scrolling
     }
-  }, [messages, currentStream, isExpanded]);
+  }, [messages.length, currentStream, isExpanded]); // Only depend on messages.length, not messages object itself
 
   // Collapse chat when clicking outside (including clicks on iframe/preview) - desktop only
   useEffect(() => {
@@ -434,10 +507,10 @@ export function ChatContainer({
     const controller = new AbortController();
     setAbortController(controller);
 
-    // Create placeholder AI message for streaming
-    const agentMessageId = `msg-${Date.now()}-agent`;
-    const initialAgentMessage: Message = {
-      id: agentMessageId,
+    // Create initial "thinking" message
+    const thinkingMessageId = `msg-${Date.now()}-thinking`;
+    const thinkingMessage: Message = {
+      id: thinkingMessageId,
       type: 'ai',
       content: '',
       agentData: {
@@ -446,13 +519,10 @@ export function ChatContainer({
         tool_calls_made: 0,
         completion_reason: 'in_progress',
       },
+      agentIcon: currentAgent.icon,
+      agentType: currentAgent.name,
     };
-    setMessages(prev => [...prev, initialAgentMessage]);
-
-    let currentRawContent = '';
-    let currentSteps: any[] = [];
-    let iterations = 0;
-    let toolCallsMade = 0;
+    setMessages(prev => [...prev, thinkingMessage]);
 
     try {
       await chatApi.sendAgentMessageStreaming(
@@ -463,13 +533,8 @@ export function ChatContainer({
           max_iterations: 20,
         },
         (event) => {
-          if (event.type === 'text_chunk') {
-            // Accumulate raw content but don't display it
-            // The structured steps will be displayed instead
-            currentRawContent += event.data.content;
-          } else if (event.type === 'agent_step') {
+          if (event.type === 'agent_step') {
             // Transform tool_results array to match HTTP format
-            // HTTP embeds result in each tool_call, SSE sends separate tool_results array
             const transformedStep = {
               ...event.data,
               tool_calls: event.data.tool_calls?.map((tc: any, index: number) => ({
@@ -478,100 +543,81 @@ export function ChatContainer({
                 result: event.data.tool_results?.[index] || {}
               })) || []
             };
-
-            // Remove tool_results from step since they're now embedded in tool_calls
             delete transformedStep.tool_results;
 
-            currentSteps.push(transformedStep);
-            iterations = event.data.iteration || iterations;
-            toolCallsMade += event.data.tool_calls?.length || 0;
+            // Create a new message for this step
+            const stepMessage: Message = {
+              id: `msg-${Date.now()}-step-${event.data.iteration}`,
+              type: 'ai',
+              content: '',
+              agentData: {
+                steps: [transformedStep],
+                iterations: event.data.iteration || 0,
+                tool_calls_made: event.data.tool_calls?.length || 0,
+                completion_reason: 'step_complete',
+              },
+              agentIcon: currentAgent.icon,
+              agentType: currentAgent.name,
+            };
 
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === agentMessageId
-                  ? {
-                      ...msg,
-                      agentData: {
-                        ...msg.agentData!,
-                        steps: currentSteps,
-                        iterations,
-                        tool_calls_made: toolCallsMade,
-                      },
-                    }
-                  : msg
-              )
-            );
+            // Remove thinking message, add step message, and re-add thinking message in one update
+            setMessages(prev => {
+              const withoutThinking = prev.filter(msg => msg.id !== thinkingMessageId);
+              return [...withoutThinking, stepMessage, { ...thinkingMessage, id: thinkingMessageId }];
+            });
           } else if (event.type === 'complete') {
-            // Use final_response from complete event (conversational response)
-            const finalContent = event.data.final_response || 'Task completed.';
-            iterations = event.data.iterations || iterations;
-            toolCallsMade = event.data.tool_calls_made || toolCallsMade;
+            // Remove thinking message
+            setMessages(prev => prev.filter(msg => msg.id !== thinkingMessageId));
 
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === agentMessageId
-                  ? {
-                      ...msg,
-                      content: finalContent,
-                      agentData: {
-                        ...msg.agentData!,
-                        steps: currentSteps,
-                        iterations,
-                        tool_calls_made: toolCallsMade,
-                        completion_reason: event.data.completion_reason || 'task_complete',
-                      },
-                    }
-                  : msg
-              )
-            );
+            // Add final result as separate message only if there's actual content
+            const finalContent = event.data.final_response;
+            if (finalContent && finalContent.trim()) {
+              const resultMessage: Message = {
+                id: `msg-${Date.now()}-result`,
+                type: 'ai',
+                content: finalContent,
+                agentIcon: currentAgent.icon,
+                agentType: currentAgent.name,
+              };
+              setMessages(prev => [...prev, resultMessage]);
+            }
 
             toast.success('Task completed successfully');
           } else if (event.type === 'error') {
-            // Handle error event
             throw new Error(event.data.message || 'Agent execution failed');
           }
         },
-        controller.signal // Pass abort signal
+        controller.signal
       );
     } catch (error: any) {
-      // Check if it was aborted
       if (error.name === 'AbortError') {
         console.log('[AGENT] Execution aborted by user');
 
-        // Update message to show it was stopped
-        setMessages(prev =>
-          prev.map(msg =>
-            msg.id === agentMessageId
-              ? {
-                  ...msg,
-                  content: (msg.content || '') + '\n\n_[Execution stopped by user]_',
-                  agentData: {
-                    ...msg.agentData!,
-                    completion_reason: 'stopped_by_user',
-                  },
-                }
-              : msg
-          )
-        );
+        // Remove thinking message and add stopped message
+        setMessages(prev => {
+          const withoutThinking = prev.filter(msg => msg.id !== thinkingMessageId);
+          return [...withoutThinking, {
+            id: `msg-${Date.now()}-stopped`,
+            type: 'ai',
+            content: '_[Execution stopped by user]_',
+          }];
+        });
 
-        return; // Don't show error toast for intentional stops
+        return;
       }
 
       console.error('[AGENT] Streaming execution error:', error);
 
-      // Update message with error
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.id === agentMessageId
-            ? {
-                ...msg,
-                content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
-              }
-            : msg
-        )
-      );
+      // Remove thinking message and add error message
+      setMessages(prev => {
+        const withoutThinking = prev.filter(msg => msg.id !== thinkingMessageId);
+        return [...withoutThinking, {
+          id: `msg-${Date.now()}-error`,
+          type: 'ai',
+          content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
+        }];
+      });
 
-      // Show technical error in toast
       const errorDetail = error?.message || 'Failed to execute agent';
       toast.error(errorDetail, {
         duration: 5000,
@@ -645,8 +691,6 @@ export function ChatContainer({
       }
     });
   };
-
-  const isTyping = isStreaming || agentExecuting;
 
   return (
     <>
@@ -740,6 +784,7 @@ export function ChatContainer({
 
       {/* Chat messages - only shown when expanded */}
       <div
+        ref={messagesContainerRef}
         className={`
           chat-messages
           flex-1 overflow-y-auto px-3
@@ -779,6 +824,7 @@ export function ChatContainer({
                 <AgentMessage
                   agentData={message.agentData}
                   finalResponse={message.content}
+                  agentIcon={message.agentIcon}
                 />
               </div>
             );
@@ -790,6 +836,7 @@ export function ChatContainer({
               key={message.id}
               type={message.type}
               content={renderMessageContent(message.content, false)}
+              agentIcon={message.agentIcon}
               toolCalls={message.toolCalls}
               actions={message.actions}
             />
@@ -808,9 +855,6 @@ export function ChatContainer({
 
         <div ref={messagesEndRef} />
       </div>
-
-      {/* Typing indicator */}
-      <TypingIndicator visible={isTyping && isExpanded} />
 
       {/* Chat input */}
       <div onFocus={handleInputFocus} className="px-3 py-2 pointer-events-auto">

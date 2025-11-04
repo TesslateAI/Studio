@@ -190,6 +190,13 @@ class IterativeAgent(AbstractAgent):
         for iteration in range(1, self.max_iterations + 1):
             logger.info(f"[IterativeAgent] Iteration {iteration}/{self.max_iterations}")
 
+            # DEBUG: Log full context being sent to LLM
+            logger.debug(f"[IterativeAgent] Context sent to LLM (iteration {iteration}):")
+            for idx, msg in enumerate(self.messages):
+                role = msg['role']
+                content = msg['content']
+                logger.debug(f"  Message {idx} [{role}]: {content[:500]}..." if len(content) > 500 else f"  Message {idx} [{role}]: {content}")
+
             try:
                 # Step 1: Get model response (streaming)
                 response = ""
@@ -204,6 +211,9 @@ class IterativeAgent(AbstractAgent):
                         }
                     }
 
+                # DEBUG: Log full model response
+                logger.debug(f"[IterativeAgent] Full model response (iteration {iteration}):")
+                logger.debug(f"  {response}")
                 logger.debug(f"[IterativeAgent] Model response complete: {response[:200]}...")
 
                 # Step 2: Parse response
@@ -215,6 +225,11 @@ class IterativeAgent(AbstractAgent):
                     f"[IterativeAgent] Iteration {iteration} - "
                     f"tool_calls: {len(tool_calls)}, complete: {is_complete}"
                 )
+
+                # DEBUG: Log parsed data
+                logger.debug(f"[IterativeAgent] Parsed thought: {thought}")
+                logger.debug(f"[IterativeAgent] Parsed tool_calls: {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}")
+                logger.debug(f"[IterativeAgent] Is complete: {is_complete}")
 
                 # Step 3: Execute tools if any (skip if task is complete)
                 tool_results = []
@@ -242,9 +257,21 @@ class IterativeAgent(AbstractAgent):
                 )
                 self.steps.append(step)
 
+                # Build step data with optional debug info
+                step_data = step.to_dict()
+
+                # Add debug data (only included if client requests it)
+                step_data['_debug'] = {
+                    'full_response': response,
+                    'context_messages_count': len(self.messages),
+                    'raw_tool_calls': [{'name': tc.name, 'params': tc.parameters} for tc in tool_calls],
+                    'raw_thought': thought,
+                    'is_complete': is_complete
+                }
+
                 yield {
                     'type': 'agent_step',
-                    'data': step.to_dict()
+                    'data': step_data
                 }
 
                 # Step 4: Update conversation history
@@ -271,21 +298,25 @@ class IterativeAgent(AbstractAgent):
                     }
                     return
 
-                # If no tool calls and no completion signal, assume task is done
-                if not tool_calls and iteration > 1:
-                    logger.info(f"[IterativeAgent] No tool calls in iteration {iteration}, assuming complete")
+                # If no tool calls, check if we should complete
+                if not tool_calls:
                     conversational_text = self.parser.get_conversational_text(response)
-                    yield {
-                        'type': 'complete',
-                        'data': {
-                            'success': True,
-                            'iterations': iteration,
-                            'final_response': conversational_text or response,
-                            'tool_calls_made': self.tool_calls_count,
-                            'completion_reason': 'no_more_actions'
+
+                    # Complete if there's conversational text (simple greeting/question)
+                    # OR if this is not the first iteration (agent gave up on finding actions)
+                    if conversational_text or iteration > 1:
+                        logger.info(f"[IterativeAgent] No tool calls in iteration {iteration}, assuming complete")
+                        yield {
+                            'type': 'complete',
+                            'data': {
+                                'success': True,
+                                'iterations': iteration,
+                                'final_response': conversational_text or response,
+                                'tool_calls_made': self.tool_calls_count,
+                                'completion_reason': 'no_more_actions'
+                            }
                         }
-                    }
-                    return
+                        return
 
             except Exception as e:
                 logger.error(f"[IterativeAgent] Iteration {iteration} error: {e}", exc_info=True)
