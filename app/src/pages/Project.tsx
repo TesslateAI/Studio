@@ -20,7 +20,8 @@ import {
   ArrowsClockwise,
   Kanban,
   FlowArrow,
-  List
+  List,
+  Article
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -459,6 +460,11 @@ export default function Project() {
       icon: <Storefront size={18} />,
       title: 'Agent Marketplace',
       onClick: () => navigate('/marketplace')
+    },
+    {
+      icon: <Article size={18} />,
+      title: 'Documentation',
+      onClick: () => window.open('https://docs.tesslate.com', '_blank')
     },
     {
       icon: <Gear size={18} />,
