@@ -56,24 +56,18 @@ export default function OAuthLoginCallback() {
     // If no token and no error, the backend should have set a cookie
     // Try to verify we're authenticated by checking if we can access a protected endpoint
     try {
-      const response = await fetch('/api/users/me', {
-        credentials: 'include', // Include cookies
-      });
+      // Import api from lib to use configured axios instance with credentials
+      const { authApi } = await import('../lib/api');
+      const user = await authApi.getCurrentUser();
 
-      if (response.ok) {
-        // We're authenticated via cookie, but we need JWT token for API calls
-        // The frontend will need to get the token somehow
-        // For now, show success and redirect
-        setStatus('success');
-        setMessage('Successfully signed in!');
-        toast.success('Welcome!');
+      // Successfully authenticated via cookie
+      setStatus('success');
+      setMessage('Successfully signed in!');
+      toast.success('Welcome!');
 
-        setTimeout(() => {
-          navigate('/dashboard');
-        }, 1500);
-      } else {
-        throw new Error('Authentication verification failed');
-      }
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 1500);
     } catch (err: any) {
       setStatus('error');
       setMessage('Failed to complete sign in');

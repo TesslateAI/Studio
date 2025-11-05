@@ -13,6 +13,7 @@ import uuid
 from typing import Optional
 
 from fastapi import Depends, Request
+from starlette.responses import Response
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -154,6 +155,26 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             except Exception as e:
                 logger.error(f"Failed to track referral conversion: {e}")
 
+    async def on_after_login(
+        self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
+    ):
+        """Called after successful user login."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"User {user.id} has logged in: {user.email}")
+
+        # Send Discord login notification
+        try:
+            from .services.discord_service import discord_service
+            await discord_service.send_login_notification(
+                username=user.username,
+                email=user.email,
+                user_id=str(user.id)
+            )
+        except Exception as e:
+            logger.error(f"Failed to send Discord login notification: {e}")
+
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None
     ):
@@ -215,6 +236,122 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         return user
 
+    async def oauth_callback(
+        self,
+        oauth_name: str,
+        access_token: str,
+        account_id: str,
+        account_email: str,
+        expires_at: Optional[int] = None,
+        refresh_token: Optional[str] = None,
+        request: Optional[Request] = None,
+        *,
+        associate_by_email: bool = False,
+        is_verified_by_default: bool = False,
+    ) -> User:
+        """
+        Handle OAuth callback and create/update user.
+
+        Overrides the default method to properly handle our custom fields:
+        - name: Extract from OAuth profile or generate from email
+        - username: Generate from email
+        - slug: Generate unique slug
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Try to get existing user by OAuth account
+        # get_by_oauth_account returns the User object directly, not the OAuthAccount
+        user = await self.user_db.get_by_oauth_account(oauth_name, account_id)
+
+        if user:
+            logger.info(f"Found existing OAuth account for {oauth_name} user {account_id}")
+            return user
+
+        # Try to find by email if associate_by_email is True
+        if associate_by_email:
+            try:
+                user = await self.user_db.get_by_email(account_email)
+                if user:
+                    logger.info(f"Associating existing user {user.id} with {oauth_name} account")
+                    # Create OAuth account link
+                    await self.user_db.add_oauth_account(
+                        user,
+                        {
+                            "oauth_name": oauth_name,
+                            "account_id": account_id,
+                            "account_email": account_email,
+                            "access_token": access_token,
+                            "expires_at": expires_at,
+                            "refresh_token": refresh_token,
+                        }
+                    )
+                    return user
+            except Exception as e:
+                logger.debug(f"User not found by email: {e}")
+
+        # Create new user from OAuth data
+        # Generate username from email (everything before @)
+        email_username = account_email.split('@')[0]
+        base_username = email_username.lower().replace('.', '').replace('+', '').replace('-', '')[:20]
+
+        # Make username unique by appending nanoid
+        username_suffix = generate(size=6)
+        username = f"{base_username}_{username_suffix}"
+
+        # Generate slug
+        base_slug = username.lower().replace("_", "-")
+        slug_suffix = generate(size=6)
+        slug = f"{base_slug}-{slug_suffix}"
+
+        # Generate referral code
+        referral_code = generate(size=8).upper()
+
+        # Extract name from email as fallback
+        name = email_username.replace('.', ' ').replace('_', ' ').title()
+
+        logger.info(f"Creating new user from {oauth_name} OAuth: email={account_email}, name={name}, username={username}")
+
+        # Create user with required fields
+        user_dict = {
+            "email": account_email,
+            "name": name,
+            "username": username,
+            "slug": slug,
+            "referral_code": referral_code,
+            "is_active": True,
+            "is_superuser": False,
+            "is_verified": is_verified_by_default,
+            # OAuth users don't have passwords - generate a random one they can't use
+            "hashed_password": self.password_helper.hash(generate(size=32)),
+            "subscription_tier": "free",
+            "total_spend": 0,
+            "credits_balance": 0,
+        }
+
+        user = User(**user_dict)
+        self.user_db.session.add(user)
+        await self.user_db.session.commit()
+        await self.user_db.session.refresh(user)
+
+        # Create OAuth account link
+        await self.user_db.add_oauth_account(
+            user,
+            {
+                "oauth_name": oauth_name,
+                "account_id": account_id,
+                "account_email": account_email,
+                "access_token": access_token,
+                "expires_at": expires_at,
+                "refresh_token": refresh_token,
+            }
+        )
+
+        # Call post-registration hooks
+        await self.on_after_register(user, request)
+
+        return user
+
     async def validate_password(
         self, password: str, user: UserCreate | User
     ) -> None:
@@ -253,6 +390,7 @@ cookie_transport = CookieTransport(
     cookie_secure=settings.cookie_secure,  # From environment variable
     cookie_httponly=True,  # Prevent XSS attacks
     cookie_samesite=settings.cookie_samesite,  # From environment variable
+    cookie_domain=settings.cookie_domain if settings.cookie_domain else None,  # From environment variable
 )
 
 # Bearer Transport (for API clients)

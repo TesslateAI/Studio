@@ -54,6 +54,20 @@ class Settings(BaseSettings):
     # Examples: studio.localhost (local), studio-demo.tesslate.com (production)
     app_domain: str = "studio.localhost"
 
+    # Application base URL (full URL with protocol)
+    # Format: "https://studio-demo.tesslate.com" or "http://studio.localhost"
+    # Used for OAuth redirects and other absolute URL generation
+    app_base_url: str = ""  # Will default to http://app_domain if not set
+
+    @property
+    def get_app_base_url(self) -> str:
+        """Get the full base URL for the application."""
+        if self.app_base_url:
+            return self.app_base_url
+        # Default to http:// for localhost, https:// otherwise
+        protocol = "http" if "localhost" in self.app_domain else "https"
+        return f"{protocol}://{self.app_domain}"
+
     # Traefik certificate resolver name
     # Development: "letsencrypt" (HTTP challenge)
     # Production: "cloudflare" (DNS challenge for wildcard certs)

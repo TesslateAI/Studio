@@ -8,6 +8,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true, // Send cookies with requests (for OAuth cookie-based auth)
 });
 
 /**
@@ -83,13 +84,15 @@ export const authApi = {
     localStorage.removeItem('token');
   },
 
-  // OAuth endpoints
-  getGithubAuthUrl: () => {
-    return `${API_URL}/api/auth/github/authorize`;
+  // OAuth endpoints - Fetch the authorization URL from the backend
+  getGithubAuthUrl: async () => {
+    const response = await api.get('/api/auth/github/authorize');
+    return response.data.authorization_url;
   },
 
-  getGoogleAuthUrl: () => {
-    return `${API_URL}/api/auth/google/authorize`;
+  getGoogleAuthUrl: async () => {
+    const response = await api.get('/api/auth/google/authorize');
+    return response.data.authorization_url;
   },
 };
 
