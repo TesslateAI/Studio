@@ -81,6 +81,8 @@ export function ChatContainer({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isUserScrollingRef = useRef(false);
+  const previousMessageCountRef = useRef(0);
+  const animatedMessagesRef = useRef<Set<string>>(new Set());
 
   // Load chat history from database
   useEffect(() => {
@@ -115,6 +117,7 @@ export function ChatContainer({
           const agentData = initialAgents.find(a => a.name === msg.message_metadata?.agent_type);
           const agentIcon = agentData?.icon;
           const agentType = msg.message_metadata.agent_type;
+          const finalResponse = msg.content && msg.content.trim() ? msg.content : '';
 
           // Add each step as a separate message (filter out steps with no content)
           if (msg.message_metadata.steps && msg.message_metadata.steps.length > 0) {
@@ -123,10 +126,13 @@ export function ChatContainer({
               const hasContent = (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim());
               if (!hasContent) return;
 
+              // Include final response in the last step
+              const isLastStep = stepIdx === msg.message_metadata.steps.length - 1;
+
               expandedMessages.push({
                 id: `msg-${idx}-step-${stepIdx}`,
                 type: 'ai',
-                content: '',
+                content: isLastStep ? finalResponse : '',
                 agentData: {
                   steps: [step],
                   iterations: step.iteration || stepIdx + 1,
@@ -137,14 +143,18 @@ export function ChatContainer({
                 agentType
               });
             });
-          }
-
-          // Add final response as separate message if it exists
-          if (msg.content && msg.content.trim()) {
+          } else if (finalResponse) {
+            // If no steps but has final response, create a message with empty agentData
             expandedMessages.push({
               id: `msg-${idx}-result`,
               type: 'ai',
-              content: msg.content,
+              content: finalResponse,
+              agentData: {
+                steps: [],
+                iterations: 0,
+                tool_calls_made: 0,
+                completion_reason: 'complete'
+              },
               agentIcon,
               agentType
             });
@@ -574,17 +584,36 @@ export function ChatContainer({
             // Remove thinking message
             setMessages(prev => prev.filter(msg => msg.id !== thinkingMessageId));
 
-            // Add final result as separate message only if there's actual content
+            // Add final response as part of AgentMessage (not a separate message)
             const finalContent = event.data.final_response;
             if (finalContent && finalContent.trim()) {
-              const resultMessage: Message = {
-                id: `msg-${Date.now()}-result`,
-                type: 'ai',
-                content: finalContent,
-                agentIcon: currentAgent.icon,
-                agentType: currentAgent.name,
-              };
-              setMessages(prev => [...prev, resultMessage]);
+              // Update the last agent message to include the final response
+              setMessages(prev => {
+                const lastMsg = prev[prev.length - 1];
+                if (lastMsg && lastMsg.agentData) {
+                  return [
+                    ...prev.slice(0, -1),
+                    {
+                      ...lastMsg,
+                      content: finalContent,
+                    }
+                  ];
+                }
+                // Fallback: if no agent message exists, create one
+                return [...prev, {
+                  id: `msg-${Date.now()}-result`,
+                  type: 'ai',
+                  content: finalContent,
+                  agentData: {
+                    steps: [],
+                    iterations: 0,
+                    tool_calls_made: 0,
+                    completion_reason: 'complete',
+                  },
+                  agentIcon: currentAgent.icon,
+                  agentType: currentAgent.name,
+                }];
+              });
             }
 
             toast.success('Task completed successfully');
@@ -839,10 +868,20 @@ export function ChatContainer({
         )}
 
         {messages.map((message) => {
+          // Check if this is a new message that should animate
+          const isNewMessage = !animatedMessagesRef.current.has(message.id);
+          if (isNewMessage && !isLoadingHistory) {
+            animatedMessagesRef.current.add(message.id);
+          }
+          const shouldAnimate = isNewMessage && !isLoadingHistory;
+
           // Render agent message with special component
           if (message.type === 'ai' && message.agentData) {
             return (
-              <div key={message.id} className="mb-4">
+              <div
+                key={message.id}
+                className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
+              >
                 <AgentMessage
                   agentData={message.agentData}
                   finalResponse={message.content}
@@ -854,20 +893,24 @@ export function ChatContainer({
 
           // Render regular messages
           return (
-            <ChatMessage
+            <div
               key={message.id}
-              type={message.type}
-              content={renderMessageContent(message.content, false)}
-              agentIcon={message.agentIcon}
-              toolCalls={message.toolCalls}
-              actions={message.actions}
-            />
+              className={shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}
+            >
+              <ChatMessage
+                type={message.type}
+                content={renderMessageContent(message.content, false)}
+                agentIcon={message.agentIcon}
+                toolCalls={message.toolCalls}
+                actions={message.actions}
+              />
+            </div>
           );
         })}
 
         {/* Streaming message */}
         {isStreaming && currentStream && (
-          <div className="mb-4">
+          <div className="mb-4 animate-[slideIn_0.3s_ease-out]">
             <ChatMessage
               type="ai"
               content={renderMessageContent(currentStream, true)}
