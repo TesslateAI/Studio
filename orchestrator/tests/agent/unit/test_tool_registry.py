@@ -18,7 +18,7 @@ class TestToolRegistry:
         return ToolRegistry()
 
     @pytest.fixture
-    async def mock_tool_executor(self):
+    def mock_tool_executor(self):
         """Create a mock tool executor function."""
         async def executor(params, context):
             return {
@@ -308,6 +308,16 @@ class TestScopedToolRegistry:
     """Test suite for scoped tool registries."""
 
     @pytest.fixture
+    def mock_tool_executor(self):
+        """Create a mock tool executor function."""
+        async def executor(params, context):
+            return {
+                "message": f"Executed with {params}",
+                "success": True
+            }
+        return executor
+
+    @pytest.fixture
     def populated_registry(self, mock_tool_executor):
         """Create a registry with multiple tools."""
         registry = ToolRegistry()
@@ -376,6 +386,16 @@ class TestScopedToolRegistry:
 @pytest.mark.unit
 class TestToolDataclass:
     """Test suite for Tool dataclass."""
+
+    @pytest.fixture
+    def mock_tool_executor(self):
+        """Create a mock tool executor function."""
+        async def executor(params, context):
+            return {
+                "message": f"Executed with {params}",
+                "success": True
+            }
+        return executor
 
     def test_tool_creation(self, mock_tool_executor):
         """Test creating a Tool instance."""

@@ -84,14 +84,18 @@ def format_file_size(size_bytes: int) -> str:
         size_bytes: Size in bytes
 
     Returns:
-        Formatted string (e.g., "1.5 KB", "2.3 MB")
+        Formatted string (e.g., "1.5 KB", "2.3 MB", "1.0 GB")
     """
-    if size_bytes < 1024:
+    if size_bytes == 1:
+        return "1 byte"
+    elif size_bytes < 1024:
         return f"{size_bytes} bytes"
     elif size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
-    else:
+    elif size_bytes < 1024 * 1024 * 1024:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
 
 def truncate_session_id(session_id: str, length: int = 8) -> str:
