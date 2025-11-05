@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Loader2, FileCode, X } from 'lucide-react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { createWebSocket, chatApi, agentsApi } from '../../lib/api';
+import { createWebSocket, chatApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
-import { type AgentMessageData, type Agent as BackendAgent, type DBMessage } from '../../types/agent';
+import { type AgentMessageData, type DBMessage } from '../../types/agent';
 
 interface Agent {
   id: string;
@@ -69,19 +69,18 @@ export function ChatContainer({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [backendAgents, setBackendAgents] = useState<BackendAgent[]>([]);
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<Agent>(initialCurrentAgent);
   const [isStreaming, setIsStreaming] = useState(false);
   const [agentExecuting, setAgentExecuting] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isUserScrollingRef = useRef(false);
-  const lastScrollHeightRef = useRef(0);
 
   // Load chat history from database
   useEffect(() => {
@@ -89,8 +88,9 @@ export function ChatContainer({
     if (initialAgents.length === 0) return;
 
     const loadChatHistory = async () => {
+      setIsLoadingHistory(true);
       try {
-        const dbMessages: DBMessage[] = await chatApi.getProjectMessages(projectId);
+        const dbMessages: DBMessage[] = await chatApi.getProjectMessages(projectId.toString());
 
         const expandedMessages: Message[] = [];
 
@@ -99,12 +99,15 @@ export function ChatContainer({
           const messageType = msg.role === 'assistant' ? 'ai' : 'user';
 
           // For user messages or non-agent assistant messages, add as-is
+          // Skip messages with empty content to prevent empty chat bubbles
           if (messageType === 'user' || !msg.message_metadata?.agent_mode) {
-            expandedMessages.push({
-              id: `msg-${idx}`,
-              type: messageType,
-              content: msg.content
-            });
+            if (msg.content && msg.content.trim()) {
+              expandedMessages.push({
+                id: `msg-${idx}`,
+                type: messageType,
+                content: msg.content
+              });
+            }
             return;
           }
 
@@ -152,6 +155,8 @@ export function ChatContainer({
       } catch (error) {
         console.error('[CHAT] Failed to load chat history:', error);
         setMessages([]);
+      } finally {
+        setIsLoadingHistory(false);
       }
     };
 
@@ -170,7 +175,7 @@ export function ChatContainer({
         onSelectAgent(defaultAgent);
       }
     }
-  }, [initialAgents]);
+  }, [initialAgents, currentAgent.id, onSelectAgent]);
 
   // WebSocket connection with auto-reconnect and heartbeat
   useEffect(() => {
@@ -382,7 +387,7 @@ export function ChatContainer({
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
       isUserScrollingRef.current = false; // Reset after scrolling
     }
-  }, [messages.length, currentStream, isExpanded]); // Only depend on messages.length, not messages object itself
+  }, [messages, currentStream, isExpanded]);
 
   // Collapse chat when clicking outside (including clicks on iframe/preview) - desktop only
   useEffect(() => {
@@ -443,37 +448,42 @@ export function ChatContainer({
   };
 
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [escPressCount, setEscPressCount] = useState(0);
+  const escPressCountRef = useRef(0);
   const escTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopAgentExecution = useCallback(() => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setAgentExecuting(false);
+    }
+  }, [abortController]);
 
   // ESC key handler for stopping execution
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && agentExecuting) {
-        setEscPressCount(prev => {
-          const newCount = prev + 1;
+        escPressCountRef.current += 1;
+        const newCount = escPressCountRef.current;
 
-          // Clear previous timeout
-          if (escTimeoutRef.current) {
-            clearTimeout(escTimeoutRef.current);
-          }
+        // Clear previous timeout
+        if (escTimeoutRef.current) {
+          clearTimeout(escTimeoutRef.current);
+        }
 
-          // Reset count after 500ms
-          escTimeoutRef.current = setTimeout(() => {
-            setEscPressCount(0);
-          }, 500);
+        // Reset count after 500ms
+        escTimeoutRef.current = setTimeout(() => {
+          escPressCountRef.current = 0;
+        }, 500);
 
-          // Stop execution on double ESC
-          if (newCount >= 2) {
-            stopAgentExecution();
-            setEscPressCount(0);
-            toast.success('Agent stopped (ESC pressed twice)');
-          } else {
-            toast('Press ESC again to stop agent', { duration: 500 });
-          }
-
-          return newCount;
-        });
+        // Stop execution on double ESC
+        if (newCount >= 2) {
+          stopAgentExecution();
+          escPressCountRef.current = 0;
+          toast.success('Agent stopped (ESC pressed twice)');
+        } else {
+          toast('Press ESC again to stop agent', { duration: 500 });
+        }
       }
     };
 
@@ -484,15 +494,8 @@ export function ChatContainer({
         clearTimeout(escTimeoutRef.current);
       }
     };
-  }, [agentExecuting]);
+  }, [agentExecuting, stopAgentExecution]);
 
-  const stopAgentExecution = () => {
-    if (abortController) {
-      abortController.abort();
-      setAbortController(null);
-      setAgentExecuting(false);
-    }
-  };
 
   const sendAgentMessage = async (message: string) => {
     if (!message.trim() || agentExecuting) return;
@@ -539,7 +542,7 @@ export function ChatContainer({
             // Transform tool_results array to match HTTP format
             const transformedStep = {
               ...event.data,
-              tool_calls: event.data.tool_calls?.map((tc: any, index: number) => ({
+              tool_calls: event.data.tool_calls?.map((tc: { name: string; parameters: unknown }, index: number) => ({
                 name: tc.name,
                 parameters: tc.parameters,
                 result: event.data.tool_results?.[index] || {}
@@ -591,8 +594,8 @@ export function ChatContainer({
         },
         controller.signal
       );
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') {
         console.log('[AGENT] Execution aborted by user');
 
         // Remove thinking message and add stopped message
@@ -620,7 +623,7 @@ export function ChatContainer({
         }];
       });
 
-      const errorDetail = error?.message || 'Failed to execute agent';
+      const errorDetail = error instanceof Error ? error.message : 'Failed to execute agent';
       toast.error(errorDetail, {
         duration: 5000,
       });
@@ -802,7 +805,20 @@ export function ChatContainer({
           }
         `}
       >
-        {messages.length === 0 && !isStreaming && (
+        {isLoadingHistory && (
+          <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
+            <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
+              <Loader2 className="animate-spin text-orange-500" size={32} />
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm max-w-xs mx-auto leading-relaxed">
+                Loading chat history...
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!isLoadingHistory && messages.length === 0 && !isStreaming && (
           <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
             <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
               <svg xmlns="http://www.w3.org/2000/svg" width="32" height="25" viewBox="0 0 161.9 126.66" className="text-orange-500">

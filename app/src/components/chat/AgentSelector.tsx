@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 interface Agent {
   id: string;
   name: string;
-  icon: ReactNode;
+  icon: string;  // Emoji string from backend
   active?: boolean;
+  backendId?: number;  // Link to backend agent ID
+  mode?: 'stream' | 'agent';
 }
 
 interface AgentSelectorProps {

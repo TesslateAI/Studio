@@ -7,8 +7,10 @@ import JSZip from 'jszip';
 interface Agent {
   id: string;
   name: string;
-  icon: React.ReactNode;
+  icon: string;  // Emoji string from backend
   active?: boolean;
+  backendId?: number;  // Link to backend agent ID
+  mode?: 'stream' | 'agent';
 }
 
 interface ProjectFile {
@@ -53,18 +55,22 @@ export function ChatInput({
     }
   }, []);
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
+  const sendMessage = () => {
     if (message.trim() && !disabled) {
       onSendMessage(message.trim());
       setMessage('');
     }
   };
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    sendMessage();
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit(e as any);
+      sendMessage();
     }
   };
 
@@ -138,7 +144,7 @@ export function ChatInput({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSubmit(e as any);
+                sendMessage();
               }
             }}
             placeholder={placeholder}
