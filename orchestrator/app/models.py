@@ -23,6 +23,13 @@ class Project(Base):
     git_remote_url = Column(String(500), nullable=True)
     architecture_diagram = Column(Text, nullable=True)  # Stored Mermaid diagram
     settings = Column(JSON, nullable=True)  # Project settings: preview_mode, etc.
+
+    # Deployment tracking (for billing)
+    deploy_type = Column(String, default="development")  # development, deployed
+    is_deployed = Column(Boolean, default=False)  # Quick query for deployed status
+    deployed_at = Column(DateTime(timezone=True), nullable=True)  # When deployed
+    stripe_payment_intent = Column(String, nullable=True)  # For paid deploys
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -468,3 +475,106 @@ class UserCustomModel(Base):
 
     # Relationships
     user = relationship("User", back_populates="custom_models")
+
+
+# ============================================================================
+# Billing & Transactions Models
+# ============================================================================
+
+class MarketplaceTransaction(Base):
+    """Tracks revenue from marketplace agent purchases and usage."""
+    __tablename__ = "marketplace_transactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=False)
+    creator_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # Agent creator
+
+    # Transaction details
+    transaction_type = Column(String, nullable=False)  # subscription, one_time, usage
+    amount_total = Column(Integer, nullable=False)  # Total amount in cents
+    amount_creator = Column(Integer, nullable=False)  # Creator's share (90%)
+    amount_platform = Column(Integer, nullable=False)  # Platform's share (10%)
+
+    # Stripe references
+    stripe_payment_intent = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
+    stripe_invoice_id = Column(String, nullable=True)
+
+    # Payout tracking
+    payout_status = Column(String, default="pending")  # pending, processing, paid, failed
+    payout_date = Column(DateTime(timezone=True), nullable=True)
+    stripe_payout_id = Column(String, nullable=True)
+
+    # Usage details (for API-based pricing)
+    tokens_input = Column(Integer, nullable=True)
+    tokens_output = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    creator = relationship("User", foreign_keys=[creator_id])
+    agent = relationship("MarketplaceAgent")
+
+
+class CreditPurchase(Base):
+    """Tracks user credit purchases ($5, $10, $50 packages)."""
+    __tablename__ = "credit_purchases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+    # Purchase details
+    amount_cents = Column(Integer, nullable=False)  # Amount purchased in cents ($5 = 500)
+    credits_amount = Column(Integer, nullable=False)  # Credits granted (same as amount_cents)
+
+    # Stripe references
+    stripe_payment_intent = Column(String, nullable=False, unique=True, index=True)
+    stripe_checkout_session = Column(String, nullable=True)
+
+    # Status
+    status = Column(String, default="pending")  # pending, completed, failed, refunded
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    user = relationship("User")
+
+
+class UsageLog(Base):
+    """Tracks token usage for billing purposes."""
+    __tablename__ = "usage_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id"), nullable=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
+
+    # Usage details
+    model = Column(String, nullable=False)  # Model used
+    tokens_input = Column(Integer, nullable=False)
+    tokens_output = Column(Integer, nullable=False)
+    cost_input = Column(Integer, nullable=False)  # Cost in cents
+    cost_output = Column(Integer, nullable=False)  # Cost in cents
+    cost_total = Column(Integer, nullable=False)  # Total cost in cents
+
+    # Agent creator revenue (if applicable)
+    creator_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    creator_revenue = Column(Integer, default=0)  # Creator's 90% share in cents
+    platform_revenue = Column(Integer, default=0)  # Platform's 10% share in cents
+
+    # Billing status
+    billed_status = Column(String, default="pending")  # pending, invoiced, paid
+    invoice_id = Column(String, nullable=True)  # Stripe invoice ID
+    billed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Metadata
+    request_id = Column(String, nullable=True)  # LiteLLM request ID
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    agent = relationship("MarketplaceAgent")
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[creator_id])

@@ -14,15 +14,40 @@ const api = axios.create({
 /**
  * Authentication with fastapi-users:
  * - JWT Bearer tokens for API authentication
+ * - Cookie-based OAuth authentication with CSRF protection
  * - No refresh tokens (tokens are long-lived)
  * - Redirect to login on 401 errors
  */
+
+// CSRF token management
+let csrfToken: string | null = null;
+
+export const fetchCsrfToken = async () => {
+  try {
+    const response = await api.get('/api/auth/csrf');
+    csrfToken = response.data.csrf_token;
+  } catch (error) {
+    console.error('Failed to fetch CSRF token:', error);
+  }
+};
+
+// Call fetchCsrfToken on app load
+fetchCsrfToken();
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Add CSRF token for state-changing operations when using cookie auth
+  if (['post', 'put', 'delete', 'patch'].includes(config.method?.toLowerCase() || '')) {
+    if (csrfToken && !token) {
+      // Only add CSRF token if we're using cookie-based auth (no Bearer token)
+      config.headers['X-CSRF-Token'] = csrfToken;
+    }
+  }
+
   return config;
 });
 
@@ -34,6 +59,17 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
+      }
+    }
+
+    // If error is 403 and mentions CSRF, refetch token and retry
+    if (error.response?.status === 403 &&
+        error.response?.data?.detail?.includes('CSRF')) {
+      await fetchCsrfToken();
+      // Retry the request once with new CSRF token
+      if (error.config && !error.config._retry) {
+        error.config._retry = true;
+        return api.request(error.config);
       }
     }
 
@@ -583,6 +619,125 @@ export const assetsApi = {
     const response = await api.patch(`/api/projects/${projectSlug}/assets/${assetId}/move`, {
       directory,
     });
+    return response.data;
+  },
+};
+
+// ============================================================================
+// Billing & Subscription API
+// ============================================================================
+
+export const billingApi = {
+  // Get public billing configuration
+  getConfig: async () => {
+    const response = await api.get('/api/billing/config');
+    return response.data;
+  },
+
+  // Subscription management
+  getSubscription: async () => {
+    const response = await api.get('/api/billing/subscription');
+    return response.data;
+  },
+
+  subscribe: async () => {
+    const response = await api.post('/api/billing/subscribe');
+    return response.data;
+  },
+
+  cancelSubscription: async (atPeriodEnd: boolean = true) => {
+    const response = await api.post(`/api/billing/cancel`, null, {
+      params: { at_period_end: atPeriodEnd },
+    });
+    return response.data;
+  },
+
+  getCustomerPortal: async () => {
+    const response = await api.get('/api/billing/portal');
+    return response.data;
+  },
+
+  // Credits management
+  getCreditsBalance: async () => {
+    const response = await api.get('/api/billing/credits');
+    return response.data;
+  },
+
+  purchaseCredits: async (packageType: 'small' | 'medium' | 'large') => {
+    const response = await api.post('/api/billing/credits/purchase', {
+      package: packageType,
+    });
+    return response.data;
+  },
+
+  getCreditsHistory: async (limit: number = 50, offset: number = 0) => {
+    const response = await api.get('/api/billing/credits/history', {
+      params: { limit, offset },
+    });
+    return response.data;
+  },
+
+  // Usage tracking
+  getUsage: async (startDate?: string, endDate?: string) => {
+    const response = await api.get('/api/billing/usage', {
+      params: { start_date: startDate, end_date: endDate },
+    });
+    return response.data;
+  },
+
+  syncUsage: async (startDate?: string) => {
+    const response = await api.post('/api/billing/usage/sync', {
+      start_date: startDate,
+    });
+    return response.data;
+  },
+
+  getUsageLogs: async (limit: number = 100, offset: number = 0, startDate?: string, endDate?: string) => {
+    const response = await api.get('/api/billing/usage/logs', {
+      params: { limit, offset, start_date: startDate, end_date: endDate },
+    });
+    return response.data;
+  },
+
+  // Transactions
+  getTransactions: async (limit: number = 50, offset: number = 0) => {
+    const response = await api.get('/api/billing/transactions', {
+      params: { limit, offset },
+    });
+    return response.data;
+  },
+
+  // Creator earnings
+  getEarnings: async (startDate?: string, endDate?: string) => {
+    const response = await api.get('/api/billing/earnings', {
+      params: { start_date: startDate, end_date: endDate },
+    });
+    return response.data;
+  },
+
+  connectStripe: async () => {
+    const response = await api.post('/api/billing/connect');
+    return response.data;
+  },
+
+  // Deployment management
+  getDeploymentLimits: async () => {
+    const response = await api.get('/api/projects/deployment/limits');
+    return response.data;
+  },
+
+  deployProject: async (projectSlug: string) => {
+    const response = await api.post(`/api/projects/${projectSlug}/deploy`);
+    return response.data;
+  },
+
+  undeployProject: async (projectSlug: string) => {
+    const response = await api.delete(`/api/projects/${projectSlug}/deploy`);
+    return response.data;
+  },
+
+  purchaseDeploySlot: async () => {
+    const response = await api.post('/api/projects/deployment/purchase-slot');
     return response.data;
   },
 };

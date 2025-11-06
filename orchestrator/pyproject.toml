@@ -43,6 +43,8 @@ dependencies = [
     "slowapi>=0.1.9",
     # Encryption
     "cryptography>=41.0.0",
+    # Payment processing
+    "stripe>=7.0.0",
 ]
 
 [dependency-groups]

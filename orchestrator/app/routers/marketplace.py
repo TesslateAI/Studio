@@ -510,20 +510,15 @@ async def purchase_agent(
         }
 
     # For paid agents, create Stripe checkout session
-    # This will be implemented when we add the Stripe service
-    from ..services.stripe_service import StripeService
-
-    stripe_service = StripeService()
-    settings = get_settings()
+    from ..services.stripe_service import stripe_service
 
     # Create checkout session with config-based URLs
-    protocol = "https" if settings.deployment_mode == "kubernetes" else "http"
-    base_url = f"{protocol}://{settings.app_domain}"
-    success_url = f"{base_url}/marketplace/success?agent={agent.slug}"
+    base_url = settings.get_app_base_url
+    success_url = f"{base_url}/marketplace/success?agent={agent.slug}&session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{base_url}/marketplace/agent/{agent.slug}"
 
     try:
-        session = await stripe_service.create_checkout_session(
+        session = await stripe_service.create_agent_purchase_checkout(
             user=current_user,
             agent=agent,
             success_url=success_url,
@@ -531,11 +526,19 @@ async def purchase_agent(
             db=db
         )
 
+        if not session:
+            raise HTTPException(
+                status_code=500,
+                detail="Stripe not configured or checkout creation failed"
+            )
+
         return {
             "checkout_url": session['url'] if isinstance(session, dict) else session.url,
             "session_id": session['id'] if isinstance(session, dict) else session.id,
             "agent_id": agent_id
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create Stripe checkout: {e}")
         raise HTTPException(status_code=500, detail="Failed to create checkout session")

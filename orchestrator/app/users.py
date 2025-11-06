@@ -78,6 +78,23 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         logger.info(f"User {user.id} has registered: {user.email}")
 
+        # Create Stripe customer
+        try:
+            from .services.stripe_service import stripe_service
+            customer = await stripe_service.create_customer(
+                email=user.email,
+                name=user.name,
+                metadata={"user_id": str(user.id), "username": user.username}
+            )
+
+            if customer:
+                user.stripe_customer_id = customer["id"]
+                await self.user_db.session.commit()
+                logger.info(f"Created Stripe customer for user {user.username}: {customer['id']}")
+        except Exception as e:
+            logger.error(f"Failed to create Stripe customer for user {user.username}: {e}")
+            logger.warning(f"User {user.username} registered WITHOUT Stripe customer")
+
         # Initialize LiteLLM user key
         try:
             from .services.litellm_service import litellm_service
