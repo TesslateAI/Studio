@@ -28,7 +28,10 @@ import {
   Books,
   SignOut,
   CaretDown,
-  Check
+  Check,
+  Coins,
+  CreditCard,
+  User
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -65,6 +68,8 @@ export default function Dashboard() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [userName, setUserName] = useState<string>('');
+  const [userCredits, setUserCredits] = useState<number>(0);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [containerStatuses, setContainerStatuses] = useState<Record<string, 'starting' | 'running' | 'stopped' | 'error'>>({});
 
   // Fetch current user data
@@ -73,9 +78,11 @@ export default function Dashboard() {
       try {
         const user = await authApi.getCurrentUser();
         setUserName(user.name || user.username || 'there');
+        setUserCredits(user.credits || 0);
       } catch (e) {
         console.error('Failed to fetch user data:', e);
         setUserName('there');
+        setUserCredits(0);
       }
     };
     fetchUserData();
@@ -453,15 +460,112 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Mobile hamburger menu */}
-          <button
-            onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-            className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
-          >
-            <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
+          {/* Right side - User Profile */}
+          <div className="flex items-center gap-3">
+            {/* Credits Display */}
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg">
+              <Coins size={16} className="text-[var(--primary)]" weight="fill" />
+              <span className="text-sm font-semibold text-[var(--primary)]">
+                {userCredits.toLocaleString()}
+              </span>
+            </div>
+
+            {/* User Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowUserDropdown(!showUserDropdown)}
+                className="hidden md:flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 rounded-lg transition-colors"
+              >
+                <User size={18} className="text-[var(--text)]" weight="fill" />
+                <span className="text-sm font-medium text-[var(--text)]">{userName}</span>
+                <CaretDown
+                  size={14}
+                  className={`text-[var(--text)]/60 transition-transform ${showUserDropdown ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {/* Dropdown Menu */}
+              {showUserDropdown && (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowUserDropdown(false)}
+                  />
+
+                  {/* Menu */}
+                  <div className="absolute right-0 mt-2 w-56 bg-[var(--surface)] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="py-2">
+                      {/* Credits Item */}
+                      <button
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          navigate('/billing');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <Coins size={18} className="text-[var(--primary)]" weight="fill" />
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-[var(--text)]">Credits</div>
+                          <div className="text-xs text-[var(--text)]/60">{userCredits.toLocaleString()} available</div>
+                        </div>
+                      </button>
+
+                      <div className="h-px bg-white/10 my-2" />
+
+                      {/* Subscriptions */}
+                      <button
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          navigate('/billing/plans');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <CreditCard size={18} className="text-[var(--text)]/80" />
+                        <span className="text-sm font-medium text-[var(--text)]">Subscriptions</span>
+                      </button>
+
+                      {/* Settings */}
+                      <button
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          toast('Settings coming soon!');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <Gear size={18} className="text-[var(--text)]/80" />
+                        <span className="text-sm font-medium text-[var(--text)]">Settings</span>
+                      </button>
+
+                      <div className="h-px bg-white/10 my-2" />
+
+                      {/* Logout */}
+                      <button
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          navigate('/logout');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-left group"
+                      >
+                        <SignOut size={18} className="text-red-400 group-hover:text-red-400" />
+                        <span className="text-sm font-medium text-red-400">Logout</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Mobile hamburger menu */}
+            <button
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+            >
+              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Tab Filters - Mobile */}

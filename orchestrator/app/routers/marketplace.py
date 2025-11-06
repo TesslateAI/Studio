@@ -4,7 +4,7 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -454,6 +454,7 @@ async def get_agent_details(
 @router.post("/agents/{agent_id}/purchase")
 async def purchase_agent(
     agent_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user)
 ):
@@ -512,10 +513,11 @@ async def purchase_agent(
     # For paid agents, create Stripe checkout session
     from ..services.stripe_service import stripe_service
 
-    # Create checkout session with config-based URLs
-    base_url = settings.get_app_base_url
-    success_url = f"{base_url}/marketplace/success?agent={agent.slug}&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{base_url}/marketplace/agent/{agent.slug}"
+    # Create checkout session with origin-based URLs to preserve user's domain
+    # This ensures localStorage and cookies work correctly after Stripe redirect
+    origin = request.headers.get('origin') or request.headers.get('referer', '').rstrip('/').split('?')[0].rsplit('/', 1)[0] or settings.get_app_base_url
+    success_url = f"{origin}/marketplace/success?agent={agent.slug}&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/marketplace/agent/{agent.slug}"
 
     try:
         session = await stripe_service.create_agent_purchase_checkout(
@@ -542,6 +544,232 @@ async def purchase_agent(
     except Exception as e:
         logger.error(f"Failed to create Stripe checkout: {e}")
         raise HTTPException(status_code=500, detail="Failed to create checkout session")
+
+
+@router.post("/verify-purchase")
+async def verify_agent_purchase(
+    session_id: str = Body(..., embed=True),
+    agent_slug: Optional[str] = Body(None, embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Verify a Stripe checkout session and add the agent to the user's library.
+    Called after successful checkout redirect.
+    """
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
+    if not stripe_service.stripe:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    try:
+        # Retrieve the checkout session from Stripe
+        session = stripe_lib.checkout.Session.retrieve(
+            session_id,
+            expand=['line_items', 'subscription']
+        )
+
+        # Verify session is complete
+        if session.payment_status != 'paid':
+            raise HTTPException(
+                status_code=400,
+                detail="Payment not completed"
+            )
+
+        # Verify the customer matches the current user
+        user_billing = await db.execute(
+            select(User).where(User.id == current_user.id)
+        )
+        user = user_billing.scalar_one()
+
+        if not user.stripe_customer_id or user.stripe_customer_id != session.customer:
+            raise HTTPException(
+                status_code=403,
+                detail="Session customer does not match user"
+            )
+
+        # Get agent from metadata or slug parameter
+        agent_id_from_metadata = session.metadata.get('agent_id') if session.metadata else None
+
+        # Try to find agent by ID from metadata or by slug
+        query = select(MarketplaceAgent)
+        if agent_id_from_metadata:
+            query = query.where(MarketplaceAgent.id == agent_id_from_metadata)
+        elif agent_slug:
+            query = query.where(MarketplaceAgent.slug == agent_slug)
+        else:
+            raise HTTPException(status_code=400, detail="No agent identifier provided")
+
+        result = await db.execute(query)
+        agent = result.scalar_one_or_none()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Check if user already has this agent
+        existing_query = select(UserPurchasedAgent).where(
+            and_(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.agent_id == agent.id
+            )
+        )
+        existing_result = await db.execute(existing_query)
+        existing_purchase = existing_result.scalar_one_or_none()
+
+        if existing_purchase:
+            # Update existing purchase with new subscription ID
+            existing_purchase.stripe_subscription_id = session.subscription.id if session.subscription else None
+            existing_purchase.stripe_payment_intent = session.payment_intent
+            existing_purchase.is_active = True
+            existing_purchase.purchase_date = datetime.now(timezone.utc)
+
+            if session.subscription:
+                # Subscription - set expires_at to None (ongoing)
+                existing_purchase.expires_at = None
+                existing_purchase.purchase_type = "monthly"
+            else:
+                # One-time payment - set expiration if applicable
+                existing_purchase.purchase_type = "one_time"
+        else:
+            # Create new purchase record
+            new_purchase = UserPurchasedAgent(
+                user_id=current_user.id,
+                agent_id=agent.id,
+                stripe_payment_intent=session.payment_intent,
+                stripe_subscription_id=session.subscription.id if session.subscription else None,
+                purchase_type="monthly" if session.subscription else "one_time",
+                purchase_date=datetime.now(timezone.utc),
+                is_active=True,
+                expires_at=None if session.subscription else None,  # Subscriptions don't expire until cancelled
+                selected_model=agent.model
+            )
+            db.add(new_purchase)
+
+        # Update agent download count
+        agent.downloads += 1
+
+        await db.commit()
+
+        return {
+            "success": True,
+            "message": "Agent added to your library",
+            "agent_id": str(agent.id),
+            "agent_name": agent.name
+        }
+
+    except stripe_lib.error.StripeError as e:
+        logger.error(f"Stripe error during purchase verification: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to verify payment: {str(e)}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to verify purchase: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to verify purchase"
+        )
+
+
+@router.get("/subscriptions")
+async def get_user_subscriptions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Get all active agent subscriptions for the current user.
+    """
+    # Get all purchased agents with active subscriptions
+    query = select(UserPurchasedAgent, MarketplaceAgent).join(
+        MarketplaceAgent,
+        UserPurchasedAgent.agent_id == MarketplaceAgent.id
+    ).where(
+        and_(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.is_active == True,
+            UserPurchasedAgent.purchase_type == "monthly",
+            UserPurchasedAgent.stripe_subscription_id.isnot(None)
+        )
+    )
+
+    result = await db.execute(query)
+    purchases = result.all()
+
+    subscriptions = []
+    for purchase, agent in purchases:
+        subscriptions.append({
+            "id": str(purchase.id),
+            "agent_id": str(agent.id),
+            "name": agent.name,
+            "slug": agent.slug,
+            "icon": agent.icon,
+            "price": agent.price,
+            "subscription_id": purchase.stripe_subscription_id,
+            "purchase_date": purchase.purchase_date.isoformat(),
+            "is_active": purchase.is_active
+        })
+
+    return subscriptions
+
+
+@router.post("/subscriptions/{subscription_id}/cancel")
+async def cancel_agent_subscription(
+    subscription_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Cancel an agent subscription.
+    """
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
+    if not stripe_service.stripe:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    try:
+        # Find the purchase record with this subscription ID
+        query = select(UserPurchasedAgent).where(
+            and_(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.stripe_subscription_id == subscription_id
+            )
+        )
+        result = await db.execute(query)
+        purchase = result.scalar_one_or_none()
+
+        if not purchase:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Cancel the subscription in Stripe
+        subscription = stripe_lib.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=True
+        )
+
+        logger.info(f"Cancelled agent subscription {subscription_id} for user {current_user.id}")
+
+        return {
+            "success": True,
+            "message": "Subscription will be cancelled at the end of the billing period",
+            "cancel_at": subscription.cancel_at
+        }
+
+    except stripe_lib.error.StripeError as e:
+        logger.error(f"Stripe error during subscription cancellation: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to cancel subscription: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to cancel subscription: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to cancel subscription"
+        )
 
 
 @router.post("/agents/{agent_id}/fork")

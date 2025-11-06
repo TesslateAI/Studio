@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import { Preloader } from '../components/Preloader';
 import { CheckCircle, XCircle } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 
@@ -15,6 +16,7 @@ export default function OAuthLoginCallback() {
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('Completing sign in...');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [showPreloader, setShowPreloader] = useState(false);
 
   useEffect(() => {
     handleOAuthCallback();
@@ -47,9 +49,10 @@ export default function OAuthLoginCallback() {
       setMessage('Successfully signed in!');
       toast.success('Welcome back!');
 
+      // Show preloader before navigating
       setTimeout(() => {
-        navigate('/dashboard');
-      }, 1500);
+        setShowPreloader(true);
+      }, 800);
       return;
     }
 
@@ -65,9 +68,10 @@ export default function OAuthLoginCallback() {
       setMessage('Successfully signed in!');
       toast.success('Welcome!');
 
+      // Show preloader before navigating
       setTimeout(() => {
-        navigate('/dashboard');
-      }, 1500);
+        setShowPreloader(true);
+      }, 800);
     } catch (err: any) {
       setStatus('error');
       setMessage('Failed to complete sign in');
@@ -103,7 +107,9 @@ export default function OAuthLoginCallback() {
   };
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center p-4">
+    <>
+      {showPreloader && <Preloader onComplete={() => navigate('/dashboard')} />}
+      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center p-4">
       <div className="max-w-md w-full">
         <div className="bg-[#0a0a0a] rounded-3xl p-8 shadow-2xl border border-gray-800">
           {/* Status Icon */}
@@ -156,5 +162,6 @@ export default function OAuthLoginCallback() {
         </div>
       </div>
     </div>
+    </>
   );
 }

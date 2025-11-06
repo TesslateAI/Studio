@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
+import { Preloader } from '../components/Preloader';
 import toast from 'react-hot-toast';
 
 export default function Login() {
@@ -12,6 +13,7 @@ export default function Login() {
     password: '',
   });
   const [loading, setLoading] = useState(false);
+  const [showPreloader, setShowPreloader] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +24,12 @@ export default function Login() {
       localStorage.setItem('token', response.access_token);
 
       toast.success('Logged in successfully!');
-      navigate('/dashboard');
+      setLoading(false);
+
+      // Show preloader before navigating
+      setTimeout(() => {
+        setShowPreloader(true);
+      }, 300);
     } catch (error: any) {
       // Handle validation errors (array format from FastAPI/Pydantic)
       if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
@@ -70,7 +77,9 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <>
+      {showPreloader && <Preloader onComplete={() => navigate('/dashboard')} />}
+      <div className="min-h-screen flex">
       {/* Left side - White form section */}
       <div className="w-full lg:w-1/2 bg-white flex items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-md">
@@ -260,5 +269,6 @@ export default function Login() {
         `}</style>
       </div>
     </div>
+    </>
   );
 }

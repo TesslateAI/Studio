@@ -32,8 +32,8 @@ const SubscriptionPlans: React.FC = () => {
         billingApi.getSubscription(),
       ]);
 
-      setConfig(configRes.data);
-      setSubscription(subRes.data);
+      setConfig(configRes);
+      setSubscription(subRes);
     } catch (err: any) {
       console.error('Failed to load billing data:', err);
       setError(err.response?.data?.detail || 'Failed to load billing information');
@@ -52,8 +52,8 @@ const SubscriptionPlans: React.FC = () => {
       const response = await billingApi.subscribe();
 
       // Redirect to Stripe Checkout
-      if (response.data.url) {
-        window.location.href = response.data.url;
+      if (response.url) {
+        window.location.href = response.url;
       } else {
         throw new Error('No checkout URL received');
       }
@@ -69,8 +69,8 @@ const SubscriptionPlans: React.FC = () => {
       const response = await billingApi.getCustomerPortal();
 
       // Redirect to Stripe Customer Portal
-      if (response.data.url) {
-        window.location.href = response.data.url;
+      if (response.url) {
+        window.location.href = response.url;
       }
     } catch (err: any) {
       console.error('Failed to open customer portal:', err);

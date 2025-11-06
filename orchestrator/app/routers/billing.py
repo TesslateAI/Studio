@@ -2,7 +2,7 @@
 Billing and subscription management endpoints.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from typing import Optional, List, Dict, Any
@@ -111,6 +111,7 @@ async def get_subscription(
 
 @router.post("/subscribe", response_model=CheckoutSessionResponse)
 async def create_subscription(
+    request: Request,
     user: AuthUser = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -124,9 +125,10 @@ async def create_subscription(
             detail="Already subscribed to premium"
         )
 
-    # Create checkout session
-    success_url = f"{settings.get_app_base_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{settings.get_app_base_url}/billing/cancel"
+    # Create checkout session with origin-based URLs to preserve user's domain
+    origin = request.headers.get('origin') or request.headers.get('referer', '').rstrip('/').split('?')[0].rsplit('/', 1)[0] or settings.get_app_base_url
+    success_url = f"{origin}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/billing/cancel"
 
     session = await stripe_service.create_subscription_checkout(
         user=user,
@@ -193,6 +195,7 @@ async def cancel_subscription(
 
 @router.get("/portal")
 async def get_customer_portal(
+    request: Request,
     user: AuthUser = Depends(current_active_user)
 ):
     """
@@ -210,10 +213,13 @@ async def get_customer_portal(
             detail="Stripe not configured"
         )
 
+    # Use origin-based URL to preserve user's domain
+    origin = request.headers.get('origin') or request.headers.get('referer', '').rstrip('/').split('?')[0].rsplit('/', 1)[0] or settings.get_app_base_url
+
     try:
         portal_session = stripe_service.stripe.billing_portal.Session.create(
             customer=user.stripe_customer_id,
-            return_url=f"{settings.get_app_base_url}/billing"
+            return_url=f"{origin}/billing"
         )
 
         return {"url": portal_session.url}
@@ -244,6 +250,7 @@ async def get_credits_balance(
 @router.post("/credits/purchase", response_model=CheckoutSessionResponse)
 async def purchase_credits(
     request: CreditPurchaseRequest,
+    http_request: Request,
     user: AuthUser = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -265,9 +272,10 @@ async def purchase_credits(
 
     amount_cents = package_amounts[request.package]
 
-    # Create checkout session
-    success_url = f"{settings.get_app_base_url}/billing/credits/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{settings.get_app_base_url}/billing/credits/cancel"
+    # Create checkout session with origin-based URLs to preserve user's domain
+    origin = http_request.headers.get('origin') or http_request.headers.get('referer', '').rstrip('/').split('?')[0].rsplit('/', 1)[0] or settings.get_app_base_url
+    success_url = f"{origin}/billing/credits/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/billing/credits/cancel"
 
     session = await stripe_service.create_credit_purchase_checkout(
         user=user,
@@ -545,14 +553,17 @@ async def get_creator_earnings(
 
 @router.post("/connect")
 async def connect_stripe_account(
+    request: Request,
     user: AuthUser = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Create Stripe Connect onboarding link for receiving payouts.
     """
-    refresh_url = f"{settings.get_app_base_url}/billing/connect/refresh"
-    return_url = f"{settings.get_app_base_url}/billing/connect/complete"
+    # Use origin-based URLs to preserve user's domain
+    origin = request.headers.get('origin') or request.headers.get('referer', '').rstrip('/').split('?')[0].rsplit('/', 1)[0] or settings.get_app_base_url
+    refresh_url = f"{origin}/billing/connect/refresh"
+    return_url = f"{origin}/billing/connect/complete"
 
     url = await stripe_service.create_connect_account_link(
         user=user,
