@@ -35,10 +35,10 @@ const BillingDashboard: React.FC = () => {
         billingApi.getCreditsHistory(10, 0),
       ]);
 
-      setSubscription(subRes.data);
-      setCredits(creditsRes.data);
-      setTransactions(transRes.data.transactions);
-      setCreditHistory(historyRes.data.purchases);
+      setSubscription(subRes);
+      setCredits(creditsRes);
+      setTransactions(transRes.transactions);
+      setCreditHistory(historyRes.purchases);
     } catch (err: any) {
       console.error('Failed to load billing data:', err);
       setError(err.response?.data?.detail || 'Failed to load billing information');
@@ -75,12 +75,21 @@ const BillingDashboard: React.FC = () => {
   const handleManageSubscription = async () => {
     try {
       const response = await billingApi.getCustomerPortal();
-      if (response.data.url) {
-        window.location.href = response.data.url;
+      if (response.url) {
+        window.location.href = response.url;
       }
     } catch (err: any) {
       console.error('Failed to open customer portal:', err);
-      setError(err.response?.data?.detail || 'Failed to open customer portal');
+      const errorDetail = err.response?.data?.detail || 'Failed to open customer portal';
+
+      // If portal not configured, redirect to library subscriptions tab
+      if (err.response?.status === 503 || errorDetail.includes('not configured')) {
+        if (confirm(errorDetail + '\n\nWould you like to go to Library > Subscriptions to manage your subscription?')) {
+          window.location.href = '/library?tab=subscriptions';
+        }
+      } else {
+        setError(errorDetail);
+      }
     }
   };
 

@@ -74,7 +74,16 @@ const SubscriptionPlans: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Failed to open customer portal:', err);
-      setError(err.response?.data?.detail || 'Failed to open customer portal');
+      const errorDetail = err.response?.data?.detail || 'Failed to open customer portal';
+
+      // If portal not configured, redirect to library subscriptions tab
+      if (err.response?.status === 503 || errorDetail.includes('not configured')) {
+        if (confirm(errorDetail + '\n\nWould you like to go to Library > Subscriptions to manage your subscription?')) {
+          window.location.href = '/library?tab=subscriptions';
+        }
+      } else {
+        setError(errorDetail);
+      }
     }
   };
 
@@ -218,12 +227,21 @@ const SubscriptionPlans: React.FC = () => {
               ))}
             </ul>
 
-            <button
-              disabled
-              className="w-full py-3 px-6 rounded-lg bg-gray-100 text-gray-500 font-semibold cursor-not-allowed"
-            >
-              Current Plan
-            </button>
+            {!isCurrentlyPremium ? (
+              <button
+                disabled
+                className="w-full py-3 px-6 rounded-lg bg-gray-100 text-gray-500 font-semibold cursor-not-allowed"
+              >
+                Current Plan
+              </button>
+            ) : (
+              <button
+                disabled
+                className="w-full py-3 px-6 rounded-lg bg-gray-200 text-gray-600 font-semibold cursor-not-allowed opacity-50"
+              >
+                Downgrade (Contact Support)
+              </button>
+            )}
           </div>
 
           {/* Premium Plan */}

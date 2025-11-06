@@ -69,6 +69,7 @@ export default function Dashboard() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [userName, setUserName] = useState<string>('');
   const [userCredits, setUserCredits] = useState<number>(0);
+  const [userTier, setUserTier] = useState<string>('free');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [containerStatuses, setContainerStatuses] = useState<Record<string, 'starting' | 'running' | 'stopped' | 'error'>>({});
 
@@ -78,11 +79,13 @@ export default function Dashboard() {
       try {
         const user = await authApi.getCurrentUser();
         setUserName(user.name || user.username || 'there');
-        setUserCredits(user.credits || 0);
+        setUserCredits(user.credits_balance || 0);
+        setUserTier(user.subscription_tier || 'free');
       } catch (e) {
         console.error('Failed to fetch user data:', e);
         setUserName('there');
         setUserCredits(0);
+        setUserTier('free');
       }
     };
     fetchUserData();
@@ -478,6 +481,11 @@ export default function Dashboard() {
               >
                 <User size={18} className="text-[var(--text)]" weight="fill" />
                 <span className="text-sm font-medium text-[var(--text)]">{userName}</span>
+                {userTier === 'pro' && (
+                  <span className="px-2 py-0.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white text-xs font-bold rounded-md">
+                    PRO
+                  </span>
+                )}
                 <CaretDown
                   size={14}
                   className={`text-[var(--text)]/60 transition-transform ${showUserDropdown ? 'rotate-180' : ''}`}

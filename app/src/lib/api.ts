@@ -472,6 +472,12 @@ export const marketplaceApi = {
     const response = await api.post(`/api/marketplace/subscriptions/${subscriptionId}/cancel`);
     return response.data;
   },
+
+  // Renew a cancelled agent subscription
+  renewAgentSubscription: async (subscriptionId: string) => {
+    const response = await api.post(`/api/marketplace/subscriptions/${subscriptionId}/renew`);
+    return response.data;
+  },
 };
 
 export const agentsApi = {
@@ -670,6 +676,11 @@ export const billingApi = {
     const response = await api.post(`/api/billing/cancel`, null, {
       params: { at_period_end: atPeriodEnd },
     });
+    return response.data;
+  },
+
+  renewSubscription: async () => {
+    const response = await api.post('/api/billing/renew');
     return response.data;
   },
 

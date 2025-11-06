@@ -34,6 +34,10 @@ class SubscriptionResponse(BaseModel):
     stripe_customer_id: Optional[str] = None
     max_projects: int
     max_deploys: int
+    current_period_start: Optional[str] = None  # ISO format date string
+    current_period_end: Optional[str] = None    # ISO format date string
+    cancel_at_period_end: Optional[bool] = None
+    cancel_at: Optional[str] = None             # ISO format date string
 
     class Config:
         from_attributes = True
@@ -91,6 +95,9 @@ async def get_subscription(
     """
     Get current subscription status for the user.
     """
+    from datetime import datetime
+    import stripe as stripe_lib
+
     # Determine limits based on tier
     if user.subscription_tier == "pro":
         max_projects = settings.premium_max_projects
@@ -99,13 +106,55 @@ async def get_subscription(
         max_projects = settings.free_max_projects
         max_deploys = settings.free_max_deploys
 
+    # Fetch subscription details from Stripe if user has an active subscription
+    current_period_start = None
+    current_period_end = None
+    cancel_at_period_end = None
+    cancel_at = None
+
+    if user.subscription_tier == "pro" and user.stripe_subscription_id and stripe_service.stripe:
+        try:
+            subscription = stripe_lib.Subscription.retrieve(user.stripe_subscription_id)
+            # Stripe objects support both attribute and dict access
+            print(f"DEBUG: Subscription type: {type(subscription)}")
+            print(f"DEBUG: Subscription keys: {dir(subscription)[:10]}")
+
+            # Stripe subscription object - access directly via attributes
+            # start_date = when subscription was created
+            # billing_cycle_anchor = current period start (Unix timestamp)
+            print(f"DEBUG: Accessing subscription attributes directly")
+            print(f"DEBUG: start_date = {subscription.start_date}")
+            print(f"DEBUG: billing_cycle_anchor = {subscription.billing_cycle_anchor}")
+
+            # Use start_date as subscription start
+            current_period_start = datetime.fromtimestamp(subscription.start_date).isoformat()
+
+            # Calculate next billing date from billing_cycle_anchor (add 1 month)
+            from dateutil.relativedelta import relativedelta
+            billing_anchor_date = datetime.fromtimestamp(subscription.billing_cycle_anchor)
+            next_billing_date = billing_anchor_date + relativedelta(months=1)
+            current_period_end = next_billing_date.isoformat()
+
+            cancel_at_period_end = subscription.cancel_at_period_end
+            if subscription.cancel_at:
+                cancel_at = datetime.fromtimestamp(subscription.cancel_at).isoformat()
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Error fetching subscription details: {e}")
+            import traceback
+            traceback.print_exc()
+
     return SubscriptionResponse(
         tier=user.subscription_tier,
         is_active=user.subscription_tier != "free",
         subscription_id=user.stripe_subscription_id,
         stripe_customer_id=user.stripe_customer_id,
         max_projects=max_projects,
-        max_deploys=max_deploys
+        max_deploys=max_deploys,
+        current_period_start=current_period_start,
+        current_period_end=current_period_end,
+        cancel_at_period_end=cancel_at_period_end,
+        cancel_at=cancel_at
     )
 
 
@@ -193,6 +242,42 @@ async def cancel_subscription(
     }
 
 
+@router.post("/renew")
+async def renew_subscription(
+    user: AuthUser = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Renew a cancelled subscription (reactivate before it ends).
+    """
+    if user.subscription_tier == "free":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active subscription"
+        )
+
+    if not user.stripe_subscription_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No subscription ID found"
+        )
+
+    success = await stripe_service.renew_subscription(
+        subscription_id=user.stripe_subscription_id
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to renew subscription"
+        )
+
+    return {
+        "success": True,
+        "message": "Subscription has been renewed and will continue after the current period"
+    }
+
+
 @router.get("/portal")
 async def get_customer_portal(
     request: Request,
@@ -224,9 +309,16 @@ async def get_customer_portal(
 
         return {"url": portal_session.url}
     except Exception as e:
+        error_msg = str(e)
+        # Check if it's a portal configuration error
+        if "No configuration" in error_msg or "default configuration has not been created" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe Customer Portal not configured. Please use Library > Subscriptions tab to manage your subscription, or contact support."
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create portal session: {str(e)}"
+            detail=f"Failed to create portal session: {error_msg}"
         )
 
 

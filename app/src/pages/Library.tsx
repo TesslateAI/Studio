@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package,
   Pencil,
@@ -156,7 +156,9 @@ const getToolIcon = (toolName: string): { icon: React.ReactNode; label: string }
 export default function Library() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState<TabType>('agents');
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab') as TabType | null;
+  const [activeTab, setActiveTab] = useState<TabType>(tabParam || 'agents');
   const [agents, setAgents] = useState<LibraryAgent[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [externalProviders, setExternalProviders] = useState<ExternalProvider[]>([]);
@@ -711,7 +713,12 @@ function ModelsTab({
           </div>
           <div className="flex-1">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">OpenRouter Integration</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-bold text-[var(--text)]">OpenRouter Integration</h2>
+                <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+                  FREE (Limited Time)
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowAddApiKey(true)}
@@ -732,7 +739,7 @@ function ModelsTab({
               </div>
             </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
-              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more.
+              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more. <span className="text-orange-400 font-medium">Currently free for all users</span> — this will become a premium subscription feature in the future.
             </p>
 
             {/* API Keys List */}
@@ -796,10 +803,15 @@ function ModelsTab({
             <ChartLine size={24} className="text-orange-400" />
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold text-[var(--text)] mb-2">Architecture Diagram Generation</h2>
+            <div className="flex items-center gap-3 mb-2">
+              <h2 className="text-xl font-bold text-[var(--text)]">Architecture Diagram Generation</h2>
+              <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+                FREE (Limited Time)
+              </span>
+            </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
               Select which AI model to use for generating architecture diagrams of your projects.
-              This model will analyze your code and create Mermaid diagrams showing component relationships.
+              This model will analyze your code and create Mermaid diagrams showing component relationships. <span className="text-orange-400 font-medium">Currently free for all users</span> — this feature will become paid in the future.
             </p>
           </div>
         </div>
@@ -908,8 +920,15 @@ function ModelsTab({
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-2xl font-bold text-[var(--text)] mb-1">Available Models</h2>
-            <p className="text-[var(--text)]/60">Models you can use right now</p>
+            <div className="flex items-center gap-3 mb-1">
+              <h2 className="text-2xl font-bold text-[var(--text)]">Available Models</h2>
+              <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+                FREE (Limited Time)
+              </span>
+            </div>
+            <p className="text-[var(--text)]/60">
+              <span className="text-orange-400 font-medium">Currently free for all users</span> — these models will become paid features in the future. Use them now while they're complimentary!
+            </p>
           </div>
           <div className="text-sm text-[var(--text)]/40">
             {systemModels.length} models available
@@ -1858,10 +1877,22 @@ function SubscriptionsTab() {
     try {
       // Load premium subscription status
       const subscription = await billingApi.getSubscription();
+      console.log('DEBUG: Premium subscription data:', subscription);
+      console.log('DEBUG: cancel_at_period_end:', subscription?.cancel_at_period_end);
+      console.log('DEBUG: current_period_start:', subscription?.current_period_start);
+      console.log('DEBUG: current_period_end:', subscription?.current_period_end);
       setPremiumSubscription(subscription);
 
       // Load agent subscriptions
       const agents = await marketplaceApi.getUserSubscriptions();
+      console.log('DEBUG: Agent subscriptions loaded:', agents);
+      agents.forEach((agent, idx) => {
+        console.log(`DEBUG: Agent ${idx}:`, {
+          name: agent.name,
+          purchase_type: agent.purchase_type,
+          subscription_id: agent.subscription_id,
+        });
+      });
       setAgentSubscriptions(agents);
     } catch (error) {
       console.error('Failed to load subscriptions:', error);
@@ -1872,6 +1903,14 @@ function SubscriptionsTab() {
   };
 
   const handleCancelSubscription = async (subscriptionId: string, type: 'premium' | 'agent') => {
+    console.log('DEBUG: handleCancelSubscription called:', { subscriptionId, type });
+
+    if (!subscriptionId) {
+      console.error('DEBUG: No subscription ID provided!');
+      toast.error('Cannot cancel: Missing subscription ID');
+      return;
+    }
+
     if (!confirm(`Are you sure you want to cancel this subscription? You'll continue to have access until the end of your billing period.`)) {
       return;
     }
@@ -1879,9 +1918,11 @@ function SubscriptionsTab() {
     setCancelingId(subscriptionId);
     try {
       if (type === 'premium') {
+        console.log('DEBUG: Cancelling premium subscription');
         await billingApi.cancelSubscription();
         toast.success('Premium subscription cancelled');
       } else {
+        console.log('DEBUG: Cancelling agent subscription:', subscriptionId);
         await marketplaceApi.cancelAgentSubscription(subscriptionId);
         toast.success('Agent subscription cancelled');
       }
@@ -1889,6 +1930,39 @@ function SubscriptionsTab() {
     } catch (error: any) {
       console.error('Failed to cancel subscription:', error);
       toast.error(error.response?.data?.detail || 'Failed to cancel subscription');
+    } finally {
+      setCancelingId(null);
+    }
+  };
+
+  const handleRenewSubscription = async (subscriptionId: string, type: 'premium' | 'agent') => {
+    console.log('DEBUG: handleRenewSubscription called:', { subscriptionId, type });
+
+    if (!subscriptionId) {
+      console.error('DEBUG: No subscription ID provided!');
+      toast.error('Cannot renew: Missing subscription ID');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to renew this subscription? It will continue automatically after the current period.`)) {
+      return;
+    }
+
+    setCancelingId(subscriptionId);
+    try {
+      if (type === 'premium') {
+        console.log('DEBUG: Renewing premium subscription');
+        await billingApi.renewSubscription();
+        toast.success('Premium subscription renewed');
+      } else {
+        console.log('DEBUG: Renewing agent subscription:', subscriptionId);
+        await marketplaceApi.renewAgentSubscription(subscriptionId);
+        toast.success('Agent subscription renewed');
+      }
+      await loadSubscriptions();
+    } catch (error: any) {
+      console.error('Failed to renew subscription:', error);
+      toast.error(error.response?.data?.detail || 'Failed to renew subscription');
     } finally {
       setCancelingId(null);
     }
@@ -1929,9 +2003,21 @@ function SubscriptionsTab() {
                     Active Premium Subscription
                   </span>
                 </div>
-                <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
-                  You have access to all premium features
-                </p>
+
+                {/* Subscription dates */}
+                <div className="mb-3 text-sm space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                  {premiumSubscription.current_period_start && (
+                    <div>Started: {new Date(premiumSubscription.current_period_start).toLocaleDateString()}</div>
+                  )}
+                  {premiumSubscription.cancel_at_period_end && premiumSubscription.current_period_end ? (
+                    <div className="text-orange-500">
+                      Cancels on: {new Date(premiumSubscription.current_period_end).toLocaleDateString()} ({Math.ceil((new Date(premiumSubscription.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days remaining)
+                    </div>
+                  ) : premiumSubscription.current_period_end ? (
+                    <div>Renews: {new Date(premiumSubscription.current_period_end).toLocaleDateString()}</div>
+                  ) : null}
+                </div>
+
                 <div className="space-y-2 text-sm" style={{ color: 'var(--text)', opacity: 0.8 }}>
                   <div className="flex items-center gap-2">
                     <Check size={16} className="text-green-500" />
@@ -1948,13 +2034,23 @@ function SubscriptionsTab() {
                 </div>
               </div>
 
-              <button
-                onClick={() => handleCancelSubscription(premiumSubscription.subscription_id, 'premium')}
-                disabled={cancelingId === premiumSubscription.subscription_id}
-                className="px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
-              >
-                {cancelingId === premiumSubscription.subscription_id ? 'Canceling...' : 'Cancel'}
-              </button>
+              {!premiumSubscription.cancel_at_period_end ? (
+                <button
+                  onClick={() => handleCancelSubscription(premiumSubscription.subscription_id, 'premium')}
+                  disabled={cancelingId === premiumSubscription.subscription_id}
+                  className="px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+                >
+                  {cancelingId === premiumSubscription.subscription_id ? 'Canceling...' : 'Cancel'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleRenewSubscription(premiumSubscription.subscription_id, 'premium')}
+                  disabled={cancelingId === premiumSubscription.subscription_id}
+                  className="px-4 py-2 text-sm font-medium text-green-500 hover:bg-green-500/10 rounded-lg transition disabled:opacity-50"
+                >
+                  {cancelingId === premiumSubscription.subscription_id ? 'Renewing...' : 'Renew'}
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -1978,12 +2074,12 @@ function SubscriptionsTab() {
         )}
       </div>
 
-      {/* Agent Subscriptions */}
+      {/* Agent Subscriptions & Purchases */}
       <div>
         <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
           <div className="flex items-center gap-2">
             <Package size={20} weight="fill" />
-            Agent Subscriptions
+            Purchased Agents & Subscriptions
           </div>
         </h2>
 
@@ -1997,7 +2093,7 @@ function SubscriptionsTab() {
           >
             <Package size={48} weight="fill" style={{ color: 'var(--text)', opacity: 0.3 }} className="mx-auto mb-3" />
             <p className="text-sm" style={{ color: 'var(--text)', opacity: 0.7 }}>
-              No active agent subscriptions
+              No purchased agents yet
             </p>
             <button
               onClick={() => window.location.href = '/marketplace'}
@@ -2008,46 +2104,82 @@ function SubscriptionsTab() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {agentSubscriptions.map((sub) => (
-              <div
-                key={sub.id}
-                className="rounded-xl p-4 border"
-                style={{
-                  backgroundColor: 'var(--surface)',
-                  borderColor: 'rgba(255, 255, 255, 0.1)'
-                }}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="text-2xl">{sub.icon || '🤖'}</div>
-                    <div>
-                      <h3 className="font-medium" style={{ color: 'var(--text)' }}>
-                        {sub.name}
-                      </h3>
-                      <p className="text-xs" style={{ color: 'var(--text)', opacity: 0.6 }}>
-                        ${(sub.price / 100).toFixed(2)}/month
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleCancelSubscription(sub.subscription_id, 'agent')}
-                    disabled={cancelingId === sub.subscription_id}
-                    className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
-                    title="Cancel subscription"
-                  >
-                    <XCircle size={20} />
-                  </button>
-                </div>
+            {agentSubscriptions.map((sub) => {
+              const isSubscription = (sub.purchase_type === 'monthly' || sub.purchase_type === 'subscription') && sub.subscription_id;
+              const isOneTime = sub.purchase_type === 'onetime' || sub.purchase_type === 'one_time';
 
-                <div className="text-xs space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
-                  <div>Purchased: {new Date(sub.purchase_date).toLocaleDateString()}</div>
-                  <div className="flex items-center gap-1">
-                    <CheckCircle size={12} className="text-green-500" />
-                    <span>Active</span>
+              return (
+                <div
+                  key={sub.id}
+                  className="rounded-xl p-4 border"
+                  style={{
+                    backgroundColor: 'var(--surface)',
+                    borderColor: 'rgba(255, 255, 255, 0.1)'
+                  }}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl">{sub.icon || '🤖'}</div>
+                      <div>
+                        <h3 className="font-medium" style={{ color: 'var(--text)' }}>
+                          {sub.name}
+                        </h3>
+                        <p className="text-xs" style={{ color: 'var(--text)', opacity: 0.6 }}>
+                          {isSubscription
+                            ? `$${(sub.price / 100).toFixed(2)}/month`
+                            : `$${(sub.price / 100).toFixed(2)} (One-time)`
+                          }
+                        </p>
+                      </div>
+                    </div>
+                    {isSubscription && !sub.cancel_at_period_end && (
+                      <button
+                        onClick={() => handleCancelSubscription(sub.subscription_id, 'agent')}
+                        disabled={cancelingId === sub.subscription_id}
+                        className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+                        title="Cancel subscription"
+                      >
+                        <XCircle size={20} />
+                      </button>
+                    )}
+                    {isSubscription && sub.cancel_at_period_end && (
+                      <button
+                        onClick={() => handleRenewSubscription(sub.subscription_id, 'agent')}
+                        disabled={cancelingId === sub.subscription_id}
+                        className="p-2 text-green-500 hover:bg-green-500/10 rounded-lg transition disabled:opacity-50"
+                        title="Renew subscription"
+                      >
+                        <CheckCircle size={20} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="text-xs space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                    <div>Purchased: {new Date(sub.purchase_date).toLocaleDateString()}</div>
+                    <div className="flex items-center gap-1">
+                      <CheckCircle size={12} className="text-green-500" />
+                      <span>{isSubscription ? 'Active Subscription' : 'Owned'}</span>
+                    </div>
+                    {/* Show cancellation info for monthly subscriptions */}
+                    {isSubscription && sub.cancel_at_period_end && sub.current_period_end && (
+                      <div className="text-orange-500 font-medium">
+                        Cancels: {new Date(sub.current_period_end).toLocaleDateString()}
+                        ({Math.ceil((new Date(sub.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days left)
+                      </div>
+                    )}
+                    {/* Show renewal date for active monthly subscriptions */}
+                    {isSubscription && !sub.cancel_at_period_end && sub.current_period_end && (
+                      <div>Renews: {new Date(sub.current_period_end).toLocaleDateString()}</div>
+                    )}
+                    {isOneTime && sub.expires_at && (
+                      <div className="text-xs" style={{ color: 'var(--text)', opacity: 0.6 }}>
+                        Access until: {new Date(sub.expires_at).toLocaleDateString()}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

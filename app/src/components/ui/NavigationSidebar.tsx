@@ -219,15 +219,9 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
                 onClick={() => navigate('/billing/plans')}
                 className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg p-3 transition-all shadow-lg hover:shadow-xl"
               >
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center justify-center gap-2">
                   <Sparkle size={16} weight="fill" />
                   <span className="text-sm font-bold">Upgrade to Premium</span>
-                </div>
-                <div className="text-xs opacity-90 space-y-0.5 text-left">
-                  <div>• 5 projects & deploys</div>
-                  <div>• 24/7 running mode</div>
-                  <div>• Use your own API keys</div>
-                  <div className="font-semibold mt-1">Just $5/month</div>
                 </div>
               </button>
             </div>

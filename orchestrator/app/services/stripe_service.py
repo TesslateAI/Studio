@@ -209,6 +209,35 @@ class StripeService:
             logger.error(f"Failed to cancel subscription: {e}")
             return False
 
+    async def renew_subscription(
+        self,
+        subscription_id: str
+    ) -> bool:
+        """
+        Renew a cancelled subscription by removing the cancellation.
+
+        Args:
+            subscription_id: Stripe subscription ID
+
+        Returns:
+            True if successful
+        """
+        if not self.stripe:
+            logger.warning("Stripe not configured")
+            return False
+
+        try:
+            # Reactivate by setting cancel_at_period_end to False
+            self.stripe.Subscription.modify(
+                subscription_id,
+                cancel_at_period_end=False
+            )
+            logger.info(f"Renewed subscription: {subscription_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to renew subscription: {e}")
+            return False
+
     # ========================================================================
     # Credit Purchases
     # ========================================================================

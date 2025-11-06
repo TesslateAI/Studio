@@ -680,37 +680,81 @@ async def get_user_subscriptions(
     current_user: User = Depends(current_active_user)
 ):
     """
-    Get all active agent subscriptions for the current user.
+    Get all active agent subscriptions and purchases for the current user.
+    Returns both one-time purchases and recurring subscriptions.
     """
-    # Get all purchased agents with active subscriptions
+    # Get all active purchased agents (both one-time and subscriptions)
     query = select(UserPurchasedAgent, MarketplaceAgent).join(
         MarketplaceAgent,
         UserPurchasedAgent.agent_id == MarketplaceAgent.id
     ).where(
         and_(
             UserPurchasedAgent.user_id == current_user.id,
-            UserPurchasedAgent.is_active == True,
-            UserPurchasedAgent.purchase_type == "monthly",
-            UserPurchasedAgent.stripe_subscription_id.isnot(None)
+            UserPurchasedAgent.is_active == True
         )
     )
 
     result = await db.execute(query)
     purchases = result.all()
 
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
     subscriptions = []
     for purchase, agent in purchases:
-        subscriptions.append({
+        subscription_data = {
             "id": str(purchase.id),
             "agent_id": str(agent.id),
             "name": agent.name,
             "slug": agent.slug,
             "icon": agent.icon,
             "price": agent.price,
+            "purchase_type": purchase.purchase_type,  # "onetime" or "monthly"
             "subscription_id": purchase.stripe_subscription_id,
             "purchase_date": purchase.purchase_date.isoformat(),
-            "is_active": purchase.is_active
-        })
+            "expires_at": purchase.expires_at.isoformat() if purchase.expires_at else None,
+            "is_active": purchase.is_active,
+            "cancel_at_period_end": False,
+            "current_period_end": None,
+            "cancel_at": None
+        }
+
+        # If it's a monthly subscription, fetch cancellation info from Stripe
+        # Check for both "monthly" and "subscription" (legacy naming)
+        if purchase.purchase_type in ("monthly", "subscription") and purchase.stripe_subscription_id and stripe_service.stripe:
+            try:
+                from datetime import datetime
+                logger.info(f"DEBUG: Fetching Stripe subscription for {purchase.stripe_subscription_id}, purchase_type={purchase.purchase_type}")
+                stripe_sub = stripe_lib.Subscription.retrieve(purchase.stripe_subscription_id)
+
+                # Get cancellation status
+                subscription_data["cancel_at_period_end"] = stripe_sub.cancel_at_period_end
+                logger.info(f"DEBUG: Stripe subscription {purchase.stripe_subscription_id} cancel_at_period_end={stripe_sub.cancel_at_period_end}")
+
+                # Get current period end (when subscription renews or ends)
+                # Try both dictionary and attribute access for compatibility
+                try:
+                    period_end = stripe_sub.get('current_period_end') if hasattr(stripe_sub, 'get') else stripe_sub.current_period_end
+                    if period_end:
+                        subscription_data["current_period_end"] = datetime.fromtimestamp(period_end).isoformat()
+                        logger.info(f"DEBUG: current_period_end={subscription_data['current_period_end']}")
+                except (AttributeError, KeyError) as e:
+                    logger.warning(f"Could not get current_period_end for {purchase.stripe_subscription_id}: {e}")
+
+                # Get cancel_at if subscription is set to cancel at specific time
+                try:
+                    cancel_at = stripe_sub.get('cancel_at') if hasattr(stripe_sub, 'get') else stripe_sub.cancel_at
+                    if cancel_at:
+                        subscription_data["cancel_at"] = datetime.fromtimestamp(cancel_at).isoformat()
+                except (AttributeError, KeyError):
+                    pass  # cancel_at is optional
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch Stripe subscription details for {purchase.stripe_subscription_id}: {e}")
+        else:
+            logger.info(f"DEBUG: Skipping Stripe fetch for {agent.name}: purchase_type={purchase.purchase_type}, has_subscription_id={purchase.stripe_subscription_id is not None}, stripe_enabled={stripe_service.stripe is not None}")
+
+        subscriptions.append(subscription_data)
 
     return subscriptions
 
@@ -727,7 +771,10 @@ async def cancel_agent_subscription(
     from ..services.stripe_service import stripe_service
     import stripe as stripe_lib
 
+    logger.info(f"DEBUG: Cancel agent subscription request - subscription_id: {subscription_id}, user_id: {current_user.id}")
+
     if not stripe_service.stripe:
+        logger.error("DEBUG: Stripe not configured")
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
     try:
@@ -741,7 +788,12 @@ async def cancel_agent_subscription(
         result = await db.execute(query)
         purchase = result.scalar_one_or_none()
 
+        logger.info(f"DEBUG: Purchase record found: {purchase is not None}")
+        if purchase:
+            logger.info(f"DEBUG: Purchase details - id: {purchase.id}, agent_id: {purchase.agent_id}, stripe_subscription_id: {purchase.stripe_subscription_id}")
+
         if not purchase:
+            logger.error(f"DEBUG: Subscription not found for subscription_id: {subscription_id}, user_id: {current_user.id}")
             raise HTTPException(status_code=404, detail="Subscription not found")
 
         # Cancel the subscription in Stripe
@@ -769,6 +821,70 @@ async def cancel_agent_subscription(
         raise HTTPException(
             status_code=500,
             detail="Failed to cancel subscription"
+        )
+
+
+@router.post("/subscriptions/{subscription_id}/renew")
+async def renew_agent_subscription(
+    subscription_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Renew a cancelled agent subscription (reactivate before it ends).
+    """
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
+    logger.info(f"DEBUG: Renew agent subscription request - subscription_id: {subscription_id}, user_id: {current_user.id}")
+
+    if not stripe_service.stripe:
+        logger.error("DEBUG: Stripe not configured")
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    try:
+        # Find the purchase record with this subscription ID
+        query = select(UserPurchasedAgent).where(
+            and_(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.stripe_subscription_id == subscription_id
+            )
+        )
+        result = await db.execute(query)
+        purchase = result.scalar_one_or_none()
+
+        logger.info(f"DEBUG: Purchase record found: {purchase is not None}")
+        if purchase:
+            logger.info(f"DEBUG: Purchase details - id: {purchase.id}, agent_id: {purchase.agent_id}, stripe_subscription_id: {purchase.stripe_subscription_id}")
+
+        if not purchase:
+            logger.error(f"DEBUG: Subscription not found for subscription_id: {subscription_id}, user_id: {current_user.id}")
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Reactivate the subscription in Stripe by setting cancel_at_period_end to False
+        subscription = stripe_lib.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=False
+        )
+
+        logger.info(f"Renewed agent subscription {subscription_id} for user {current_user.id}")
+
+        return {
+            "success": True,
+            "message": "Subscription has been renewed and will continue after the current period"
+        }
+
+    except stripe_lib.error.StripeError as e:
+        logger.error(f"Stripe error during subscription renewal: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to renew subscription: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to renew subscription: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to renew subscription"
         )
 
 
