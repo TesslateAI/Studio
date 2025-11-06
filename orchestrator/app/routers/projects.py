@@ -102,6 +102,31 @@ async def create_project(
     try:
         logger.info(f"[CREATE] Creating project for user {current_user.id}: {project.name} (source: {project.source_type})")
 
+        # Check project limits based on subscription tier
+        from ..config import get_settings
+        settings = get_settings()
+
+        # Count current active projects (not including deployed-only)
+        current_projects_result = await db.execute(
+            select(func.count(Project.id)).where(
+                Project.owner_id == current_user.id
+            )
+        )
+        current_projects_count = current_projects_result.scalar()
+
+        # Determine max projects based on tier
+        if current_user.subscription_tier == "pro":
+            max_projects = settings.premium_max_projects
+        else:
+            max_projects = settings.free_max_projects
+
+        # Enforce limit
+        if current_projects_count >= max_projects:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Project limit reached. Your {current_user.subscription_tier} tier allows {max_projects} project(s). Upgrade to create more projects."
+            )
+
         # Generate unique slug for the project
         project_slug = generate_project_slug(project.name)
 
@@ -2348,3 +2373,212 @@ async def move_asset(
         await db.rollback()
         logger.error(f"[ASSETS] Move failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to move asset: {str(e)}")
+
+
+# ============================================================================
+# Deployment Management (for billing/premium features)
+# ============================================================================
+
+@router.post("/{project_slug}/deploy")
+async def deploy_project(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark a project as deployed (keeps container running permanently).
+    This is a premium feature with tier-based limits.
+    """
+    # Get project
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    # Check if already deployed
+    if project.is_deployed:
+        return {
+            "message": "Project is already deployed",
+            "project_id": str(project.id)
+        }
+
+    # Check deployment limits
+    from ..config import get_settings
+    settings = get_settings()
+
+    # Count current deployed projects
+    deployed_count_result = await db.execute(
+        select(func.count(Project.id)).where(
+            and_(
+                Project.owner_id == current_user.id,
+                Project.is_deployed == True
+            )
+        )
+    )
+    deployed_count = deployed_count_result.scalar()
+
+    # Determine max deploys based on tier
+    if current_user.subscription_tier == "pro":
+        max_deploys = settings.premium_max_deploys
+    else:
+        max_deploys = settings.free_max_deploys
+
+    # Check if limit exceeded
+    if deployed_count >= max_deploys:
+        # Check if user has purchased additional deploy slots
+        # For now, we'll use total_spend to track additional purchases
+        # In a real system, you'd have a separate table for tracking this
+        additional_slots_purchased = current_user.total_spend // settings.additional_deploy_price
+        effective_max_deploys = max_deploys + additional_slots_purchased
+
+        if deployed_count >= effective_max_deploys:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "message": f"Deploy limit reached. Your {current_user.subscription_tier} tier allows {max_deploys} deployed project(s).",
+                    "current_deployed": deployed_count,
+                    "max_deploys": effective_max_deploys,
+                    "upgrade_required": True,
+                    "purchase_additional_url": "/api/billing/deploy/purchase"
+                }
+            )
+
+    # Mark as deployed
+    project.is_deployed = True
+    project.deploy_type = "deployed"
+    project.deployed_at = datetime.now(timezone.utc)
+    current_user.deployed_projects_count += 1
+
+    await db.commit()
+
+    logger.info(f"[DEPLOY] Project {project_slug} deployed for user {current_user.id}")
+
+    return {
+        "message": "Project deployed successfully",
+        "project_id": str(project.id),
+        "deployed_at": project.deployed_at.isoformat()
+    }
+
+
+@router.delete("/{project_slug}/deploy")
+async def undeploy_project(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Remove deployment status from a project (allows container to be stopped when idle).
+    """
+    # Get project
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    if not project.is_deployed:
+        return {
+            "message": "Project is not deployed",
+            "project_id": str(project.id)
+        }
+
+    # Undeploy
+    project.is_deployed = False
+    project.deploy_type = "development"
+    project.deployed_at = None
+    current_user.deployed_projects_count = max(0, current_user.deployed_projects_count - 1)
+
+    await db.commit()
+
+    logger.info(f"[DEPLOY] Project {project_slug} undeployed for user {current_user.id}")
+
+    return {
+        "message": "Project undeployed successfully",
+        "project_id": str(project.id)
+    }
+
+
+@router.get("/deployment/limits")
+async def get_deployment_limits(
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get current deployment limits and usage for the user.
+    """
+    from ..config import get_settings
+    settings = get_settings()
+
+    # Count deployed projects
+    deployed_count_result = await db.execute(
+        select(func.count(Project.id)).where(
+            and_(
+                Project.owner_id == current_user.id,
+                Project.is_deployed == True
+            )
+        )
+    )
+    deployed_count = deployed_count_result.scalar()
+
+    # Determine limits
+    if current_user.subscription_tier == "pro":
+        base_max_deploys = settings.premium_max_deploys
+        base_max_projects = settings.premium_max_projects
+    else:
+        base_max_deploys = settings.free_max_deploys
+        base_max_projects = settings.free_max_projects
+
+    # Calculate additional slots from purchases
+    additional_slots = current_user.total_spend // settings.additional_deploy_price
+    effective_max_deploys = base_max_deploys + additional_slots
+
+    # Count total projects
+    total_projects_result = await db.execute(
+        select(func.count(Project.id)).where(
+            Project.owner_id == current_user.id
+        )
+    )
+    total_projects = total_projects_result.scalar()
+
+    return {
+        "tier": current_user.subscription_tier,
+        "projects": {
+            "current": total_projects,
+            "max": base_max_projects
+        },
+        "deploys": {
+            "current": deployed_count,
+            "base_max": base_max_deploys,
+            "additional_purchased": additional_slots,
+            "effective_max": effective_max_deploys
+        },
+        "can_deploy_more": deployed_count < effective_max_deploys,
+        "can_create_more_projects": total_projects < base_max_projects
+    }
+
+
+@router.post("/deployment/purchase-slot")
+async def purchase_additional_deploy_slot(
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a checkout session for purchasing an additional deploy slot.
+    """
+    from ..services.stripe_service import stripe_service
+    from ..config import get_settings
+    settings = get_settings()
+
+    success_url = f"{settings.get_app_base_url}/billing/deploy/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{settings.get_app_base_url}/projects"
+
+    session = await stripe_service.create_deploy_purchase_checkout(
+        user=current_user,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        db=db
+    )
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create checkout session"
+        )
+
+    return {
+        "checkout_url": session['url'],
+        "session_id": session['id']
+    }

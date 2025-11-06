@@ -43,9 +43,14 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
 
     # Subscription & billing
     subscription_tier: Mapped[str] = mapped_column(String, default="free")  # free, pro, enterprise
-    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Active subscription ID
     total_spend: Mapped[int] = mapped_column(Integer, default=0)  # In cents for precision
-    credits_balance: Mapped[int] = mapped_column(Integer, default=0)  # In cents
+    credits_balance: Mapped[int] = mapped_column(Integer, default=0)  # In cents (prepaid credits)
+    deployed_projects_count: Mapped[int] = mapped_column(Integer, default=0)  # Number of deployed projects
+
+    # Creator payouts (Stripe Connect)
+    creator_stripe_account_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # For receiving payouts
 
     # LiteLLM integration (usage tracking)
     litellm_api_key: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)

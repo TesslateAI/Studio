@@ -20,6 +20,10 @@ import Referrals from './pages/Referrals';
 import { Walkthrough } from './components/Walkthrough';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import axios from 'axios';
+// Billing components
+import SubscriptionPlans from './components/billing/SubscriptionPlans';
+import BillingDashboard from './components/billing/BillingDashboard';
+import UsageDashboard from './components/billing/UsageDashboard';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -216,6 +220,74 @@ function AppContent() {
             element={
               <PrivateRoute>
                 <AdminDashboard />
+              </PrivateRoute>
+            }
+          />
+          {/* Billing Routes */}
+          <Route
+            path="/billing"
+            element={
+              <PrivateRoute>
+                <BillingDashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/billing/plans"
+            element={
+              <PrivateRoute>
+                <SubscriptionPlans />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/billing/usage"
+            element={
+              <PrivateRoute>
+                <UsageDashboard />
+              </PrivateRoute>
+            }
+          />
+          {/* Success/Cancel redirect pages */}
+          <Route
+            path="/billing/success"
+            element={
+              <PrivateRoute>
+                <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                  <div className="bg-white rounded-lg shadow-lg p-8 max-w-md text-center">
+                    <div className="mb-4">
+                      <svg className="mx-auto h-16 w-16 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
+                    <p className="text-gray-600 mb-6">Your payment has been processed successfully.</p>
+                    <a href="/billing" className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                      Go to Billing Dashboard
+                    </a>
+                  </div>
+                </div>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/billing/cancel"
+            element={
+              <PrivateRoute>
+                <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                  <div className="bg-white rounded-lg shadow-lg p-8 max-w-md text-center">
+                    <div className="mb-4">
+                      <svg className="mx-auto h-16 w-16 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Cancelled</h2>
+                    <p className="text-gray-600 mb-6">Your payment was cancelled. No charges have been made.</p>
+                    <a href="/billing" className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                      Go to Billing Dashboard
+                    </a>
+                  </div>
+                </div>
               </PrivateRoute>
             }
           />

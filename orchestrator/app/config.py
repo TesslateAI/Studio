@@ -96,6 +96,42 @@ class Settings(BaseSettings):
     cookie_samesite: str = "lax"  # lax, strict, or none
     cookie_domain: str = ""  # Leave empty for default, or set to .yourdomain.com for subdomains
 
+    # Stripe Configuration
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_connect_client_id: str = ""  # For creator payouts (Stripe Connect)
+
+    # Subscription Pricing (in cents)
+    premium_subscription_price: int = 500  # $5/month
+    stripe_premium_price_id: str = ""  # Stripe Price ID for premium subscription
+
+    # Credit Packages (in cents)
+    credit_package_small: int = 500  # $5
+    credit_package_medium: int = 1000  # $10
+    credit_package_large: int = 5000  # $50
+
+    # Deploy Pricing (in cents)
+    additional_deploy_price: int = 1000  # $10 per additional deploy slot
+
+    # Subscription Tier Limits
+    # Free tier
+    free_max_projects: int = 1
+    free_max_deploys: int = 1
+    free_initial_credits: int = 0  # Free users get 0 credits initially
+
+    # Premium tier
+    premium_max_projects: int = 5
+    premium_max_deploys: int = 5
+    premium_initial_credits: int = 0  # Premium users still need to buy credits
+
+    # Revenue sharing (percentages)
+    creator_revenue_share: float = 0.90  # 90% to creator
+    platform_revenue_share: float = 0.10  # 10% to platform
+
+    # Billing settings
+    usage_invoice_day: int = 1  # Day of month to generate usage invoices (1-28)
+
     class Config:
         # For Docker Compose: environment variables are passed directly
         # For native development: looks for .env in parent directory (project root)
