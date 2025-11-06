@@ -1,14 +1,17 @@
 import { useState, useEffect, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
 import { ToolDropdown } from './ToolDropdown';
+import { Gear } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
 
 interface Agent {
   id: string;
   name: string;
-  icon: React.ReactNode;
+  icon: string;  // Emoji string from backend
   active?: boolean;
+  backendId?: number;  // Link to backend agent ID
+  mode?: 'stream' | 'agent';
 }
 
 interface ProjectFile {
@@ -27,6 +30,7 @@ interface ChatInputProps {
   disabled?: boolean;
   isExecuting?: boolean;
   onStop?: () => void;
+  onClearHistory?: () => void;
 }
 
 export function ChatInput({
@@ -39,7 +43,8 @@ export function ChatInput({
   placeholder = 'Ask AI to build something...',
   disabled = false,
   isExecuting = false,
-  onStop
+  onStop,
+  onClearHistory
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
 
@@ -53,18 +58,22 @@ export function ChatInput({
     }
   }, []);
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
+  const sendMessage = () => {
     if (message.trim() && !disabled) {
       onSendMessage(message.trim());
       setMessage('');
     }
   };
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    sendMessage();
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit(e as any);
+      sendMessage();
     }
   };
 
@@ -99,6 +108,17 @@ export function ChatInput({
     }
   };
 
+  const clearChatHistory = () => {
+    if (onClearHistory) {
+      const confirmed = window.confirm(
+        'Are you sure you want to clear all chat history? This action cannot be undone.'
+      );
+      if (confirmed) {
+        onClearHistory();
+      }
+    }
+  };
+
   const tools = [
     {
       icon: (
@@ -109,7 +129,17 @@ export function ChatInput({
       label: 'Download Project',
       onClick: downloadProject,
       category: 'tools' as const
-    }
+    },
+    ...(onClearHistory ? [{
+      icon: (
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
+          <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
+        </svg>
+      ),
+      label: 'Clear Chat History',
+      onClick: clearChatHistory,
+      category: 'tools' as const
+    }] : [])
   ];
 
   return (
@@ -138,7 +168,7 @@ export function ChatInput({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSubmit(e as any);
+                sendMessage();
               }
             }}
             placeholder={placeholder}
@@ -168,11 +198,7 @@ export function ChatInput({
       <div className="hidden md:flex items-center gap-2" data-tour="chat-input">
         {/* Tools dropdown */}
         <ToolDropdown
-          icon={
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 256 256">
-              <path d="M224,152v56a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V152a8,8,0,0,1,16,0v56H208V152a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,132.69V40a8,8,0,0,0-16,0v92.69L93.66,106.34a8,8,0,0,0-11.32,11.32Z" />
-            </svg>
-          }
+          icon={<Gear size={16} weight="bold" />}
           tools={tools}
         />
 

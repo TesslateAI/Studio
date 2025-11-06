@@ -1,13 +1,13 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PencilSimple } from '@phosphor-icons/react';
 
 interface Agent {
   id: string;
   name: string;
-  icon: ReactNode;
+  icon: string;  // Emoji string from backend
   active?: boolean;
-  backendId?: number;
+  backendId?: number;  // Link to backend agent ID
+  mode?: 'stream' | 'agent';
 }
 
 interface AgentSelectorProps {
@@ -107,8 +107,9 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
           </div>
 
           {agents.map((agent) => (
-            <div
+            <button
               key={agent.id}
+              onClick={() => handleSelect(agent)}
               className={`
                 w-full px-4 py-3 flex items-center gap-3
                 text-sm text-white transition-colors
@@ -116,59 +117,24 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
                 ${agent.id === currentAgent.id && 'bg-[rgba(255,107,0,0.2)]'}
               `}
             >
-              <button
-                onClick={() => handleSelect(agent)}
-                className="flex items-center gap-3 flex-1 text-left"
-              >
-                <span className="text-base">{agent.icon}</span>
-                <span className="flex-1">{agent.name}</span>
-                {agent.id === currentAgent.id && (
-                  <span className="text-xs text-green-400">Active</span>
-                )}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsOpen(false);
-                  navigate('/library', { state: { selectedAgentId: agent.backendId } });
-                }}
-                className="p-1.5 hover:bg-white/20 rounded-lg transition-colors flex-shrink-0"
-                title="Edit agent"
-              >
-                <PencilSimple size={14} weight="bold" className="text-gray-400 hover:text-white" />
-              </button>
-            </div>
+              <span className="text-base">{agent.icon}</span>
+              <span className="flex-1 text-left">{agent.name}</span>
+              {agent.id === currentAgent.id && (
+                <span className="text-xs text-green-400">Active</span>
+              )}
+            </button>
           ))}
 
-          <div className="border-t border-white/10 p-3 space-y-3">
-            <div className="bg-gradient-to-r from-purple-500/20 to-purple-600/20 rounded-lg p-3 border border-purple-500/30">
-              <div className="flex items-center gap-2 mb-2">
-                <PencilSimple size={16} weight="bold" className="text-purple-400" />
-                <span className="font-semibold text-sm text-white">Customize Your Agents</span>
-              </div>
-              <p className="text-xs text-gray-300 mb-3">
-                Click the edit icon (✏️) next to any agent to customize its system prompt, behavior, and settings in your Library.
-              </p>
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  navigate('/library');
-                }}
-                className="w-full py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 rounded-lg text-white text-sm font-semibold transition-all"
-              >
-                Go to Library
-              </button>
-            </div>
-
+          <div className="border-t border-white/10 p-3">
             <div className="bg-gradient-to-r from-orange-500/20 to-orange-600/20 rounded-lg p-3 border border-orange-500/30">
               <div className="flex items-center gap-2 mb-2">
                 <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 256 256">
                   <path d="M239.75,90.81c0,.11,0,.21-.05.32a15.94,15.94,0,0,1-8.32,12l-70.74,38.12,34.81,94a16.42,16.42,0,0,1-.93,13.38,15.94,15.94,0,0,1-12.21,7.73,16.86,16.86,0,0,1-5.18-.05,15.93,15.93,0,0,1-10.93-8.17L128,173.26,89.8,248.15a15.93,15.93,0,0,1-10.93,8.17,16.86,16.86,0,0,1-5.18.05,15.94,15.94,0,0,1-12.21-7.73,16.42,16.42,0,0,1-.93-13.38l34.81-94L24.62,103.13a15.94,15.94,0,0,1-8.32-12c0-.11,0-.21-.05-.32A16,16,0,0,1,26.71,75.68L109.18,64,147.24,8.12a16.1,16.1,0,0,1,28.52,0L213.82,64l82.47,11.68A16,16,0,0,1,239.75,90.81Z" />
                 </svg>
-                <span className="font-semibold text-sm text-white">Discover More Agents</span>
+                <span className="font-semibold text-sm text-white">Unlock More AI Agents</span>
               </div>
               <p className="text-xs text-gray-300 mb-3">
-                Get specialized agents for React, Vue, Python, DevOps, and more from the Marketplace!
+                Get specialized agents for React, Vue, Python, DevOps, and more!
               </p>
               <button
                 onClick={() => {

@@ -181,10 +181,19 @@ class IterativeAgent(AbstractAgent):
         # Get user message with full [CONTEXT] section
         user_message = await get_user_message_wrapper(user_request, project_context)
 
+        # Build messages list starting with system prompt
         self.messages = [
-            {"role": "system", "content": full_system_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "system", "content": full_system_prompt}
         ]
+
+        # Include chat history if provided (for conversation continuity)
+        chat_history = context.get('chat_history', [])
+        if chat_history:
+            logger.info(f"[IterativeAgent] Including {len(chat_history)} previous messages for context")
+            self.messages.extend(chat_history)
+
+        # Add current user message
+        self.messages.append({"role": "user", "content": user_message})
 
         # Main agent loop
         for iteration in range(1, self.max_iterations + 1):

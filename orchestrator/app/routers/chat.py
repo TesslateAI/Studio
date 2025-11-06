@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,6 +95,58 @@ async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) 
     except Exception as e:
         logger.error(f"[GIT-CONTEXT] Failed to build Git context: {e}", exc_info=True)
         return None
+
+
+async def _get_chat_history(
+    chat_id: UUID,
+    db: AsyncSession,
+    limit: int = 10
+) -> List[Dict[str, str]]:
+    """
+    Fetch recent chat history for context.
+
+    Args:
+        chat_id: Chat ID to fetch messages from
+        db: Database session
+        limit: Maximum number of message pairs to fetch (default 10, max 20)
+
+    Returns:
+        List of message dictionaries with 'role' and 'content' keys
+    """
+    try:
+        # Limit to prevent token overflow
+        limit = min(limit, 20)
+
+        # Fetch recent messages, excluding the current one (it will be added separately)
+        messages_result = await db.execute(
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit * 2)  # *2 to account for user+assistant pairs
+        )
+        messages = list(messages_result.scalars().all())
+
+        # Reverse to get chronological order (oldest first)
+        messages.reverse()
+
+        # Format messages for LLM
+        formatted_messages = []
+        for msg in messages:
+            # Skip system messages or empty content
+            if not msg.content or msg.role not in ['user', 'assistant']:
+                continue
+
+            formatted_messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
+
+        logger.info(f"[CHAT-HISTORY] Fetched {len(formatted_messages)} messages for chat {chat_id}")
+        return formatted_messages
+
+    except Exception as e:
+        logger.error(f"[CHAT-HISTORY] Failed to fetch chat history: {e}", exc_info=True)
+        return []
 
 
 async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSession) -> Optional[str]:
@@ -259,6 +311,53 @@ async def get_project_messages(
     )
     messages = messages_result.scalars().all()
     return messages
+
+
+@router.delete("/{project_id}/messages")
+async def delete_project_messages(
+    project_id: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete all messages for a specific project's chat (clear chat history)."""
+    try:
+        # Get the chat for this user and project
+        result = await db.execute(
+            select(Chat).where(
+                Chat.user_id == current_user.id,
+                Chat.project_id == project_id
+            )
+        )
+        chat = result.scalar_one_or_none()
+
+        if not chat:
+            # No chat exists, nothing to delete
+            return {"success": True, "message": "No chat history found", "deleted_count": 0}
+
+        # Delete all messages for this chat
+        from sqlalchemy import delete as sql_delete
+        delete_result = await db.execute(
+            sql_delete(Message).where(Message.chat_id == chat.id)
+        )
+        deleted_count = delete_result.rowcount
+
+        await db.commit()
+
+        logger.info(f"[CHAT] Deleted {deleted_count} messages for project {project_id}, user {current_user.id}")
+
+        return {
+            "success": True,
+            "message": f"Deleted {deleted_count} messages",
+            "deleted_count": deleted_count
+        }
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CHAT] Failed to delete messages for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete chat history: {str(e)}"
+        )
 
 
 @router.post("/agent", response_model=AgentChatResponse)
@@ -431,11 +530,39 @@ async def agent_chat(
 
         logger.info(f"[HTTP-AGENT] Agent created successfully with max_iterations={request.max_iterations}")
 
+        # Get or create chat for message history
+        try:
+            chat_result = await db.execute(
+                select(Chat).where(
+                    Chat.user_id == current_user.id,
+                    Chat.project_id == request.project_id
+                )
+            )
+            chat = chat_result.scalar_one_or_none()
+
+            if not chat:
+                chat = Chat(user_id=current_user.id, project_id=request.project_id)
+                db.add(chat)
+                await db.commit()
+                await db.refresh(chat)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Database error during chat setup: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database error while setting up chat: {str(e)}"
+            )
+
+        # Fetch chat history for context
+        chat_history = await _get_chat_history(chat.id, db, limit=10)
+
         # Prepare context for tool execution
         context = {
             "user_id": current_user.id,
             "project_id": request.project_id,
-            "db": db
+            "db": db,
+            "chat_history": chat_history
         }
 
         # Get project context
@@ -525,23 +652,8 @@ async def agent_chat(
         )
 
 
-        # Save to chat history
-        # Get or create chat for this project
+        # Save to chat history (chat was already created/fetched earlier)
         try:
-            chat_result = await db.execute(
-                select(Chat).where(
-                    Chat.user_id == current_user.id,
-                    Chat.project_id == request.project_id
-                )
-            )
-            chat = chat_result.scalar_one_or_none()
-
-            if not chat:
-                chat = Chat(user_id=current_user.id, project_id=request.project_id)
-                db.add(chat)
-                await db.commit()
-                await db.refresh(chat)
-
             # Save user message
             user_message = Message(
                 chat_id=chat.id,
@@ -703,6 +815,9 @@ async def agent_chat_stream(
             db.add(user_message)
             await db.commit()
 
+            # Fetch chat history for context (excluding the just-added user message)
+            chat_history = await _get_chat_history(chat.id, db, limit=10)
+
             # Create agent using same pattern as HTTP endpoint
             from ..agent.factory import create_agent_from_db_model
             from ..agent.models import create_model_adapter
@@ -779,7 +894,8 @@ async def agent_chat_stream(
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
-                "db": db
+                "db": db,
+                "chat_history": chat_history
             }
 
             # Accumulate results for database persistence
@@ -1046,6 +1162,9 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         db.add(user_message)
         await db.commit()
 
+        # Fetch chat history for context (excluding the just-added user message)
+        chat_history = await _get_chat_history(chat_id, db, limit=10)
+
         # ============================================================================
         # NEW: Unified Agent Factory System
         # ============================================================================
@@ -1278,7 +1397,8 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'project_context_str': project_context_str,
         'has_existing_files': has_existing_files,
         'model': model_name,  # Use the resolved model name (user's selection or agent's default)
-        'api_base': settings.litellm_api_base
+        'api_base': settings.litellm_api_base,
+        'chat_history': chat_history
     }
 
     if project:

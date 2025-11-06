@@ -1,13 +1,13 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, FileCode, X } from 'lucide-react';
 import { PencilSimple, Storefront, Books } from '@phosphor-icons/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { createWebSocket, chatApi, agentsApi } from '../../lib/api';
+import { createWebSocket, chatApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
-import { type AgentMessageData, type Agent as BackendAgent, type DBMessage } from '../../types/agent';
+import { type AgentMessageData, type DBMessage } from '../../types/agent';
 
 interface Agent {
   id: string;
@@ -72,19 +72,21 @@ export function ChatContainer({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [backendAgents, setBackendAgents] = useState<BackendAgent[]>([]);
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<Agent>(initialCurrentAgent);
   const [isStreaming, setIsStreaming] = useState(false);
   const [agentExecuting, setAgentExecuting] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isUserScrollingRef = useRef(false);
-  const lastScrollHeightRef = useRef(0);
+  const previousMessageCountRef = useRef(0);
+  const animatedMessagesRef = useRef<Set<string>>(new Set());
 
   // Load chat history from database
   useEffect(() => {
@@ -92,8 +94,9 @@ export function ChatContainer({
     if (initialAgents.length === 0) return;
 
     const loadChatHistory = async () => {
+      setIsLoadingHistory(true);
       try {
-        const dbMessages: DBMessage[] = await chatApi.getProjectMessages(projectId);
+        const dbMessages: DBMessage[] = await chatApi.getProjectMessages(projectId.toString());
 
         const expandedMessages: Message[] = [];
 
@@ -102,12 +105,15 @@ export function ChatContainer({
           const messageType = msg.role === 'assistant' ? 'ai' : 'user';
 
           // For user messages or non-agent assistant messages, add as-is
+          // Skip messages with empty content to prevent empty chat bubbles
           if (messageType === 'user' || !msg.message_metadata?.agent_mode) {
-            expandedMessages.push({
-              id: `msg-${idx}`,
-              type: messageType,
-              content: msg.content
-            });
+            if (msg.content && msg.content.trim()) {
+              expandedMessages.push({
+                id: `msg-${idx}`,
+                type: messageType,
+                content: msg.content
+              });
+            }
             return;
           }
 
@@ -115,6 +121,7 @@ export function ChatContainer({
           const agentData = initialAgents.find(a => a.name === msg.message_metadata?.agent_type);
           const agentIcon = agentData?.icon;
           const agentType = msg.message_metadata.agent_type;
+          const finalResponse = msg.content && msg.content.trim() ? msg.content : '';
 
           // Add each step as a separate message (filter out steps with no content)
           if (msg.message_metadata.steps && msg.message_metadata.steps.length > 0) {
@@ -123,10 +130,13 @@ export function ChatContainer({
               const hasContent = (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim());
               if (!hasContent) return;
 
+              // Include final response in the last step
+              const isLastStep = stepIdx === msg.message_metadata.steps.length - 1;
+
               expandedMessages.push({
                 id: `msg-${idx}-step-${stepIdx}`,
                 type: 'ai',
-                content: '',
+                content: isLastStep ? finalResponse : '',
                 agentData: {
                   steps: [step],
                   iterations: step.iteration || stepIdx + 1,
@@ -137,14 +147,18 @@ export function ChatContainer({
                 agentType
               });
             });
-          }
-
-          // Add final response as separate message if it exists
-          if (msg.content && msg.content.trim()) {
+          } else if (finalResponse) {
+            // If no steps but has final response, create a message with empty agentData
             expandedMessages.push({
               id: `msg-${idx}-result`,
               type: 'ai',
-              content: msg.content,
+              content: finalResponse,
+              agentData: {
+                steps: [],
+                iterations: 0,
+                tool_calls_made: 0,
+                completion_reason: 'complete'
+              },
               agentIcon,
               agentType
             });
@@ -155,6 +169,8 @@ export function ChatContainer({
       } catch (error) {
         console.error('[CHAT] Failed to load chat history:', error);
         setMessages([]);
+      } finally {
+        setIsLoadingHistory(false);
       }
     };
 
@@ -173,7 +189,7 @@ export function ChatContainer({
         onSelectAgent(defaultAgent);
       }
     }
-  }, [initialAgents]);
+  }, [initialAgents, currentAgent.id, onSelectAgent]);
 
   // WebSocket connection with auto-reconnect and heartbeat
   useEffect(() => {
@@ -349,6 +365,16 @@ export function ChatContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Track desktop/mobile state
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Track user scroll behavior
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -385,7 +411,7 @@ export function ChatContainer({
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
       isUserScrollingRef.current = false; // Reset after scrolling
     }
-  }, [messages.length, currentStream, isExpanded]); // Only depend on messages.length, not messages object itself
+  }, [messages, currentStream, isExpanded]);
 
   // Collapse chat when clicking outside (including clicks on iframe/preview) - desktop only
   useEffect(() => {
@@ -446,37 +472,42 @@ export function ChatContainer({
   };
 
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [escPressCount, setEscPressCount] = useState(0);
+  const escPressCountRef = useRef(0);
   const escTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopAgentExecution = useCallback(() => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setAgentExecuting(false);
+    }
+  }, [abortController]);
 
   // ESC key handler for stopping execution
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && agentExecuting) {
-        setEscPressCount(prev => {
-          const newCount = prev + 1;
+        escPressCountRef.current += 1;
+        const newCount = escPressCountRef.current;
 
-          // Clear previous timeout
-          if (escTimeoutRef.current) {
-            clearTimeout(escTimeoutRef.current);
-          }
+        // Clear previous timeout
+        if (escTimeoutRef.current) {
+          clearTimeout(escTimeoutRef.current);
+        }
 
-          // Reset count after 500ms
-          escTimeoutRef.current = setTimeout(() => {
-            setEscPressCount(0);
-          }, 500);
+        // Reset count after 500ms
+        escTimeoutRef.current = setTimeout(() => {
+          escPressCountRef.current = 0;
+        }, 500);
 
-          // Stop execution on double ESC
-          if (newCount >= 2) {
-            stopAgentExecution();
-            setEscPressCount(0);
-            toast.success('Agent stopped (ESC pressed twice)');
-          } else {
-            toast('Press ESC again to stop agent', { duration: 500 });
-          }
-
-          return newCount;
-        });
+        // Stop execution on double ESC
+        if (newCount >= 2) {
+          stopAgentExecution();
+          escPressCountRef.current = 0;
+          toast.success('Agent stopped (ESC pressed twice)');
+        } else {
+          toast('Press ESC again to stop agent', { duration: 500 });
+        }
       }
     };
 
@@ -487,15 +518,8 @@ export function ChatContainer({
         clearTimeout(escTimeoutRef.current);
       }
     };
-  }, [agentExecuting]);
+  }, [agentExecuting, stopAgentExecution]);
 
-  const stopAgentExecution = () => {
-    if (abortController) {
-      abortController.abort();
-      setAbortController(null);
-      setAgentExecuting(false);
-    }
-  };
 
   const sendAgentMessage = async (message: string) => {
     if (!message.trim() || agentExecuting) return;
@@ -542,7 +566,7 @@ export function ChatContainer({
             // Transform tool_results array to match HTTP format
             const transformedStep = {
               ...event.data,
-              tool_calls: event.data.tool_calls?.map((tc: any, index: number) => ({
+              tool_calls: event.data.tool_calls?.map((tc: { name: string; parameters: unknown }, index: number) => ({
                 name: tc.name,
                 parameters: tc.parameters,
                 result: event.data.tool_results?.[index] || {}
@@ -574,17 +598,36 @@ export function ChatContainer({
             // Remove thinking message
             setMessages(prev => prev.filter(msg => msg.id !== thinkingMessageId));
 
-            // Add final result as separate message only if there's actual content
+            // Add final response as part of AgentMessage (not a separate message)
             const finalContent = event.data.final_response;
             if (finalContent && finalContent.trim()) {
-              const resultMessage: Message = {
-                id: `msg-${Date.now()}-result`,
-                type: 'ai',
-                content: finalContent,
-                agentIcon: currentAgent.icon,
-                agentType: currentAgent.name,
-              };
-              setMessages(prev => [...prev, resultMessage]);
+              // Update the last agent message to include the final response
+              setMessages(prev => {
+                const lastMsg = prev[prev.length - 1];
+                if (lastMsg && lastMsg.agentData) {
+                  return [
+                    ...prev.slice(0, -1),
+                    {
+                      ...lastMsg,
+                      content: finalContent,
+                    }
+                  ];
+                }
+                // Fallback: if no agent message exists, create one
+                return [...prev, {
+                  id: `msg-${Date.now()}-result`,
+                  type: 'ai',
+                  content: finalContent,
+                  agentData: {
+                    steps: [],
+                    iterations: 0,
+                    tool_calls_made: 0,
+                    completion_reason: 'complete',
+                  },
+                  agentIcon: currentAgent.icon,
+                  agentType: currentAgent.name,
+                }];
+              });
             }
 
             toast.success('Task completed successfully');
@@ -594,8 +637,8 @@ export function ChatContainer({
         },
         controller.signal
       );
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') {
         console.log('[AGENT] Execution aborted by user');
 
         // Remove thinking message and add stopped message
@@ -623,7 +666,7 @@ export function ChatContainer({
         }];
       });
 
-      const errorDetail = error?.message || 'Failed to execute agent';
+      const errorDetail = error instanceof Error ? error.message : 'Failed to execute agent';
       toast.error(errorDetail, {
         duration: 5000,
       });
@@ -639,6 +682,18 @@ export function ChatContainer({
       sendAgentMessage(message);
     } else {
       sendStreamMessage(message);
+    }
+  };
+
+  const handleClearHistory = async () => {
+    try {
+      const result = await chatApi.clearProjectMessages(projectId.toString());
+      setMessages([]);
+      animatedMessagesRef.current.clear();
+      toast.success(`Cleared ${result.deleted_count} messages`, { icon: '🗑️' });
+    } catch (error) {
+      console.error('[CHAT] Failed to clear history:', error);
+      toast.error('Failed to clear chat history');
     }
   };
 
@@ -700,24 +755,40 @@ export function ChatContainer({
   return (
     <>
       {/* Mobile: Floating chat button - only show when collapsed */}
-      <button
-        onClick={() => setIsExpanded(true)}
-        className={`
-          md:hidden fixed bottom-20 right-4 z-[150]
-          w-14 h-14 rounded-full
-          bg-orange-500 hover:bg-orange-600 active:bg-orange-700
-          shadow-lg
-          flex items-center justify-center
-          transition-all duration-300
-          ${isExpanded ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'}
-        `}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 161.9 126.66" className="text-white" fill="currentColor">
-          <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"/>
-          <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"/>
-          <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"/>
-        </svg>
-      </button>
+      <div className="md:hidden fixed bottom-20 right-4 z-30 group">
+        <button
+          onClick={() => setIsExpanded(true)}
+          className={`
+            w-12 h-12 md:w-16 md:h-16 rounded-full
+            bg-orange-500 hover:bg-orange-600 active:bg-orange-700
+            shadow-lg hover:shadow-xl
+            flex items-center justify-center
+            transition-all duration-300
+            hover:scale-110
+            ${isExpanded ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'}
+          `}
+          aria-label="Open chat"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="16" viewBox="0 0 161.9 126.66" className="text-white md:w-6 md:h-6" fill="currentColor">
+            <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"/>
+            <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"/>
+            <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"/>
+          </svg>
+
+          {/* Hover tooltip */}
+          <div className="
+            absolute bottom-full mb-2 right-0
+            bg-gray-900 text-white text-sm
+            px-3 py-2 rounded-lg
+            whitespace-nowrap
+            opacity-0 group-hover:opacity-100
+            transition-opacity duration-200
+            pointer-events-none
+          ">
+            Open chat
+          </div>
+        </button>
+      </div>
 
       {/* Chat container */}
       <div
@@ -742,9 +813,11 @@ export function ChatContainer({
           ${!isExpanded && isHovered ? 'md:w-[min(650px,calc(100vw-48px))]' : ''}
           ${className}
         `}
-        style={{
+        style={isDesktop ? {
           left: sidebarExpanded ? 'calc(96px + 50vw)' : 'calc(24px + 50vw)',
           transition: 'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.4s var(--ease), max-height 0.4s var(--ease)'
+        } : {
+          transition: 'width 0.4s var(--ease), max-height 0.4s var(--ease), transform 0.4s var(--ease)'
         }}
         onMouseEnter={() => !isExpanded && setIsHovered(true)}
         onMouseLeave={() => !isExpanded && setIsHovered(false)}
@@ -805,7 +878,20 @@ export function ChatContainer({
           }
         `}
       >
-        {messages.length === 0 && !isStreaming && (
+        {isLoadingHistory && (
+          <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
+            <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
+              <Loader2 className="animate-spin text-orange-500" size={32} />
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm max-w-xs mx-auto leading-relaxed">
+                Loading chat history...
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!isLoadingHistory && messages.length === 0 && !isStreaming && (
           <div className="text-center text-[var(--text)]/60 mt-8 space-y-6 max-w-md mx-auto px-4">
             <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
               <svg xmlns="http://www.w3.org/2000/svg" width="32" height="25" viewBox="0 0 161.9 126.66" className="text-orange-500">
@@ -865,10 +951,20 @@ export function ChatContainer({
         )}
 
         {messages.map((message) => {
+          // Check if this is a new message that should animate
+          const isNewMessage = !animatedMessagesRef.current.has(message.id);
+          if (isNewMessage && !isLoadingHistory) {
+            animatedMessagesRef.current.add(message.id);
+          }
+          const shouldAnimate = isNewMessage && !isLoadingHistory;
+
           // Render agent message with special component
           if (message.type === 'ai' && message.agentData) {
             return (
-              <div key={message.id} className="mb-4">
+              <div
+                key={message.id}
+                className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
+              >
                 <AgentMessage
                   agentData={message.agentData}
                   finalResponse={message.content}
@@ -880,20 +976,24 @@ export function ChatContainer({
 
           // Render regular messages
           return (
-            <ChatMessage
+            <div
               key={message.id}
-              type={message.type}
-              content={renderMessageContent(message.content, false)}
-              agentIcon={message.agentIcon}
-              toolCalls={message.toolCalls}
-              actions={message.actions}
-            />
+              className={shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}
+            >
+              <ChatMessage
+                type={message.type}
+                content={renderMessageContent(message.content, false)}
+                agentIcon={message.agentIcon}
+                toolCalls={message.toolCalls}
+                actions={message.actions}
+              />
+            </div>
           );
         })}
 
         {/* Streaming message */}
         {isStreaming && currentStream && (
-          <div className="mb-4">
+          <div className="mb-4 animate-[slideIn_0.3s_ease-out]">
             <ChatMessage
               type="ai"
               content={renderMessageContent(currentStream, true)}
@@ -916,6 +1016,7 @@ export function ChatContainer({
           disabled={isStreaming || agentExecuting}
           isExecuting={agentExecuting}
           onStop={stopAgentExecution}
+          onClearHistory={handleClearHistory}
         />
       </div>
     </div>

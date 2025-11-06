@@ -39,8 +39,8 @@ import {
   ArrowClockwise,
   FloppyDisk
 } from '@phosphor-icons/react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
+import api from '../../lib/api';
 
 const lowlight = createLowlight(common);
 
@@ -138,10 +138,8 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
 
   const loadNotes = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(
-        `${API_URL}/api/kanban/projects/${projectSlug}/notes`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const response = await api.get(
+        `/api/kanban/projects/${projectSlug}/notes`
       );
 
       if (editor && response.data.content) {
@@ -159,14 +157,12 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
   const saveNotes = async (content: string) => {
     try {
       setIsSaving(true);
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `${API_URL}/api/kanban/projects/${projectSlug}/notes`,
+      await api.put(
+        `/api/kanban/projects/${projectSlug}/notes`,
         {
           content,
           content_format: 'html'
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
+        }
       );
       setLastSaved(new Date());
     } catch (error: any) {

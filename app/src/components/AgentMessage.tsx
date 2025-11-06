@@ -54,10 +54,19 @@ export default function AgentMessage({ agentData, finalResponse, agentIcon }: Ag
 
         {/* In Progress Indicator - Just animated dots */}
         {agentData.completion_reason === 'in_progress' && stepsToDisplay.length === 0 && (
-          <div className="flex gap-1.5 py-2">
-            <div className="w-2 h-2 rounded-full bg-[hsl(var(--hue2)_60%_50%)] animate-typing"></div>
-            <div className="w-2 h-2 rounded-full bg-[hsl(var(--hue2)_60%_50%)] animate-typing animation-delay-200"></div>
-            <div className="w-2 h-2 rounded-full bg-[hsl(var(--hue2)_60%_50%)] animate-typing animation-delay-400"></div>
+          <div className="inline-flex gap-1 px-3 py-2 bg-white/5 rounded-2xl">
+            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing"></div>
+            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-200"></div>
+            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-400"></div>
+          </div>
+        )}
+
+        {/* Final Response - Only shown when task is complete */}
+        {finalResponse && finalResponse.trim() && (
+          <div className="mt-2">
+            <div className="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]">
+              {finalResponse}
+            </div>
           </div>
         )}
       </div>
