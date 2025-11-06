@@ -15,8 +15,10 @@ import {
   SignOut,
   CaretLeft,
   CaretRight,
-  Article
+  Article,
+  Sparkle
 } from '@phosphor-icons/react';
+import { billingApi } from '../../lib/api';
 
 interface NavigationSidebarProps {
   activePage: 'dashboard' | 'marketplace' | 'library';
@@ -29,10 +31,27 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
     const saved = localStorage.getItem('navigationSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
+  const [isPremium, setIsPremium] = useState(false);
+  const [loadingSubscription, setLoadingSubscription] = useState(true);
 
   useEffect(() => {
     localStorage.setItem('navigationSidebarExpanded', JSON.stringify(isExpanded));
   }, [isExpanded]);
+
+  useEffect(() => {
+    // Check subscription status
+    const checkSubscription = async () => {
+      try {
+        const subscription = await billingApi.getSubscription();
+        setIsPremium(subscription.tier === 'pro');
+      } catch (error) {
+        console.error('Failed to check subscription:', error);
+      } finally {
+        setLoadingSubscription(false);
+      }
+    };
+    checkSubscription();
+  }, []);
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -190,6 +209,41 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
       )}
 
       <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+
+      {/* Premium Upgrade Button */}
+      {!loadingSubscription && !isPremium && (
+        <>
+          {isExpanded ? (
+            <div className="mx-2 my-1 flex-shrink-0">
+              <button
+                onClick={() => navigate('/billing/plans')}
+                className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg p-3 transition-all shadow-lg hover:shadow-xl"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkle size={16} weight="fill" />
+                  <span className="text-sm font-bold">Upgrade to Premium</span>
+                </div>
+                <div className="text-xs opacity-90 space-y-0.5 text-left">
+                  <div>• 5 projects & deploys</div>
+                  <div>• 24/7 running mode</div>
+                  <div>• Use your own API keys</div>
+                  <div className="font-semibold mt-1">Just $5/month</div>
+                </div>
+              </button>
+            </div>
+          ) : (
+            <Tooltip content="Upgrade to Premium" side="right" delay={200}>
+              <button
+                onClick={() => navigate('/billing/plans')}
+                className="flex items-center justify-center h-9 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white transition-all w-full flex-shrink-0"
+              >
+                <Sparkle size={18} weight="fill" />
+              </button>
+            </Tooltip>
+          )}
+          <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+        </>
+      )}
 
       {/* Utility Items */}
       {isExpanded ? (

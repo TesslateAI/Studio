@@ -375,6 +375,15 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  // Verify Stripe purchase and add to library
+  verifyPurchase: async (sessionId: string, agentSlug?: string) => {
+    const response = await api.post('/api/marketplace/verify-purchase', {
+      session_id: sessionId,
+      agent_slug: agentSlug
+    });
+    return response.data;
+  },
+
   // Get available models from LITELLM_DEFAULT_MODELS
   getAvailableModels: async () => {
     const response = await api.get('/api/marketplace/models');
@@ -449,6 +458,18 @@ export const marketplaceApi = {
 
   getUserBases: async () => {
     const response = await api.get('/api/marketplace/my-bases');
+    return response.data;
+  },
+
+  // Get user's agent subscriptions
+  getUserSubscriptions: async () => {
+    const response = await api.get('/api/marketplace/subscriptions');
+    return response.data;
+  },
+
+  // Cancel an agent subscription
+  cancelAgentSubscription: async (subscriptionId: string) => {
+    const response = await api.post(`/api/marketplace/subscriptions/${subscriptionId}/cancel`);
     return response.data;
   },
 };

@@ -1,6 +1,6 @@
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -2552,6 +2552,7 @@ async def get_deployment_limits(
 
 @router.post("/deployment/purchase-slot")
 async def purchase_additional_deploy_slot(
+    request: Request,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -2562,8 +2563,10 @@ async def purchase_additional_deploy_slot(
     from ..config import get_settings
     settings = get_settings()
 
-    success_url = f"{settings.get_app_base_url}/billing/deploy/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{settings.get_app_base_url}/projects"
+    # Use origin-based URLs to preserve user's domain
+    origin = request.headers.get('origin') or request.headers.get('referer', '').rstrip('/').split('?')[0].rsplit('/', 1)[0] or settings.get_app_base_url
+    success_url = f"{origin}/billing/deploy/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/projects"
 
     session = await stripe_service.create_deploy_purchase_checkout(
         user=current_user,

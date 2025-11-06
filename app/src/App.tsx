@@ -24,6 +24,7 @@ import axios from 'axios';
 import SubscriptionPlans from './components/billing/SubscriptionPlans';
 import BillingDashboard from './components/billing/BillingDashboard';
 import UsageDashboard from './components/billing/UsageDashboard';
+import MarketplaceSuccess from './pages/MarketplaceSuccess';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -204,6 +205,14 @@ function AppContent() {
             element={
               <PrivateRoute>
                 <Marketplace />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/marketplace/success"
+            element={
+              <PrivateRoute>
+                <MarketplaceSuccess />
               </PrivateRoute>
             }
           />

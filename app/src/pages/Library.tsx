@@ -34,14 +34,17 @@ import {
   Sun,
   Moon,
   Gear,
-  SignOut
+  SignOut,
+  CreditCard,
+  Repeat,
+  Coins
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { DiscordSupport } from '../components/DiscordSupport';
 import { MobileMenu, NavigationSidebar } from '../components/ui';
 import { MobileWarning } from '../components/MobileWarning';
 import { ConfirmDialog } from '../components/modals';
-import { marketplaceApi, secretsApi, usersApi } from '../lib/api';
+import { marketplaceApi, secretsApi, usersApi, billingApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
 
@@ -113,7 +116,7 @@ interface Provider {
   requires_key: boolean;
 }
 
-type TabType = 'agents' | 'models' | 'api-keys';
+type TabType = 'agents' | 'models' | 'api-keys' | 'subscriptions' | 'credits';
 
 // All available tools in the system
 const ALL_TOOLS = [
@@ -394,6 +397,28 @@ export default function Library() {
                 <Key size={16} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
                 API Keys ({apiKeys.length})
               </button>
+              <button
+                onClick={() => setActiveTab('subscriptions')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'subscriptions'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Repeat size={16} weight={activeTab === 'subscriptions' ? 'fill' : 'regular'} />
+                Subscriptions
+              </button>
+              <button
+                onClick={() => setActiveTab('credits')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'credits'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Coins size={16} weight={activeTab === 'credits' ? 'fill' : 'regular'} />
+                Credits
+              </button>
             </div>
           </div>
         </div>
@@ -427,6 +452,14 @@ export default function Library() {
             providers={providers}
             onReload={loadApiKeys}
           />
+        )}
+
+        {activeTab === 'subscriptions' && (
+          <SubscriptionsTab />
+        )}
+
+        {activeTab === 'credits' && (
+          <CreditsTab />
         )}
           </div>
         </div>
@@ -1402,7 +1435,9 @@ function AgentCard({
         ) : (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg w-fit">
             <Cpu size={14} className="text-blue-400" />
-            <span className="text-xs text-blue-400 font-medium">{currentModel}</span>
+            <span className="text-xs text-blue-400 font-medium">
+              {currentModel || 'Model not disclosed (closed source)'}
+            </span>
           </div>
         )}
       </div>
@@ -1429,7 +1464,7 @@ function AgentCard({
 
       {/* Features */}
       <div className="flex flex-wrap gap-2 mb-4">
-        {agent.features.slice(0, 3).map((feature, idx) => (
+        {(agent.features || []).slice(0, 3).map((feature, idx) => (
           <span
             key={idx}
             className="px-2 py-1 bg-white/5 text-[var(--text)]/60 text-xs rounded"
@@ -1802,6 +1837,373 @@ function AddCustomModelModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Subscriptions Tab Component
+function SubscriptionsTab() {
+  const [loading, setLoading] = useState(true);
+  const [premiumSubscription, setPremiumSubscription] = useState<any>(null);
+  const [agentSubscriptions, setAgentSubscriptions] = useState<any[]>([]);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadSubscriptions();
+  }, []);
+
+  const loadSubscriptions = async () => {
+    setLoading(true);
+    try {
+      // Load premium subscription status
+      const subscription = await billingApi.getSubscription();
+      setPremiumSubscription(subscription);
+
+      // Load agent subscriptions
+      const agents = await marketplaceApi.getUserSubscriptions();
+      setAgentSubscriptions(agents);
+    } catch (error) {
+      console.error('Failed to load subscriptions:', error);
+      toast.error('Failed to load subscriptions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelSubscription = async (subscriptionId: string, type: 'premium' | 'agent') => {
+    if (!confirm(`Are you sure you want to cancel this subscription? You'll continue to have access until the end of your billing period.`)) {
+      return;
+    }
+
+    setCancelingId(subscriptionId);
+    try {
+      if (type === 'premium') {
+        await billingApi.cancelSubscription();
+        toast.success('Premium subscription cancelled');
+      } else {
+        await marketplaceApi.cancelAgentSubscription(subscriptionId);
+        toast.success('Agent subscription cancelled');
+      }
+      await loadSubscriptions();
+    } catch (error: any) {
+      console.error('Failed to cancel subscription:', error);
+      toast.error(error.response?.data?.detail || 'Failed to cancel subscription');
+    } finally {
+      setCancelingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Premium Subscription */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          <div className="flex items-center gap-2">
+            <Sparkle size={20} weight="fill" className="text-orange-500" />
+            Premium Subscription
+          </div>
+        </h2>
+
+        {premiumSubscription?.tier === 'pro' ? (
+          <div
+            className="rounded-xl p-6 border"
+            style={{
+              backgroundColor: 'var(--surface)',
+              borderColor: 'rgba(255, 107, 0, 0.2)'
+            }}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle size={20} weight="fill" className="text-green-500" />
+                  <span className="font-medium" style={{ color: 'var(--text)' }}>
+                    Active Premium Subscription
+                  </span>
+                </div>
+                <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                  You have access to all premium features
+                </p>
+                <div className="space-y-2 text-sm" style={{ color: 'var(--text)', opacity: 0.8 }}>
+                  <div className="flex items-center gap-2">
+                    <Check size={16} className="text-green-500" />
+                    <span>5 projects & deploys</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check size={16} className="text-green-500" />
+                    <span>24/7 running mode</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check size={16} className="text-green-500" />
+                    <span>Use your own API keys</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleCancelSubscription(premiumSubscription.subscription_id, 'premium')}
+                disabled={cancelingId === premiumSubscription.subscription_id}
+                className="px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+              >
+                {cancelingId === premiumSubscription.subscription_id ? 'Canceling...' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className="rounded-xl p-6 border text-center"
+            style={{
+              backgroundColor: 'var(--surface)',
+              borderColor: 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
+              You're on the free plan
+            </p>
+            <button
+              onClick={() => window.location.href = '/billing/plans'}
+              className="px-6 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition font-medium text-sm"
+            >
+              Upgrade to Premium - $5/month
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Agent Subscriptions */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          <div className="flex items-center gap-2">
+            <Package size={20} weight="fill" />
+            Agent Subscriptions
+          </div>
+        </h2>
+
+        {agentSubscriptions.length === 0 ? (
+          <div
+            className="rounded-xl p-8 border text-center"
+            style={{
+              backgroundColor: 'var(--surface)',
+              borderColor: 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            <Package size={48} weight="fill" style={{ color: 'var(--text)', opacity: 0.3 }} className="mx-auto mb-3" />
+            <p className="text-sm" style={{ color: 'var(--text)', opacity: 0.7 }}>
+              No active agent subscriptions
+            </p>
+            <button
+              onClick={() => window.location.href = '/marketplace'}
+              className="mt-4 px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition font-medium text-sm"
+            >
+              Browse Marketplace
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {agentSubscriptions.map((sub) => (
+              <div
+                key={sub.id}
+                className="rounded-xl p-4 border"
+                style={{
+                  backgroundColor: 'var(--surface)',
+                  borderColor: 'rgba(255, 255, 255, 0.1)'
+                }}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="text-2xl">{sub.icon || '🤖'}</div>
+                    <div>
+                      <h3 className="font-medium" style={{ color: 'var(--text)' }}>
+                        {sub.name}
+                      </h3>
+                      <p className="text-xs" style={{ color: 'var(--text)', opacity: 0.6 }}>
+                        ${(sub.price / 100).toFixed(2)}/month
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleCancelSubscription(sub.subscription_id, 'agent')}
+                    disabled={cancelingId === sub.subscription_id}
+                    className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+                    title="Cancel subscription"
+                  >
+                    <XCircle size={20} />
+                  </button>
+                </div>
+
+                <div className="text-xs space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                  <div>Purchased: {new Date(sub.purchase_date).toLocaleDateString()}</div>
+                  <div className="flex items-center gap-1">
+                    <CheckCircle size={12} className="text-green-500" />
+                    <span>Active</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Credits Tab Component
+function CreditsTab() {
+  const [loading, setLoading] = useState(true);
+  const [credits, setCredits] = useState<any>(null);
+  const [purchasing, setPurchasing] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadCredits();
+  }, []);
+
+  const loadCredits = async () => {
+    setLoading(true);
+    try {
+      const balance = await billingApi.getCreditsBalance();
+      setCredits(balance);
+    } catch (error) {
+      console.error('Failed to load credits:', error);
+      toast.error('Failed to load credits balance');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePurchaseCredits = async (packageType: 'small' | 'medium' | 'large') => {
+    setPurchasing(packageType);
+    try {
+      const response = await billingApi.purchaseCredits(packageType);
+      if (response.url) {
+        window.location.href = response.url;
+      }
+    } catch (error: any) {
+      console.error('Failed to initiate credit purchase:', error);
+      toast.error(error.response?.data?.detail || 'Failed to start checkout');
+      setPurchasing(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  const packages = [
+    {
+      id: 'small' as const,
+      amount: 5,
+      credits: 500,
+      popular: false
+    },
+    {
+      id: 'medium' as const,
+      amount: 15,
+      credits: 1500,
+      popular: true
+    },
+    {
+      id: 'large' as const,
+      amount: 25,
+      credits: 2500,
+      popular: false
+    }
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Current Balance */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          <div className="flex items-center gap-2">
+            <Coins size={20} weight="fill" className="text-yellow-500" />
+            Credits Balance
+          </div>
+        </h2>
+
+        <div
+          className="rounded-xl p-6 border"
+          style={{
+            backgroundColor: 'var(--surface)',
+            borderColor: 'rgba(255, 107, 0, 0.2)'
+          }}
+        >
+          <div className="text-center">
+            <div className="text-4xl font-bold mb-2" style={{ color: 'var(--primary)' }}>
+              {credits?.balance_cents ? (credits.balance_cents / 100).toFixed(2) : '0.00'}
+            </div>
+            <p className="text-sm" style={{ color: 'var(--text)', opacity: 0.7 }}>
+              Available Credits (${credits?.balance_usd?.toFixed(2) || '0.00'} USD)
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Purchase Options */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          Top Up Credits
+        </h2>
+        <p className="text-sm mb-6" style={{ color: 'var(--text)', opacity: 0.7 }}>
+          Credits are used to purchase API-based agents from the marketplace
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {packages.map((pkg) => (
+            <div
+              key={pkg.id}
+              className={`rounded-xl p-6 border relative ${pkg.popular ? 'ring-2' : ''}`}
+              style={{
+                backgroundColor: 'var(--surface)',
+                borderColor: pkg.popular ? 'var(--primary)' : 'rgba(255, 255, 255, 0.1)',
+                ringColor: pkg.popular ? 'var(--primary)' : undefined
+              }}
+            >
+              {pkg.popular && (
+                <div
+                  className="absolute -top-3 left-1/2 transform -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
+                  style={{
+                    backgroundColor: 'var(--primary)',
+                    color: 'white'
+                  }}
+                >
+                  Most Popular
+                </div>
+              )}
+
+              <div className="text-center">
+                <div className="text-3xl font-bold mb-2" style={{ color: 'var(--text)' }}>
+                  ${pkg.amount}
+                </div>
+                <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                  {pkg.credits} credits
+                </p>
+                <button
+                  onClick={() => handlePurchaseCredits(pkg.id)}
+                  disabled={purchasing !== null}
+                  className={`w-full px-6 py-3 rounded-lg font-medium text-sm transition ${
+                    pkg.popular
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white'
+                      : 'bg-white/5 hover:bg-white/10 text-white'
+                  } disabled:opacity-50`}
+                >
+                  {purchasing === pkg.id ? 'Processing...' : 'Purchase'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
