@@ -6,9 +6,10 @@ Supports:
 - GitHub OAuth
 - Graceful degradation if credentials not configured
 """
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 from httpx_oauth.clients.google import GoogleOAuth2
 from httpx_oauth.clients.github import GitHubOAuth2
+from httpx_oauth.exceptions import GetIdEmailError, GetProfileError
 
 from .config import get_settings
 
@@ -16,22 +17,66 @@ settings = get_settings()
 
 
 # ============================================================================
+# Custom Google OAuth2 Client
+# ============================================================================
+
+class CustomGoogleOAuth2(GoogleOAuth2):
+    """
+    Custom Google OAuth2 client that uses the OpenID Connect userinfo endpoint.
+
+    The default httpx_oauth GoogleOAuth2 client uses the People API which requires
+    different scopes. This custom implementation uses the standard OpenID Connect
+    endpoint that works with openid, email, and profile scopes.
+    """
+
+    async def get_id_email(self, token: str) -> tuple[str, Optional[str]]:
+        """
+        Get user ID and email using OpenID Connect userinfo endpoint.
+
+        Uses: https://openidconnect.googleapis.com/v1/userinfo
+        Works with scopes: openid, email, profile
+        """
+        try:
+            async with self.get_httpx_client() as client:
+                response = await client.get(
+                    "https://openidconnect.googleapis.com/v1/userinfo",
+                    headers={**self.request_headers, "Authorization": f"Bearer {token}"},
+                )
+
+                if response.status_code >= 400:
+                    raise GetProfileError(response=response)
+
+                profile = cast(dict[str, Any], response.json())
+        except GetProfileError as e:
+            raise GetIdEmailError(response=e.response) from e
+
+        # OpenID Connect userinfo returns 'sub' for user ID and 'email' directly
+        user_id = profile.get("sub")
+        user_email = profile.get("email")
+
+        return user_id, user_email
+
+
+# ============================================================================
 # OAuth Clients Configuration
 # ============================================================================
 
-def get_google_oauth_client() -> Optional[GoogleOAuth2]:
+def get_google_oauth_client() -> Optional[CustomGoogleOAuth2]:
     """
     Get Google OAuth client if configured, otherwise return None.
 
     Graceful degradation: If Google OAuth credentials are not set,
     the Google login option simply won't be available.
+
+    Uses CustomGoogleOAuth2 which uses OpenID Connect userinfo endpoint
+    instead of the People API.
     """
     if not settings.google_client_id or not settings.google_client_secret:
         print("⚠️  Google OAuth not configured (missing CLIENT_ID or CLIENT_SECRET)")
         return None
 
     try:
-        return GoogleOAuth2(
+        return CustomGoogleOAuth2(
             client_id=settings.google_client_id,
             client_secret=settings.google_client_secret,
             scopes=["openid", "email", "profile"],

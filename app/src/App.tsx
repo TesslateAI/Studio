@@ -23,28 +23,51 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
-async function validateToken(): Promise<boolean> {
-  const token = localStorage.getItem('token');
-
-  if (!token) {
-    return false;
-  }
-
-  // Token exists, assume it's valid
-  // If it's expired, the API will return 401 and redirect to login
-  return true;
-}
-
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem('token');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
-  // If we have token, assume authenticated
-  // The axios interceptor will handle 401 errors and redirect to login if needed
-  if (token) {
-    return <>{children}</>;
+  useEffect(() => {
+    // Check authentication by trying to get current user
+    // This works for both Bearer token (localStorage) and cookie-based auth
+    const checkAuth = async () => {
+      try {
+        // Check if we have a token in localStorage (regular login)
+        const token = localStorage.getItem('token');
+        if (token) {
+          setIsAuthenticated(true);
+          return;
+        }
+
+        // No token in localStorage, check if we have a valid cookie (OAuth login)
+        const response = await axios.get(`${API_URL}/api/users/me`, {
+          withCredentials: true, // Send cookies
+        });
+
+        if (response.status === 200) {
+          setIsAuthenticated(true);
+        } else {
+          setIsAuthenticated(false);
+        }
+      } catch (error) {
+        setIsAuthenticated(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  // Loading state - show nothing while checking
+  if (isAuthenticated === null) {
+    return null;
   }
 
-  return <Navigate to="/login" />;
+  // Not authenticated - redirect to login
+  if (!isAuthenticated) {
+    return <Navigate to="/login" />;
+  }
+
+  // Authenticated - show protected content
+  return <>{children}</>;
 }
 
 function AppContent() {

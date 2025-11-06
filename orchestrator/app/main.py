@@ -1,14 +1,15 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
 from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals, auth
 from .config import get_settings
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
-from .users import fastapi_users, cookie_backend, bearer_backend
+from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
 from .schemas_auth import UserRead, UserCreate, UserUpdate
 from .oauth import get_available_oauth_clients
 import os
@@ -99,6 +100,10 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             response.headers["Access-Control-Expose-Headers"] = "Content-Length, X-Total-Count"
 
         return response
+
+# Add ProxyHeadersMiddleware first to handle X-Forwarded-* headers from Traefik
+# This ensures FastAPI generates correct URLs for OAuth redirects
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # Use custom dynamic CORS middleware
 app.add_middleware(DynamicCORSMiddleware)
@@ -244,6 +249,8 @@ async def add_security_headers(request: Request, call_next):
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
+    if request.url.path == "/api/users/me":
+        logger.info(f"Cookie header: {request.headers.get('cookie', 'NO COOKIE')}")
     try:
         response = await call_next(request)
         logger.info(f"Response status: {response.status_code}")
@@ -343,23 +350,228 @@ app.include_router(
     tags=["users"],
 )
 
-# OAuth routers (Google and GitHub) - only include if configured
-oauth_clients = get_available_oauth_clients()
-for provider_name, oauth_client in oauth_clients.items():
-    # Redirect to frontend OAuth callback page after successful authentication
-    frontend_redirect = f"{settings.cors_origins.split(',')[0]}/oauth/callback" if settings.cors_origins else None
+# ============================================================================
+# Custom OAuth Authorize Endpoints
+# ============================================================================
+# These MUST be registered BEFORE the OAuth routers to take precedence
+# They force the redirect_uri to use localhost (Google doesn't accept .localhost domains)
 
-    app.include_router(
-        fastapi_users.get_oauth_router(
-            oauth_client,
-            bearer_backend,
-            settings.secret_key,
-            redirect_url=frontend_redirect,
-        ),
-        prefix=f"/api/auth/{provider_name}",
+from fastapi import Query
+from fastapi.responses import JSONResponse
+
+@app.get("/api/auth/google/authorize", tags=["auth"])
+async def google_authorize(scopes: list[str] = Query(None)):
+    """
+    Custom Google OAuth authorize endpoint that forces redirect_uri to use localhost.
+    Google OAuth doesn't accept .localhost domains, so we force it to use localhost
+    regardless of what domain the user accessed the app from.
+    """
+    from .oauth import OAUTH_CLIENTS
+    from fastapi_users.router.oauth import generate_state_token, STATE_TOKEN_AUDIENCE
+
+    if "google" not in OAUTH_CLIENTS:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Google OAuth is not configured"}
+        )
+
+    oauth_client = OAUTH_CLIENTS["google"]
+
+    # Force the redirect_uri to use localhost (from environment variable)
+    redirect_uri = settings.google_oauth_redirect_uri
+    logger.info(f"Google OAuth redirect_uri: {redirect_uri}")
+
+    # Generate state token
+    state_data: dict[str, str] = {}
+    state = generate_state_token(state_data, settings.secret_key)
+
+    # Get authorization URL with forced redirect_uri
+    authorization_url = await oauth_client.get_authorization_url(
+        redirect_uri,
+        state,
+        scopes,
+    )
+
+    return {"authorization_url": authorization_url}
+
+@app.get("/api/auth/github/authorize", tags=["auth"])
+async def github_authorize(scopes: list[str] = Query(None)):
+    """
+    Custom GitHub OAuth authorize endpoint that forces redirect_uri to use localhost.
+    This matches the Google OAuth behavior for consistency.
+    """
+    from .oauth import OAUTH_CLIENTS
+    from fastapi_users.router.oauth import generate_state_token, STATE_TOKEN_AUDIENCE
+
+    if "github" not in OAUTH_CLIENTS:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "GitHub OAuth is not configured"}
+        )
+
+    oauth_client = OAUTH_CLIENTS["github"]
+
+    # Force the redirect_uri to use localhost (from environment variable)
+    redirect_uri = settings.github_oauth_redirect_uri
+    logger.info(f"GitHub OAuth redirect_uri: {redirect_uri}")
+
+    # Generate state token
+    state_data: dict[str, str] = {}
+    state = generate_state_token(state_data, settings.secret_key)
+
+    # Get authorization URL with forced redirect_uri
+    authorization_url = await oauth_client.get_authorization_url(
+        redirect_uri,
+        state,
+        scopes,
+    )
+
+    return {"authorization_url": authorization_url}
+
+# ============================================================================
+# Custom OAuth Callback Endpoints with Redirect
+# ============================================================================
+# We need custom callback endpoints to properly redirect to the frontend
+# after setting the authentication cookie
+
+from fastapi import HTTPException, status as http_status
+from fastapi.responses import RedirectResponse
+from httpx_oauth.integrations.fastapi import OAuth2AuthorizeCallback
+
+# Frontend callback URL where users will be redirected after authentication
+# Use localhost for OAuth callback to match where cookie is set
+# (Google OAuth requires localhost, not studio.localhost)
+frontend_callback_url = "http://localhost/oauth/callback"
+
+def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redirect_uri: str):
+    """
+    Factory function to create OAuth callback endpoint with proper closure.
+
+    This is necessary because we're creating endpoints in a loop and need to
+    capture the provider-specific variables correctly.
+    """
+    # Create OAuth2AuthorizeCallback dependency with forced redirect_uri
+    oauth2_callback_dependency = OAuth2AuthorizeCallback(
+        oauth_client,
+        redirect_url=oauth_redirect_uri,
+    )
+
+    async def oauth_callback_handler(
+        request: Request,
+        access_token_state=Depends(oauth2_callback_dependency),
+        user_manager=Depends(get_user_manager),
+        strategy=Depends(cookie_backend.get_strategy),
+    ):
+        """
+        OAuth callback endpoint that handles authentication and redirects to frontend.
+
+        Flow:
+        1. Receive authorization code from OAuth provider
+        2. Exchange code for access token (handled by oauth2_callback_dependency)
+        3. Get user info from OAuth provider
+        4. Create/update user in database
+        5. Generate session token and set cookie
+        6. Redirect to frontend OAuth callback page
+        """
+        from fastapi_users.router.oauth import STATE_TOKEN_AUDIENCE
+        import jwt as jose_jwt
+
+        token, state = access_token_state
+
+        try:
+            # Get user ID and email from OAuth provider
+            account_id, account_email = await oauth_client.get_id_email(token["access_token"])
+
+            if account_email is None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="OAUTH_NOT_AVAILABLE_EMAIL",
+                )
+
+            # Verify state token
+            from fastapi_users.jwt import decode_jwt
+            try:
+                decode_jwt(state, settings.secret_key, [STATE_TOKEN_AUDIENCE])
+            except jose_jwt.DecodeError:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="INVALID_STATE_TOKEN",
+                )
+            except jose_jwt.ExpiredSignatureError:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="STATE_TOKEN_EXPIRED",
+                )
+
+            # Create or get user via OAuth callback
+            user = await user_manager.oauth_callback(
+                provider_name,
+                token["access_token"],
+                account_id,
+                account_email,
+                token.get("expires_at"),
+                token.get("refresh_token"),
+                request,
+                associate_by_email=True,
+                is_verified_by_default=True,
+            )
+
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="LOGIN_BAD_CREDENTIALS",
+                )
+
+            # Generate authentication cookie using cookie backend
+            # Frontend is configured with withCredentials=true to send cookies
+            login_response = await cookie_backend.login(strategy, user)
+
+            # Call on_after_login hook to send webhook
+            await user_manager.on_after_login(user, request)
+
+            # Create redirect response to frontend callback page
+            redirect_response = RedirectResponse(url=frontend_callback_url, status_code=303)
+
+            # Copy Set-Cookie headers from login response to redirect response
+            set_cookie_headers = login_response.headers.getlist('set-cookie')
+            for cookie_header in set_cookie_headers:
+                redirect_response.headers.append('set-cookie', cookie_header)
+
+            logger.info(f"OAuth login successful for {provider_name}: {user.email}")
+            return redirect_response
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"OAuth callback error for {provider_name}: {e}")
+            # Redirect to login with error
+            error_url = f"{settings.get_app_base_url}/login?error=oauth_failed"
+            return RedirectResponse(url=error_url, status_code=303)
+
+    return oauth_callback_handler
+
+# Register OAuth callback endpoints for each provider
+for provider_name, oauth_client in get_available_oauth_clients().items():
+    # Get the correct redirect_uri for token exchange (from environment)
+    if provider_name == "google":
+        oauth_redirect_uri = settings.google_oauth_redirect_uri
+    elif provider_name == "github":
+        oauth_redirect_uri = settings.github_oauth_redirect_uri
+    else:
+        oauth_redirect_uri = None
+
+    # Create and register the callback endpoint
+    callback_handler = create_oauth_callback_endpoint(provider_name, oauth_client, oauth_redirect_uri)
+
+    app.add_api_route(
+        f"/api/auth/{provider_name}/callback",
+        callback_handler,
+        methods=["GET"],
+        name=f"oauth:{provider_name}.cookie.callback",
         tags=["auth"],
     )
-    logger.info(f"✅ Registered OAuth router for: {provider_name}")
+
+    logger.info(f"✅ Registered OAuth callback for {provider_name} (redirects to: {frontend_callback_url})")
 
 # CSRF token endpoint
 @app.get("/api/auth/csrf", tags=["auth"])

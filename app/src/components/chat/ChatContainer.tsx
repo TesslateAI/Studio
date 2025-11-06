@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Loader2, FileCode, X } from 'lucide-react';
+import { PencilSimple, Storefront, Books } from '@phosphor-icons/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { createWebSocket, chatApi } from '../../lib/api';
@@ -66,6 +68,7 @@ export function ChatContainer({
   className = '',
   sidebarExpanded = true
 }: ChatContainerProps) {
+  const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -848,7 +851,7 @@ export function ChatContainer({
         )}
 
         {!isLoadingHistory && messages.length === 0 && !isStreaming && (
-          <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
+          <div className="text-center text-[var(--text)]/60 mt-8 space-y-6 max-w-md mx-auto px-4">
             <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
               <svg xmlns="http://www.w3.org/2000/svg" width="32" height="25" viewBox="0 0 161.9 126.66" className="text-orange-500">
                 <g>
@@ -859,10 +862,49 @@ export function ChatContainer({
               </svg>
             </div>
             <div className="space-y-2">
-              <p className="text-lg font-semibold">Let's start building</p>
-              <p className="text-sm max-w-xs mx-auto leading-relaxed">
+              <p className="text-lg font-semibold text-[var(--text)]">Let's start building</p>
+              <p className="text-sm leading-relaxed">
                 Describe what you'd like to create and I'll help you build it step by step
               </p>
+            </div>
+
+            {/* Discovery Cards */}
+            <div className="space-y-3 text-left">
+              <div className="bg-gradient-to-r from-purple-500/10 to-purple-600/10 rounded-lg p-3 border border-purple-500/20">
+                <div className="flex items-center gap-2 mb-2">
+                  <PencilSimple size={16} weight="bold" className="text-purple-400" />
+                  <span className="font-semibold text-sm text-[var(--text)]">Customize Your Agent</span>
+                </div>
+                <p className="text-xs text-[var(--text)]/70 mb-3">
+                  Edit system prompts, behaviors, and settings to tailor {currentAgent.name} to your needs.
+                </p>
+                <button
+                  onClick={() => {
+                    navigate('/library', { state: { selectedAgentId: currentAgent.backendId } });
+                  }}
+                  className="w-full py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 rounded-lg text-[var(--text)] text-xs font-semibold transition-all"
+                >
+                  Open in Library
+                </button>
+              </div>
+
+              <div className="bg-gradient-to-r from-orange-500/10 to-orange-600/10 rounded-lg p-3 border border-orange-500/20">
+                <div className="flex items-center gap-2 mb-2">
+                  <Storefront size={16} weight="fill" className="text-orange-400" />
+                  <span className="font-semibold text-sm text-[var(--text)]">Discover More Agents</span>
+                </div>
+                <p className="text-xs text-[var(--text)]/70 mb-3">
+                  Browse specialized agents for React, Vue, Python, DevOps, and more!
+                </p>
+                <button
+                  onClick={() => {
+                    navigate('/marketplace');
+                  }}
+                  className="w-full py-2 bg-gradient-to-r from-orange-500/30 to-orange-600/30 hover:from-orange-500/40 hover:to-orange-600/40 rounded-lg text-[var(--text)] text-xs font-semibold transition-all border border-orange-500/40"
+                >
+                  Browse Marketplace
+                </button>
+              </div>
             </div>
           </div>
         )}

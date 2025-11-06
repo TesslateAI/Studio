@@ -105,7 +105,7 @@ services:
       - CSRF_TOKEN_MAX_AGE=${CSRF_TOKEN_MAX_AGE:-86400}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
-      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-.localhost}
       - PYTHONUNBUFFERED=1
       - WATCHFILES_FORCE_POLLING=true
     depends_on:
@@ -116,7 +116,9 @@ services:
     labels:
       - "traefik.enable=true"
       # API routes - handle both /api and websocket paths
-      - "traefik.http.routers.orchestrator.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
+      # Set in .env - should be empty in production
+      - "traefik.http.routers.orchestrator.rule=(Host(`${APP_DOMAIN:-studio.localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
       - "traefik.http.routers.orchestrator.entrypoints=web"
       - "traefik.http.routers.orchestrator.priority=100"
       - "traefik.http.routers.orchestrator.service=orchestrator"
@@ -160,7 +162,9 @@ services:
     labels:
       - "traefik.enable=true"
       # Frontend routes - everything except /api, /ws, and /preview
-      - "traefik.http.routers.app.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
+      # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
+      # Set in .env - should be empty in production
+      - "traefik.http.routers.app.rule=(Host(`${APP_DOMAIN:-studio.localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
       - "traefik.http.routers.app.entrypoints=web"
       - "traefik.http.routers.app.priority=10"
       - "traefik.http.routers.app.service=app"

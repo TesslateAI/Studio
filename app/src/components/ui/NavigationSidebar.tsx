@@ -14,7 +14,8 @@ import {
   Books,
   SignOut,
   CaretLeft,
-  CaretRight
+  CaretRight,
+  Article
 } from '@phosphor-icons/react';
 
 interface NavigationSidebarProps {
@@ -162,6 +163,29 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
           >
             <Package size={18} weight="fill" />
           </button>
+        </Tooltip>
+      )}
+
+      {isExpanded ? (
+        <a
+          href="https://docs.tesslate.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
+        >
+          <Article size={18} weight="fill" />
+          <span className="text-sm font-medium">Documentation</span>
+        </a>
+      ) : (
+        <Tooltip content="Documentation" side="right" delay={200}>
+          <a
+            href="https://docs.tesslate.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
+          >
+            <Article size={18} weight="fill" />
+          </a>
         </Tooltip>
       )}
 
