@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
+import { getAuthHeaders } from '../lib/api';
 // Using simple chart placeholders for now
 // Will integrate charts later
 
@@ -106,12 +107,10 @@ export default function AdminDashboard() {
   const loadMetrics = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
 
       const response = await fetch('/api/admin/metrics/summary', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) {
@@ -135,12 +134,9 @@ export default function AdminDashboard() {
 
   const loadDetailedMetrics = async (metric: string) => {
     try {
-      const token = localStorage.getItem('token');
-
       const response = await fetch(`/api/admin/metrics/${metric}?days=${selectedPeriod}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) {
@@ -667,7 +663,6 @@ function AgentManagement() {
   const loadAgents = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
 
       // Build query params
       const params = new URLSearchParams();
@@ -676,9 +671,8 @@ function AgentManagement() {
       if (filter.is_active) params.append('is_active', filter.is_active);
 
       const response = await fetch(`/api/admin/agents?${params.toString()}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) throw new Error('Failed to load agents');
@@ -695,11 +689,9 @@ function AgentManagement() {
 
   const loadAvailableModels = async () => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch('/api/admin/models', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) throw new Error('Failed to load models');
@@ -713,11 +705,9 @@ function AgentManagement() {
 
   const loadAgentDetails = async (agentId: number) => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`/api/admin/agents/${agentId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) throw new Error('Failed to load agent details');
@@ -742,12 +732,10 @@ function AgentManagement() {
     }
 
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`/api/admin/agents/${agent.id}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) {
@@ -769,12 +757,10 @@ function AgentManagement() {
     }
 
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`/api/admin/agents/${agent.id}/remove-from-marketplace`, {
         method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) throw new Error('Failed to remove agent');
@@ -789,12 +775,10 @@ function AgentManagement() {
 
   const handleToggleFeatured = async (agent: Agent) => {
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`/api/admin/agents/${agent.id}/feature?is_featured=${!agent.is_featured}`, {
         method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: getAuthHeaders(),
+        credentials: 'include'
       });
 
       if (!response.ok) throw new Error('Failed to toggle featured');
@@ -1072,8 +1056,6 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
     setSaving(true);
 
     try {
-      const token = localStorage.getItem('token');
-
       // Prepare payload
       const payload = {
         ...formData,
@@ -1091,10 +1073,8 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
 
       const response = await fetch(url, {
         method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify(payload)
       });
 

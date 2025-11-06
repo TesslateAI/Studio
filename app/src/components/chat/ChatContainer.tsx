@@ -79,6 +79,7 @@ export function ChatContainer({
   const [currentStream, setCurrentStream] = useState('');
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -363,6 +364,16 @@ export function ChatContainer({
     // Only reconnect when projectId changes, not when onFileUpdate changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // Track desktop/mobile state
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Track user scroll behavior
   useEffect(() => {
@@ -744,24 +755,40 @@ export function ChatContainer({
   return (
     <>
       {/* Mobile: Floating chat button - only show when collapsed */}
-      <button
-        onClick={() => setIsExpanded(true)}
-        className={`
-          md:hidden fixed bottom-20 right-4 z-[150]
-          w-14 h-14 rounded-full
-          bg-orange-500 hover:bg-orange-600 active:bg-orange-700
-          shadow-lg
-          flex items-center justify-center
-          transition-all duration-300
-          ${isExpanded ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'}
-        `}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 161.9 126.66" className="text-white" fill="currentColor">
-          <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"/>
-          <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"/>
-          <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"/>
-        </svg>
-      </button>
+      <div className="md:hidden fixed bottom-20 right-4 z-30 group">
+        <button
+          onClick={() => setIsExpanded(true)}
+          className={`
+            w-12 h-12 md:w-16 md:h-16 rounded-full
+            bg-orange-500 hover:bg-orange-600 active:bg-orange-700
+            shadow-lg hover:shadow-xl
+            flex items-center justify-center
+            transition-all duration-300
+            hover:scale-110
+            ${isExpanded ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'}
+          `}
+          aria-label="Open chat"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="16" viewBox="0 0 161.9 126.66" className="text-white md:w-6 md:h-6" fill="currentColor">
+            <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"/>
+            <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"/>
+            <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"/>
+          </svg>
+
+          {/* Hover tooltip */}
+          <div className="
+            absolute bottom-full mb-2 right-0
+            bg-gray-900 text-white text-sm
+            px-3 py-2 rounded-lg
+            whitespace-nowrap
+            opacity-0 group-hover:opacity-100
+            transition-opacity duration-200
+            pointer-events-none
+          ">
+            Open chat
+          </div>
+        </button>
+      </div>
 
       {/* Chat container */}
       <div
@@ -786,9 +813,11 @@ export function ChatContainer({
           ${!isExpanded && isHovered ? 'md:w-[min(650px,calc(100vw-48px))]' : ''}
           ${className}
         `}
-        style={{
+        style={isDesktop ? {
           left: sidebarExpanded ? 'calc(96px + 50vw)' : 'calc(24px + 50vw)',
           transition: 'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.4s var(--ease), max-height 0.4s var(--ease)'
+        } : {
+          transition: 'width 0.4s var(--ease), max-height 0.4s var(--ease), transform 0.4s var(--ease)'
         }}
         onMouseEnter={() => !isExpanded && setIsHovered(true)}
         onMouseLeave={() => !isExpanded && setIsHovered(false)}

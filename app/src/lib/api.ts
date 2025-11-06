@@ -34,6 +34,27 @@ export const fetchCsrfToken = async () => {
 // Call fetchCsrfToken on app load
 fetchCsrfToken();
 
+/**
+ * Helper to build auth headers for fetch() calls
+ * Supports both JWT Bearer tokens and cookie-based OAuth authentication
+ */
+export const getAuthHeaders = (additionalHeaders?: Record<string, string>): Record<string, string> => {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...additionalHeaders,
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  } else if (csrfToken) {
+    // Add CSRF token for cookie-based auth (OAuth users)
+    headers['X-CSRF-Token'] = csrfToken;
+  }
+
+  return headers;
+};
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -232,18 +253,11 @@ export const chatApi = {
     onEvent: (event: { type: string; data: any }) => void,
     signal?: AbortSignal
   ): Promise<void> => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('No authentication token found');
-    }
-
     const response = await fetch(`${API_URL}/api/chat/agent/stream`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(request),
+      credentials: 'include', // Include cookies for OAuth-based authentication
       signal, // Pass abort signal
     });
 

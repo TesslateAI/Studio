@@ -15,7 +15,7 @@ import {
   ChatCircle
 } from '@phosphor-icons/react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import axios from 'axios';
+import api from '../../lib/api';
 import toast from 'react-hot-toast';
 
 interface KanbanPanelProps {
@@ -126,10 +126,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
   const loadBoard = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE}/api/kanban/projects/${projectId}/board`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/api/kanban/projects/${projectId}/board`);
       setBoard(response.data);
     } catch (error: any) {
       console.error('Failed to load board:', error);
@@ -141,10 +138,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
   const loadTaskDetails = async (taskId: string) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE}/api/kanban/tasks/${taskId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/api/kanban/tasks/${taskId}`);
       setSelectedTask(response.data);
       setShowTaskDetails(true);
     } catch (error: any) {
@@ -156,14 +150,12 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!newTask.title.trim() || !newTaskColumnId) return;
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE}/api/kanban/projects/${projectId}/tasks`,
+      await api.post(
+        `/api/kanban/projects/${projectId}/tasks`,
         {
           column_id: newTaskColumnId,
           ...newTask
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
+        }
       );
       toast.success('Task created successfully');
       setShowNewTaskModal(false);
@@ -183,11 +175,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
   const updateTask = async (taskId: string, updates: Partial<Task>) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(
-        `${API_BASE}/api/kanban/tasks/${taskId}`,
-        updates,
-        { headers: { Authorization: `Bearer ${token}` } }
+      await api.patch(
+        `/api/kanban/tasks/${taskId}`,
+        updates
       );
       toast.success('Task updated');
       await loadBoard();
@@ -203,10 +193,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!confirm('Are you sure you want to delete this task?')) return;
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${API_BASE}/api/kanban/tasks/${taskId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.delete(`/api/kanban/tasks/${taskId}`);
       toast.success('Task deleted');
       setShowTaskDetails(false);
       await loadBoard();
@@ -219,11 +206,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!selectedTask || !newComment.trim()) return;
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE}/api/kanban/tasks/${selectedTask.id}/comments`,
-        { content: newComment },
-        { headers: { Authorization: `Bearer ${token}` } }
+      await api.post(
+        `/api/kanban/tasks/${selectedTask.id}/comments`,
+        { content: newComment }
       );
       setNewComment('');
       await loadTaskDetails(selectedTask.id);
@@ -288,14 +273,12 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
     // Send to backend
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE}/api/kanban/tasks/${taskId}/move`,
+      await api.post(
+        `/api/kanban/tasks/${taskId}/move`,
         {
           column_id: destination.droppableId.replace('column-', ''),
           position: destination.index
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
+        }
       );
     } catch (error: any) {
       toast.error('Failed to move task');

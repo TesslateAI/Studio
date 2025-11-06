@@ -54,7 +54,7 @@ export default function AgentMessage({ agentData, finalResponse, agentIcon }: Ag
 
         {/* In Progress Indicator - Just animated dots */}
         {agentData.completion_reason === 'in_progress' && stepsToDisplay.length === 0 && (
-          <div className="flex gap-1 px-4 py-3 bg-white/5 rounded-2xl">
+          <div className="inline-flex gap-1 px-3 py-2 bg-white/5 rounded-2xl">
             <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing"></div>
             <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-200"></div>
             <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-400"></div>

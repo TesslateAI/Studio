@@ -1681,6 +1681,19 @@ wheels = [
 ]
 
 [[package]]
+name = "stripe"
+version = "13.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4f/c1/e687ba904a78eeb9ac8e0845630c625a03d380b7569647530c4bafd12677/stripe-13.2.0.tar.gz", hash = "sha256:ed6ad1c27725e1e32a336fa9d835cfa8f0bd6dafcc98b3ab7bc7e8791390453b", size = 1357785, upload-time = "2025-11-05T23:04:23.043Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/39/5a7a7ac27372e8bd1ec45f52b884d039f504900a1a41885745c5a7976519/stripe-13.2.0-py3-none-any.whl", hash = "sha256:e7d18bd44bab1812bc4e9e75da4ceacedd587f71737bb9193955edf420605f88", size = 1962001, upload-time = "2025-11-05T23:04:21.056Z" },
+]
+
+[[package]]
 name = "tesslate-studio-orchestrator"
 version = "0.1.0"
 source = { editable = "." }
@@ -1709,6 +1722,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "slowapi" },
     { name = "sqlalchemy" },
+    { name = "stripe" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
 ]
@@ -1745,6 +1759,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.6" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", specifier = ">=2.0.25" },
+    { name = "stripe", specifier = ">=7.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
     { name = "websockets", specifier = ">=12.0" },
 ]
