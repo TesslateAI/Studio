@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { billingApi } from '../../lib/api';
-import CreditsPurchaseModal from './CreditsPurchaseModal';
 import type {
   SubscriptionResponse,
   CreditBalanceResponse,
@@ -17,7 +16,6 @@ const BillingDashboard: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [creditHistory, setCreditHistory] = useState<CreditPurchase[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreditModal, setShowCreditModal] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -218,12 +216,12 @@ const BillingDashboard: React.FC = () => {
               <div className="text-sm text-gray-600">Available Balance</div>
             </div>
 
-            <button
-              onClick={() => setShowCreditModal(true)}
-              className="w-full py-2 px-4 bg-blue-500 text-white rounded hover:bg-blue-600 transition text-sm font-medium"
+            <Link
+              to="/library?tab=credits"
+              className="block w-full py-2 px-4 bg-blue-500 text-white text-center rounded hover:bg-blue-600 transition text-sm font-medium"
             >
               Purchase Credits
-            </button>
+            </Link>
 
             <div className="mt-4 pt-4 border-t">
               <Link
@@ -350,16 +348,6 @@ const BillingDashboard: React.FC = () => {
           )}
         </div>
       </div>
-
-      {/* Credits Purchase Modal */}
-      <CreditsPurchaseModal
-        isOpen={showCreditModal}
-        onClose={() => setShowCreditModal(false)}
-        onSuccess={() => {
-          setShowCreditModal(false);
-          loadData();
-        }}
-      />
     </div>
   );
 };
