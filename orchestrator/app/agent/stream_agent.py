@@ -80,11 +80,22 @@ class StreamAgent(AbstractAgent):
             }
             return
 
-        # Build the complete prompt
+        # Build the complete prompt starting with system message
         messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"{project_context_str}\n\nUser request: {user_request}"}
+            {"role": "system", "content": self.system_prompt}
         ]
+
+        # Include chat history if provided (for conversation continuity)
+        chat_history = context.get('chat_history', [])
+        if chat_history:
+            logger.info(f"[StreamAgent] Including {len(chat_history)} previous messages for context")
+            messages.extend(chat_history)
+
+        # Add current user message
+        messages.append({
+            "role": "user",
+            "content": f"{project_context_str}\n\nUser request: {user_request}"
+        })
 
         full_response = ""
         processed_files = set()

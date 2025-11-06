@@ -14,15 +14,43 @@ const api = axios.create({
 /**
  * Authentication with fastapi-users:
  * - JWT Bearer tokens for API authentication
+ * - Cookie-based authentication (for OAuth)
+ * - CSRF protection for cookie-based POST requests
  * - No refresh tokens (tokens are long-lived)
  * - Redirect to login on 401 errors
  */
+
+// Store CSRF token
+let csrfToken: string | null = null;
+
+// Fetch CSRF token from server
+export const fetchCsrfToken = async () => {
+  try {
+    const response = await axios.get(`${API_URL}/api/auth/csrf`, {
+      withCredentials: true,
+    });
+    csrfToken = response.data.csrf_token;
+    return csrfToken;
+  } catch (error) {
+    console.error('Failed to fetch CSRF token:', error);
+    return null;
+  }
+};
+
+// Initialize CSRF token on module load
+fetchCsrfToken();
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Add CSRF token for state-changing requests (if using cookie auth)
+  if (!token && csrfToken && ['post', 'put', 'delete', 'patch'].includes(config.method?.toLowerCase() || '')) {
+    config.headers['X-CSRF-Token'] = csrfToken;
+  }
+
   return config;
 });
 
@@ -34,6 +62,17 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
+      }
+    }
+
+    // If error is 403 and mentions CSRF, try to refetch CSRF token and retry
+    if (error.response?.status === 403 && error.response?.data?.detail?.includes('CSRF')) {
+      await fetchCsrfToken();
+      // Retry the request once with new CSRF token
+      if (csrfToken) {
+        const config = error.config;
+        config.headers['X-CSRF-Token'] = csrfToken;
+        return api.request(config);
       }
     }
 
@@ -82,6 +121,12 @@ export const authApi = {
       // Ignore errors, we're logging out anyway
     }
     localStorage.removeItem('token');
+    csrfToken = null;
+  },
+
+  // Refresh CSRF token (call after OAuth login or on app init)
+  refreshCsrfToken: async () => {
+    return await fetchCsrfToken();
   },
 
   // OAuth endpoints - Fetch the authorization URL from the backend
@@ -187,6 +232,10 @@ export const chatApi = {
     const response = await api.get(`/api/chat/${projectId}/messages`);
     return response.data;
   },
+  clearProjectMessages: async (projectId: string) => {
+    const response = await api.delete(`/api/chat/${projectId}/messages`);
+    return response.data;
+  },
   sendAgentMessage: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
     const response = await api.post('/api/chat/agent', request);
     return response.data;
@@ -197,17 +246,30 @@ export const chatApi = {
     signal?: AbortSignal
   ): Promise<void> => {
     const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('No authentication token found');
+
+    // Build headers - support both Bearer token and cookie-based auth
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (token) {
+      // Use Bearer token authentication (regular login)
+      headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      // Use cookie-based authentication (OAuth login) with CSRF token
+      if (!csrfToken) {
+        await fetchCsrfToken();
+      }
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
     }
 
     const response = await fetch(`${API_URL}/api/chat/agent/stream`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers,
       body: JSON.stringify(request),
+      credentials: 'include', // Include cookies for cookie-based auth
       signal, // Pass abort signal
     });
 

@@ -674,6 +674,18 @@ export function ChatContainer({
     }
   };
 
+  const handleClearHistory = async () => {
+    try {
+      const result = await chatApi.clearProjectMessages(projectId.toString());
+      setMessages([]);
+      animatedMessagesRef.current.clear();
+      toast.success(`Cleared ${result.deleted_count} messages`, { icon: '🗑️' });
+    } catch (error) {
+      console.error('[CHAT] Failed to clear history:', error);
+      toast.error('Failed to clear chat history');
+    }
+  };
+
   const renderMessageContent = (content: string, isCurrentlyStreaming: boolean = false) => {
     // Safety check: handle undefined/null content
     if (!content) {
@@ -975,6 +987,7 @@ export function ChatContainer({
           disabled={isStreaming || agentExecuting}
           isExecuting={agentExecuting}
           onStop={stopAgentExecution}
+          onClearHistory={handleClearHistory}
         />
       </div>
     </div>
