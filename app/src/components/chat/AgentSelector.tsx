@@ -72,16 +72,18 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
         }}
         className="
           agent-pill
-          bg-[var(--primary)] text-white
+          bg-[var(--text)]/10 text-[var(--text)]
           flex items-center gap-1.5
           transition-all
           text-xs font-medium
           flex-shrink-0
-          hover:bg-orange-600
-          active:bg-orange-700
+          hover:bg-[var(--text)]/20
+          active:bg-[var(--text)]/30
           relative z-[10000]
-          md:px-3.5 md:py-2.5 md:rounded-l-2xl md:-ml-px md:-my-px
-          px-2.5 py-2.5 rounded-xl
+          h-8
+          md:px-3.5 md:rounded-xl
+          px-2.5 rounded-xl
+          border-2 border-[var(--border-color)]
         "
         title={currentAgent.name}
       >

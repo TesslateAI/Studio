@@ -48,8 +48,8 @@ const CreditsPurchaseModal: React.FC<CreditsPurchaseModalProps> = ({
         billingApi.getCreditsBalance(),
       ]);
 
-      setConfig(configRes.data);
-      setBalance(balanceRes.data);
+      setConfig(configRes);
+      setBalance(balanceRes);
     } catch (err: any) {
       console.error('Failed to load credits data:', err);
       setError(err.response?.data?.detail || 'Failed to load credits information');
@@ -68,8 +68,8 @@ const CreditsPurchaseModal: React.FC<CreditsPurchaseModalProps> = ({
       const response = await billingApi.purchaseCredits(selectedPackage);
 
       // Redirect to Stripe Checkout
-      if (response.data.url) {
-        window.location.href = response.data.url;
+      if (response.url) {
+        window.location.href = response.url;
         if (onSuccess) {
           onSuccess();
         }

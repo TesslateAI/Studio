@@ -21,37 +21,6 @@ export default function NewLandingPage() {
     animationDelay: `${Math.random() * 3}s`,
   }));
 
-  // Generate meteors - only 3 but make them spectacular
-  const meteors = [
-    {
-      id: 1,
-      top: '15%',
-      right: '70%',
-      duration: '3s',
-      delay: '0s',
-      length: '200px',
-      thickness: '3px',
-    },
-    {
-      id: 2,
-      top: '25%',
-      right: '40%',
-      duration: '4s',
-      delay: '2s',
-      length: '150px',
-      thickness: '2px',
-    },
-    {
-      id: 3,
-      top: '10%',
-      right: '85%',
-      duration: '3.5s',
-      delay: '4.5s',
-      length: '180px',
-      thickness: '2.5px',
-    },
-  ];
-
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
@@ -107,66 +76,6 @@ export default function NewLandingPage() {
           />
         ))}
       </div>
-
-      {/* Shooting stars/meteors - enhanced */}
-      {meteors.map((meteor) => (
-        <div
-          key={meteor.id}
-          className="absolute z-0"
-          style={{
-            top: meteor.top,
-            right: meteor.right,
-            transform: 'rotate(-45deg)',
-            animation: `shooting-star ${meteor.duration} ease-in-out infinite`,
-            animationDelay: meteor.delay,
-          }}
-        >
-          {/* Main meteor trail */}
-          <div
-            className="relative"
-            style={{
-              width: meteor.length,
-              height: meteor.thickness,
-              background: 'linear-gradient(90deg, rgba(135,206,250,0.6) 0%, rgba(255,255,255,1) 30%, rgba(255,255,255,0.8) 70%, rgba(255,255,255,0) 100%)',
-              boxShadow: `
-                0 0 10px 2px rgba(255, 255, 255, 0.8),
-                0 0 20px 4px rgba(135, 206, 250, 0.6),
-                0 0 30px 6px rgba(255, 255, 255, 0.4)
-              `,
-              borderRadius: '50%',
-            }}
-          >
-            {/* Meteor head glow */}
-            <div
-              className="absolute left-0 top-1/2 -translate-y-1/2"
-              style={{
-                width: '12px',
-                height: '12px',
-                background: 'radial-gradient(circle, rgba(255,255,255,1) 0%, rgba(135,206,250,0.8) 40%, transparent 70%)',
-                boxShadow: `
-                  0 0 15px 5px rgba(255, 255, 255, 0.9),
-                  0 0 25px 8px rgba(135, 206, 250, 0.7),
-                  0 0 35px 10px rgba(255, 255, 255, 0.5)
-                `,
-                borderRadius: '50%',
-                animation: 'meteor-pulse 0.5s ease-in-out infinite alternate',
-              }}
-            />
-          </div>
-
-          {/* Secondary trail for depth */}
-          <div
-            className="absolute top-0"
-            style={{
-              width: meteor.length,
-              height: meteor.thickness,
-              background: 'linear-gradient(90deg, rgba(135,206,250,0.2) 0%, rgba(255,255,255,0.3) 50%, rgba(255,255,255,0) 100%)',
-              filter: 'blur(2px)',
-              transform: 'translateY(1px)',
-            }}
-          />
-        </div>
-      ))}
 
       {/* Dotted Surface Background (Sea) */}
       <DottedSurface />
@@ -307,36 +216,6 @@ export default function NewLandingPage() {
         </div>
       </div>
 
-      {/* CSS for meteor animations */}
-      <style>{`
-        @keyframes shooting-star {
-          0% {
-            opacity: 0;
-            transform: translateX(400px) translateY(-400px) rotate(-45deg);
-          }
-          10% {
-            opacity: 1;
-          }
-          90% {
-            opacity: 1;
-          }
-          100% {
-            opacity: 0;
-            transform: translateX(-200px) translateY(200px) rotate(-45deg);
-          }
-        }
-
-        @keyframes meteor-pulse {
-          0% {
-            transform: translateY(-50%) scale(1);
-            opacity: 1;
-          }
-          100% {
-            transform: translateY(-50%) scale(1.3);
-            opacity: 0.8;
-          }
-        }
-      `}</style>
     </div>
   );
 }

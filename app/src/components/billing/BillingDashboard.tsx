@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import { billingApi } from '../../lib/api';
 import CreditsPurchaseModal from './CreditsPurchaseModal';
 import type {
@@ -10,6 +11,7 @@ import type {
 } from '../../types/billing';
 
 const BillingDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
   const [credits, setCredits] = useState<CreditBalanceResponse | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -130,6 +132,13 @@ const BillingDashboard: React.FC = () => {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4 transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span className="text-sm font-medium">Back to Dashboard</span>
+          </button>
           <h1 className="text-3xl font-bold text-gray-900">Billing & Subscription</h1>
           <p className="text-gray-600 mt-2">Manage your subscription, credits, and billing</p>
         </div>

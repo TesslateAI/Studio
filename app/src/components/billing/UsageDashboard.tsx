@@ -43,7 +43,7 @@ const UsageDashboard: React.FC = () => {
       const { start, end } = getDateRange();
       const response = await billingApi.getUsage(start, end);
 
-      setUsage(response.data);
+      setUsage(response);
     } catch (err: any) {
       console.error('Failed to load usage:', err);
       setError(err.response?.data?.detail || 'Failed to load usage data');

@@ -790,7 +790,7 @@ export function ChatContainer({
         </button>
       </div>
 
-      {/* Chat container */}
+      {/* Chat container - 60-30-10: 60% bg-dark (dominant), 30% surface/borders (secondary), 10% orange accents */}
       <div
         ref={containerRef}
         className={`
@@ -798,9 +798,9 @@ export function ChatContainer({
           fixed
           z-[150]
           flex flex-col
-          bg-[var(--surface)]/95
+          bg-[var(--bg-dark)]
           backdrop-blur-xl saturate-180
-          border border-[var(--border-color)]
+          border-2 border-[var(--surface)]
           shadow-2xl
           transition-all duration-400 ease-[var(--ease)]
           rounded-3xl
@@ -852,15 +852,15 @@ export function ChatContainer({
         style={{ zIndex: -1 }}
       />
 
-      {/* Mobile header with close button */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-white/10">
+      {/* Mobile header with close button - 30% secondary surface */}
+      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b-2 border-[var(--surface)] bg-[var(--surface)]/30">
         <h3 className="text-sm font-semibold text-[var(--text)]">Chat</h3>
         <button
           onClick={() => setIsExpanded(false)}
-          className="p-2 hover:bg-[var(--text)]/10 rounded-lg transition-colors -mr-2"
+          className="p-2 hover:bg-[var(--primary)]/10 rounded-lg transition-colors -mr-2"
           aria-label="Close chat"
         >
-          <X size={20} className="text-[var(--text)]/60" />
+          <X size={20} className="text-[var(--text)]/60 hover:text-[var(--primary)]" />
         </button>
       </div>
 
@@ -880,8 +880,8 @@ export function ChatContainer({
       >
         {isLoadingHistory && (
           <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
-            <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
-              <Loader2 className="animate-spin text-orange-500" size={32} />
+            <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
+              <Loader2 className="animate-spin text-[var(--primary)]" size={32} />
             </div>
             <div className="space-y-2">
               <p className="text-sm max-w-xs mx-auto leading-relaxed">
@@ -893,8 +893,8 @@ export function ChatContainer({
 
         {!isLoadingHistory && messages.length === 0 && !isStreaming && (
           <div className="text-center text-[var(--text)]/60 mt-8 space-y-6 max-w-md mx-auto px-4">
-            <div className="w-16 h-16 bg-gradient-to-br from-orange-500/20 to-orange-400/10 rounded-2xl flex items-center justify-center mx-auto">
-              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="25" viewBox="0 0 161.9 126.66" className="text-orange-500">
+            <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="25" viewBox="0 0 161.9 126.66" className="text-[var(--primary)]">
                 <g>
                   <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor" strokeWidth="0"/>
                   <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor" strokeWidth="0"/>
@@ -909,11 +909,11 @@ export function ChatContainer({
               </p>
             </div>
 
-            {/* Discovery Cards */}
+            {/* Discovery Cards - 30% secondary background with 10% accent borders */}
             <div className="space-y-3 text-left">
-              <div className="bg-gradient-to-r from-purple-500/10 to-purple-600/10 rounded-lg p-3 border border-purple-500/20">
+              <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--border-color)]">
                 <div className="flex items-center gap-2 mb-2">
-                  <PencilSimple size={16} weight="bold" className="text-purple-400" />
+                  <PencilSimple size={16} weight="bold" className="text-[var(--text)]/80" />
                   <span className="font-semibold text-sm text-[var(--text)]">Customize Your Agent</span>
                 </div>
                 <p className="text-xs text-[var(--text)]/70 mb-3">
@@ -923,15 +923,15 @@ export function ChatContainer({
                   onClick={() => {
                     navigate('/library', { state: { selectedAgentId: currentAgent.backendId } });
                   }}
-                  className="w-full py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 rounded-lg text-[var(--text)] text-xs font-semibold transition-all"
+                  className="w-full py-2 bg-[var(--text)]/5 hover:bg-[var(--text)]/10 border-2 border-[var(--border-color)] hover:border-[var(--text)]/20 rounded-lg text-[var(--text)] text-xs font-semibold transition-all"
                 >
                   Open in Library
                 </button>
               </div>
 
-              <div className="bg-gradient-to-r from-orange-500/10 to-orange-600/10 rounded-lg p-3 border border-orange-500/20">
+              <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--primary)]/30">
                 <div className="flex items-center gap-2 mb-2">
-                  <Storefront size={16} weight="fill" className="text-orange-400" />
+                  <Storefront size={16} weight="fill" className="text-[var(--primary)]" />
                   <span className="font-semibold text-sm text-[var(--text)]">Discover More Agents</span>
                 </div>
                 <p className="text-xs text-[var(--text)]/70 mb-3">
@@ -941,7 +941,7 @@ export function ChatContainer({
                   onClick={() => {
                     navigate('/marketplace');
                   }}
-                  className="w-full py-2 bg-gradient-to-r from-orange-500/30 to-orange-600/30 hover:from-orange-500/40 hover:to-orange-600/40 rounded-lg text-[var(--text)] text-xs font-semibold transition-all border border-orange-500/40"
+                  className="w-full py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 rounded-lg text-[var(--primary)] text-xs font-semibold transition-all border-2 border-[var(--primary)]/40 hover:border-[var(--primary)]/60"
                 >
                   Browse Marketplace
                 </button>
@@ -1005,7 +1005,7 @@ export function ChatContainer({
       </div>
 
       {/* Chat input */}
-      <div onFocus={handleInputFocus} className="px-3 py-2 pointer-events-auto">
+      <div onFocus={handleInputFocus} className="pointer-events-auto">
         <ChatInput
           agents={agents}
           currentAgent={currentAgent}
@@ -1017,6 +1017,7 @@ export function ChatContainer({
           isExecuting={agentExecuting}
           onStop={stopAgentExecution}
           onClearHistory={handleClearHistory}
+          isExpanded={isExpanded}
         />
       </div>
     </div>

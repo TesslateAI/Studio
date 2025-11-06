@@ -24,6 +24,7 @@ import axios from 'axios';
 import SubscriptionPlans from './components/billing/SubscriptionPlans';
 import BillingDashboard from './components/billing/BillingDashboard';
 import UsageDashboard from './components/billing/UsageDashboard';
+import TransactionHistory from './components/billing/TransactionHistory';
 import MarketplaceSuccess from './pages/MarketplaceSuccess';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -254,6 +255,14 @@ function AppContent() {
             element={
               <PrivateRoute>
                 <UsageDashboard />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/billing/transactions"
+            element={
+              <PrivateRoute>
+                <TransactionHistory />
               </PrivateRoute>
             }
           />
