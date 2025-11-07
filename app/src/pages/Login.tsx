@@ -9,7 +9,7 @@ import toast from 'react-hot-toast';
 export default function Login() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    username: '',
+    email: '',
     password: '',
   });
   const [loading, setLoading] = useState(false);
@@ -20,7 +20,7 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await authApi.login(formData.username, formData.password);
+      const response = await authApi.login(formData.email, formData.password);
       localStorage.setItem('token', response.access_token);
 
       toast.success('Logged in successfully!');
@@ -38,7 +38,7 @@ export default function Login() {
       } else if (typeof error.response?.data?.detail === 'string') {
         const errorMessage = error.response.data.detail;
         if (errorMessage === 'LOGIN_BAD_CREDENTIALS') {
-          toast.error('Invalid username or password');
+          toast.error('Invalid email or password');
         } else {
           toast.error(errorMessage);
         }
@@ -145,12 +145,15 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <input
-                type="text"
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
-                placeholder="Username or email"
+                placeholder="Email address"
                 required
+                autoComplete="email"
+                maxLength={254}
+                pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
               />
             </div>
 
@@ -162,6 +165,9 @@ export default function Login() {
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
                 placeholder="Password"
                 required
+                autoComplete="current-password"
+                maxLength={128}
+                minLength={6}
               />
             </div>
 

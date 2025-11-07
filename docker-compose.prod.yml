@@ -62,6 +62,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./orchestrator/app:/app/app:ro
       - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver:ro
+      - ./referrals.db:/app/referrals.db
     environment:
       - DATABASE_URL=postgresql+asyncpg://tesslate_user:${POSTGRES_PASSWORD}@postgres:5432/tesslate
       - SECRET_KEY=${SECRET_KEY}

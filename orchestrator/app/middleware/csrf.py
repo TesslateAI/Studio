@@ -92,7 +92,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         "/api/auth/csrf",  # CSRF token endpoint itself
         "/api/auth/google/callback",
         "/api/auth/github/callback",
-        "/api/referrals/track-landing",
+        "/api/track-landing",  # Referral tracking endpoint
         "/api/webhooks/stripe",  # Stripe webhooks need to bypass CSRF
         "/docs",
         "/redoc",

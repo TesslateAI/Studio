@@ -111,13 +111,12 @@ export const authApi = {
   },
 
   // Register new user (fastapi-users endpoint)
-  register: async (name: string, username: string, email: string, password: string) => {
+  register: async (name: string, email: string, password: string) => {
     // Check if there's a referrer in sessionStorage
     const referred_by = sessionStorage.getItem('referrer');
 
     const response = await api.post('/api/auth/register', {
       name,
-      username,
       email,
       password,
       referral_code: referred_by || undefined,

@@ -230,6 +230,13 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         password = user_dict.pop("password")
         user_dict["hashed_password"] = self.password_helper.hash(password)
 
+        # Auto-generate username from email if not provided
+        if not user_dict.get("username"):
+            email_username = user_dict["email"].split('@')[0]
+            base_username = email_username.lower().replace('.', '').replace('+', '').replace('-', '')[:20]
+            username_suffix = generate(size=6)
+            user_dict["username"] = f"{base_username}_{username_suffix}"
+
         # Generate unique slug from username (e.g., "john-doe-a3x9k2")
         base_slug = user_dict["username"].lower().replace("_", "-").replace(" ", "-")
         slug_suffix = generate(size=6)  # Generate 6-character nanoid

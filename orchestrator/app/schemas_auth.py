@@ -50,9 +50,9 @@ class UserCreate(schemas.BaseUserCreate):
     """
     # Custom required fields
     name: str = Field(..., min_length=1, max_length=100, description="User's display name")
-    username: str = Field(..., min_length=3, max_length=50, description="Unique username")
 
     # Optional fields with defaults
+    username: Optional[str] = Field(None, min_length=3, max_length=50, description="Unique username (auto-generated from email if not provided)")
     referral_code: Optional[str] = Field(None, description="Referral code from another user")
 
 

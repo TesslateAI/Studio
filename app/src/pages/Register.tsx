@@ -9,7 +9,6 @@ export default function Register() {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
     name: '',
-    username: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -28,7 +27,7 @@ export default function Register() {
 
     try {
       // Register the user
-      await authApi.register(formData.name, formData.username, formData.email, formData.password);
+      await authApi.register(formData.name, formData.email, formData.password);
 
       toast.success('Account created successfully!');
 
@@ -45,7 +44,7 @@ export default function Register() {
       } else if (typeof error.response?.data?.detail === 'string') {
         const errorMessage = error.response.data.detail;
         if (errorMessage === 'REGISTER_USER_ALREADY_EXISTS') {
-          toast.error('Email or username already exists');
+          toast.error('Email already exists');
         } else {
           toast.error(errorMessage);
         }
@@ -156,17 +155,9 @@ export default function Register() {
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
                 placeholder="Full name"
                 required
-              />
-            </div>
-
-            <div>
-              <input
-                type="text"
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
-                placeholder="Username"
-                required
+                autoComplete="name"
+                maxLength={100}
+                minLength={1}
               />
             </div>
 
@@ -178,6 +169,9 @@ export default function Register() {
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
                 placeholder="Email address"
                 required
+                autoComplete="email"
+                maxLength={254}
+                pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
               />
             </div>
 
@@ -189,6 +183,8 @@ export default function Register() {
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
                 placeholder="Password"
                 required
+                autoComplete="new-password"
+                maxLength={128}
                 minLength={6}
               />
             </div>
@@ -201,6 +197,8 @@ export default function Register() {
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all placeholder:text-gray-400 text-sm"
                 placeholder="Confirm password"
                 required
+                autoComplete="new-password"
+                maxLength={128}
                 minLength={6}
               />
             </div>

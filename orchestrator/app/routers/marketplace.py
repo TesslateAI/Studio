@@ -978,7 +978,7 @@ async def create_custom_agent(
     system_prompt: str,
     mode: str = "stream",
     agent_type: str = "StreamAgent",
-    model: str = "cerebras/qwen-3-coder-480b",
+    model: str = "qwen-3-235b-a22b-thinking-2507",
     category: str = "custom",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user)

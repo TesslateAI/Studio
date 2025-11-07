@@ -439,9 +439,8 @@ from fastapi.responses import RedirectResponse
 from httpx_oauth.integrations.fastapi import OAuth2AuthorizeCallback
 
 # Frontend callback URL where users will be redirected after authentication
-# Use localhost for OAuth callback to match where cookie is set
-# (Google OAuth requires localhost, not studio.localhost)
-frontend_callback_url = "http://localhost/oauth/callback"
+# Dynamically constructed from environment settings to support both local and production
+frontend_callback_url = f"{settings.get_app_base_url}/oauth/callback"
 
 def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redirect_uri: str):
     """

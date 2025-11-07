@@ -470,3 +470,18 @@ button, a, input, select, textarea {
 .tiptap-editor .ProseMirror a:hover {
   color: #ff8533;
 }
+
+/* Prevent mobile zoom on input focus while maintaining accessibility */
+/* Mobile browsers zoom if font-size < 16px, so we ensure inputs are at least 16px on mobile */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="search"],
+  input[type="url"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
