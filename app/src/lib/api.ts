@@ -787,6 +787,64 @@ export const billingApi = {
   },
 };
 
+// ============================================================================
+// Feedback System API
+// ============================================================================
+
+export const feedbackApi = {
+  // List all feedback posts
+  list: async (params?: {
+    type?: 'bug' | 'suggestion';
+    status?: string;
+    sort?: 'upvotes' | 'date' | 'comments';
+    limit?: number;
+    offset?: number;
+  }) => {
+    const response = await api.get('/api/feedback', { params });
+    return response.data;
+  },
+
+  // Get single feedback post with comments
+  get: async (feedbackId: string) => {
+    const response = await api.get(`/api/feedback/${feedbackId}`);
+    return response.data;
+  },
+
+  // Create new feedback post
+  create: async (data: {
+    type: 'bug' | 'suggestion';
+    title: string;
+    description: string;
+  }) => {
+    const response = await api.post('/api/feedback', data);
+    return response.data;
+  },
+
+  // Update feedback status (admin only)
+  updateStatus: async (feedbackId: string, status: string) => {
+    const response = await api.patch(`/api/feedback/${feedbackId}`, { status });
+    return response.data;
+  },
+
+  // Delete feedback post
+  delete: async (feedbackId: string) => {
+    const response = await api.delete(`/api/feedback/${feedbackId}`);
+    return response.data;
+  },
+
+  // Toggle upvote on feedback
+  toggleUpvote: async (feedbackId: string) => {
+    const response = await api.post(`/api/feedback/${feedbackId}/upvote`);
+    return response.data;
+  },
+
+  // Add comment to feedback
+  addComment: async (feedbackId: string, content: string) => {
+    const response = await api.post(`/api/feedback/${feedbackId}/comments`, { content });
+    return response.data;
+  },
+};
+
 export const createWebSocket = (token: string) => {
   let wsUrl: string;
   if (API_URL) {

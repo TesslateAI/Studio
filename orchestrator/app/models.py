@@ -578,3 +578,61 @@ class UsageLog(Base):
     agent = relationship("MarketplaceAgent")
     project = relationship("Project")
     creator = relationship("User", foreign_keys=[creator_id])
+
+
+# ============================================================================
+# Feedback System Models
+# ============================================================================
+
+class FeedbackPost(Base):
+    """User feedback posts (bugs and suggestions)."""
+    __tablename__ = "feedback_posts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    type = Column(String, nullable=False)  # "bug" or "suggestion"
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="open")  # open, in_progress, resolved, closed
+    upvote_count = Column(Integer, nullable=False, default=0, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="feedback_posts")
+    upvotes = relationship("FeedbackUpvote", back_populates="feedback_post", cascade="all, delete-orphan")
+    comments = relationship("FeedbackComment", back_populates="feedback_post", cascade="all, delete-orphan")
+
+
+class FeedbackUpvote(Base):
+    """Track user upvotes on feedback posts."""
+    __tablename__ = "feedback_upvotes"
+    __table_args__ = (
+        # Ensure one upvote per user per post
+        {"schema": None},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    feedback_id = Column(UUID(as_uuid=True), ForeignKey("feedback_posts.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="feedback_upvotes")
+    feedback_post = relationship("FeedbackPost", back_populates="upvotes")
+
+
+class FeedbackComment(Base):
+    """Comments/replies on feedback posts."""
+    __tablename__ = "feedback_comments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    feedback_id = Column(UUID(as_uuid=True), ForeignKey("feedback_posts.id"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="feedback_comments")
+    feedback_post = relationship("FeedbackPost", back_populates="comments")

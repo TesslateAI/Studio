@@ -16,12 +16,13 @@ import {
   CaretLeft,
   CaretRight,
   Article,
-  Sparkle
+  Sparkle,
+  ChatCircleDots
 } from '@phosphor-icons/react';
 import { billingApi } from '../../lib/api';
 
 interface NavigationSidebarProps {
-  activePage: 'dashboard' | 'marketplace' | 'library';
+  activePage: 'dashboard' | 'marketplace' | 'library' | 'feedback';
 }
 
 export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
@@ -162,6 +163,33 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             }`}
           >
             <Books size={18} weight="fill" />
+          </button>
+        </Tooltip>
+      )}
+
+      {isExpanded ? (
+        <button
+          onClick={() => navigate('/feedback')}
+          className={`flex items-center h-9 transition-all w-full flex-shrink-0 px-3 gap-3 ${
+            activePage === 'feedback'
+              ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
+              : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+          }`}
+        >
+          <ChatCircleDots size={18} weight="fill" />
+          <span className="text-sm font-medium">Feedback</span>
+        </button>
+      ) : (
+        <Tooltip content="Feedback" side="right" delay={200}>
+          <button
+            onClick={() => navigate('/feedback')}
+            className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+              activePage === 'feedback'
+                ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
+                : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+            }`}
+          >
+            <ChatCircleDots size={18} weight="fill" />
           </button>
         </Tooltip>
       )}

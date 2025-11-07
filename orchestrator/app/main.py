@@ -6,7 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
-from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks
+from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback
 from .config import get_settings
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
@@ -597,6 +597,7 @@ app.include_router(kanban.router, tags=["kanban"])
 app.include_router(referrals.router, prefix="/api", tags=["referrals"])
 app.include_router(billing.router, prefix="/api", tags=["billing"])
 app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
+app.include_router(feedback.router, tags=["feedback"])
 
 @app.get("/")
 async def root():

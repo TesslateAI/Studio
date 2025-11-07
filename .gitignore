@@ -155,4 +155,4 @@ k8s/.env
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
-# uv.lock
+# uv.lockbackups/

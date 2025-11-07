@@ -116,12 +116,12 @@ class Settings(BaseSettings):
 
     # Subscription Tier Limits
     # Free tier
-    free_max_projects: int = 1
+    free_max_projects: int = 3
     free_max_deploys: int = 1
     free_initial_credits: int = 0  # Free users get 0 credits initially
 
     # Premium tier
-    premium_max_projects: int = 5
+    premium_max_projects: int = 20
     premium_max_deploys: int = 5
     premium_initial_credits: int = 0  # Premium users still need to buy credits
 

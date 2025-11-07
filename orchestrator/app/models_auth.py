@@ -82,6 +82,9 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
     custom_models = relationship("UserCustomModel", back_populates="user", cascade="all, delete-orphan")
     shell_sessions = relationship("ShellSession", back_populates="user", cascade="all, delete-orphan")
+    feedback_posts = relationship("FeedbackPost", back_populates="user", cascade="all, delete-orphan")
+    feedback_upvotes = relationship("FeedbackUpvote", back_populates="user", cascade="all, delete-orphan")
+    feedback_comments = relationship("FeedbackComment", back_populates="user", cascade="all, delete-orphan")
 
     # fastapi-users relationships
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(

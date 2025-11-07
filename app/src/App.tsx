@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard';
 import Project from './pages/Project';
 import Marketplace from './pages/Marketplace';
 import Library from './pages/Library';
+import Feedback from './pages/Feedback';
 import AdminDashboard from './pages/AdminDashboard';
 import AuthCallback from './pages/AuthCallback';
 import OAuthLoginCallback from './pages/OAuthLoginCallback';
@@ -222,6 +223,14 @@ function AppContent() {
             element={
               <PrivateRoute>
                 <Library />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/feedback"
+            element={
+              <PrivateRoute>
+                <Feedback />
               </PrivateRoute>
             }
           />

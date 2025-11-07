@@ -41,7 +41,7 @@ export function ChatInput({
   onSendMessage,
   projectFiles = [],
   projectName = 'project',
-  placeholder = 'Ask AI to build something... (Ctrl+Enter to send, Shift+Enter for new line, / for commands)',
+  placeholder = 'Ask AI to build something... (Enter to send, Shift+Enter for new line, / for commands)',
   disabled = false,
   isExecuting = false,
   onStop,
@@ -160,21 +160,13 @@ export function ChatInput({
         }
       }
     }
-    // Enter alone sends slash commands (Minecraft-style)
-    else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && message.startsWith('/')) {
-      e.preventDefault();
-      sendMessage();
-    }
-    // Ctrl+Enter or Cmd+Enter sends regular messages
-    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    // Enter alone sends message (both slash commands and regular messages)
+    // Ctrl+Enter or Cmd+Enter also works for sending messages
+    else if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
     // Shift+Enter creates a new line (default behavior, no need to handle)
-    // Enter alone does nothing for regular messages (prevents accidental sends)
-    else if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-    }
   };
 
   const downloadProject = async () => {
@@ -371,7 +363,7 @@ export function ChatInput({
             onClick={isExecuting ? onStop : sendMessage}
             disabled={!isExecuting && (!message.trim() || disabled)}
             className="w-8 h-8 bg-[var(--text)]/10 hover:bg-[var(--text)]/20 rounded-lg border-2 border-[var(--border-color)] text-[var(--text)] flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            title={isExecuting ? "Stop execution" : "Send message (Ctrl+Enter)"}
+            title={isExecuting ? "Stop execution" : "Send message (Enter)"}
           >
             {isExecuting ? (
               <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 256 256">
