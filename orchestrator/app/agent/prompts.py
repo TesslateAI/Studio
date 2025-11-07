@@ -10,38 +10,6 @@ from .tools.registry import ToolRegistry
 from ..utils.resource_naming import get_project_path, get_container_name
 
 
-def get_base_methodology_prompt() -> str:
-    """
-    Get the base methodology prompt that defines how agents should work.
-
-    This is adapted from TODO/agent/System_prompt.txt and defines:
-    - Agent role and expertise
-    - Security directives
-    - Core workflow (Plan-Act-Observe-Verify)
-    - General rules and constraints
-
-    Returns:
-        Base methodology prompt string
-    """
-    return """You are a world-class, autonomous AI software engineering agent. Your role is that of a seasoned Principal Engineer with 20 years of experience, possessing deep expertise in system administration, operating system principles, network protocols, and software development across multiple languages. You are precise, methodical, and security-conscious.
-
-Your primary goal is to solve the user's software engineering task by following a clear, iterative methodology. You will be given a task and a dynamic context about the execution environment. You must use the provided tools to accomplish the task.
-
-Core Workflow: Plan-Act-Observe-Verify
-
-You must break down every task into a series of steps, following this iterative loop:
-
-1. Analyze & Plan: First, analyze the provided [CONTEXT], including file listings and system details. Reason about the user's request, assess what information you have and what you need, and formulate a step-by-step plan. Decide which tool is the most appropriate for the immediate next step.
-
-2. Execute (Tool Call): Use tools to accomplish your goals. You can call multiple tools in a single response when they are independent and don't depend on each other's results.
-
-3. Observe & Verify: After executing a tool, you will receive an observation. Carefully analyze the output to verify if the step was successful and if the result matches your expectation.
-
-4. Self-Correct & Proceed: If the previous step failed or produced an unexpected result, analyze the error and formulate a new plan to correct it. If it was successful, proceed to the next step in your plan.
-
-5. Completion: Once you have verified that the entire task is complete and the solution is working, output TASK_COMPLETE to signal completion."""
-
-
 async def get_environment_context(user_id: UUID, project_id: str) -> str:
     """
     Get environment context for the agent.
@@ -212,32 +180,3 @@ async def get_user_message_wrapper(
     return "\n".join(message_parts)
 
 
-# Mini-SWE-Agent inspired format (for models that prefer simpler prompts)
-def get_minimal_system_prompt(tool_registry: ToolRegistry) -> str:
-    """
-    Minimal system prompt inspired by mini-swe-agent.
-
-    Uses a simpler format for models that work better with concise instructions.
-
-    Args:
-        tool_registry: Registry of available tools
-
-    Returns:
-        Minimal system prompt
-    """
-    tools_list = []
-    for tool in tool_registry.list_tools():
-        params = ", ".join(tool.parameters.get("required", []))
-        tools_list.append(f"- {tool.name}({params}): {tool.description}")
-
-    tools_text = "\n".join(tools_list)
-
-    return f"""You are a coding assistant. You can call tools to help with tasks.
-
-Available tools:
-{tools_text}
-
-Format tool calls like this:
-<tool_call><tool_name>NAME</tool_name><parameters>{{"param": "value"}}</parameters></tool_call>
-
-Always think before acting. When done, output: TASK_COMPLETE"""

@@ -8,50 +8,11 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from uuid import uuid4
 from app.agent.prompts import (
-    get_base_methodology_prompt,
     get_environment_context,
     get_file_listing_context,
-    get_user_message_wrapper,
-    get_minimal_system_prompt
+    get_user_message_wrapper
 )
 from app.agent.tools.registry import ToolRegistry, Tool, ToolCategory
-
-
-@pytest.mark.unit
-class TestBaseMethodologyPrompt:
-    """Test suite for base methodology prompt."""
-
-    def test_get_base_methodology_prompt_returns_string(self):
-        """Test that base methodology prompt is returned as string."""
-        prompt = get_base_methodology_prompt()
-
-        assert isinstance(prompt, str)
-        assert len(prompt) > 0
-
-    def test_base_methodology_prompt_contains_key_concepts(self):
-        """Test that prompt contains important concepts."""
-        prompt = get_base_methodology_prompt()
-
-        # Should contain core concepts
-        assert "Plan-Act-Observe-Verify" in prompt
-        assert "TASK_COMPLETE" in prompt
-        assert "tools" in prompt.lower()
-
-    def test_base_methodology_prompt_defines_workflow(self):
-        """Test that prompt defines the agent workflow."""
-        prompt = get_base_methodology_prompt()
-
-        # Should define workflow steps
-        assert "Analyze & Plan" in prompt
-        assert "Execute" in prompt
-        assert "Observe & Verify" in prompt
-
-    def test_base_methodology_prompt_is_consistent(self):
-        """Test that multiple calls return the same prompt."""
-        prompt1 = get_base_methodology_prompt()
-        prompt2 = get_base_methodology_prompt()
-
-        assert prompt1 == prompt2
 
 
 @pytest.mark.unit
@@ -336,74 +297,3 @@ class TestUserMessageWrapper:
                 assert "TESSLATE context" in result
                 assert "Git context" in result
                 assert "Complete test" in result
-
-
-@pytest.mark.unit
-class TestMinimalSystemPrompt:
-    """Test suite for minimal system prompt."""
-
-    def test_get_minimal_system_prompt_with_tools(self):
-        """Test minimal prompt generation with tools."""
-        registry = ToolRegistry()
-
-        async def mock_executor(params, context):
-            return {}
-
-        registry.register(Tool(
-            name="read_file",
-            description="Read a file",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string"}
-                },
-                "required": ["file_path"]
-            },
-            executor=mock_executor,
-            category=ToolCategory.FILE_OPS
-        ))
-
-        registry.register(Tool(
-            name="write_file",
-            description="Write a file",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string"},
-                    "content": {"type": "string"}
-                },
-                "required": ["file_path", "content"]
-            },
-            executor=mock_executor,
-            category=ToolCategory.FILE_OPS
-        ))
-
-        prompt = get_minimal_system_prompt(registry)
-
-        assert isinstance(prompt, str)
-        assert "read_file" in prompt
-        assert "write_file" in prompt
-        assert "file_path" in prompt
-        assert "TASK_COMPLETE" in prompt
-
-    def test_get_minimal_system_prompt_format(self):
-        """Test that minimal prompt has correct format."""
-        registry = ToolRegistry()
-
-        prompt = get_minimal_system_prompt(registry)
-
-        assert "Available tools:" in prompt
-        assert "<tool_call>" in prompt
-        assert "<tool_name>" in prompt
-        assert "<parameters>" in prompt
-
-    def test_get_minimal_system_prompt_empty_registry(self):
-        """Test minimal prompt with empty tool registry."""
-        registry = ToolRegistry()
-
-        prompt = get_minimal_system_prompt(registry)
-
-        assert isinstance(prompt, str)
-        assert len(prompt) > 0
-        # Should still have structure even with no tools
-        assert "tools" in prompt.lower()

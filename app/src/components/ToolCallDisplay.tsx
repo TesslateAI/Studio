@@ -76,6 +76,7 @@ const shouldTruncateOutput = (output: string): boolean => {
 
 export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   const [showFullOutput, setShowFullOutput] = useState(false);
+  const isDevelopment = import.meta.env.DEV;
 
   const { name, parameters, result } = toolCall;
   const hasResult = result !== undefined && result !== null;
@@ -242,8 +243,8 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         </div>
       )}
 
-      {/* Suggestion (for errors) */}
-      {suggestion && !success && (
+      {/* Suggestion (for errors) - Only shown in development mode */}
+      {suggestion && !success && isDevelopment && (
         <div className="border-t border-current/10">
           <div className="px-3 py-2 bg-yellow-500/10">
             <div className="text-xs font-medium text-yellow-700 dark:text-yellow-400 mb-1">

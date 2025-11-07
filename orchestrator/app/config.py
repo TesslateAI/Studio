@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Deployment mode: "docker" (local with Docker+Traefik) or "kubernetes" (K8s cluster)
     deployment_mode: str = "docker"
 
+    # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_level: str = "INFO"
+
     @property
     def container_project_path(self) -> str:
         """

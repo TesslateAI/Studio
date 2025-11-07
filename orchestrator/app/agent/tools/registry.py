@@ -151,9 +151,17 @@ class ToolRegistry:
             # Execute the tool
             result = await tool.executor(parameters, context)
 
-            logger.info(f"Tool {tool_name} executed successfully")
+            # Check if the tool itself reported success/failure
+            # Tools return dicts with "success" field to indicate operation status
+            tool_succeeded = result.get("success", True) if isinstance(result, dict) else True
+
+            if tool_succeeded:
+                logger.info(f"Tool {tool_name} executed successfully")
+            else:
+                logger.warning(f"Tool {tool_name} executed but reported failure: {result.get('message', 'Unknown error')}")
+
             return {
-                "success": True,
+                "success": tool_succeeded,
                 "tool": tool_name,
                 "result": result
             }

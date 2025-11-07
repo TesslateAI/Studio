@@ -240,21 +240,18 @@ class IterativeAgent(AbstractAgent):
                 logger.debug(f"[IterativeAgent] Parsed tool_calls: {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}")
                 logger.debug(f"[IterativeAgent] Is complete: {is_complete}")
 
-                # Step 3: Execute tools if any (skip if task is complete)
+                # Step 3: Execute tools if any
+                # IMPORTANT: Always execute tool calls even if task is marked complete
+                # The agent may need to perform final actions before completion
                 tool_results = []
-                if tool_calls and not is_complete:
+                if tool_calls:
                     tool_results = await self._execute_tool_calls(tool_calls, context)
                     self.tool_calls_count += len(tool_calls)
-                elif tool_calls and is_complete:
-                    logger.info(f"[IterativeAgent] Skipping {len(tool_calls)} tool calls because task is complete")
-                    tool_calls = []  # Clear tool calls to avoid showing "Unknown tool" errors
 
                 # Record this step and yield to client
-                display_text = response
-                if not tool_calls and not is_complete:
-                    conversational = self.parser.get_conversational_text(response)
-                    if conversational:
-                        display_text = conversational
+                # Always extract conversational text to hide internal thinking from users
+                conversational = self.parser.get_conversational_text(response)
+                display_text = conversational if conversational else response
 
                 step = AgentStep(
                     iteration=iteration,
@@ -517,7 +514,13 @@ class IterativeAgent(AbstractAgent):
                 else:
                     formatted.append(f"   {tool_result}")
             else:
-                error = result.get("error", "Unknown error")
+                # Tools use "message" key for errors, but some might use "error"
+                # Check result["result"]["message"] first (tool output), then result["error"] (executor error)
+                error = None
+                if isinstance(result.get("result"), dict) and "message" in result["result"]:
+                    error = result["result"]["message"]
+                else:
+                    error = result.get("error", "Unknown error")
                 formatted.append(f"   Error: {error}")
 
                 # Show suggestion from result if available
@@ -539,22 +542,17 @@ class IterativeAgent(AbstractAgent):
         """
         Build the complete system prompt for the agent.
 
-        The prompt has three parts:
-        1. Base methodology (Plan-Act-Observe-Verify workflow)
-        2. Agent specialization (custom prompt defining agent role/expertise)
-        3. Tool information (available tools, formatting, usage rules)
+        The prompt has two parts:
+        1. Agent's custom system prompt (from agents_config.json)
+        2. Tool information (available tools, formatting, usage rules)
 
         Returns:
             Complete system prompt string
         """
-        from .prompts import get_base_methodology_prompt
+        prompt_parts = []
 
-        # Start with base methodology
-        prompt_parts = [get_base_methodology_prompt()]
-
-        # Add agent specialization
+        # Add agent's custom system prompt
         if self.system_prompt and self.system_prompt.strip():
-            prompt_parts.append("\n\n=== AGENT SPECIALIZATION ===\n")
             prompt_parts.append(self.system_prompt)
 
         # Add tool information
@@ -573,7 +571,7 @@ class IterativeAgent(AbstractAgent):
             return ""
 
         tools_text = [
-            "\n\nTool Usage and Formatting",
+            "\n\n=== TOOL USAGE AND FORMATTING ===",
             "",
             "Your actions are communicated through specific XML-style tool calls. You must include a THOUGHT section before every tool call to explain your reasoning.",
             "",
@@ -638,7 +636,7 @@ class IterativeAgent(AbstractAgent):
                             tools_text.append("")
 
         tools_text.extend([
-            "Rules and Constraints",
+            "Rules and Constraints:",
             "",
             "One Tool Call per Thought: Always include a THOUGHT section before tool calls.",
             "",
@@ -648,7 +646,12 @@ class IterativeAgent(AbstractAgent):
             "",
             "File Modifications: Read files before modifying them to understand their current state.",
             "",
-            "Output Truncation: Be aware that long command outputs or file contents may be truncated to preserve context space. You will be notified if this happens."
+            "Output Truncation: Be aware that long command outputs or file contents may be truncated to preserve context space. You will be notified if this happens.",
+            "",
+            "",
+            "Task Completion:",
+            "",
+            "Output TASK_COMPLETE when you have fully satisfied the user's original request. Do NOT mark complete just because a tool succeeded. Verify the entire task is done."
         ])
 
         return "\n".join(tools_text)

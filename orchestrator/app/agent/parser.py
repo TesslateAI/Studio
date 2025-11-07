@@ -362,6 +362,15 @@ class AgentResponseParser:
         # Remove bash blocks
         text = re.sub(self.BASH_PATTERN, '', text, flags=re.DOTALL)
 
+        # Remove <think> and <thinking> tags (internal reasoning from models)
+        # First remove complete pairs
+        text = re.sub(r'<think(?:ing)?>.*?</think(?:ing)?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Then remove orphaned closing tags along with everything before them
+        # This handles cases where the opening tag was truncated/missing
+        text = re.sub(r'^.*?</think(?:ing)?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Finally remove any remaining orphaned opening tags
+        text = re.sub(r'<think(?:ing)?>', '', text, flags=re.IGNORECASE)
+
         # Remove completion signals
         for signal in self.COMPLETION_SIGNALS:
             # Case-insensitive removal

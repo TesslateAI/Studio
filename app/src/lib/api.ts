@@ -243,6 +243,10 @@ export const chatApi = {
     const response = await api.get(`/api/chat/${projectId}/messages`);
     return response.data;
   },
+  clearProjectMessages: async (projectId: string) => {
+    const response = await api.delete(`/api/chat/${projectId}/messages`);
+    return response.data;
+  },
   sendAgentMessage: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
     const response = await api.post('/api/chat/agent', request);
     return response.data;

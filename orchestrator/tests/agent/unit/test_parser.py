@@ -364,3 +364,40 @@ ls -la
         assert len(tool_calls) == 1
         assert "世界" in tool_calls[0].parameters["content"]
         assert "🌍" in tool_calls[0].parameters["content"]
+
+    def test_get_conversational_text_removes_think_tags(self, parser):
+        """Test that <think> tags are removed from conversational text."""
+        response = """
+<think>
+This is internal reasoning that should not be shown to the user.
+I'm analyzing the problem and planning my approach.
+</think>
+
+I'll create a coffee shop website for you.
+
+<tool_call>
+<tool_name>write_file</tool_name>
+<parameters>
+{"file_path": "index.html", "content": "..."}
+</parameters>
+</tool_call>
+
+The website has been created successfully!
+
+TASK_COMPLETE
+"""
+        conversational = parser.get_conversational_text(response)
+
+        # Should contain user-facing text
+        assert "I'll create a coffee shop website" in conversational
+        assert "successfully" in conversational
+
+        # Should NOT contain internal reasoning
+        assert "<think>" not in conversational
+        assert "</think>" not in conversational
+        assert "internal reasoning" not in conversational
+        assert "analyzing the problem" not in conversational
+
+        # Should NOT contain tool calls or completion signals
+        assert "<tool_call>" not in conversational
+        assert "TASK_COMPLETE" not in conversational
