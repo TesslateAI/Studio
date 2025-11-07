@@ -27,6 +27,7 @@ class DockerContainerManager(BaseContainerManager):
     def __init__(self):
         self.containers: Dict[str, Dict] = {}  # project_key -> {container_name, hostname, user_id, project_id}
         self.activity_tracker: Dict[str, float] = {}  # project_key -> last_activity_timestamp
+        self.paused_at_tracker: Dict[str, float] = {}  # project_key -> paused_timestamp (for two-tier cleanup)
         # Detect the correct network name by checking which network Traefik is on
         self.network_name = self._detect_traefik_network()
         self.base_image_name = "tesslate-devserver:latest"
@@ -965,6 +966,42 @@ class DockerContainerManager(BaseContainerManager):
             print("[ERROR] npm install timed out")
             raise RuntimeError("npm install timed out")
     
+    async def pause_idle_container(self, project_id: str, user_id: UUID) -> None:
+        """
+        Pause (stop without removing) an idle container for quick restart.
+
+        Unlike stop_container, this keeps the container so it can be quickly restarted
+        with docker start, avoiding full container recreation.
+        """
+        project_key = self._get_project_key(user_id, project_id)
+        container_info = self.containers.get(project_key)
+
+        if not container_info:
+            print(f"[PAUSE] No container found to pause for {project_key}")
+            return
+
+        container_name = container_info["container_name"]
+        print(f"[PAUSE] Pausing container: {container_name}")
+
+        try:
+            result = subprocess.run(
+                ["docker", "stop", container_name],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                print(f"[PAUSE] ✅ Container paused: {container_name}")
+                # Keep container_info in self.containers for quick restart
+                # Record pause timestamp for two-tier cleanup
+                self.paused_at_tracker[project_key] = time.time()
+            else:
+                print(f"[PAUSE] ⚠️ Failed to pause: {result.stderr}")
+
+        except Exception as e:
+            print(f"[PAUSE] ❌ Error pausing container {container_name}: {e}")
+
     async def stop_container(self, project_id: str, user_id: UUID = None) -> None:
         """Stop and remove a development container with multi-user support."""
         container_info = None
@@ -1305,30 +1342,147 @@ class DockerContainerManager(BaseContainerManager):
         self.activity_tracker[project_key] = time.time()
         print(f"[DEBUG] Activity tracked for {project_key}")
 
-    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
+    async def ensure_container_running(self, project_id: str, user_id: UUID, project_slug: str = None) -> bool:
         """
-        Cleanup containers that have been idle for longer than the timeout.
-
-        Args:
-            idle_timeout_minutes: Minutes of inactivity before cleanup (default: 30)
+        Ensure container is running, auto-restart if stopped.
 
         Returns:
-            List of cleaned up project keys
+            True if container is running or successfully started
+            False if container could not be started
         """
-        print(f"[CLEANUP] Checking for idle containers (timeout: {idle_timeout_minutes} minutes)...")
+        status = await self.get_container_status(project_id, user_id, project_slug)
 
-        cleaned = []
-        current_time = time.time()
-        timeout_seconds = idle_timeout_minutes * 60
+        if status.get("running"):
+            self.track_activity(user_id, project_id)
+            return True
+
+        print(f"[AUTO-RESTART] Container not running for project {project_id}, attempting restart...")
 
         try:
-            # Get list of all containers before iterating (to avoid modifying dict during iteration)
+            project_key = self._get_project_key(user_id, project_id)
+            container_info = self.containers.get(project_key)
+
+            if container_info:
+                container_name = container_info["container_name"]
+
+                # Try to restart stopped container
+                result = subprocess.run(
+                    ["docker", "start", container_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                if result.returncode == 0:
+                    print(f"[AUTO-RESTART] ✅ Successfully restarted container {container_name}")
+                    self.track_activity(user_id, project_id)
+                    # Clear paused timestamp since container is now active
+                    self.paused_at_tracker.pop(project_key, None)
+                    return True
+                else:
+                    print(f"[AUTO-RESTART] ⚠️ Failed to restart: {result.stderr}")
+                    return False
+            else:
+                print(f"[AUTO-RESTART] Container not found in tracking, needs full creation")
+                return False
+
+        except Exception as e:
+            print(f"[AUTO-RESTART] ❌ Error during restart: {e}")
+            return False
+
+    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
+        """
+        Two-tier cleanup system for idle containers:
+        - Tier 1 (5 minutes idle): Pause running containers (stop without removing)
+        - Tier 2 (24 hours paused): Fully remove long-paused containers
+
+        Args:
+            idle_timeout_minutes: Minutes of inactivity before pausing (default: 5 for tier 1)
+
+        Returns:
+            List of project keys that were paused or removed
+        """
+        print(f"[CLEANUP] Two-tier cleanup starting...")
+        print(f"[CLEANUP] Tier 1: Pause containers idle for {idle_timeout_minutes} minutes")
+        print(f"[CLEANUP] Tier 2: Remove containers paused for 24+ hours")
+
+        paused_containers = []
+        removed_containers = []
+        current_time = time.time()
+
+        # Tier 1 timeout: pause after idle_timeout_minutes (default 5 minutes)
+        tier1_timeout_seconds = idle_timeout_minutes * 60
+
+        # Tier 2 timeout: fully remove after 24 hours of being paused
+        tier2_timeout_seconds = 24 * 60 * 60
+
+        try:
+            # ========== TIER 2: Remove long-paused containers (24+ hours) ==========
+            paused_keys_to_check = list(self.paused_at_tracker.keys())
+
+            for project_key in paused_keys_to_check:
+                paused_at = self.paused_at_tracker[project_key]
+                paused_duration = current_time - paused_at
+                paused_hours = paused_duration / 3600
+
+                if paused_duration > tier2_timeout_seconds:
+                    # Container has been paused for 24+ hours, fully remove it
+                    container_info = self.containers.get(project_key)
+
+                    if container_info:
+                        user_id = container_info.get("user_id")
+                        project_id = container_info.get("project_id")
+                        container_name = container_info.get("container_name")
+
+                        print(f"[CLEANUP:TIER2] Removing long-paused container {project_key} (paused for {paused_hours:.1f} hours)")
+
+                        try:
+                            # Fully remove the container
+                            await self.stop_container(project_id, user_id)
+                            removed_containers.append(project_key)
+
+                            # Clean up all tracking data
+                            self.paused_at_tracker.pop(project_key, None)
+                            self.activity_tracker.pop(project_key, None)
+
+                            print(f"[CLEANUP:TIER2] ✅ Removed {container_name}")
+
+                        except Exception as e:
+                            print(f"[CLEANUP:TIER2] ❌ Failed to remove {project_key}: {e}")
+                    else:
+                        # Container info not found, clean up tracking
+                        self.paused_at_tracker.pop(project_key, None)
+
+            # ========== TIER 1: Pause idle running containers (5+ minutes) ==========
             containers_to_check = list(self.containers.items())
 
             for project_key, container_info in containers_to_check:
+                # Skip if already paused (will be handled by Tier 2)
+                if project_key in self.paused_at_tracker:
+                    continue
+
                 user_id = container_info.get("user_id")
                 project_id = container_info.get("project_id")
                 container_name = container_info.get("container_name")
+
+                # Check if container is actually running
+                try:
+                    result = subprocess.run(
+                        ["docker", "inspect", container_name, "--format", "{{.State.Running}}"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+
+                    is_running = result.returncode == 0 and result.stdout.strip().lower() == "true"
+
+                    if not is_running:
+                        # Container is already stopped, skip it
+                        continue
+
+                except Exception as e:
+                    print(f"[CLEANUP:TIER1] Could not check running state for {container_name}: {e}")
+                    continue
 
                 # Check last activity time
                 last_activity = self.activity_tracker.get(project_key, 0)
@@ -1348,29 +1502,33 @@ class DockerContainerManager(BaseContainerManager):
                             # Parse Docker timestamp (ISO 8601 format)
                             from datetime import datetime
                             started_at = result.stdout.strip()
-                            # Docker returns timestamp like: 2025-10-07T12:34:56.789Z
                             created_time = datetime.fromisoformat(started_at.replace('Z', '+00:00')).timestamp()
                             idle_time = current_time - created_time
                             idle_minutes = idle_time / 60
                     except Exception as e:
-                        print(f"[DEBUG] Could not get container creation time for {container_name}: {e}")
+                        print(f"[CLEANUP:TIER1] Could not get container creation time for {container_name}: {e}")
 
-                if idle_time > timeout_seconds:
-                    print(f"[CLEANUP] Cleaning up idle container {project_key} (idle for {idle_minutes:.1f} minutes)")
+                # Check if container should be paused
+                if idle_time > tier1_timeout_seconds:
+                    print(f"[CLEANUP:TIER1] Pausing idle container {project_key} (idle for {idle_minutes:.1f} minutes)")
                     try:
-                        await self.stop_container(project_id, user_id)
-                        cleaned.append(project_key)
-
-                        # Remove from activity tracker
-                        self.activity_tracker.pop(project_key, None)
+                        await self.pause_idle_container(project_id, user_id)
+                        paused_containers.append(project_key)
+                        print(f"[CLEANUP:TIER1] ✅ Paused {container_name}")
 
                     except Exception as e:
-                        print(f"[ERROR] Failed to cleanup {project_key}: {e}")
+                        print(f"[CLEANUP:TIER1] ❌ Failed to pause {project_key}: {e}")
                 else:
-                    print(f"[DEBUG] {project_key} is active (idle for {idle_minutes:.1f} minutes)")
+                    print(f"[CLEANUP:TIER1] {project_key} is active (idle for {idle_minutes:.1f} minutes)")
 
         except Exception as e:
-            print(f"[ERROR] Error during idle cleanup: {e}")
+            print(f"[CLEANUP] ❌ Unexpected error during cleanup: {e}")
 
-        print(f"[CLEANUP] Idle cleanup completed. Removed {len(cleaned)} idle containers")
-        return cleaned
+        # Summary
+        total_cleaned = len(paused_containers) + len(removed_containers)
+        print(f"[CLEANUP] ✅ Cleanup completed:")
+        print(f"[CLEANUP]    - Paused: {len(paused_containers)} containers")
+        print(f"[CLEANUP]    - Removed: {len(removed_containers)} containers")
+        print(f"[CLEANUP]    - Total: {total_cleaned} containers cleaned")
+
+        return paused_containers + removed_containers

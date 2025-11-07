@@ -424,12 +424,25 @@ class KubernetesPTYBroker(BasePTYBroker):
         logger.info(f"Closed K8s PTY session {session_id}")
 
 
+# Singleton instances
+_docker_pty_broker = None
+_kubernetes_pty_broker = None
+
+
 def get_pty_broker() -> BasePTYBroker:
-    """Factory function to get appropriate PTY broker based on deployment mode."""
+    """Factory function to get singleton PTY broker based on deployment mode."""
     from ..config import get_settings
     settings = get_settings()
 
+    global _docker_pty_broker, _kubernetes_pty_broker
+
     if settings.deployment_mode == "kubernetes":
-        return KubernetesPTYBroker()
+        if _kubernetes_pty_broker is None:
+            _kubernetes_pty_broker = KubernetesPTYBroker()
+            logger.info("Created singleton KubernetesPTYBroker instance")
+        return _kubernetes_pty_broker
     else:
-        return DockerPTYBroker()
+        if _docker_pty_broker is None:
+            _docker_pty_broker = DockerPTYBroker()
+            logger.info("Created singleton DockerPTYBroker instance")
+        return _docker_pty_broker

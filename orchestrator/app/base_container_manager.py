@@ -122,6 +122,22 @@ class BaseContainerManager(ABC):
         pass
 
     @abstractmethod
+    async def ensure_container_running(self, project_id: str, user_id: UUID, project_slug: str = None) -> bool:
+        """
+        Ensure container is running, auto-restart if stopped.
+
+        Args:
+            project_id: Project ID
+            user_id: User ID
+            project_slug: Optional project slug
+
+        Returns:
+            True if container is running or successfully started
+            False if container could not be started
+        """
+        pass
+
+    @abstractmethod
     async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
         """
         Cleanup environments that have been idle for longer than the timeout.

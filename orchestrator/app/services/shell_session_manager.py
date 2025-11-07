@@ -124,9 +124,14 @@ class ShellSessionManager:
         # 8. Track in memory
         self.active_sessions[pty_session.session_id] = pty_session
 
+        # Verify session is tracked in both manager and broker
+        assert pty_session.session_id in self.active_sessions, "Session not in manager dict"
+        assert pty_session.session_id in self.pty_broker.sessions, "Session not in broker dict"
+
         logger.info(
             f"Created shell session {pty_session.session_id} for user {user_id}, "
-            f"project {project_id}, container {container_name}"
+            f"project {project_id}, container {container_name}. "
+            f"Total active sessions: {len(self.active_sessions)}"
         )
 
         return {
@@ -140,12 +145,54 @@ class ShellSessionManager:
         session_id: str,
         data: bytes,
         db: AsyncSession,
+        user_id: Optional[UUID] = None,
     ) -> None:
-        """Write data to PTY stdin."""
+        """
+        Write data to PTY stdin.
 
+        Args:
+            session_id: Session ID to write to
+            data: Bytes to write
+            db: Database session
+            user_id: Optional user ID for authorization check
+        """
+
+        # Get session from memory
         session = self.active_sessions.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            # Try to recover session from PTY broker
+            session = self.pty_broker.sessions.get(session_id)
+            if session:
+                logger.warning(f"Session {session_id} found in broker but not in manager, recovering...")
+                self.active_sessions[session_id] = session
+            else:
+                # Check database for session info
+                result = await db.execute(
+                    select(ShellSession).where(
+                        ShellSession.session_id == session_id,
+                        ShellSession.status == "active"
+                    )
+                )
+                db_session = result.scalar_one_or_none()
+                if db_session:
+                    raise ValueError(
+                        f"Session {session_id} exists in database but PTY connection is lost. "
+                        f"Please close and create a new session."
+                    )
+                else:
+                    raise ValueError(
+                        f"Session {session_id} not found. Use shell_open to create a new session."
+                    )
+
+        # Authorization check: verify session belongs to requesting user
+        if user_id and session.user_id != user_id:
+            logger.warning(
+                f"User {user_id} attempted to access session {session_id} "
+                f"owned by user {session.user_id}"
+            )
+            raise PermissionError(
+                f"Session {session_id} does not belong to the requesting user"
+            )
 
         await self.pty_broker.write_to_pty(session_id, data)
 
@@ -156,9 +203,15 @@ class ShellSessionManager:
         self,
         session_id: str,
         db: AsyncSession,
+        user_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """
         Read new output from session since last read.
+
+        Args:
+            session_id: Session ID to read from
+            db: Database session
+            user_id: Optional user ID for authorization check
 
         Returns:
             {
@@ -171,7 +224,25 @@ class ShellSessionManager:
 
         session = self.active_sessions.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            # Try to recover session from PTY broker
+            session = self.pty_broker.sessions.get(session_id)
+            if session:
+                logger.warning(f"Session {session_id} found in broker but not in manager, recovering...")
+                self.active_sessions[session_id] = session
+            else:
+                raise ValueError(
+                    f"Session {session_id} not found. Use shell_open to create a new session."
+                )
+
+        # Authorization check: verify session belongs to requesting user
+        if user_id and session.user_id != user_id:
+            logger.warning(
+                f"User {user_id} attempted to access session {session_id} "
+                f"owned by user {session.user_id}"
+            )
+            raise PermissionError(
+                f"Session {session_id} does not belong to the requesting user"
+            )
 
         # Get new output
         new_data, is_eof = await session.read_new_output()

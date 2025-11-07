@@ -23,6 +23,7 @@ async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     command = params["command"]
     wait_seconds = params.get("wait_seconds", 2.0)
     db = context["db"]
+    user_id = context["user_id"]
 
     # Add newline if not present
     if not command.endswith("\n"):
@@ -30,22 +31,22 @@ async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -
 
     session_manager = get_shell_session_manager()
 
-    # Write command
+    # Write command (with authorization check)
     data_bytes = command.encode('utf-8')
-    await session_manager.write_to_session(session_id, data_bytes, db)
+    await session_manager.write_to_session(session_id, data_bytes, db, user_id=user_id)
 
     # Wait for execution
     await asyncio.sleep(wait_seconds)
 
-    # Read output
-    output_data = await session_manager.read_output(session_id, db)
+    # Read output (with authorization check)
+    output_data = await session_manager.read_output(session_id, db, user_id=user_id)
 
     # Decode base64 output and strip control characters
     output_text = base64.b64decode(output_data["output"]).decode('utf-8', errors='replace')
     output_text = strip_ansi_codes(output_text)
 
     return success_output(
-        message=f"Executed '{command.strip()}' in session {truncate_session_id(session_id)}",
+        message=f"Executed '{command.strip()}' in session {session_id}",
         output=output_text,
         session_id=session_id,
         details={

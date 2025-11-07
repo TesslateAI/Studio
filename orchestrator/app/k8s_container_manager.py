@@ -23,6 +23,7 @@ class KubernetesContainerManager(BaseContainerManager):
     def __init__(self):
         self.environments: Dict[str, Dict[str, Any]] = {}  # project_key -> {hostname, user_id, project_id, status}
         self.activity_tracker: Dict[str, float] = {}  # project_key -> last_activity_timestamp
+        self.paused_at_tracker: Dict[str, float] = {}  # project_key -> paused_timestamp (for two-tier cleanup)
 
         logger.info("DevContainerManager initialized - Kubernetes-native architecture with NGINX Ingress")
         # K8s manager will be lazily initialized on first use
@@ -287,30 +288,127 @@ class KubernetesContainerManager(BaseContainerManager):
         self.activity_tracker[project_key] = time.time()
         logger.debug(f"Activity tracked for {project_key}")
 
-    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
+    async def ensure_container_running(self, project_id: str, user_id: UUID, project_slug: str = None) -> bool:
         """
-        Cleanup environments that have been idle for longer than the timeout.
+        Ensure environment is running, auto-restart if stopped.
 
-        Args:
-            idle_timeout_minutes: Minutes of inactivity before cleanup (default: 30)
+        For K8s, this checks if deployment exists and scales it up if needed.
 
         Returns:
-            List of cleaned up project keys
+            True if environment is running or successfully started
+            False if environment could not be started
         """
-        logger.info(f"Checking for idle environments (timeout: {idle_timeout_minutes} minutes)...")
-
-        cleaned = []
-        current_time = time.time()
-        timeout_seconds = idle_timeout_minutes * 60
+        from ..k8s_client import get_k8s_manager
 
         try:
-            # Get all running environments from Kubernetes
+            k8s_manager = get_k8s_manager()
+            health = await k8s_manager.check_dev_environment_health(user_id, project_id)
+
+            if health["exists"] and health["ready"]:
+                self.track_activity(user_id, project_id)
+                # Clear paused timestamp since environment is now active
+                project_key = self._get_project_key(user_id, project_id)
+                self.paused_at_tracker.pop(project_key, None)
+                return True
+
+            if health["exists"] and not health["ready"]:
+                logger.info(f"[AUTO-RESTART] Environment exists but not ready, waiting for it to start...")
+                # Check if scaled to 0, if so scale back up
+                if health.get("replicas") == 0:
+                    logger.info(f"[AUTO-RESTART] Scaling up from 0 replicas...")
+                    try:
+                        await k8s_manager.scale_deployment(user_id, project_id, replicas=1)
+                        project_key = self._get_project_key(user_id, project_id)
+                        self.paused_at_tracker.pop(project_key, None)
+                    except Exception as e:
+                        logger.error(f"[AUTO-RESTART] Failed to scale up: {e}")
+                return True
+
+            logger.info(f"[AUTO-RESTART] Environment does not exist, needs creation")
+            return False
+
+        except Exception as e:
+            logger.error(f"[AUTO-RESTART] Error checking environment status: {e}")
+            return False
+
+    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
+        """
+        Two-tier cleanup system for idle K8s environments:
+        - Tier 1 (5 minutes idle): Scale to 0 replicas (pause)
+        - Tier 2 (24 hours paused): Fully delete deployment/service/ingress
+
+        Args:
+            idle_timeout_minutes: Minutes of inactivity before scaling to 0 (default: 5 for tier 1)
+
+        Returns:
+            List of project keys that were scaled down or removed
+        """
+        logger.info("[CLEANUP] Two-tier cleanup starting...")
+        logger.info(f"[CLEANUP] Tier 1: Scale to 0 replicas after {idle_timeout_minutes} minutes idle")
+        logger.info("[CLEANUP] Tier 2: Delete resources after 24 hours at 0 replicas")
+
+        scaled_down = []
+        removed = []
+        current_time = time.time()
+
+        # Tier 1 timeout: scale to 0 after idle_timeout_minutes (default 5 minutes)
+        tier1_timeout_seconds = idle_timeout_minutes * 60
+
+        # Tier 2 timeout: fully remove after 24 hours scaled to 0
+        tier2_timeout_seconds = 24 * 60 * 60
+
+        try:
+            # ========== TIER 2: Delete long-paused environments (24+ hours) ==========
+            paused_keys_to_check = list(self.paused_at_tracker.keys())
+
+            for project_key in paused_keys_to_check:
+                paused_at = self.paused_at_tracker[project_key]
+                paused_duration = current_time - paused_at
+                paused_hours = paused_duration / 3600
+
+                if paused_duration > tier2_timeout_seconds:
+                    # Environment has been paused for 24+ hours, fully delete it
+                    env_info = self.environments.get(project_key)
+
+                    if env_info:
+                        user_id = env_info.get("user_id")
+                        project_id = env_info.get("project_id")
+
+                        logger.info(f"[CLEANUP:TIER2] Deleting long-paused environment {project_key} (paused for {paused_hours:.1f} hours)")
+
+                        try:
+                            # Fully delete the K8s resources
+                            await self.stop_container(project_id, user_id)
+                            removed.append(project_key)
+
+                            # Clean up all tracking data
+                            self.paused_at_tracker.pop(project_key, None)
+                            self.activity_tracker.pop(project_key, None)
+
+                            logger.info(f"[CLEANUP:TIER2] ✅ Deleted resources for {project_key}")
+
+                        except Exception as e:
+                            logger.error(f"[CLEANUP:TIER2] ❌ Failed to delete {project_key}: {e}")
+                    else:
+                        # Environment info not found, clean up tracking
+                        self.paused_at_tracker.pop(project_key, None)
+
+            # ========== TIER 1: Scale down idle environments (5+ minutes) ==========
             k8s_environments = await get_k8s_manager().list_dev_environments()
 
             for k8s_env in k8s_environments:
                 user_id = k8s_env["user_id"]
                 project_id = k8s_env["project_id"]
                 project_key = self._get_project_key(user_id, project_id)
+                replicas = k8s_env.get("replicas", 0)
+
+                # Skip if already scaled to 0 (will be handled by Tier 2)
+                if replicas == 0:
+                    # If not tracked in paused_at_tracker, add it now
+                    if project_key not in self.paused_at_tracker:
+                        self.paused_at_tracker[project_key] = current_time
+                        logger.info(f"[CLEANUP:TIER1] Tracking already-paused environment {project_key}")
+                    continue
 
                 # Check last activity time
                 last_activity = self.activity_tracker.get(project_key, 0)
@@ -319,28 +417,38 @@ class KubernetesContainerManager(BaseContainerManager):
 
                 # If no activity tracked yet, use pod creation time as baseline
                 if last_activity == 0:
-                    # Get pod age from Kubernetes
                     creation_time = k8s_env.get("creation_time")
                     if creation_time:
                         idle_time = current_time - creation_time
                         idle_minutes = idle_time / 60
 
-                if idle_time > timeout_seconds:
-                    logger.info(f"Cleaning up idle environment {project_key} (idle for {idle_minutes:.1f} minutes)")
+                # Check if environment should be scaled down
+                if idle_time > tier1_timeout_seconds:
+                    logger.info(f"[CLEANUP:TIER1] Scaling down idle environment {project_key} (idle for {idle_minutes:.1f} minutes)")
                     try:
-                        await self.stop_container(project_id, user_id)
-                        cleaned.append(project_key)
+                        # Scale deployment to 0 replicas (pause)
+                        k8s_manager = get_k8s_manager()
+                        await k8s_manager.scale_deployment(user_id, project_id, replicas=0)
+                        scaled_down.append(project_key)
 
-                        # Remove from activity tracker
-                        self.activity_tracker.pop(project_key, None)
+                        # Record pause timestamp
+                        self.paused_at_tracker[project_key] = current_time
+
+                        logger.info(f"[CLEANUP:TIER1] ✅ Scaled down {project_key}")
 
                     except Exception as e:
-                        logger.error(f"Failed to cleanup {project_key}: {e}")
+                        logger.error(f"[CLEANUP:TIER1] ❌ Failed to scale down {project_key}: {e}")
                 else:
-                    logger.debug(f"{project_key} is active (idle for {idle_minutes:.1f} minutes)")
+                    logger.debug(f"[CLEANUP:TIER1] {project_key} is active (idle for {idle_minutes:.1f} minutes)")
 
         except Exception as e:
-            logger.error(f"Error during idle cleanup: {e}")
+            logger.error(f"[CLEANUP] ❌ Unexpected error during cleanup: {e}")
 
-        logger.info(f"Idle cleanup completed. Removed {len(cleaned)} idle environments")
-        return cleaned
+        # Summary
+        total_cleaned = len(scaled_down) + len(removed)
+        logger.info("[CLEANUP] ✅ Cleanup completed:")
+        logger.info(f"[CLEANUP]    - Scaled down: {len(scaled_down)} environments")
+        logger.info(f"[CLEANUP]    - Deleted: {len(removed)} environments")
+        logger.info(f"[CLEANUP]    - Total: {total_cleaned} environments cleaned")
+
+        return scaled_down + removed

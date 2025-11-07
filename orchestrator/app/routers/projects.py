@@ -870,6 +870,11 @@ async def get_dev_server_url(
     try:
         settings = get_settings()
 
+        # Auto-restart container if it was stopped by cleanup task
+        from ..dev_server_manager import get_container_manager
+        container_manager = get_container_manager()
+        await container_manager.ensure_container_running(str(project_id), current_user.id, project.slug)
+
         if settings.deployment_mode == "kubernetes":
             # Kubernetes mode - use K8s-specific health check
             from ..k8s_client import get_k8s_manager

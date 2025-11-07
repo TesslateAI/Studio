@@ -34,7 +34,7 @@ async def shell_open_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     session_id = session_info["session_id"]
 
     return success_output(
-        message=f"Opened shell session {truncate_session_id(session_id)}",
+        message=f"Opened shell session {session_id}",
         session_id=session_id,
         details={
             "command": command
@@ -53,7 +53,7 @@ async def shell_close_executor(params: Dict[str, Any], context: Dict[str, Any]) 
     await session_manager.close_session(session_id, db)
 
     return success_output(
-        message=f"Closed shell session {truncate_session_id(session_id)}",
+        message=f"Closed shell session {session_id}",
         session_id=session_id
     )
 

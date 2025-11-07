@@ -192,15 +192,17 @@ async def container_cleanup_loop():
     import asyncio
     from .dev_server_manager import get_container_manager
 
-    logger.info("Container cleanup task started - will shutdown idle containers after 5 minutes")
+    logger.info("Container cleanup task started - two-tier cleanup system:")
+    logger.info("  Tier 1: Pause containers idle for 5+ minutes")
+    logger.info("  Tier 2: Remove containers paused for 24+ hours")
 
     while True:
         try:
             container_manager = get_container_manager()
-            # Clean up containers idle for 5 minutes
+            # Two-tier cleanup: pause idle containers, remove long-paused ones
             cleaned = await container_manager.cleanup_idle_environments(idle_timeout_minutes=5)
             if cleaned:
-                logger.info(f"Auto-shutdown {len(cleaned)} idle project containers: {', '.join(cleaned)}")
+                logger.info(f"Cleanup processed {len(cleaned)} containers: {', '.join(cleaned)}")
         except Exception as e:
             logger.error(f"Container cleanup error: {e}", exc_info=True)
 

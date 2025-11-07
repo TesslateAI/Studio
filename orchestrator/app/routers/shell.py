@@ -26,7 +26,6 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     project_id: UUID
     command: str = "/bin/bash"
-    cwd: str = "/app"
 
 
 class CreateSessionResponse(BaseModel):
@@ -84,10 +83,9 @@ async def create_shell_session(
 
     session_info = await session_manager.create_session(
         user_id=current_user.id,
-        project_id=request.project_id,
+        project_id=str(request.project_id),
         db=db,
         command=request.command,
-        cwd=request.cwd,
     )
 
     return session_info
@@ -121,9 +119,9 @@ async def write_to_session(
             detail="Session not found"
         )
 
-    # Write to PTY
+    # Write to PTY (with authorization check)
     data_bytes = request.data.encode('utf-8')
-    await session_manager.write_to_session(session_id, data_bytes, db)
+    await session_manager.write_to_session(session_id, data_bytes, db, user_id=current_user.id)
 
     return WriteResponse(
         success=True,
@@ -159,8 +157,8 @@ async def read_session_output(
             detail="Session not found"
         )
 
-    # Read output
-    output_data = await session_manager.read_output(session_id, db)
+    # Read output (with authorization check)
+    output_data = await session_manager.read_output(session_id, db, user_id=current_user.id)
 
     return output_data
 

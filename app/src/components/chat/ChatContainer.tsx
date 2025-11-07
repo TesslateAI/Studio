@@ -90,9 +90,6 @@ export function ChatContainer({
 
   // Load chat history from database
   useEffect(() => {
-    // Only load chat history if we have agents (prevents icon from disappearing on refresh)
-    if (initialAgents.length === 0) return;
-
     const loadChatHistory = async () => {
       setIsLoadingHistory(true);
       try {
@@ -118,8 +115,11 @@ export function ChatContainer({
           }
 
           // For agent messages, split iterations into separate messages
-          const agentData = initialAgents.find(a => a.name === msg.message_metadata?.agent_type);
-          const agentIcon = agentData?.icon;
+          // Find agent icon from initialAgents if available
+          const agentData = initialAgents.length > 0
+            ? initialAgents.find(a => a.name === msg.message_metadata?.agent_type)
+            : null;
+          const agentIcon = agentData?.icon || '🤖'; // Fallback icon if agents not loaded yet
           const agentType = msg.message_metadata.agent_type;
           const finalResponse = msg.content && msg.content.trim() ? msg.content : '';
 
@@ -130,13 +130,10 @@ export function ChatContainer({
               const hasContent = (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim());
               if (!hasContent) return;
 
-              // Include final response in the last step
-              const isLastStep = stepIdx === msg.message_metadata.steps.length - 1;
-
               expandedMessages.push({
                 id: `msg-${idx}-step-${stepIdx}`,
                 type: 'ai',
-                content: isLastStep ? finalResponse : '',
+                content: '', // Don't include final response in steps
                 agentData: {
                   steps: [step],
                   iterations: step.iteration || stepIdx + 1,
@@ -147,6 +144,23 @@ export function ChatContainer({
                 agentType
               });
             });
+
+            // Always add final response as a separate message if it exists
+            if (finalResponse) {
+              expandedMessages.push({
+                id: `msg-${idx}-final`,
+                type: 'ai',
+                content: finalResponse,
+                agentData: {
+                  steps: [],
+                  iterations: 0,
+                  tool_calls_made: 0,
+                  completion_reason: 'complete'
+                },
+                agentIcon,
+                agentType
+              });
+            }
           } else if (finalResponse) {
             // If no steps but has final response, create a message with empty agentData
             expandedMessages.push({
