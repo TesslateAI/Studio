@@ -113,30 +113,30 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             logger.error(f"Failed to create LiteLLM key for user {user.username}: {e}")
             logger.warning(f"User {user.username} registered WITHOUT LiteLLM key")
 
-        # Auto-add Stream Builder agent to new users
+        # Auto-add Tesslate Agent to new users
         try:
             from .models import MarketplaceAgent, UserPurchasedAgent
             from sqlalchemy import select
 
             result = await self.user_db.session.execute(
-                select(MarketplaceAgent).where(MarketplaceAgent.slug == "stream-builder")
+                select(MarketplaceAgent).where(MarketplaceAgent.slug == "tesslate-agent")
             )
-            stream_agent = result.scalar_one_or_none()
+            default_agent = result.scalar_one_or_none()
 
-            if stream_agent:
+            if default_agent:
                 purchase = UserPurchasedAgent(
                     user_id=user.id,
-                    agent_id=stream_agent.id,
+                    agent_id=default_agent.id,
                     purchase_type="free",
                     is_active=True
                 )
                 self.user_db.session.add(purchase)
                 await self.user_db.session.commit()
-                logger.info(f"Auto-added Stream Builder to user {user.username}")
+                logger.info(f"Auto-added Tesslate Agent to user {user.username}")
             else:
-                logger.warning("Stream Builder not found - user registered without default agent")
+                logger.warning("Tesslate Agent not found - user registered without default agent")
         except Exception as e:
-            logger.error(f"Failed to add Stream Builder to user {user.username}: {e}")
+            logger.error(f"Failed to add Tesslate Agent to user {user.username}: {e}")
 
         # Send Discord signup notification
         try:
