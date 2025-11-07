@@ -572,7 +572,7 @@ export function ChatContainer({
         {
           project_id: projectId.toString(),
           message,
-          agent_id: currentAgent.backendId?.toString() || '',
+          agent_id: currentAgent.backendId?.toString(),
           max_iterations: 20,
         },
         (event) => {

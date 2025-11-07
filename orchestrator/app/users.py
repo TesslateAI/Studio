@@ -26,6 +26,8 @@ from fastapi_users_db_sqlalchemy.access_token import (
     SQLAlchemyAccessTokenDatabase,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
+from fastapi_users.exceptions import UserAlreadyExists
 from nanoid import generate
 
 from .config import get_settings
@@ -113,30 +115,36 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             logger.error(f"Failed to create LiteLLM key for user {user.username}: {e}")
             logger.warning(f"User {user.username} registered WITHOUT LiteLLM key")
 
-        # Auto-add Tesslate Agent to new users
+        # Auto-add default agents (Tesslate Agent and Stream Builder) to new users
         try:
             from .models import MarketplaceAgent, UserPurchasedAgent
             from sqlalchemy import select
 
-            result = await self.user_db.session.execute(
-                select(MarketplaceAgent).where(MarketplaceAgent.slug == "tesslate-agent")
-            )
-            default_agent = result.scalar_one_or_none()
+            # Default agents to add to every new user
+            # Note: Added in this order so tesslate-agent appears first (DESC sort by purchase_date)
+            default_agent_slugs = ["stream-builder", "tesslate-agent"]
 
-            if default_agent:
-                purchase = UserPurchasedAgent(
-                    user_id=user.id,
-                    agent_id=default_agent.id,
-                    purchase_type="free",
-                    is_active=True
+            for slug in default_agent_slugs:
+                result = await self.user_db.session.execute(
+                    select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
                 )
-                self.user_db.session.add(purchase)
-                await self.user_db.session.commit()
-                logger.info(f"Auto-added Tesslate Agent to user {user.username}")
-            else:
-                logger.warning("Tesslate Agent not found - user registered without default agent")
+                agent = result.scalar_one_or_none()
+
+                if agent:
+                    purchase = UserPurchasedAgent(
+                        user_id=user.id,
+                        agent_id=agent.id,
+                        purchase_type="free",
+                        is_active=True
+                    )
+                    self.user_db.session.add(purchase)
+                    logger.info(f"Auto-added {agent.name} to user {user.username}")
+                else:
+                    logger.warning(f"{slug} not found - user registered without this default agent")
+
+            await self.user_db.session.commit()
         except Exception as e:
-            logger.error(f"Failed to add Tesslate Agent to user {user.username}: {e}")
+            logger.error(f"Failed to add default agents to user {user.username}: {e}")
 
         # Send Discord signup notification
         try:
@@ -253,8 +261,16 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         # Create user in database
         user = User(**user_dict)
         self.user_db.session.add(user)
-        await self.user_db.session.commit()
-        await self.user_db.session.refresh(user)
+        try:
+            await self.user_db.session.commit()
+            await self.user_db.session.refresh(user)
+        except IntegrityError as e:
+            await self.user_db.session.rollback()
+            # Check if it's a duplicate email constraint violation
+            if "ix_users_email" in str(e.orig):
+                raise UserAlreadyExists()
+            # Re-raise other integrity errors
+            raise
 
         await self.on_after_register(user, request)
 
@@ -392,9 +408,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             raise ValueError("Password must be at most 72 characters long (bcrypt limit)")
 
         # Check password is not just the email or username
-        if hasattr(user, 'email') and password.lower() == user.email.lower():
+        if hasattr(user, 'email') and user.email and password.lower() == user.email.lower():
             raise ValueError("Password cannot be the same as your email")
-        if hasattr(user, 'username') and password.lower() == user.username.lower():
+        if hasattr(user, 'username') and user.username and password.lower() == user.username.lower():
             raise ValueError("Password cannot be the same as your username")
 
 

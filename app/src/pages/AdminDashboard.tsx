@@ -73,7 +73,6 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    checkAdminAccess();
     loadMetrics();
   }, []);
 
@@ -82,27 +81,6 @@ export default function AdminDashboard() {
       loadDetailedMetrics(activeTab);
     }
   }, [activeTab, selectedPeriod]);
-
-  const checkAdminAccess = async () => {
-    // Check if user is admin
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    // Decode token to check admin status
-    try {
-      const user = JSON.parse(atob(token.split('.')[1]));
-      // Check if is_admin flag is set in JWT token
-      if (!user.is_admin) {
-        toast.error('Admin access required');
-        navigate('/');
-      }
-    } catch (error) {
-      navigate('/login');
-    }
-  };
 
   const loadMetrics = async () => {
     try {
