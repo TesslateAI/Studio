@@ -11,15 +11,15 @@ export default function NewLandingPage() {
   const [showBanner, setShowBanner] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Generate star positions once
-  const stars = Array.from({ length: 700 }, (_, i) => ({
+  // Generate star positions once - memoized to prevent regeneration on re-renders
+  const stars = React.useMemo(() => Array.from({ length: 700 }, (_, i) => ({
     id: i,
     left: `${Math.random() * 100}%`,
     top: `${Math.random() * 100}%`,
     size: Math.random() > 0.7 ? 2 : 1,
     opacity: 0.3 + Math.random() * 0.7,
     animationDelay: `${Math.random() * 3}s`,
-  }));
+  })), []);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -30,7 +30,7 @@ export default function NewLandingPage() {
     }
   }, [message]);
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     if (!message.trim()) {
       toast.error('Please enter a prompt first');
       return;
@@ -43,20 +43,20 @@ export default function NewLandingPage() {
     } else {
       navigate('/register');
     }
-  };
+  }, [message, navigate]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
-  };
+  }, [handleSubmit]);
 
   const hasContent = message.trim() !== "";
 
   return (
     <div
-      className="relative w-full min-h-screen flex flex-col items-center font-['DM_Sans'] overflow-x-hidden overflow-y-auto bg-black"
+      className="relative w-full h-screen flex flex-col items-center font-['DM_Sans'] overflow-x-hidden overflow-y-auto bg-black"
       style={{
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
@@ -64,7 +64,7 @@ export default function NewLandingPage() {
       }}
     >
       <style>{`
-        .relative.w-full.min-h-screen::-webkit-scrollbar {
+        .relative.w-full.h-screen::-webkit-scrollbar {
           display: none;
         }
       `}</style>
@@ -298,7 +298,7 @@ export default function NewLandingPage() {
                 </div>
               </a>
 
-              {/* Multi-Agent Orchestration */}
+              {/* All Tesslate Apps */}
               <a
                 href="https://github.com/tesslateAI/"
                 target="_blank"
@@ -336,10 +336,10 @@ export default function NewLandingPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm sm:text-base md:text-lg font-bold text-white mb-0.5 sm:mb-1 group-hover:text-orange-400 transition-colors">
-                        Multi-Agent Orchestration
+                        All Tesslate Apps
                       </h3>
                       <p className="text-xs sm:text-sm text-gray-400 leading-tight">
-                        n8n but better, AI workflow automation
+                        Agent orchestration, Designer, Forge, Wise, and more open source frameworks
                       </p>
                     </div>
                   </div>
