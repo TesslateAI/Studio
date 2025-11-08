@@ -122,7 +122,7 @@ export default function NewLandingPage() {
             </svg>
             <div>
               <h2 className="text-base sm:text-xl font-bold text-white drop-shadow-lg">Tesslate</h2>
-              <p className="text-[10px] sm:text-xs text-orange-400">Build beyond limits</p>
+              <p className="text-[10px] sm:text-xs text-gray-400">Build beyond limits</p>
             </div>
           </div>
         </div>
@@ -168,18 +168,20 @@ export default function NewLandingPage() {
             <div
               className="flex flex-col rounded-[24px] sm:rounded-[32px] p-2 sm:p-2.5 shadow-2xl transition-all duration-300 cursor-text backdrop-blur-sm"
               style={{
-                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                backgroundColor: 'rgba(26, 26, 26, 0.8)',
                 borderWidth: '2px',
                 borderStyle: 'solid',
-                borderColor: 'rgb(249, 115, 22)',
-                boxShadow: '0 10px 40px rgba(249, 115, 22, 0.4), 0 0 80px rgba(249, 115, 22, 0.2)',
+                borderColor: 'rgba(82, 82, 82, 0.5)',
+                boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5)',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.boxShadow = '0 15px 50px rgba(249, 115, 22, 0.5), 0 0 100px rgba(249, 115, 22, 0.3)';
+                e.currentTarget.style.borderColor = 'rgba(249, 115, 22, 0.6)';
+                e.currentTarget.style.boxShadow = '0 15px 50px rgba(249, 115, 22, 0.3), 0 0 80px rgba(249, 115, 22, 0.15)';
                 e.currentTarget.style.transform = 'translateY(-2px)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow = '0 10px 40px rgba(249, 115, 22, 0.4), 0 0 80px rgba(249, 115, 22, 0.2)';
+                e.currentTarget.style.borderColor = 'rgba(82, 82, 82, 0.5)';
+                e.currentTarget.style.boxShadow = '0 10px 40px rgba(0, 0, 0, 0.5)';
                 e.currentTarget.style.transform = 'translateY(0)';
               }}
             >
@@ -254,15 +256,15 @@ export default function NewLandingPage() {
                 className="group relative overflow-hidden rounded-2xl transition-all duration-300 hover:scale-105"
                 style={{
                   backgroundColor: '#1a1a1a',
-                  border: '1px solid rgba(255, 107, 0, 0.2)',
+                  border: '1px solid rgba(82, 82, 82, 0.4)',
                   boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(249, 115, 22, 0.5)';
-                  e.currentTarget.style.boxShadow = '0 8px 30px rgba(249, 115, 22, 0.3)';
+                  e.currentTarget.style.borderColor = 'rgba(249, 115, 22, 0.4)';
+                  e.currentTarget.style.boxShadow = '0 8px 30px rgba(249, 115, 22, 0.2)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 107, 0, 0.2)';
+                  e.currentTarget.style.borderColor = 'rgba(82, 82, 82, 0.4)';
                   e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5)';
                 }}
               >
@@ -306,15 +308,15 @@ export default function NewLandingPage() {
                 className="group relative overflow-hidden rounded-2xl transition-all duration-300 hover:scale-105"
                 style={{
                   backgroundColor: '#1a1a1a',
-                  border: '1px solid rgba(255, 107, 0, 0.2)',
+                  border: '1px solid rgba(82, 82, 82, 0.4)',
                   boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(249, 115, 22, 0.5)';
-                  e.currentTarget.style.boxShadow = '0 8px 30px rgba(249, 115, 22, 0.3)';
+                  e.currentTarget.style.borderColor = 'rgba(249, 115, 22, 0.4)';
+                  e.currentTarget.style.boxShadow = '0 8px 30px rgba(249, 115, 22, 0.2)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 107, 0, 0.2)';
+                  e.currentTarget.style.borderColor = 'rgba(82, 82, 82, 0.4)';
                   e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5)';
                 }}
               >
@@ -358,15 +360,15 @@ export default function NewLandingPage() {
                 className="group relative overflow-hidden rounded-2xl transition-all duration-300 hover:scale-105"
                 style={{
                   backgroundColor: '#1a1a1a',
-                  border: '1px solid rgba(255, 107, 0, 0.2)',
+                  border: '1px solid rgba(82, 82, 82, 0.4)',
                   boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(249, 115, 22, 0.5)';
-                  e.currentTarget.style.boxShadow = '0 8px 30px rgba(249, 115, 22, 0.3)';
+                  e.currentTarget.style.borderColor = 'rgba(249, 115, 22, 0.4)';
+                  e.currentTarget.style.boxShadow = '0 8px 30px rgba(249, 115, 22, 0.2)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 107, 0, 0.2)';
+                  e.currentTarget.style.borderColor = 'rgba(82, 82, 82, 0.4)';
                   e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.5)';
                 }}
               >
