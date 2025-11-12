@@ -17,6 +17,8 @@ interface TerminalTab {
   fitAddon: FitAddon;
   ws: WebSocket | null;
   isMain: boolean;
+  reconnectAttempts: number;
+  reconnectTimer: NodeJS.Timeout | null;
 }
 
 export function TerminalPanel({ projectId }: TerminalPanelProps) {
@@ -74,6 +76,8 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       fitAddon,
       ws: null,
       isMain,
+      reconnectAttempts: 0,
+      reconnectTimer: null,
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -88,6 +92,9 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     return () => {
       // Cleanup all tabs on unmount
       tabs.forEach(tab => {
+        if (tab.reconnectTimer) {
+          clearTimeout(tab.reconnectTimer);
+        }
         if (tab.ws) {
           tab.ws.close();
         }
@@ -156,15 +163,49 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     };
   }, [activeTabId, tabs]);
 
-  // Connect WebSocket for a terminal tab
-  const connectTerminal = (tab: TerminalTab) => {
+  // Connect WebSocket for a terminal tab with auto-reconnect
+  const connectTerminal = (tab: TerminalTab, isReconnect: boolean = false) => {
+    // Clear any existing reconnect timer
+    if (tab.reconnectTimer) {
+      clearTimeout(tab.reconnectTimer);
+      tab.reconnectTimer = null;
+    }
+
+    // Close existing connection if any
+    if (tab.ws) {
+      tab.ws.close();
+      tab.ws = null;
+    }
+
     try {
       const ws = createTerminalWebSocket(projectId);
       tab.ws = ws;
 
       ws.onopen = () => {
-        tab.terminal.writeln('\x1b[32m✓ Connected to interactive shell\x1b[0m');
+        // Reset reconnect attempts on successful connection
+        tab.reconnectAttempts = 0;
+
+        if (isReconnect) {
+          tab.terminal.writeln('\x1b[32m✓ Reconnected to tmux session\x1b[0m');
+        } else {
+          tab.terminal.writeln('\x1b[32m✓ Connected to tmux session\x1b[0m');
+        }
         tab.terminal.writeln('');
+
+        // Send attach message to connect to tmux
+        if (tab.isMain) {
+          // Main tab attaches to main window (window 0)
+          ws.send(JSON.stringify({
+            type: 'attach',
+            window_id: 'main'
+          }));
+        } else {
+          // New tabs request a new tmux window
+          ws.send(JSON.stringify({
+            type: 'new_window',
+            name: tab.title
+          }));
+        }
 
         // Send initial terminal size
         const dims = tab.fitAddon.proposeDimensions();
@@ -182,13 +223,20 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
           const data = JSON.parse(event.data);
 
           if (data.type === 'output') {
+            // Clear terminal and write new output (tmux capture-pane returns full buffer)
+            tab.terminal.clear();
             tab.terminal.write(data.data);
+          } else if (data.type === 'attached') {
+            tab.terminal.writeln(`\x1b[36m⟳ Attached to pane: ${data.pane_id}\x1b[0m\r\n`);
+          } else if (data.type === 'window_created') {
+            tab.terminal.writeln(`\x1b[32m✓ Created new shell: ${data.window_name}\x1b[0m\r\n`);
           } else if (data.type === 'error') {
             tab.terminal.writeln(`\r\n\x1b[31m✗ Error: ${data.message}\x1b[0m\r\n`);
           } else if (data.type === 'status') {
             tab.terminal.writeln(`\x1b[36m⟳ ${data.message}\x1b[0m`);
           }
         } catch (e) {
+          console.error('Failed to parse message:', e);
           tab.terminal.write(event.data);
         }
       };
@@ -198,9 +246,37 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       };
 
       ws.onclose = () => {
-        tab.terminal.writeln('');
-        tab.terminal.writeln('\x1b[33m⚠ Connection closed. Click to reconnect...\x1b[0m');
         tab.ws = null;
+
+        // Attempt to reconnect with exponential backoff
+        const maxAttempts = 10;
+        const baseDelay = 1000; // 1 second
+        const maxDelay = 30000; // 30 seconds
+
+        if (tab.reconnectAttempts < maxAttempts) {
+          const delay = Math.min(baseDelay * Math.pow(1.5, tab.reconnectAttempts), maxDelay);
+          tab.reconnectAttempts++;
+
+          tab.terminal.writeln('');
+          tab.terminal.writeln(`\x1b[33m⚠ Connection closed. Reconnecting in ${Math.round(delay / 1000)}s... (attempt ${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`);
+
+          tab.reconnectTimer = setTimeout(() => {
+            connectTerminal(tab, true);
+          }, delay);
+        } else {
+          tab.terminal.writeln('');
+          tab.terminal.writeln('\x1b[31m✗ Connection failed after multiple attempts. Click to reconnect:\x1b[0m');
+          tab.terminal.writeln('\x1b[36m  → Refresh the page to try again\x1b[0m');
+
+          // Add click handler to allow manual reconnect
+          const reconnectHandler = () => {
+            tab.reconnectAttempts = 0;
+            connectTerminal(tab, true);
+          };
+
+          // Store handler so it can be cleaned up
+          (tab as any).reconnectHandler = reconnectHandler;
+        }
       };
 
       // Handle user input
@@ -227,6 +303,14 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     } catch (err) {
       console.error('Failed to connect WebSocket:', err);
       tab.terminal.writeln('\x1b[31m✗ Failed to establish connection\x1b[0m');
+
+      // Retry connection
+      if (tab.reconnectAttempts < 10) {
+        tab.reconnectAttempts++;
+        tab.reconnectTimer = setTimeout(() => {
+          connectTerminal(tab, true);
+        }, 2000);
+      }
     }
   };
 
@@ -237,6 +321,11 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
 
     // Don't allow closing the main tab
     if (tab.isMain) return;
+
+    // Clear reconnect timer
+    if (tab.reconnectTimer) {
+      clearTimeout(tab.reconnectTimer);
+    }
 
     // Close WebSocket connection
     if (tab.ws) {

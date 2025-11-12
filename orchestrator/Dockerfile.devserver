@@ -16,7 +16,8 @@ RUN apk add --no-cache \
     make \
     g++ \
     go \
-    bash
+    bash \
+    tmux
 
 # Set up Go environment
 ENV GOPATH=/go

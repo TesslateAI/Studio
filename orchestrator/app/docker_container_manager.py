@@ -868,14 +868,21 @@ class DockerContainerManager(BaseContainerManager):
                         print(f"[WARN] Framework detection failed: {e}, using default npm run dev")
                         final_command = "npm install --silent && npm run dev"
 
-            # Add image and startup command
-            # For commands with background processes (&), we need to wrap properly
-            # to ensure the container stays alive
-            if '&' in final_command and not final_command.rstrip().endswith('wait'):
-                # Add wait to keep container alive for background processes
-                wrapped_command = f"{final_command} ; wait"
-            else:
-                wrapped_command = final_command
+            # Wrap command in tmux for persistent, multiplexed terminal access
+            # Create detached tmux session named 'main' with a persistent shell
+            # Then send the startup command to that shell
+            escaped_command = final_command.replace("'", "'\\''")
+
+            # Start tmux with just a shell (stays alive)
+            tmux_command = f"tmux new-session -d -s main -x 120 -y 30 sh"
+            # Send the startup command to the shell in the tmux session
+            send_command = f"tmux send-keys -t main '{escaped_command}' C-m"
+
+            print(f"[TMUX] Creating tmux session with persistent shell")
+            print(f"[TMUX] Startup command: {final_command}")
+
+            # Keep container alive: start tmux, wait for it to initialize, send command, then tail
+            wrapped_command = f"{tmux_command} && sleep 0.5 && {send_command} && tail -f /dev/null"
 
             run_cmd.extend([
                 self.base_image_name,

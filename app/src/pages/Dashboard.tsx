@@ -131,6 +131,28 @@ export default function Dashboard() {
     }
   }, [showCreateModal]);
 
+  // Handle Ctrl+Enter keyboard shortcut for creating project
+  useEffect(() => {
+    if (!showCreateModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        // Check if form is valid before submitting
+        const isValid = newProject.name.trim() &&
+          (sourceType !== 'github' || githubRepoUrl.trim()) &&
+          (sourceType !== 'base' || selectedBase !== null);
+
+        if (isValid && !isCreating) {
+          createProject();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCreateModal, newProject, sourceType, githubRepoUrl, selectedBase, isCreating]);
+
   const loadProjects = async () => {
     try {
       const data = await projectsApi.getAll();
