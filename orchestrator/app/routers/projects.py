@@ -2763,20 +2763,19 @@ async def interactive_terminal(
             """Stream PTY output to WebSocket"""
             try:
                 while True:
-                    # Read output from PTY (non-blocking)
-                    output = await shell_manager.read_from_session(
-                        session_id=session_id,
-                        db=db,
-                        user_id=user_id,
-                        timeout=0.1
-                    )
+                    # Read new output from PTY session
+                    new_data, is_eof = await pty_session.read_new_output()
 
-                    if output:
+                    if new_data:
                         # Send raw output to client
                         await websocket.send_json({
                             "type": "output",
-                            "data": output.decode('utf-8', errors='replace')
+                            "data": new_data.decode('utf-8', errors='replace')
                         })
+
+                    if is_eof:
+                        await websocket.send_json({"type": "status", "message": "Shell session ended"})
+                        break
 
                     # Small delay to prevent tight loop
                     await asyncio.sleep(0.05)
@@ -2853,8 +2852,7 @@ async def interactive_terminal(
             try:
                 await shell_manager.close_session(
                     session_id=session_id,
-                    db=db,
-                    user_id=user_id
+                    db=db
                 )
                 logger.info(f"Closed shell session {session_id}")
             except Exception as e:

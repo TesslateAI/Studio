@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { Plus, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { createTerminalWebSocket } from '../../lib/api';
 
@@ -9,18 +10,26 @@ interface TerminalPanelProps {
   projectId: string;
 }
 
+interface TerminalTab {
+  id: string;
+  title: string;
+  terminal: Terminal;
+  fitAddon: FitAddon;
+  ws: WebSocket | null;
+  isMain: boolean;
+}
+
 export function TerminalPanel({ projectId }: TerminalPanelProps) {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [tabs, setTabs] = useState<TerminalTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const nextTabNumber = useRef(2);
 
-  useEffect(() => {
-    if (!terminalRef.current || !projectId) return;
+  // Create a new terminal tab
+  const createTab = (isMain: boolean = false) => {
+    const tabId = isMain ? 'main' : `shell-${Date.now()}`;
+    const tabTitle = isMain ? '⚡ Main' : `Shell ${nextTabNumber.current++}`;
 
-    // Create terminal instance
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 14,
@@ -52,193 +61,256 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       convertEol: true,
     });
 
-    // Add fit addon
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
-    // Add web links addon (makes URLs clickable)
     const webLinksAddon = new WebLinksAddon();
     terminal.loadAddon(webLinksAddon);
 
-    // Open terminal
-    terminal.open(terminalRef.current);
-    fitAddon.fit();
-
-    xtermRef.current = terminal;
-    fitAddonRef.current = fitAddon;
-
-    // Show initial message
-    terminal.writeln('\x1b[38;5;208m╔═══════════════════════════════════════╗\x1b[0m');
-    terminal.writeln('\x1b[38;5;208m║  Tesslate Studio - Interactive Shell  ║\x1b[0m');
-    terminal.writeln('\x1b[38;5;208m╚═══════════════════════════════════════╝\x1b[0m');
-    terminal.writeln('');
-    terminal.writeln('Connecting to container shell...');
-    terminal.writeln('');
-
-    // Connect to WebSocket for interactive terminal
-    const connectWebSocket = () => {
-      try {
-        const ws = createTerminalWebSocket(projectId);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          setIsConnected(true);
-          setError(null);
-          terminal.writeln('\x1b[32m✓ Connected to interactive shell\x1b[0m');
-          terminal.writeln('');
-
-          // Send initial terminal size
-          const dims = fitAddon.proposeDimensions();
-          if (dims) {
-            ws.send(JSON.stringify({
-              type: 'resize',
-              cols: dims.cols,
-              rows: dims.rows
-            }));
-          }
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-
-            if (data.type === 'output') {
-              // Write shell output to terminal
-              terminal.write(data.data);
-            } else if (data.type === 'error') {
-              terminal.writeln(`\r\n\x1b[31m✗ Error: ${data.message}\x1b[0m\r\n`);
-            } else if (data.type === 'status') {
-              terminal.writeln(`\x1b[36m⟳ ${data.message}\x1b[0m`);
-            }
-          } catch (e) {
-            // If not JSON, just write the raw data
-            terminal.write(event.data);
-          }
-        };
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          setError('Connection error');
-          terminal.writeln('\r\n\x1b[31m✗ Connection error\x1b[0m\r\n');
-        };
-
-        ws.onclose = () => {
-          setIsConnected(false);
-          terminal.writeln('');
-          terminal.writeln('\x1b[33m⚠ Connection closed. Reconnecting...\x1b[0m');
-
-          // Attempt to reconnect after 3 seconds
-          setTimeout(() => {
-            if (xtermRef.current) {
-              connectWebSocket();
-            }
-          }, 3000);
-        };
-
-        // Handle user input (keystrokes)
-        terminal.onData((data) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'input',
-              data: data
-            }));
-          }
-        });
-
-        // Handle terminal resize
-        terminal.onResize((dimensions) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'resize',
-              cols: dimensions.cols,
-              rows: dimensions.rows
-            }));
-          }
-        });
-
-      } catch (err) {
-        console.error('Failed to connect WebSocket:', err);
-        setError('Failed to connect');
-        terminal.writeln('\x1b[31m✗ Failed to establish connection\x1b[0m');
-      }
+    const newTab: TerminalTab = {
+      id: tabId,
+      title: tabTitle,
+      terminal,
+      fitAddon,
+      ws: null,
+      isMain,
     };
 
-    connectWebSocket();
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(tabId);
 
-    // Handle terminal resize
-    const resizeObserver = new ResizeObserver(() => {
-      if (fitAddonRef.current) {
-        try {
-          fitAddonRef.current.fit();
-        } catch (e) {
-          // Ignore resize errors
-        }
-      }
-    });
+    return newTab;
+  };
 
-    if (terminalRef.current) {
-      resizeObserver.observe(terminalRef.current);
-    }
-
-    // Cleanup
+  // Initialize first (main) tab on mount
+  useEffect(() => {
+    const mainTab = createTab(true);
     return () => {
-      resizeObserver.disconnect();
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (xtermRef.current) {
-        xtermRef.current.dispose();
-      }
+      // Cleanup all tabs on unmount
+      tabs.forEach(tab => {
+        if (tab.ws) {
+          tab.ws.close();
+        }
+        tab.terminal.dispose();
+      });
     };
   }, [projectId]);
 
+  // Handle terminal rendering when active tab changes
+  useEffect(() => {
+    if (!terminalContainerRef.current || !activeTabId) return;
+
+    const activeTab = tabs.find(tab => tab.id === activeTabId);
+    if (!activeTab) return;
+
+    // Hide all terminal divs
+    Array.from(terminalContainerRef.current.children).forEach((child) => {
+      (child as HTMLElement).style.display = 'none';
+    });
+
+    // Find or create terminal div for this tab
+    let terminalDiv = terminalContainerRef.current.querySelector(`[data-terminal-id="${activeTab.id}"]`) as HTMLDivElement;
+
+    if (!terminalDiv) {
+      // Create new div for this terminal
+      terminalDiv = document.createElement('div');
+      terminalDiv.setAttribute('data-terminal-id', activeTab.id);
+      terminalDiv.style.width = '100%';
+      terminalDiv.style.height = '100%';
+      terminalContainerRef.current.appendChild(terminalDiv);
+
+      // Open terminal in this div (only once)
+      activeTab.terminal.open(terminalDiv);
+
+      // Connect WebSocket if not already connected
+      if (!activeTab.ws) {
+        connectTerminal(activeTab);
+      }
+    }
+
+    // Show this terminal
+    terminalDiv.style.display = 'block';
+
+    // Fit terminal to container
+    setTimeout(() => {
+      try {
+        activeTab.fitAddon.fit();
+      } catch (e) {
+        // Ignore fit errors
+      }
+    }, 0);
+
+    // Handle resize
+    const resizeObserver = new ResizeObserver(() => {
+      try {
+        activeTab.fitAddon.fit();
+      } catch (e) {
+        // Ignore resize errors
+      }
+    });
+
+    resizeObserver.observe(terminalDiv);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [activeTabId, tabs]);
+
+  // Connect WebSocket for a terminal tab
+  const connectTerminal = (tab: TerminalTab) => {
+    try {
+      const ws = createTerminalWebSocket(projectId);
+      tab.ws = ws;
+
+      ws.onopen = () => {
+        tab.terminal.writeln('\x1b[32m✓ Connected to interactive shell\x1b[0m');
+        tab.terminal.writeln('');
+
+        // Send initial terminal size
+        const dims = tab.fitAddon.proposeDimensions();
+        if (dims) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: dims.cols,
+            rows: dims.rows
+          }));
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'output') {
+            tab.terminal.write(data.data);
+          } else if (data.type === 'error') {
+            tab.terminal.writeln(`\r\n\x1b[31m✗ Error: ${data.message}\x1b[0m\r\n`);
+          } else if (data.type === 'status') {
+            tab.terminal.writeln(`\x1b[36m⟳ ${data.message}\x1b[0m`);
+          }
+        } catch (e) {
+          tab.terminal.write(event.data);
+        }
+      };
+
+      ws.onerror = () => {
+        tab.terminal.writeln('\r\n\x1b[31m✗ Connection error\x1b[0m\r\n');
+      };
+
+      ws.onclose = () => {
+        tab.terminal.writeln('');
+        tab.terminal.writeln('\x1b[33m⚠ Connection closed. Click to reconnect...\x1b[0m');
+        tab.ws = null;
+      };
+
+      // Handle user input
+      tab.terminal.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'input',
+            data: data
+          }));
+        }
+      });
+
+      // Handle terminal resize
+      tab.terminal.onResize((dimensions) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: dimensions.cols,
+            rows: dimensions.rows
+          }));
+        }
+      });
+
+    } catch (err) {
+      console.error('Failed to connect WebSocket:', err);
+      tab.terminal.writeln('\x1b[31m✗ Failed to establish connection\x1b[0m');
+    }
+  };
+
+  // Close a tab
+  const closeTab = (tabId: string) => {
+    const tab = tabs.find(t => t.id === tabId);
+    if (!tab) return;
+
+    // Don't allow closing the main tab
+    if (tab.isMain) return;
+
+    // Close WebSocket connection
+    if (tab.ws) {
+      tab.ws.close();
+    }
+
+    // Dispose terminal
+    tab.terminal.dispose();
+
+    // Remove from tabs array
+    const newTabs = tabs.filter(t => t.id !== tabId);
+    setTabs(newTabs);
+
+    // Switch to main tab if closing active tab
+    if (activeTabId === tabId) {
+      setActiveTabId(newTabs[0]?.id || null);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-[#0a0a0a] rounded-lg overflow-hidden">
-      {/* Terminal Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#1a1a1a] border-b border-white/[0.08]">
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
-            <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-            <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
+      {/* Tab Bar */}
+      <div className="flex items-center gap-1 px-2 py-1.5 bg-[#1a1a1a] border-b border-white/[0.08] overflow-x-auto">
+        {tabs.map(tab => (
+          <div
+            key={tab.id}
+            className={`
+              flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer
+              transition-colors min-w-fit
+              ${activeTabId === tab.id
+                ? 'bg-[#ff6b00]/10 text-[#ff6b00]'
+                : 'bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-gray-300'
+              }
+            `}
+            onClick={() => setActiveTabId(tab.id)}
+          >
+            <span className="text-sm font-medium whitespace-nowrap">{tab.title}</span>
+            {!tab.isMain && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(tab.id);
+                }}
+                className="p-0.5 hover:bg-white/10 rounded"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
-          <span className="text-sm text-gray-400 ml-2">Interactive Shell</span>
-        </div>
+        ))}
 
-        <div className="flex items-center gap-2">
-          {isConnected ? (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span className="text-xs text-green-400">Live</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-              <span className="text-xs text-yellow-400">Connecting...</span>
-            </div>
-          )}
-        </div>
+        {/* New Shell Button */}
+        <button
+          onClick={() => createTab(false)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md
+                   bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-gray-300
+                   transition-colors min-w-fit"
+        >
+          <Plus size={14} />
+          <span className="text-sm font-medium">New Shell</span>
+        </button>
       </div>
 
       {/* Terminal Content */}
       <div
-        ref={terminalRef}
+        ref={terminalContainerRef}
         className="flex-1 p-2"
         style={{ minHeight: 0 }}
       />
 
-      {/* Error Message */}
-      {error && (
-        <div className="px-4 py-2 bg-red-500/10 border-t border-red-500/20">
-          <p className="text-xs text-red-400">{error}</p>
-        </div>
-      )}
-
       {/* Info Footer */}
       <div className="px-4 py-2 bg-[#1a1a1a] border-t border-white/[0.08]">
         <p className="text-xs text-gray-500">
-          💡 Tip: This is a fully interactive shell running inside your container.
-          You can run commands, use vim, navigate directories, and more.
+          💡 Tip: Use the Main tab to manage your app process. Create new shells for additional tasks.
         </p>
       </div>
     </div>
