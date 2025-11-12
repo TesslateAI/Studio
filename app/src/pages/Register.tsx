@@ -35,7 +35,7 @@ export default function Register() {
       const loginResponse = await authApi.login(formData.email, formData.password);
       localStorage.setItem('token', loginResponse.access_token);
 
-      navigate('/dashboard');
+      navigate('/dashboard', { state: { fromLogin: true } });
     } catch (error: any) {
       // Handle validation errors (array format from FastAPI/Pydantic)
       if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {

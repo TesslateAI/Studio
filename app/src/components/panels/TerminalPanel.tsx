@@ -5,6 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Plus, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { createTerminalWebSocket } from '../../lib/api';
+import { useTheme } from '../../theme/ThemeContext';
 
 interface TerminalPanelProps {
   projectId: string;
@@ -22,6 +23,7 @@ interface TerminalTab {
 }
 
 export function TerminalPanel({ projectId }: TerminalPanelProps) {
+  const { theme } = useTheme();
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
@@ -37,10 +39,10 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       fontSize: 14,
       fontFamily: 'JetBrains Mono, Fira Code, Consolas, monospace',
       theme: {
-        background: '#0a0a0a',
-        foreground: '#e5e5e5',
+        background: theme === 'dark' ? '#0a0a0a' : '#ffffff',
+        foreground: theme === 'dark' ? '#e5e5e5' : '#1a1a1a',
         cursor: 'var(--primary)',
-        cursorAccent: '#000000',
+        cursorAccent: theme === 'dark' ? '#000000' : '#ffffff',
         selection: 'rgba(var(--primary-rgb), 0.3)',
         black: '#000000',
         red: '#ff5555',
@@ -346,9 +348,9 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a0a] rounded-lg overflow-hidden">
+    <div className="flex flex-col h-full bg-[var(--surface)] rounded-lg overflow-hidden">
       {/* Tab Bar */}
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-[#1a1a1a] border-b border-white/[0.08] overflow-x-auto">
+      <div className="flex items-center gap-1 px-2 py-1.5 bg-[var(--bg-dark)] border-b border-[var(--sidebar-border)] overflow-x-auto">
         {tabs.map(tab => (
           <div
             key={tab.id}
@@ -357,7 +359,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
               transition-colors min-w-fit
               ${activeTabId === tab.id
                 ? 'bg-[rgba(var(--primary-rgb),0.1)] text-[var(--primary)]'
-                : 'bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-gray-300'
+                : 'bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]'
               }
             `}
             onClick={() => setActiveTabId(tab.id)}
@@ -381,7 +383,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
         <button
           onClick={() => createTab(false)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md
-                   bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-gray-300
+                   bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]
                    transition-colors min-w-fit"
         >
           <Plus size={14} />

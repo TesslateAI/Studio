@@ -15,7 +15,7 @@ interface TabsProps {
 
 export function Tabs({ tabs, activeTab, onTabChange, className = '' }: TabsProps) {
   return (
-    <div className={`w-full border-b border-white/10 bg-[#0a0a0a] ${className}`}>
+    <div className={`w-full border-b border-[var(--sidebar-border)] bg-[var(--surface)] ${className}`}>
       {/* Horizontal scrollable tabs container - mobile responsive */}
       <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
         <div className="flex gap-2 min-w-max sm:min-w-0 px-3 py-2">
@@ -34,8 +34,8 @@ export function Tabs({ tabs, activeTab, onTabChange, className = '' }: TabsProps
                   border
                   ${
                     isActive
-                      ? 'text-[var(--text)] bg-white/10 border-white/20'
-                      : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 border-white/10 hover:border-white/15'
+                      ? 'text-[var(--text)] bg-[var(--sidebar-active)] border-[var(--sidebar-border)]'
+                      : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)] border-[var(--sidebar-border)]'
                   }
                 `}
               >

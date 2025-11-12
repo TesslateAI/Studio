@@ -40,9 +40,7 @@ import {
   Coins
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { DiscordSupport } from '../components/DiscordSupport';
-import { MobileMenu, NavigationSidebar } from '../components/ui';
-import { MobileWarning } from '../components/MobileWarning';
+import { MobileMenu } from '../components/ui';
 import { ConfirmDialog } from '../components/modals';
 import { marketplaceApi, secretsApi, usersApi, billingApi } from '../lib/api';
 import toast from 'react-hot-toast';
@@ -335,18 +333,9 @@ export default function Library() {
   }
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
-      {/* Mobile Warning */}
-      <MobileWarning />
-
+    <>
       {/* Mobile Menu */}
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
-
-      {/* Navigation Sidebar */}
-      <NavigationSidebar activePage="library" />
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar with Tabs */}
         <div className="bg-[var(--surface)] border-b border-white/10">
           <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
@@ -465,7 +454,6 @@ export default function Library() {
         )}
           </div>
         </div>
-      </div>
 
       {/* Edit Agent Modal */}
       {editingAgent && (
@@ -491,9 +479,7 @@ export default function Library() {
         />
       )}
 
-      {/* Discord Support */}
-      <DiscordSupport />
-    </div>
+    </>
   );
 }
 

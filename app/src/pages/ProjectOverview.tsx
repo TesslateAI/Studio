@@ -147,7 +147,7 @@ export default function ProjectOverview() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <div className="h-12 bg-[#0a0a0a] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
+        <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
           <Breadcrumbs
             items={[
               { label: 'Projects', href: '/dashboard' },
@@ -167,7 +167,7 @@ export default function ProjectOverview() {
             {/* Plan Tab */}
             {activeTab === 'plan' && (
               <div className="max-w-4xl">
-                <div className="bg-[#0a0a0a] rounded-2xl border border-white/10 p-6 sm:p-8">
+                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--sidebar-border)] p-6 sm:p-8">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[rgba(var(--status-purple-rgb),0.1)] flex items-center justify-center">
                       <Lightbulb className="w-6 h-6 sm:w-7 sm:h-7 text-[var(--status-purple)]" />
@@ -184,7 +184,7 @@ export default function ProjectOverview() {
             {/* Build Tab */}
             {activeTab === 'build' && (
               <div className="max-w-4xl">
-                <div className="bg-[#0a0a0a] rounded-2xl border border-white/10 p-6 sm:p-8">
+                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--sidebar-border)] p-6 sm:p-8">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[rgba(var(--primary-rgb),0.1)] flex items-center justify-center">
                       <Hammer className="w-6 h-6 sm:w-7 sm:h-7 text-[var(--primary)]" />
@@ -217,7 +217,7 @@ export default function ProjectOverview() {
             {/* Deploy Tab */}
             {activeTab === 'deploy' && (
               <div className="max-w-4xl">
-                <div className="bg-[#0a0a0a] rounded-2xl border border-white/10 p-6 sm:p-8">
+                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--sidebar-border)] p-6 sm:p-8">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[rgba(var(--status-blue-rgb),0.1)] flex items-center justify-center">
                       <CloudUpload className="w-6 h-6 sm:w-7 sm:h-7 text-[var(--status-blue)]" />
@@ -234,7 +234,7 @@ export default function ProjectOverview() {
             {/* Launch Tab */}
             {activeTab === 'launch' && (
               <div className="max-w-4xl">
-                <div className="bg-[#0a0a0a] rounded-2xl border border-white/10 p-6 sm:p-8">
+                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--sidebar-border)] p-6 sm:p-8">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[rgba(var(--status-green-rgb),0.1)] flex items-center justify-center">
                       <Rocket className="w-6 h-6 sm:w-7 sm:h-7 text-[var(--status-green)]" />
@@ -251,7 +251,7 @@ export default function ProjectOverview() {
             {/* Sell Tab */}
             {activeTab === 'sell' && (
               <div className="max-w-4xl">
-                <div className="bg-[#0a0a0a] rounded-2xl border border-white/10 p-6 sm:p-8">
+                <div className="bg-[var(--surface)] rounded-2xl border border-[var(--sidebar-border)] p-6 sm:p-8">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-[rgba(var(--status-green-rgb),0.1)] flex items-center justify-center">
                       <DollarSign className="w-6 h-6 sm:w-7 sm:h-7 text-[var(--status-green)]" />

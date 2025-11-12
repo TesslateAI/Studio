@@ -31,9 +31,7 @@ import {
   SignOut
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { DiscordSupport } from '../components/DiscordSupport';
-import { MobileMenu, NavigationSidebar } from '../components/ui';
-import { MobileWarning } from '../components/MobileWarning';
+import { MobileMenu } from '../components/ui';
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
@@ -232,18 +230,9 @@ export default function Marketplace() {
   }
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
-      {/* Mobile Warning */}
-      <MobileWarning />
-
+    <>
       {/* Mobile Menu */}
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
-
-      {/* Navigation Sidebar */}
-      <NavigationSidebar activePage="marketplace" />
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar with Search and Filters */}
         <div className="bg-[var(--surface)] border-b border-white/10">
           <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
@@ -411,7 +400,6 @@ export default function Marketplace() {
 
           </div>
         </div>
-      </div>
 
       {/* Detail Modal */}
       {showItemDetail && (
@@ -426,9 +414,7 @@ export default function Marketplace() {
         />
       )}
 
-      {/* Discord Support */}
-      <DiscordSupport />
-    </div>
+    </>
   );
 }
 

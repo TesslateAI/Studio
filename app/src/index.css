@@ -35,6 +35,13 @@
   --text: #ffffff;
   --border-color: hsl(var(--hue2), 12%, 20%);
 
+  /* Sidebar Colors - Dark Mode */
+  --sidebar-bg: #0a0a0a;
+  --sidebar-text: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active: rgba(255, 255, 255, 0.1);
+
   /* Status Colors */
   --status-purple: #a855f7;
   --status-purple-rgb: 168, 85, 247;
@@ -62,16 +69,32 @@ body.dark-mode {
   --surface: #0a0a0a;
   --text: #ffffff;
   --border-color: hsl(var(--hue2), 12%, 20%);
+
+  /* Sidebar Colors - Dark Mode */
+  --sidebar-bg: #0a0a0a;
+  --sidebar-text: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active: rgba(255, 255, 255, 0.1);
+
   background-color: var(--bg-dark);
   color: var(--text);
 }
 
 /* Light Mode */
 body.light-mode {
-  --bg-dark: #f8f9fa;
+  --bg-dark: #F5F6F6;
   --surface: #ffffff;
   --text: #1a1a1a;
   --border-color: hsl(var(--hue2), 12%, 80%);
+
+  /* Sidebar Colors - Light Mode */
+  --sidebar-bg: #ffffff;
+  --sidebar-text: #38383A;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-active: rgba(248, 149, 33, 0.1);
+
   background-color: var(--bg-dark);
   color: var(--text);
 }

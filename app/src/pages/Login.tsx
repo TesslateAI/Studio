@@ -78,7 +78,7 @@ export default function Login() {
 
   return (
     <>
-      {showPreloader && <Preloader onComplete={() => navigate('/dashboard')} />}
+      {showPreloader && <Preloader onComplete={() => navigate('/dashboard', { state: { fromLogin: true } })} />}
       <div className="min-h-screen flex">
       {/* Left side - White form section */}
       <div className="w-full lg:w-1/2 bg-white flex items-center justify-center p-6 sm:p-12">

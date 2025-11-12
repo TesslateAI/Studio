@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { Preloader } from '../components/Preloader';
-import { CheckCircle, XCircle } from '@phosphor-icons/react';
+import { XCircle } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 
 /**
@@ -16,7 +15,6 @@ export default function OAuthLoginCallback() {
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('Completing sign in...');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const [showPreloader, setShowPreloader] = useState(false);
 
   useEffect(() => {
     handleOAuthCallback();
@@ -43,16 +41,9 @@ export default function OAuthLoginCallback() {
     const accessToken = searchParams.get('access_token') || searchParams.get('token');
 
     if (accessToken) {
-      // Store token and redirect to dashboard
+      // Store token and redirect to dashboard immediately
       localStorage.setItem('token', accessToken);
-      setStatus('success');
-      setMessage('Successfully signed in!');
-      toast.success('Welcome back!');
-
-      // Show preloader before navigating
-      setTimeout(() => {
-        setShowPreloader(true);
-      }, 800);
+      navigate('/dashboard', { state: { fromLogin: true } });
       return;
     }
 
@@ -63,15 +54,8 @@ export default function OAuthLoginCallback() {
       const { authApi } = await import('../lib/api');
       const user = await authApi.getCurrentUser();
 
-      // Successfully authenticated via cookie
-      setStatus('success');
-      setMessage('Successfully signed in!');
-      toast.success('Welcome!');
-
-      // Show preloader before navigating
-      setTimeout(() => {
-        setShowPreloader(true);
-      }, 800);
+      // Successfully authenticated via cookie - redirect immediately
+      navigate('/dashboard', { state: { fromLogin: true } });
     } catch (err: any) {
       setStatus('error');
       setMessage('Failed to complete sign in');
@@ -85,31 +69,18 @@ export default function OAuthLoginCallback() {
   };
 
   const getStatusIcon = () => {
-    switch (status) {
-      case 'success':
-        return <CheckCircle className="w-16 h-16 text-green-500" weight="fill" />;
-      case 'error':
-        return <XCircle className="w-16 h-16 text-red-500" weight="fill" />;
-      default:
-        return <LoadingSpinner size={80} />;
+    if (status === 'error') {
+      return <XCircle className="w-16 h-16 text-red-500" weight="fill" />;
     }
+    return <LoadingSpinner size={80} />;
   };
 
   const getStatusColor = () => {
-    switch (status) {
-      case 'success':
-        return 'text-green-500';
-      case 'error':
-        return 'text-red-500';
-      default:
-        return 'text-white';
-    }
+    return status === 'error' ? 'text-red-500' : 'text-white';
   };
 
   return (
-    <>
-      {showPreloader && <Preloader onComplete={() => navigate('/dashboard')} />}
-      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center p-4">
       <div className="max-w-md w-full">
         <div className="bg-[#0a0a0a] rounded-3xl p-8 shadow-2xl border border-gray-800">
           {/* Status Icon */}
@@ -119,9 +90,7 @@ export default function OAuthLoginCallback() {
 
           {/* Status Message */}
           <h2 className={`text-2xl font-bold text-center mb-2 ${getStatusColor()}`}>
-            {status === 'processing' ? 'Signing You In' :
-             status === 'success' ? 'Welcome!' :
-             'Sign In Failed'}
+            {status === 'error' ? 'Sign In Failed' : 'Signing You In'}
           </h2>
 
           {/* Detail Message */}
@@ -143,12 +112,6 @@ export default function OAuthLoginCallback() {
             </p>
           )}
 
-          {status === 'success' && (
-            <p className="text-xs text-center text-green-400 mt-4">
-              Redirecting you to your dashboard...
-            </p>
-          )}
-
           {status === 'error' && (
             <div className="mt-6 text-center">
               <button
@@ -162,6 +125,5 @@ export default function OAuthLoginCallback() {
         </div>
       </div>
     </div>
-    </>
   );
 }

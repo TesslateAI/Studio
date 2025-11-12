@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { useState, useEffect } from 'react';
 import { ThemeProvider } from './theme';
 import Layout from './components/Layout';
+import { DashboardLayout } from './components/DashboardLayout';
 import Landing from './pages/Landing';
 import NewLandingPage from './pages/NewLandingPage';
 import Login from './pages/Login';
@@ -187,14 +188,23 @@ function AppContent() {
           <Route path="/logout" element={<Logout />} />
           <Route path="/referral" element={<Referrals />} />
           <Route path="/referrals" element={<Referrals />} />
+
+          {/* Dashboard Layout Routes - These share the NavigationSidebar */}
           <Route
-            path="/dashboard"
             element={
               <PrivateRoute>
-                <Dashboard />
+                <DashboardLayout />
               </PrivateRoute>
             }
-          />
+          >
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/marketplace" element={<Marketplace />} />
+            <Route path="/marketplace/success" element={<MarketplaceSuccess />} />
+            <Route path="/library" element={<Library />} />
+            <Route path="/feedback" element={<Feedback />} />
+          </Route>
+
+          {/* Standalone Routes */}
           <Route
             path="/project/:slug"
             element={
@@ -208,38 +218,6 @@ function AppContent() {
             element={
               <PrivateRoute>
                 <Project />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/marketplace"
-            element={
-              <PrivateRoute>
-                <Marketplace />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/marketplace/success"
-            element={
-              <PrivateRoute>
-                <MarketplaceSuccess />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/library"
-            element={
-              <PrivateRoute>
-                <Library />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/feedback"
-            element={
-              <PrivateRoute>
-                <Feedback />
               </PrivateRoute>
             }
           />

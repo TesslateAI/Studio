@@ -5,15 +5,12 @@ import { githubApi } from '../lib/github-api';
 import { useTheme } from '../theme/ThemeContext';
 import {
   MobileMenu,
-  NavigationSidebar,
   ProjectCard,
   MarketplaceCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
 import { GitHubConnectModal, ConfirmDialog } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { MobileWarning } from '../components/MobileWarning';
-import { DiscordSupport } from '../components/DiscordSupport';
 import toast from 'react-hot-toast';
 import {
   Folder,
@@ -68,7 +65,6 @@ export default function Dashboard() {
   const [userCredits, setUserCredits] = useState<number>(0);
   const [userTier, setUserTier] = useState<string>('free');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [containerStatuses, setContainerStatuses] = useState<Record<string, 'starting' | 'running' | 'stopped' | 'error'>>({});
 
   // Fetch current user data
   useEffect(() => {
@@ -91,35 +87,6 @@ export default function Dashboard() {
   useEffect(() => {
     loadProjects();
   }, []);
-
-  // Poll container statuses
-  useEffect(() => {
-    const pollContainerStatuses = async () => {
-      if (projects.length === 0) return;
-
-      for (const project of projects) {
-        try {
-          const status = await projectsApi.getContainerStatus(project.slug);
-          setContainerStatuses(prev => ({
-            ...prev,
-            [project.slug]: status.running ? (status.health === 'healthy' ? 'running' : 'starting') : 'stopped'
-          }));
-        } catch (error) {
-          // Container might not exist yet, that's okay
-          setContainerStatuses(prev => ({
-            ...prev,
-            [project.slug]: 'stopped'
-          }));
-        }
-      }
-    };
-
-    // Poll immediately and then every 10 seconds
-    pollContainerStatuses();
-    const interval = setInterval(pollContainerStatuses, 10000);
-
-    return () => clearInterval(interval);
-  }, [projects]);
 
   useEffect(() => {
     if (showCreateModal) {
@@ -251,30 +218,6 @@ export default function Dashboard() {
     if (project) {
       setProjectToDelete(project);
       setShowDeleteDialog(true);
-    }
-  };
-
-  const handleRestartContainer = async (slug: string) => {
-    const restartToast = toast.loading('Restarting container...');
-    try {
-      setContainerStatuses(prev => ({ ...prev, [slug]: 'starting' }));
-      await projectsApi.restartDevServer(slug);
-      toast.success('Container restarted successfully', { id: restartToast });
-      // Status will be updated by the polling
-    } catch (error) {
-      toast.error('Failed to restart container', { id: restartToast });
-      setContainerStatuses(prev => ({ ...prev, [slug]: 'error' }));
-    }
-  };
-
-  const handleStopContainer = async (slug: string) => {
-    const stopToast = toast.loading('Stopping container...');
-    try {
-      await projectsApi.stopDevServer(slug);
-      toast.success('Container stopped successfully', { id: stopToast });
-      setContainerStatuses(prev => ({ ...prev, [slug]: 'stopped' }));
-    } catch (error) {
-      toast.error('Failed to stop container', { id: stopToast });
     }
   };
 
@@ -435,20 +378,12 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
-      {/* Mobile Warning */}
-      <MobileWarning />
-
+    <>
       {/* Mobile Menu - Shows on mobile only */}
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
 
-      {/* Navigation Sidebar */}
-      <NavigationSidebar activePage="dashboard" />
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <div className="h-12 bg-[#0a0a0a] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
+      {/* Top Bar */}
+      <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
           <div className="flex items-center gap-4 md:gap-6">
             <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
           </div>
@@ -607,15 +542,12 @@ export default function Dashboard() {
                     agents: project.agents || [],
                     lastUpdated: formatDate(project.updated_at),
                     isLive: project.status === 'launch',
-                    containerStatus: containerStatuses[project.slug],
                     slug: project.slug
                   }}
                   onOpen={() => navigate(`/project/${project.slug}`)}
                   onDelete={() => deleteProject(project.id)}
                   onStatusChange={(status) => updateProjectStatus(project.id, status)}
                   onFork={() => handleForkProject(project.id)}
-                  onRestartContainer={() => handleRestartContainer(project.slug)}
-                  onStopContainer={() => handleStopContainer(project.slug)}
                   isDeleting={deletingProjectIds.has(project.id)}
                 />
               ))}
@@ -629,7 +561,6 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-      </div>
 
       {/* Create Project Modal */}
       {showCreateModal && (
@@ -976,8 +907,6 @@ export default function Dashboard() {
         variant="danger"
       />
 
-      {/* Discord Support Bubble */}
-      <DiscordSupport />
-    </div>
+    </>
   );
 }

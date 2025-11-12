@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { feedbackApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
-import { NavigationSidebar, MobileMenu } from '../components/ui';
+import { MobileMenu } from '../components/ui';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { CreateFeedbackModal } from '../components/modals/CreateFeedbackModal';
 import { FeedbackModal } from '../components/modals/FeedbackModal';
@@ -163,13 +163,10 @@ export default function Feedback() {
   }
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
+    <>
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
-      <NavigationSidebar activePage="feedback" />
-
-      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <div className="h-12 bg-[#0a0a0a] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
+        <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
           <div className="flex items-center gap-4 md:gap-6">
             <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Feedback</h1>
 
@@ -346,7 +343,6 @@ export default function Feedback() {
             )}
           </div>
         </div>
-      </div>
 
       {/* Create Feedback Modal */}
       <CreateFeedbackModal
@@ -362,6 +358,6 @@ export default function Feedback() {
         onClose={() => setSelectedFeedback(null)}
         onUpdate={() => loadFeedback()}
       />
-    </div>
+    </>
   );
 }

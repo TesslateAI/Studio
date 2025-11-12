@@ -511,10 +511,10 @@ export default function Project() {
           damping: 28,
           mass: 0.4
         }}
-        className="hidden md:flex flex-col bg-[var(--surface)] border-r border-white/10 overflow-x-hidden"
+        className="hidden md:flex flex-col bg-[var(--surface)] border-r border-[var(--sidebar-border)] overflow-x-hidden"
       >
         {/* Tesslate Logo */}
-        <div className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-white/10`}>
+        <div className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}>
           <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
             <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
             <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
@@ -531,23 +531,23 @@ export default function Project() {
         {isLeftSidebarExpanded ? (
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
+            className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
           >
-            <ArrowLeft size={18} />
-            <span className="text-sm font-medium">Back to Projects</span>
+            <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+            <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
           </button>
         ) : (
           <Tooltip content="Back to Projects" side="right" delay={200}>
             <button
               onClick={() => navigate('/dashboard')}
-              className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
+              className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
             >
-              <ArrowLeft size={18} />
+              <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
             </button>
           </Tooltip>
         )}
 
-        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
 
         {/* Main View Toggles */}
         {leftSidebarItems.map((item, index) => (
@@ -555,32 +555,44 @@ export default function Project() {
             <button
               key={index}
               onClick={item.onClick}
-              className={`flex items-center h-9 transition-all w-full flex-shrink-0 px-3 gap-3 ${
+              className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
                 item.active
-                  ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
-                  : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                  ? 'bg-[var(--sidebar-active)]'
+                  : 'hover:bg-[var(--sidebar-hover)]'
               }`}
             >
-              {item.icon}
-              <span className="text-sm font-medium">{item.title}</span>
+              {React.cloneElement(item.icon, {
+                className: `transition-colors ${
+                  item.active
+                    ? 'text-[var(--text)]'
+                    : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                }`
+              })}
+              <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
             </button>
           ) : (
             <Tooltip key={index} content={item.title} side="right" delay={200}>
               <button
                 onClick={item.onClick}
-                className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+                className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
                   item.active
-                    ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                    ? 'bg-[var(--sidebar-active)]'
+                    : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
-                {item.icon}
+                {React.cloneElement(item.icon, {
+                  className: `transition-colors ${
+                    item.active
+                      ? 'text-[var(--text)]'
+                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                  }`
+                })}
               </button>
             </Tooltip>
           )
         ))}
 
-        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
 
         {/* Settings & Tools */}
         {rightSidebarItems.map((item, index) => (
@@ -588,26 +600,38 @@ export default function Project() {
             <button
               key={index}
               onClick={item.onClick}
-              className={`flex items-center h-9 transition-all w-full flex-shrink-0 px-3 gap-3 ${
+              className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
                 item.active
-                  ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
-                  : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                  ? 'bg-[var(--sidebar-active)]'
+                  : 'hover:bg-[var(--sidebar-hover)]'
               }`}
             >
-              {item.icon}
-              <span className="text-sm font-medium">{item.title}</span>
+              {React.cloneElement(item.icon, {
+                className: `transition-colors ${
+                  item.active
+                    ? 'text-[var(--text)]'
+                    : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                }`
+              })}
+              <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
             </button>
           ) : (
             <Tooltip key={index} content={item.title} side="right" delay={200}>
               <button
                 onClick={item.onClick}
-                className={`flex items-center justify-center h-9 transition-all w-full flex-shrink-0 ${
+                className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
                   item.active
-                    ? 'text-[var(--primary)] bg-[var(--primary)]/10 border-l-2 border-[var(--primary)]'
-                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                    ? 'bg-[var(--sidebar-active)]'
+                    : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
-                {item.icon}
+                {React.cloneElement(item.icon, {
+                  className: `transition-colors ${
+                    item.active
+                      ? 'text-[var(--text)]'
+                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                  }`
+                })}
               </button>
             </Tooltip>
           )
@@ -616,24 +640,24 @@ export default function Project() {
         {/* Spacer to push collapse button to bottom */}
         <div className="flex-1" />
 
-        <div className="h-px bg-white/10 my-1 mx-2 flex-shrink-0" />
+        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
 
         {/* Collapse/Expand Toggle */}
         {isLeftSidebarExpanded ? (
           <button
             onClick={() => setIsLeftSidebarExpanded(false)}
-            className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
+            className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
           >
-            <List size={18} weight="bold" />
-            <span className="text-sm font-medium">Collapse</span>
+            <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+            <span className="text-sm font-medium text-[var(--text)]">Collapse</span>
           </button>
         ) : (
           <Tooltip content="Expand" side="right" delay={200}>
             <button
               onClick={() => setIsLeftSidebarExpanded(true)}
-              className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
+              className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
             >
-              <List size={18} weight="bold" />
+              <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
             </button>
           </Tooltip>
         )}
@@ -643,7 +667,7 @@ export default function Project() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar with Project Title */}
-        <div className="h-12 bg-[#0a0a0a] border-b border-white/10 flex items-center justify-between px-4 md:px-6">
+        <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center justify-between px-4 md:px-6">
           <Breadcrumbs
             items={[
               { label: 'Projects', href: '/dashboard' },
@@ -655,7 +679,7 @@ export default function Project() {
           {/* Mobile hamburger menu */}
           <button
             onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-            className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+            className="md:hidden p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors"
             aria-label="Open menu"
           >
             <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -682,18 +706,18 @@ export default function Project() {
               ) : (
                 <>
                   {/* Browser-style chrome */}
-                  <div className="bg-[var(--surface)] border-b border-white/10 p-2 md:p-3 flex items-center gap-2 md:gap-3">
+                  <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={navigateBack}
-                        className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
                         title="Go back"
                       >
                         <CaretLeft size={18} weight="bold" />
                       </button>
                       <button
                         onClick={navigateForward}
-                        className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
                         title="Go forward"
                       >
                         <CaretRight size={18} weight="bold" />
@@ -707,7 +731,7 @@ export default function Project() {
                     </div>
                     <button
                       onClick={refreshPreview}
-                      className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
+                      className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
                       title="Refresh"
                     >
                       <ArrowsClockwise size={16} />
@@ -811,7 +835,7 @@ export default function Project() {
         />
       ) : (
         <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">
-          <div className="bg-[var(--surface)] border border-white/10 rounded-2xl shadow-2xl p-8 max-w-md pointer-events-auto">
+          <div className="bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-2xl shadow-2xl p-8 max-w-md pointer-events-auto">
             <div className="text-center">
               <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Storefront className="w-8 h-8 text-[var(--primary)]" weight="fill" />
@@ -832,7 +856,7 @@ export default function Project() {
                 </button>
                 <button
                   onClick={() => navigate('/marketplace')}
-                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-[var(--text)] py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                  className="w-full bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] border border-[var(--sidebar-border)] text-[var(--text)] py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
                 >
                   <Storefront size={20} weight="fill" />
                   Browse Marketplace
