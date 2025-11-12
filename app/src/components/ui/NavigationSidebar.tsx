@@ -5,20 +5,20 @@ import { Tooltip } from './Tooltip';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Folder,
-  Storefront,
+  FolderOpen,
+  Store,
   Package,
-  Gear,
+  Settings,
   Sun,
   Moon,
-  Books,
-  SignOut,
-  CaretLeft,
-  CaretRight,
-  Article,
-  Sparkle,
-  ChatCircleDots
-} from '@phosphor-icons/react';
+  BookOpen,
+  LogOut,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Sparkles,
+  MessageCircle
+} from 'lucide-react';
 import { billingApi } from '../../lib/api';
 
 interface NavigationSidebarProps {
@@ -69,10 +69,10 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
         damping: 28,
         mass: 0.4
       }}
-      className="hidden md:flex flex-col bg-[var(--surface)] border-r border-white/10 overflow-x-hidden"
+      className="hidden md:flex flex-col bg-[#0a0a0a] border-r border-white/10 overflow-x-hidden"
     >
       {/* Tesslate Logo */}
-      <div className={`flex items-center h-12 flex-shrink-0 ${isExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-white/10`}>
+      <div className={`flex items-center h-12 flex-shrink-0 ${isExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-white/10 bg-[#0a0a0a]`}>
         <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
           <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
           <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
@@ -95,7 +95,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
               : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
           }`}
         >
-          <Folder size={18} weight="fill" />
+          <FolderOpen size={18} />
           <span className="text-sm font-medium">Projects</span>
         </button>
       ) : (
@@ -108,7 +108,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
                 : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
             }`}
           >
-            <Folder size={18} weight="fill" />
+            <FolderOpen size={18} />
           </button>
         </Tooltip>
       )}
@@ -122,7 +122,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
               : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
           }`}
         >
-          <Storefront size={18} weight="fill" />
+          <Store size={18} />
           <span className="text-sm font-medium">Marketplace</span>
         </button>
       ) : (
@@ -135,7 +135,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
                 : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
             }`}
           >
-            <Storefront size={18} weight="fill" />
+            <Store size={18} />
           </button>
         </Tooltip>
       )}
@@ -149,7 +149,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
               : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
           }`}
         >
-          <Books size={18} weight="fill" />
+          <BookOpen size={18} />
           <span className="text-sm font-medium">Library</span>
         </button>
       ) : (
@@ -162,7 +162,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
                 : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
             }`}
           >
-            <Books size={18} weight="fill" />
+            <BookOpen size={18} />
           </button>
         </Tooltip>
       )}
@@ -176,7 +176,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
               : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
           }`}
         >
-          <ChatCircleDots size={18} weight="fill" />
+          <MessageCircle size={18} />
           <span className="text-sm font-medium">Feedback</span>
         </button>
       ) : (
@@ -189,7 +189,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
                 : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
             }`}
           >
-            <ChatCircleDots size={18} weight="fill" />
+            <MessageCircle size={18} />
           </button>
         </Tooltip>
       )}
@@ -199,7 +199,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
           onClick={() => toast('Components library coming soon!')}
           className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
         >
-          <Package size={18} weight="fill" />
+          <Package size={18} />
           <span className="text-sm font-medium">Components</span>
         </button>
       ) : (
@@ -208,7 +208,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             onClick={() => toast('Components library coming soon!')}
             className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
           >
-            <Package size={18} weight="fill" />
+            <Package size={18} />
           </button>
         </Tooltip>
       )}
@@ -220,7 +220,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
           rel="noopener noreferrer"
           className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
         >
-          <Article size={18} weight="fill" />
+          <FileText size={18} />
           <span className="text-sm font-medium">Documentation</span>
         </a>
       ) : (
@@ -231,7 +231,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             rel="noopener noreferrer"
             className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
           >
-            <Article size={18} weight="fill" />
+            <FileText size={18} />
           </a>
         </Tooltip>
       )}
@@ -245,10 +245,10 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             <div className="mx-2 my-1 flex-shrink-0">
               <button
                 onClick={() => navigate('/billing/plans')}
-                className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg p-3 transition-all shadow-lg hover:shadow-xl"
+                className="w-full bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary-hover)] text-white rounded-lg p-3 transition-all shadow-lg hover:shadow-xl"
               >
                 <div className="flex items-center justify-center gap-2">
-                  <Sparkle size={16} weight="fill" />
+                  <Sparkles size={16} />
                   <span className="text-sm font-bold">Upgrade to Premium</span>
                 </div>
               </button>
@@ -257,9 +257,9 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             <Tooltip content="Upgrade to Premium" side="right" delay={200}>
               <button
                 onClick={() => navigate('/billing/plans')}
-                className="flex items-center justify-center h-9 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white transition-all w-full flex-shrink-0"
+                className="flex items-center justify-center h-9 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary-hover)] text-white transition-all w-full flex-shrink-0"
               >
-                <Sparkle size={18} weight="fill" />
+                <Sparkles size={18} />
               </button>
             </Tooltip>
           )}
@@ -273,7 +273,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
           onClick={toggleTheme}
           className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
         >
-          {theme === 'dark' ? <Sun size={18} weight="fill" /> : <Moon size={18} weight="fill" />}
+          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           <span className="text-sm font-medium">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
         </button>
       ) : (
@@ -282,7 +282,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             onClick={toggleTheme}
             className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
           >
-            {theme === 'dark' ? <Sun size={18} weight="fill" /> : <Moon size={18} weight="fill" />}
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </Tooltip>
       )}
@@ -292,7 +292,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
           onClick={() => toast('Settings coming soon!')}
           className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
         >
-          <Gear size={18} weight="fill" />
+          <Settings size={18} />
           <span className="text-sm font-medium">Settings</span>
         </button>
       ) : (
@@ -301,7 +301,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             onClick={() => toast('Settings coming soon!')}
             className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
           >
-            <Gear size={18} weight="fill" />
+            <Settings size={18} />
           </button>
         </Tooltip>
       )}
@@ -311,7 +311,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
           onClick={logout}
           className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
         >
-          <SignOut size={18} weight="fill" />
+          <LogOut size={18} />
           <span className="text-sm font-medium">Logout</span>
         </button>
       ) : (
@@ -320,7 +320,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             onClick={logout}
             className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
           >
-            <SignOut size={18} weight="fill" />
+            <LogOut size={18} />
           </button>
         </Tooltip>
       )}
@@ -336,7 +336,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
           onClick={() => setIsExpanded(false)}
           className="flex items-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0 px-3 gap-3"
         >
-          <CaretLeft size={18} weight="bold" />
+          <ChevronLeft size={18} />
           <span className="text-sm font-medium">Collapse</span>
         </button>
       ) : (
@@ -345,7 +345,7 @@ export function NavigationSidebar({ activePage }: NavigationSidebarProps) {
             onClick={() => setIsExpanded(true)}
             className="flex items-center justify-center h-9 text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5 transition-all w-full flex-shrink-0"
           >
-            <CaretRight size={18} weight="bold" />
+            <ChevronRight size={18} />
           </button>
         </Tooltip>
       )}

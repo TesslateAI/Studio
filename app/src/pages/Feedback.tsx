@@ -169,7 +169,7 @@ export default function Feedback() {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <div className="h-12 bg-[var(--surface)] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
+        <div className="h-12 bg-[#0a0a0a] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
           <div className="flex items-center gap-4 md:gap-6">
             <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Feedback</h1>
 
@@ -212,7 +212,7 @@ export default function Feedback() {
           {/* New Feedback Button */}
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 bg-[var(--primary)] hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+            className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
           >
             <Plus size={16} weight="bold" />
             <span className="hidden md:inline">New Feedback</span>
@@ -337,7 +337,7 @@ export default function Feedback() {
                 <p className="text-[var(--text)]/40 text-sm mb-4">No feedback found</p>
                 <button
                   onClick={() => setShowCreateModal(true)}
-                  className="inline-flex items-center gap-2 bg-[var(--primary)] hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                  className="inline-flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all"
                 >
                   <Plus size={16} weight="bold" />
                   Create First Feedback

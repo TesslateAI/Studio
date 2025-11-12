@@ -27,6 +27,7 @@ import {
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
 import { Tooltip } from '../components/ui/Tooltip';
+import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
@@ -642,8 +643,14 @@ export default function Project() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar with Project Title */}
-        <div className="h-12 bg-[var(--surface)] border-b border-white/10 flex items-center justify-between px-4 md:px-6">
-          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">{project.name}</h1>
+        <div className="h-12 bg-[#0a0a0a] border-b border-white/10 flex items-center justify-between px-4 md:px-6">
+          <Breadcrumbs
+            items={[
+              { label: 'Projects', href: '/dashboard' },
+              { label: project.name, href: `/project/${slug}` },
+              { label: 'Builder' }
+            ]}
+          />
 
           {/* Mobile hamburger menu */}
           <button
@@ -818,7 +825,7 @@ export default function Project() {
               <div className="flex flex-col gap-3">
                 <button
                   onClick={() => navigate('/library')}
-                  className="w-full bg-[var(--primary)] hover:bg-orange-600 text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                  className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
                 >
                   <Storefront size={20} weight="fill" />
                   Go to Library

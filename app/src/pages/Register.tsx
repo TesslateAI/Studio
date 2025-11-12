@@ -266,7 +266,7 @@ export default function Register() {
         <div className="relative z-10 max-w-lg text-center">
           <h2 className="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
             From idea to production.<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-orange-600">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)]">
               In record time.
             </span>
           </h2>

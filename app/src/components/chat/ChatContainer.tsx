@@ -749,10 +749,10 @@ export function ChatContainer({
         return (
           <div key={index} className="my-2">
             <div className="flex items-center gap-2 p-3 bg-[var(--surface)]/50 rounded-lg border border-[var(--border-color)]">
-              <FileCode size={18} className="text-orange-500" />
+              <FileCode size={18} className="text-[var(--primary)]" />
               <span className="text-sm font-medium flex-1">{fileName}</span>
               {isFileStreaming && (
-                <Loader2 className="animate-spin text-orange-500" size={16} />
+                <Loader2 className="animate-spin text-[var(--primary)]" size={16} />
               )}
               {!isFileStreaming && (
                 <div className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center">
@@ -774,7 +774,7 @@ export function ChatContainer({
           onClick={() => setIsExpanded(true)}
           className={`
             w-12 h-12 md:w-16 md:h-16 rounded-full
-            bg-orange-500 hover:bg-orange-600 active:bg-orange-700
+            bg-[var(--primary)] hover:bg-[var(--primary-hover)] active:bg-[var(--primary-hover)]
             shadow-lg hover:shadow-xl
             flex items-center justify-center
             transition-all duration-300

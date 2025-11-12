@@ -10,6 +10,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Project from './pages/Project';
+import ProjectOverview from './pages/ProjectOverview';
 import Marketplace from './pages/Marketplace';
 import Library from './pages/Library';
 import Feedback from './pages/Feedback';
@@ -196,6 +197,14 @@ function AppContent() {
           />
           <Route
             path="/project/:slug"
+            element={
+              <PrivateRoute>
+                <ProjectOverview />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/project/:slug/builder"
             element={
               <PrivateRoute>
                 <Project />

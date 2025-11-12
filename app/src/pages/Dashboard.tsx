@@ -44,8 +44,6 @@ interface Project {
   agents?: Array<{ icon: any; name: string }>;
 }
 
-type TabFilter = 'all' | 'idea' | 'build' | 'launch';
-
 export default function Dashboard() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
@@ -53,7 +51,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', description: '' });
-  const [activeTab, setActiveTab] = useState<TabFilter>('all');
   const [isCreating, setIsCreating] = useState(false);
   const [sourceType, setSourceType] = useState<'template' | 'github' | 'base'>('template');
   const [githubRepoUrl, setGithubRepoUrl] = useState('');
@@ -346,11 +343,8 @@ export default function Dashboard() {
     navigate('/login');
   };
 
-  // Filter projects by tab
-  const filteredProjects = projects.filter(project => {
-    if (activeTab === 'all') return true;
-    return project.status === activeTab;
-  });
+  // Show all projects (no filtering)
+  const filteredProjects = projects;
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Never';
@@ -454,35 +448,9 @@ export default function Dashboard() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <div className="h-12 bg-[var(--surface)] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
+        <div className="h-12 bg-[#0a0a0a] border-b border-white/10 flex items-center px-4 md:px-6 justify-between">
           <div className="flex items-center gap-4 md:gap-6">
             <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
-
-            {/* Tab Filters - Desktop */}
-            <div className="hidden md:flex items-center gap-1">
-              {[
-                { key: 'all', label: 'All', enabled: true },
-                { key: 'build', label: 'Build', enabled: true },
-                { key: 'idea', label: 'Idea', enabled: false },
-                { key: 'launch', label: 'Launch', enabled: false }
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => tab.enabled ? setActiveTab(tab.key as TabFilter) : toast('Coming soon!')}
-                  className={`
-                    px-3 py-1 rounded-lg text-xs font-medium transition-all
-                    ${activeTab === tab.key
-                      ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                      : tab.enabled
-                        ? 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
-                        : 'text-[var(--text)]/30 cursor-not-allowed'
-                    }
-                  `}
-                >
-                  {tab.label}{!tab.enabled && ' 🔒'}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* Right side - User Profile */}
@@ -504,7 +472,7 @@ export default function Dashboard() {
                 <User size={18} className="text-[var(--text)]" weight="fill" />
                 <span className="text-sm font-medium text-[var(--text)]">{userName}</span>
                 {userTier === 'pro' && (
-                  <span className="px-2 py-0.5 bg-gradient-to-r from-orange-500 to-orange-600 text-white text-xs font-bold rounded-md">
+                  <span className="px-2 py-0.5 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-xs font-bold rounded-md">
                     PRO
                   </span>
                 )}
@@ -599,30 +567,6 @@ export default function Dashboard() {
         </div>
 
         {/* Tab Filters - Mobile */}
-        <div className="md:hidden bg-[var(--surface)] border-b border-white/10 px-4 py-2 flex items-center gap-2 overflow-x-auto">
-          {[
-            { key: 'all', label: 'All', enabled: true },
-            { key: 'build', label: 'Build', enabled: true },
-            { key: 'idea', label: 'Idea', enabled: false },
-            { key: 'launch', label: 'Launch', enabled: false }
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => tab.enabled ? setActiveTab(tab.key as TabFilter) : toast('Coming soon!')}
-              className={`
-                px-3 py-1 rounded-lg text-xs font-medium transition-all whitespace-nowrap
-                ${activeTab === tab.key
-                  ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                  : tab.enabled
-                    ? 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
-                    : 'text-[var(--text)]/30 cursor-not-allowed'
-                }
-              `}
-            >
-              {tab.label}{!tab.enabled && ' 🔒'}
-            </button>
-          ))}
-        </div>
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-auto bg-[var(--bg)]">
@@ -634,15 +578,15 @@ export default function Dashboard() {
                 onClick={() => setShowCreateModal(true)}
                 className={`
                   group bg-white/[0.01] rounded-2xl p-6
-                  border-2 border-dashed border-[rgba(255,107,0,0.3)]
-                  hover:border-[rgba(255,107,0,0.6)]
+                  border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
+                  hover:border-[rgba(var(--primary-rgb),0.6)]
                   transition-all duration-300
                   hover:transform hover:-translate-y-1
                   flex flex-col items-center justify-center gap-3
                   ${filteredProjects.length === 0 ? 'w-full min-h-[400px]' : 'min-h-[240px]'}
                 `}
               >
-                <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(255,107,0,0.3)] transition-colors">
+                <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
                   <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
                 </div>
                 <div className="text-center">
@@ -692,7 +636,7 @@ export default function Dashboard() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => !isCreating && setShowCreateModal(false)}>
           <div className="bg-[var(--surface)] p-8 rounded-3xl w-full max-w-lg shadow-2xl border border-white/10" onClick={(e) => e.stopPropagation()}>
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
               </div>
               <h2 className="font-heading text-2xl font-bold text-[var(--text)] mb-2">Create New Project</h2>
@@ -710,7 +654,7 @@ export default function Dashboard() {
                     className={`
                       p-4 rounded-xl border-2 transition-all
                       ${sourceType === 'template'
-                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
+                        ? 'border-[var(--primary)] bg-[rgba(var(--primary-rgb),0.1)]'
                         : theme === 'light'
                           ? 'border-black/10 bg-black/5 hover:border-black/20'
                           : 'border-white/10 bg-white/5 hover:border-white/20'
@@ -728,7 +672,7 @@ export default function Dashboard() {
                     className={`
                       p-4 rounded-xl border-2 transition-all
                       ${sourceType === 'base'
-                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
+                        ? 'border-[var(--primary)] bg-[rgba(var(--primary-rgb),0.1)]'
                         : theme === 'light'
                           ? 'border-black/10 bg-black/5 hover:border-black/20'
                           : 'border-white/10 bg-white/5 hover:border-white/20'
@@ -746,7 +690,7 @@ export default function Dashboard() {
                     className={`
                       p-4 rounded-xl border-2 transition-all
                       ${sourceType === 'github'
-                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
+                        ? 'border-[var(--primary)] bg-[rgba(var(--primary-rgb),0.1)]'
                         : theme === 'light'
                           ? 'border-black/10 bg-black/5 hover:border-black/20'
                           : 'border-white/10 bg-white/5 hover:border-white/20'
@@ -776,7 +720,7 @@ export default function Dashboard() {
                           setShowCreateModal(false);
                           navigate('/marketplace');
                         }}
-                        className="text-[var(--primary)] hover:text-orange-400 text-sm font-medium"
+                        className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-sm font-medium"
                       >
                         Browse Marketplace
                       </button>
@@ -845,7 +789,7 @@ export default function Dashboard() {
                                   w-full px-3 py-3 text-left transition-colors
                                   flex items-center gap-3
                                   ${selectedBase === base.id
-                                    ? 'bg-[rgba(255,107,0,0.1)]'
+                                    ? 'bg-[rgba(var(--primary-rgb),0.1)]'
                                     : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
                                   }
                                 `}
@@ -894,14 +838,14 @@ export default function Dashboard() {
                       ) : githubConnected ? (
                         <span className="text-xs text-green-400">✓ Connected</span>
                       ) : (
-                        <span className="text-xs text-orange-400">Not Connected</span>
+                        <span className="text-xs text-[var(--primary)]">Not Connected</span>
                       )}
                     </div>
                     {!githubConnected && !checkingGithub && (
                       <button
                         onClick={() => setShowGithubConnectModal(true)}
                         disabled={isCreating}
-                        className="text-xs bg-purple-500 hover:bg-purple-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg font-medium transition-all"
+                        className="text-xs bg-[var(--status-purple)] hover:bg-[var(--status-purple)]/80 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg font-medium transition-all"
                       >
                         Connect
                       </button>
@@ -987,7 +931,7 @@ export default function Dashboard() {
                     (sourceType === 'github' && !githubRepoUrl.trim()) ||
                     (sourceType === 'base' && !selectedBase)
                   }
-                  className="flex-1 bg-[var(--primary)] hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
+                  className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
                 >
                   {isCreating
                     ? sourceType === 'github' ? 'Importing...' : sourceType === 'base' ? 'Creating...' : 'Creating...'

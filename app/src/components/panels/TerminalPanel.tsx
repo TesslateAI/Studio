@@ -39,9 +39,9 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       theme: {
         background: '#0a0a0a',
         foreground: '#e5e5e5',
-        cursor: '#ff6b00',
+        cursor: 'var(--primary)',
         cursorAccent: '#000000',
-        selection: 'rgba(255, 107, 0, 0.3)',
+        selection: 'rgba(var(--primary-rgb), 0.3)',
         black: '#000000',
         red: '#ff5555',
         green: '#50fa7b',
@@ -356,7 +356,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
               flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer
               transition-colors min-w-fit
               ${activeTabId === tab.id
-                ? 'bg-[#ff6b00]/10 text-[#ff6b00]'
+                ? 'bg-[rgba(var(--primary-rgb),0.1)] text-[var(--primary)]'
                 : 'bg-[#0a0a0a] text-gray-400 hover:bg-[#1a1a1a] hover:text-gray-300'
               }
             `}

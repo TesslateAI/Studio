@@ -249,7 +249,7 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
                   <button
                     type="submit"
                     disabled={submittingComment || !newComment.trim()}
-                    className="w-full flex items-center justify-center gap-2 bg-[var(--primary)] hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-2.5 rounded-xl font-semibold transition-all text-sm"
+                    className="w-full flex items-center justify-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-2.5 rounded-xl font-semibold transition-all text-sm"
                   >
                     {submittingComment ? (
                       <>

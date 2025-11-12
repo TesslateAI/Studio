@@ -918,7 +918,7 @@ function AgentManagement() {
                     {agent.is_active && (
                       <button
                         onClick={() => handleRemoveFromMarketplace(agent)}
-                        className="text-orange-400 hover:text-orange-300 text-sm"
+                        className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-sm"
                         title="Remove from marketplace"
                       >
                         Hide

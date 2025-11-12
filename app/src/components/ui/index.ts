@@ -12,3 +12,5 @@ export { Dropdown } from './Dropdown';
 export { ProjectCard } from './ProjectCard';
 export { MarketplaceCard } from './MarketplaceCard';
 export { default as HelpModal } from './HelpModal';
+export { Breadcrumbs } from './Breadcrumbs';
+export type { BreadcrumbItem } from './Breadcrumbs';

@@ -51,7 +51,7 @@ const getToolColor = (toolName: string): string => {
   } else if (name.includes('read') || name.includes('get')) {
     return 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400';
   } else if (name.includes('write') || name.includes('edit') || name.includes('update')) {
-    return 'bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400';
+    return 'bg-[rgba(var(--primary-rgb),0.1)] border-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]';
   } else if (name.includes('list') || name.includes('directory')) {
     return 'bg-purple-500/10 border-purple-500/20 text-purple-600 dark:text-purple-400';
   } else if (name.includes('search') || name.includes('find')) {

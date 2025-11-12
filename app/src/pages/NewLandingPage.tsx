@@ -94,7 +94,7 @@ export default function NewLandingPage() {
       <div className="relative z-10 w-full h-full flex flex-col items-center">
         {/* GPT-5 Banner */}
         {showBanner && (
-          <div className="fixed top-0 left-0 right-0 w-full bg-gradient-to-r from-orange-600 via-orange-500 to-orange-600 text-white py-2 px-4 z-50">
+          <div className="fixed top-0 left-0 right-0 w-full bg-gradient-to-r from-[var(--primary-hover)] via-[var(--primary)] to-[var(--primary-hover)] text-white py-2 px-4 z-50">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-2 flex-1 justify-center">
                 <Sparkles className="w-3.5 h-3.5" />
@@ -115,7 +115,7 @@ export default function NewLandingPage() {
         {/* Tesslate Logo in top left */}
         <div className="fixed top-4 left-4 sm:top-8 sm:left-8 z-40" style={{ marginTop: showBanner ? '44px' : '0' }}>
           <div className="flex items-center gap-2 sm:gap-3">
-            <svg className="w-6 h-6 sm:w-8 sm:h-8 text-orange-500" viewBox="0 0 161.9 126.66">
+            <svg className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
               <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
               <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
               <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
@@ -131,7 +131,7 @@ export default function NewLandingPage() {
         <div className="fixed top-4 right-4 sm:top-8 sm:right-8 z-40" style={{ marginTop: showBanner ? '44px' : '0' }}>
           <button
             onClick={() => navigate('/login')}
-            className="px-4 sm:px-6 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white transition-colors shadow-lg shadow-orange-500/30"
+            className="px-4 sm:px-6 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white transition-colors shadow-lg shadow-[rgba(var(--primary-rgb),0.3)]"
           >
             Sign In
           </button>
@@ -158,7 +158,7 @@ export default function NewLandingPage() {
             <p className="mt-1.5 sm:mt-3 md:mt-4 text-sm sm:text-lg md:text-xl lg:text-2xl xl:text-3xl text-neutral-200 font-semibold max-w-4xl mx-auto leading-relaxed px-2">
               Make full stack apps. Change your system prompts.
             </p>
-            <p className="text-xs sm:text-base md:text-lg lg:text-xl text-orange-400 font-medium">
+            <p className="text-xs sm:text-base md:text-lg lg:text-xl text-[var(--primary)] font-medium">
               Sell your coding agents.
             </p>
           </div>
@@ -281,11 +281,11 @@ export default function NewLandingPage() {
                 {/* Content */}
                 <div className="p-3 sm:p-4 md:p-5">
                   <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-3">
-                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-orange-500 flex items-center justify-center">
+                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-[var(--primary)] flex items-center justify-center">
                       <Code2 className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm sm:text-base md:text-lg font-bold text-white mb-0.5 sm:mb-1 group-hover:text-orange-400 transition-colors">
+                      <h3 className="text-sm sm:text-base md:text-lg font-bold text-white mb-0.5 sm:mb-1 group-hover:text-[var(--primary)] transition-colors">
                         Studio Open Source
                       </h3>
                       <p className="text-xs sm:text-sm text-gray-400 leading-tight">
@@ -333,11 +333,11 @@ export default function NewLandingPage() {
                 {/* Content */}
                 <div className="p-3 sm:p-4 md:p-5">
                   <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-3">
-                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-orange-500 flex items-center justify-center">
+                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-[var(--primary)] flex items-center justify-center">
                       <Boxes className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm sm:text-base md:text-lg font-bold text-white mb-0.5 sm:mb-1 group-hover:text-orange-400 transition-colors">
+                      <h3 className="text-sm sm:text-base md:text-lg font-bold text-white mb-0.5 sm:mb-1 group-hover:text-[var(--primary)] transition-colors">
                         All Tesslate Apps
                       </h3>
                       <p className="text-xs sm:text-sm text-gray-400 leading-tight">
@@ -373,7 +373,7 @@ export default function NewLandingPage() {
                 }}
               >
                 {/* Gradient background instead of image */}
-                <div className="relative w-full h-24 sm:h-32 md:h-40 overflow-hidden bg-gradient-to-br from-orange-600 via-orange-500 to-orange-400">
+                <div className="relative w-full h-24 sm:h-32 md:h-40 overflow-hidden bg-gradient-to-br from-[var(--primary-hover)] via-[var(--primary)] to-[var(--primary)]">
                   <div className="absolute inset-0 flex items-center justify-center">
                     <BookOpen className="w-16 sm:w-20 h-16 sm:h-20 text-white opacity-20" />
                   </div>
@@ -383,11 +383,11 @@ export default function NewLandingPage() {
                 {/* Content */}
                 <div className="p-3 sm:p-4 md:p-5">
                   <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-3">
-                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-orange-500 flex items-center justify-center">
+                    <div className="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-[var(--primary)] flex items-center justify-center">
                       <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm sm:text-base md:text-lg font-bold text-white mb-0.5 sm:mb-1 group-hover:text-orange-400 transition-colors">
+                      <h3 className="text-sm sm:text-base md:text-lg font-bold text-white mb-0.5 sm:mb-1 group-hover:text-[var(--primary)] transition-colors">
                         Documentation
                       </h3>
                       <p className="text-xs sm:text-sm text-gray-400 leading-tight">
@@ -412,7 +412,7 @@ export default function NewLandingPage() {
                 href="https://discord.gg/WgXabcN2r2"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-orange-400 hover:text-orange-500 transition-colors underline"
+                className="text-[var(--primary)] hover:text-[var(--primary-hover)] transition-colors underline"
               >
                 Give us feedback
               </a>
