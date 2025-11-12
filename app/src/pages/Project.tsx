@@ -21,7 +21,8 @@ import {
   Kanban,
   FlowArrow,
   List,
-  Article
+  Article,
+  Terminal
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -37,7 +38,8 @@ import {
   NotesPanel,
   SettingsPanel,
   AssetsPanel,
-  KanbanPanel
+  KanbanPanel,
+  TerminalPanel
 } from '../components/panels';
 import CodeEditor from '../components/CodeEditor';
 import { projectsApi, marketplaceApi } from '../lib/api';
@@ -47,7 +49,7 @@ import { fileEvents } from '../utils/fileEvents';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
-type MainViewType = 'preview' | 'code' | 'kanban' | 'assets';
+type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 
 interface UIAgent {
   id: string;
@@ -421,6 +423,12 @@ export default function Project() {
       active: activeView === 'assets'
     },
     {
+      icon: <Terminal size={18} />,
+      title: 'Terminal',
+      onClick: () => setActiveView('terminal'),
+      active: activeView === 'terminal'
+    },
+    {
       icon: <Folder size={18} />,
       title: 'Files',
       onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
@@ -734,6 +742,11 @@ export default function Project() {
           {/* Assets View */}
           <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
             <AssetsPanel projectSlug={slug!} />
+          </div>
+
+          {/* Terminal View */}
+          <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
+            <TerminalPanel projectId={slug!} />
           </div>
         </div>
       </div>

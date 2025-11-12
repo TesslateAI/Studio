@@ -1,7 +1,23 @@
 import axios from 'axios';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+import { authManager } from './auth';
 import type { AgentChatRequest, AgentChatResponse, Agent, AgentCreate } from '../types/agent';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+// Determine API URL based on platform
+const getApiUrl = (): string => {
+  // For development, use Traefik on port 80 (routes to orchestrator via /api prefix)
+  if (__DEV__) {
+    return Platform.OS === 'android'
+      ? 'http://10.0.2.2'  // Android emulator -> Traefik on host
+      : 'http://studio.localhost'; // iOS simulator or web -> Traefik
+  }
+
+  // For production, use environment variable or default
+  return Constants.expoConfig?.extra?.apiUrl || 'https://api.tesslate.com';
+};
+
+const API_URL = getApiUrl();
 
 const api = axios.create({
   baseURL: API_URL,
@@ -15,8 +31,8 @@ const api = axios.create({
  * Authentication with fastapi-users:
  * - JWT Bearer tokens for API authentication
  * - Cookie-based OAuth authentication with CSRF protection
+ * - Tokens stored in SecureStore (encrypted)
  * - No refresh tokens (tokens are long-lived)
- * - Redirect to login on 401 errors
  */
 
 // CSRF token management
@@ -38,8 +54,8 @@ fetchCsrfToken();
  * Helper to build auth headers for fetch() calls
  * Supports both JWT Bearer tokens and cookie-based OAuth authentication
  */
-export const getAuthHeaders = (additionalHeaders?: Record<string, string>): Record<string, string> => {
-  const token = localStorage.getItem('token');
+export const getAuthHeaders = async (additionalHeaders?: Record<string, string>): Promise<Record<string, string>> => {
+  const token = await authManager.getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...additionalHeaders,
@@ -55,8 +71,8 @@ export const getAuthHeaders = (additionalHeaders?: Record<string, string>): Reco
   return headers;
 };
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+api.interceptors.request.use(async (config) => {
+  const token = await authManager.getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -75,12 +91,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    // If error is 401, redirect to login
+    // If error is 401, clear token and trigger logout
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
+      await authManager.deleteToken();
+      // Navigation will be handled by app-level auth state
     }
 
     // If error is 403 and mentions CSRF, refetch token and retry
@@ -111,15 +125,12 @@ export const authApi = {
   },
 
   // Register new user (fastapi-users endpoint)
-  register: async (name: string, email: string, password: string) => {
-    // Check if there's a referrer in sessionStorage
-    const referred_by = sessionStorage.getItem('referrer');
-
+  register: async (name: string, email: string, password: string, referralCode?: string) => {
     const response = await api.post('/api/auth/register', {
       name,
       email,
       password,
-      referral_code: referred_by || undefined,
+      referral_code: referralCode || undefined,
     });
     return response.data;
   },
@@ -137,7 +148,7 @@ export const authApi = {
     } catch (error) {
       // Ignore errors, we're logging out anyway
     }
-    localStorage.removeItem('token');
+    await authManager.deleteToken();
   },
 
   // OAuth endpoints - Fetch the authorization URL from the backend
@@ -256,18 +267,19 @@ export const chatApi = {
     onEvent: (event: { type: string; data: any }) => void,
     signal?: AbortSignal
   ): Promise<void> => {
+    const headers = await getAuthHeaders();
+
     const response = await fetch(`${API_URL}/api/chat/agent/stream`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers,
       body: JSON.stringify(request),
       credentials: 'include', // Include cookies for OAuth-based authentication
       signal, // Pass abort signal
     });
 
-    // Handle 401 by redirecting to login
+    // Handle 401 by clearing token
     if (response.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+      await authManager.deleteToken();
       throw new Error('Authentication required');
     }
 
@@ -617,12 +629,16 @@ export const assetsApi = {
   // Upload an asset file
   uploadAsset: async (
     projectSlug: string,
-    file: File,
+    file: { uri: string; name: string; type: string },
     directory: string,
     onProgress?: (progress: number) => void
   ) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.type,
+    } as any);
     formData.append('directory', directory);
 
     const response = await api.post(`/api/projects/${projectSlug}/assets/upload`, formData, {
@@ -849,33 +865,14 @@ export const feedbackApi = {
   },
 };
 
-export const createWebSocket = (token: string) => {
+export const createWebSocket = async (token: string) => {
   let wsUrl: string;
   if (API_URL) {
     wsUrl = API_URL.replace('http', 'ws');
   } else {
-    // Use current location for WebSocket when no API_URL is set
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsUrl = `${protocol}//${window.location.host}`;
+    wsUrl = __DEV__ ? (Platform.OS === 'android' ? 'ws://10.0.2.2:8000' : 'ws://localhost:8000') : 'wss://api.tesslate.com';
   }
   return new WebSocket(`${wsUrl}/api/chat/ws/${token}`);
-};
-
-/**
- * Create a WebSocket connection for interactive terminal access
- * @param projectId - The project ID or slug
- * @returns WebSocket instance connected to the terminal endpoint
- */
-export const createTerminalWebSocket = (projectId: string): WebSocket => {
-  let wsUrl: string;
-  if (API_URL) {
-    wsUrl = API_URL.replace('http', 'ws');
-  } else {
-    // Use current location for WebSocket when no API_URL is set
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsUrl = `${protocol}//${window.location.host}`;
-  }
-  return new WebSocket(`${wsUrl}/api/projects/${projectId}/terminal`);
 };
 
 export default api;

@@ -1,6 +1,6 @@
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status, WebSocket
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
@@ -2590,3 +2590,277 @@ async def purchase_additional_deploy_slot(
         "checkout_url": session['url'],
         "session_id": session['id']
     }
+
+# WebSocket endpoint for streaming container logs
+@router.websocket("/{project_slug}/logs/stream")
+async def stream_container_logs(
+    websocket: WebSocket,
+    project_slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    WebSocket endpoint to stream container logs in real-time.
+    Streams stdout/stderr from the project's dev container.
+    """
+    from fastapi import WebSocket, WebSocketDisconnect
+    import docker
+    import asyncio
+    
+    await websocket.accept()
+    
+    try:
+        # Get project
+        result = await db.execute(
+            select(Project).where(Project.slug == project_slug)
+        )
+        project = result.scalar_one_or_none()
+        
+        if not project:
+            await websocket.send_json({"type": "error", "message": "Project not found"})
+            await websocket.close()
+            return
+        
+        # Get container name
+        from ..utils.resource_naming import get_container_name
+        container_name = get_container_name(str(project.user_id), str(project.id))
+        
+        await websocket.send_json({"type": "status", "message": f"Connecting to container: {container_name}"})
+        
+        # Connect to Docker
+        docker_client = docker.from_env()
+        
+        try:
+            container = docker_client.containers.get(container_name)
+            
+            await websocket.send_json({"type": "status", "message": "Container found. Streaming logs..."})
+            
+            # Stream logs (follow=True for real-time)
+            log_stream = container.logs(stream=True, follow=True, stdout=True, stderr=True, tail=100)
+            
+            # Stream logs to WebSocket
+            for log_line in log_stream:
+                try:
+                    # Decode and send log line
+                    log_text = log_line.decode('utf-8', errors='replace')
+                    await websocket.send_json({"type": "log", "data": log_text})
+                    
+                    # Check for disconnect
+                    try:
+                        message = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
+                        if message == "ping":
+                            await websocket.send_text("pong")
+                    except asyncio.TimeoutError:
+                        pass  # No message, continue streaming
+                        
+                except WebSocketDisconnect:
+                    break
+                except Exception as e:
+                    logger.error(f"Error streaming log line: {e}")
+                    break
+                    
+        except docker.errors.NotFound:
+            await websocket.send_json({"type": "error", "message": "Container not found. Start the dev server first."})
+        except Exception as e:
+            logger.error(f"Error accessing container: {e}")
+            await websocket.send_json({"type": "error", "message": f"Container error: {str(e)}"})
+        finally:
+            docker_client.close()
+            
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for project {project_slug}")
+    except Exception as e:
+        logger.error(f"WebSocket error for project {project_slug}: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
+
+
+@router.websocket("/{project_slug}/terminal")
+async def interactive_terminal(
+    websocket: WebSocket,
+    project_slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    WebSocket endpoint for interactive terminal with PTY support.
+    Provides full bidirectional shell access to the project's dev container.
+
+    Message format:
+    - Client -> Server: {"type": "input", "data": "command text"} or {"type": "resize", "cols": 80, "rows": 24}
+    - Server -> Client: {"type": "output", "data": "terminal output"} or {"type": "error", "message": "error text"}
+    """
+    from fastapi import WebSocket, WebSocketDisconnect
+    from ..services.shell_session_manager import ShellSessionManager
+    from ..services.pty_broker import get_pty_broker
+    import json
+
+    await websocket.accept()
+    session_id = None
+    shell_manager = ShellSessionManager()
+    output_task = None
+
+    try:
+        # Get project and verify ownership
+        result = await db.execute(
+            select(Project).where(Project.slug == project_slug)
+        )
+        project = result.scalar_one_or_none()
+
+        if not project:
+            await websocket.send_json({"type": "error", "message": "Project not found"})
+            await websocket.close()
+            return
+
+        # For now, we'll get user from project owner (in production, extract from JWT token)
+        user_id = project.owner_id
+
+        # Create shell session
+        await websocket.send_json({"type": "status", "message": "Starting shell session..."})
+
+        try:
+            session_info = await shell_manager.create_session(
+                user_id=user_id,
+                project_id=str(project.id),
+                db=db,
+                command="/bin/sh"
+            )
+            session_id = session_info["session_id"]
+
+            await websocket.send_json({"type": "status", "message": f"Shell session created: {session_id}"})
+
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "message": e.detail})
+            await websocket.close()
+            return
+        except Exception as e:
+            logger.error(f"Failed to create shell session: {e}")
+            await websocket.send_json({"type": "error", "message": f"Failed to create shell: {str(e)}"})
+            await websocket.close()
+            return
+
+        # Get PTY session for direct access
+        pty_broker = get_pty_broker()
+        pty_session = pty_broker.sessions.get(session_id)
+
+        if not pty_session:
+            await websocket.send_json({"type": "error", "message": "PTY session not found"})
+            await websocket.close()
+            return
+
+        # Send initial prompt
+        await websocket.send_json({"type": "output", "data": "\r\n\x1b[38;5;208m╔═══════════════════════════════════════╗\x1b[0m\r\n"})
+        await websocket.send_json({"type": "output", "data": "\x1b[38;5;208m║   Tesslate Studio - Interactive Shell ║\x1b[0m\r\n"})
+        await websocket.send_json({"type": "output", "data": "\x1b[38;5;208m╚═══════════════════════════════════════╝\x1b[0m\r\n\r\n"})
+
+        # Start background task to stream PTY output to WebSocket
+        async def stream_output():
+            """Stream PTY output to WebSocket"""
+            try:
+                while True:
+                    # Read output from PTY (non-blocking)
+                    output = await shell_manager.read_from_session(
+                        session_id=session_id,
+                        db=db,
+                        user_id=user_id,
+                        timeout=0.1
+                    )
+
+                    if output:
+                        # Send raw output to client
+                        await websocket.send_json({
+                            "type": "output",
+                            "data": output.decode('utf-8', errors='replace')
+                        })
+
+                    # Small delay to prevent tight loop
+                    await asyncio.sleep(0.05)
+
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket disconnected during output streaming")
+            except Exception as e:
+                logger.error(f"Error streaming output: {e}")
+                try:
+                    await websocket.send_json({"type": "error", "message": f"Stream error: {str(e)}"})
+                except:
+                    pass
+
+        # Start output streaming task
+        output_task = asyncio.create_task(stream_output())
+
+        # Handle incoming messages from client
+        while True:
+            try:
+                message = await websocket.receive_text()
+                data = json.loads(message)
+
+                if data.get("type") == "input":
+                    # User input - send to PTY stdin
+                    input_data = data.get("data", "")
+                    await shell_manager.write_to_session(
+                        session_id=session_id,
+                        data=input_data.encode('utf-8'),
+                        db=db,
+                        user_id=user_id
+                    )
+
+                elif data.get("type") == "resize":
+                    # Terminal resize event
+                    cols = data.get("cols", 80)
+                    rows = data.get("rows", 24)
+
+                    # Resize PTY
+                    if pty_session and hasattr(pty_session, 'resize'):
+                        try:
+                            await pty_session.resize(cols, rows)
+                        except Exception as e:
+                            logger.error(f"Failed to resize terminal: {e}")
+
+            except WebSocketDisconnect:
+                logger.info(f"Client disconnected from terminal {session_id}")
+                break
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+            except Exception as e:
+                logger.error(f"Error handling client message: {e}")
+                await websocket.send_json({"type": "error", "message": str(e)})
+                break
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for project {project_slug}")
+    except Exception as e:
+        logger.error(f"Terminal WebSocket error for project {project_slug}: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except:
+            pass
+    finally:
+        # Clean up output streaming task
+        if output_task:
+            output_task.cancel()
+            try:
+                await output_task
+            except asyncio.CancelledError:
+                pass
+
+        # Close shell session
+        if session_id:
+            try:
+                await shell_manager.close_session(
+                    session_id=session_id,
+                    db=db,
+                    user_id=user_id
+                )
+                logger.info(f"Closed shell session {session_id}")
+            except Exception as e:
+                logger.error(f"Error closing session {session_id}: {e}")
+
+        try:
+            await websocket.close()
+        except:
+            pass

@@ -31,6 +31,9 @@
     "@tiptap/react": "^3.7.0",
     "@tiptap/starter-kit": "^3.7.0",
     "@types/react-router-dom": "^5.3.3",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
     "axios": "^1.11.0",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.1",
@@ -69,7 +72,7 @@
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.47.1",
     "@rollup/rollup-linux-x64-musl": "^4.47.1",
-    "@rollup/rollup-win32-x64-msvc": "^4.47.1",
+    "@rollup/rollup-win32-x64-msvc": "^4.53.1",
     "lightningcss-win32-x64-msvc": "^1.30.1"
   }
 }

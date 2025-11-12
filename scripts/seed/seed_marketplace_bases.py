@@ -1,10 +1,11 @@
 """
 Seed initial marketplace bases.
 
-Creates three featured fullstack bases:
+Creates four featured bases:
 1. Next.js 15 (Integrated fullstack)
 2. Vite + React + FastAPI (Separated fullstack - Python)
 3. Vite + React + Go (Separated fullstack - Go)
+4. Expo (Mobile - React Native)
 
 HOW TO RUN:
 -----------
@@ -108,6 +109,26 @@ async def seed_bases():
                 reviews_count=0,
                 features=["Vite Frontend", "Go Backend", "Air Hot Reload", "Chi Router", "CORS Middleware", "WebSocket Support", "REST API"],
                 tech_stack=["Vite", "React", "Go", "Chi Router", "Air"],
+                is_featured=True,
+                is_active=True
+            ),
+            MarketplaceBase(
+                name="Expo",
+                slug="expo-default",
+                description="Cross-platform mobile app with Expo Router and React Native",
+                long_description="Modern Expo starter template with file-based routing, React Native 0.81, React 19, and multi-platform support. Perfect for building iOS, Android, and web applications from a single codebase with hot reload and TypeScript. Features Expo Router for intuitive navigation and Metro bundler for optimized performance.",
+                git_repo_url="https://github.com/TesslateAI/Studio-Expo-Base.git",
+                default_branch="main",
+                category="mobile",
+                icon="📱",
+                tags=["expo", "react-native", "mobile", "typescript", "ios", "android", "web", "metro"],
+                pricing_type="free",
+                price=0,
+                downloads=0,
+                rating=5.0,
+                reviews_count=0,
+                features=["File-based Routing", "Expo Router", "Multi-platform (iOS/Android/Web)", "Hot Reload", "TypeScript", "React Native 0.81", "Metro Bundler", "React 19"],
+                tech_stack=["Expo SDK 54", "React Native 0.81", "React 19", "TypeScript", "Metro"],
                 is_featured=True,
                 is_active=True
             )
