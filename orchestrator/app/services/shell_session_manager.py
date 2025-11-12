@@ -82,7 +82,7 @@ class ShellSessionManager:
             )
 
         # 4. Get container/pod name based on deployment mode
-        container_name = self._get_container_name(user_id, project_id)
+        container_name = await self._get_container_name(user_id, project_id)
 
         # 5. Verify container is running
         is_running = await self._is_container_running(user_id, project_id, project.slug)
@@ -344,7 +344,7 @@ class ShellSessionManager:
 
     # Helper methods
 
-    def _get_container_name(self, user_id: UUID, project_id: str) -> str:
+    async def _get_container_name(self, user_id: UUID, project_id: str) -> str:
         """Get container/pod name based on deployment mode."""
         if settings.deployment_mode == "kubernetes":
             # K8s pod name format
@@ -360,8 +360,8 @@ class ShellSessionManager:
                 return container_info["container_name"]
             else:
                 # Fallback: try to find container by labels
-                import subprocess
-                result = subprocess.run(
+                from ..utils.async_subprocess import run_async
+                result = await run_async(
                     ["docker", "ps", "--filter", f"label=com.tesslate.devserver.project_id={project_id}",
                      "--filter", f"label=com.tesslate.devserver.user_id={user_id}", "--format", "{{.Names}}"],
                     capture_output=True, text=True, timeout=10

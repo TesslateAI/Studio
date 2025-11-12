@@ -6,7 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
-from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback
+from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks
 from .config import get_settings
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
@@ -256,6 +256,10 @@ async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
     if request.url.path == "/api/users/me":
         logger.info(f"Cookie header: {request.headers.get('cookie', 'NO COOKIE')}")
+    if "/api/tasks/" in request.url.path:
+        auth_header = request.headers.get('authorization', 'NO AUTH HEADER')
+        logger.info(f"[TASK_REQUEST] Authorization header: {auth_header[:50] if auth_header != 'NO AUTH HEADER' else auth_header}...")
+        logger.info(f"[TASK_REQUEST] All headers: {dict(request.headers)}")
     try:
         response = await call_next(request)
         logger.info(f"Response status: {response.status_code}")
@@ -603,6 +607,7 @@ app.include_router(referrals.router, prefix="/api", tags=["referrals"])
 app.include_router(billing.router, prefix="/api", tags=["billing"])
 app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
 app.include_router(feedback.router, tags=["feedback"])
+app.include_router(tasks.router)
 
 @app.get("/")
 async def root():

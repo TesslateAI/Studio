@@ -53,6 +53,7 @@ export function MiniAsteroids() {
   const [gameOver, setGameOver] = useState(false);
   const [combo, setCombo] = useState(0);
   const [showCombo, setShowCombo] = useState(false);
+  const [gameFocused, setGameFocused] = useState(false);
 
   const gameStateRef = useRef({
     ship: {
@@ -222,6 +223,16 @@ export function MiniAsteroids() {
 
     // Keyboard controls
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if we're typing in an input field
+      const activeElement = document.activeElement;
+      const isTyping = activeElement instanceof HTMLInputElement ||
+                       activeElement instanceof HTMLTextAreaElement ||
+                       activeElement instanceof HTMLSelectElement ||
+                       (activeElement?.getAttribute('contenteditable') === 'true');
+
+      // Only capture keys if game is focused and not typing in a form
+      if (!gameFocused || isTyping) return;
+
       const key = e.key.toLowerCase();
       gameStateRef.current.keys[e.key] = true;
       gameStateRef.current.keys[key] = true;
@@ -233,14 +244,41 @@ export function MiniAsteroids() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      // Check if we're typing in an input field
+      const activeElement = document.activeElement;
+      const isTyping = activeElement instanceof HTMLInputElement ||
+                       activeElement instanceof HTMLTextAreaElement ||
+                       activeElement instanceof HTMLSelectElement ||
+                       (activeElement?.getAttribute('contenteditable') === 'true');
+
+      // Only capture keys if game is focused and not typing in a form
+      if (!gameFocused || isTyping) return;
+
       const key = e.key.toLowerCase();
       gameStateRef.current.keys[e.key] = false;
       gameStateRef.current.keys[key] = false;
     };
 
+    // Handle canvas click to activate game focus
+    const handleCanvasClick = (e: MouseEvent) => {
+      e.stopPropagation();
+      setGameFocused(true);
+    };
+
+    // Handle document click to deactivate game focus when clicking outside
+    const handleDocumentClick = (e: MouseEvent) => {
+      if (!canvas.contains(e.target as Node)) {
+        setGameFocused(false);
+        // Clear all keys when losing focus
+        gameStateRef.current.keys = {};
+      }
+    };
+
     // Touch/Mouse controls for mobile
     const handlePointerDown = (e: PointerEvent) => {
       e.preventDefault();
+      setGameFocused(true);
+
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -265,6 +303,8 @@ export function MiniAsteroids() {
 
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
+    document.addEventListener('click', handleDocumentClick);
+    canvas.addEventListener('click', handleCanvasClick);
     canvas.addEventListener('pointerdown', handlePointerDown);
     canvas.addEventListener('pointerup', handlePointerUp);
     canvas.addEventListener('pointerleave', handlePointerUp);
@@ -860,11 +900,13 @@ export function MiniAsteroids() {
       window.removeEventListener('resize', resizeCanvas);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
+      document.removeEventListener('click', handleDocumentClick);
+      canvas.removeEventListener('click', handleCanvasClick);
       canvas.removeEventListener('pointerdown', handlePointerDown);
       canvas.removeEventListener('pointerup', handlePointerUp);
       canvas.removeEventListener('pointerleave', handlePointerUp);
     };
-  }, [gameOver, highScore]);
+  }, [gameOver, highScore, gameFocused]);
 
   const handleRestart = () => {
     setGameOver(false);
@@ -890,10 +932,14 @@ export function MiniAsteroids() {
   if (ship.laser > 0) activePowerUps.push({ type: 'laser', time: ship.laser });
 
   return (
-    <div className="relative w-full h-full bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/10 overflow-hidden">
+    <div className={`relative w-full h-full bg-gradient-to-br from-gray-900/80 to-gray-800/80 backdrop-blur-xl rounded-3xl shadow-2xl overflow-hidden transition-all duration-300 ${
+      gameFocused
+        ? 'border-2 border-orange-500/70 ring-2 ring-orange-500/30'
+        : 'border border-white/10'
+    }`}>
       <canvas
         ref={canvasRef}
-        className="w-full h-full"
+        className="w-full h-full cursor-pointer"
         style={{ touchAction: 'none' }}
       />
 
@@ -925,6 +971,11 @@ export function MiniAsteroids() {
 
       {/* Controls hint */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none">
+        {!gameFocused && !gameOver && (
+          <div className="text-orange-400 text-sm font-semibold bg-black/70 px-5 py-2.5 rounded-full border-2 border-orange-500/50 animate-pulse mb-2">
+            Click to play
+          </div>
+        )}
         <div className="text-gray-400 text-xs bg-black/40 px-4 py-2 rounded-full hidden sm:block">
           A/D or ← → rotate • W or ↑ thrust • space shoot
         </div>

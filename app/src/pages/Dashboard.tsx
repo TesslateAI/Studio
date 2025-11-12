@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectsApi, marketplaceApi, authApi } from '../lib/api';
+import { projectsApi, marketplaceApi, authApi, tasksApi } from '../lib/api';
 import { githubApi } from '../lib/github-api';
 import { useTheme } from '../theme/ThemeContext';
 import {
@@ -33,6 +33,7 @@ import {
 
 interface Project {
   id: string;
+  slug: string;
   name: string;
   description: string;
   created_at: string;
@@ -58,7 +59,7 @@ export default function Dashboard() {
   const [bases, setBases] = useState<any[]>([]);
   const [selectedBase, setSelectedBase] = useState<number | null>(null);
   const [isBaseDropdownOpen, setIsBaseDropdownOpen] = useState(false);
-  const [deletingProjectIds, setDeletingProjectIds] = useState<Set<number>>(new Set());
+  const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [userName, setUserName] = useState<string>('');
@@ -187,7 +188,7 @@ export default function Dashboard() {
     );
 
     try {
-      const project = await projectsApi.create(
+      const response = await projectsApi.create(
         newProject.name,
         newProject.description,
         sourceType,
@@ -195,20 +196,34 @@ export default function Dashboard() {
         githubBranch || 'main',
         selectedBase || undefined
       );
-      toast.success('Project created successfully!', { id: creatingToast });
+
+      // Response now includes { project, task_id, status_endpoint }
+      const project = response.project;
+      const taskId = response.task_id;
+
+      // Update toast to show it's processing in background
+      toast.success('Project created! Setting up files...', { id: creatingToast, duration: 3000 });
+
       setShowCreateModal(false);
       setNewProject({ name: '', description: '' });
       setSourceType('template');
       setGithubRepoUrl('');
       setGithubBranch('main');
-      setTimeout(() => {
-        navigate(`/project/${project.slug}`);
-      }, 500);
+      setIsCreating(false);
+
+      // Navigate to project immediately
+      navigate(`/project/${project.slug}`);
+
+      // Poll for task completion in background (notifications will show via WebSocket)
+      if (taskId) {
+        tasksApi.pollUntilComplete(taskId).catch((err) => {
+          console.error('Project setup failed:', err);
+        });
+      }
     } catch (error: any) {
       const detail = error?.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to create project';
       toast.error(errorMessage, { id: creatingToast });
-    } finally {
       setIsCreating(false);
     }
   };
@@ -225,20 +240,58 @@ export default function Dashboard() {
     if (!projectToDelete) return;
 
     const projectId = projectToDelete.id;
+    const projectSlug = projectToDelete.slug;
     setShowDeleteDialog(false);
     setDeletingProjectIds(prev => new Set(prev).add(projectId));
     const deletingToast = toast.loading('Deleting project...');
 
     try {
-      await projectsApi.delete(projectId);
-      toast.success('Project deleted successfully', { id: deletingToast });
-      await loadProjects();
-      // Only remove from deleting state after project list is refreshed
-      setDeletingProjectIds(prev => {
-        const updated = new Set(prev);
-        updated.delete(projectId);
-        return updated;
-      });
+      const response = await projectsApi.delete(projectSlug);  // Use slug for API call
+      // Response now includes { task_id, status_endpoint }
+      const taskId = response.task_id;
+
+      toast.loading('Deleting project...', { id: deletingToast });
+
+      // Wait for deletion task to complete
+      if (taskId) {
+        try {
+          await tasksApi.pollUntilComplete(taskId);
+
+          // Task completed successfully - remove project from UI
+          toast.success('Project deleted successfully', { id: deletingToast });
+
+          // Remove project from state
+          setProjects(prev => prev.filter(p => p.id !== projectId));
+
+          setDeletingProjectIds(prev => {
+            const updated = new Set(prev);
+            updated.delete(projectId);
+            return updated;
+          });
+        } catch (taskError) {
+          // Task failed - show error and reload to get accurate state
+          console.error('Project deletion task failed:', taskError);
+          toast.error('Project deletion failed', { id: deletingToast });
+
+          setDeletingProjectIds(prev => {
+            const updated = new Set(prev);
+            updated.delete(projectId);
+            return updated;
+          });
+
+          // Reload to ensure UI matches backend state
+          await loadProjects();
+        }
+      } else {
+        // No task ID returned - reload to verify state
+        toast.success('Project deleted', { id: deletingToast });
+        await loadProjects();
+        setDeletingProjectIds(prev => {
+          const updated = new Set(prev);
+          updated.delete(projectId);
+          return updated;
+        });
+      }
     } catch (error) {
       toast.error('Failed to delete project', { id: deletingToast });
       // Remove from deleting state on error

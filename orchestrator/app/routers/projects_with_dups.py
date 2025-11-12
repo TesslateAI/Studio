@@ -427,7 +427,7 @@ async def _setup_template_project(
             task.update_progress(95, 100, "Template files copied to filesystem")
         except Exception as copy_error:
             logger.error(f"[CREATE] Failed to copy template files: {copy_error}", exc_info=True)
-@router.post("/")
+@router.post("/", response_model=ProjectSchema)
 async def create_project(
     project: ProjectCreate,
     current_user: User = Depends(current_active_user),
@@ -559,6 +559,538 @@ async def create_project(
 
 
 @router.get("/{project_slug}", response_model=ProjectSchema)
+
+        # In Docker mode, create the directory
+        settings = get_settings()
+        if settings.deployment_mode == "docker":
+            # Force create directories using Path (more reliable on Windows Docker volumes)
+            from pathlib import Path
+            try:
+                Path(project_path).mkdir(parents=True, exist_ok=True)
+                logger.info(f"[CREATE] Created project directory: {project_path}")
+            except Exception as e:
+                logger.warning(f"[CREATE] mkdir failed: {e}, trying subprocess")
+                # Try alternative method
+                import subprocess
+                subprocess.run(['mkdir', '-p', project_path], check=False, capture_output=True)
+
+            # Give filesystem a moment to sync (Windows Docker volume issue)
+            import time
+            time.sleep(0.1)
+
+            logger.info(f"[CREATE] Project directory ready: {project_path}")
+
+        # Handle source type: template or github
+        if project.source_type == "github":
+            logger.info(f"[CREATE] Importing from GitHub: {project.github_repo_url}")
+
+            # Try to get GitHub credentials (optional for public repos)
+            from ..services.credential_manager import get_credential_manager
+            credential_manager = get_credential_manager()
+            access_token = await credential_manager.get_access_token(db, current_user.id)
+
+            if access_token:
+                logger.info(f"[CREATE] Using GitHub authentication for {current_user.id}")
+            else:
+                logger.info(f"[CREATE] No GitHub authentication - attempting public repository clone")
+
+            # Clone repository first (don't start container yet - no package.json exists!)
+            # Container will be started later when user opens the project
+            try:
+                from ..services.git_manager import GitManager
+                from ..services.github_client import GitHubClient
+                from ..services.project_patcher import ProjectPatcher
+
+                # Parse repository info
+                repo_info = GitHubClient.parse_repo_url(project.github_repo_url)
+                if not repo_info:
+                    raise ValueError("Invalid GitHub repository URL")
+
+                # Get default branch if not specified
+                branch = project.github_branch
+                if not branch or branch == "":
+                    if access_token:
+                        # Try to get default branch from GitHub API
+                        github_client = GitHubClient(access_token)
+                        try:
+                            branch = await github_client.get_default_branch(repo_info['owner'], repo_info['repo'])
+                            logger.info(f"[CREATE] Detected default branch: {branch}")
+                        except Exception as e:
+                            logger.warning(f"[CREATE] Could not detect default branch: {e}, defaulting to 'main'")
+                            branch = "main"
+                    else:
+                        # No auth token - default to 'main'
+                        branch = "main"
+                        logger.info(f"[CREATE] No auth token, defaulting to branch: {branch}")
+
+                # Clone repository
+                git_manager = GitManager(current_user.id, str(db_project.id))
+                await git_manager.clone_repository(
+                    repo_url=project.github_repo_url,
+                    branch=branch,
+                    auth_token=access_token,
+                    direct_to_filesystem=(settings.deployment_mode == "docker")  # Clone directly for Docker mode
+                )
+
+                logger.info(f"[CREATE] Repository cloned successfully")
+
+                # Auto-patch the imported project to work with Tesslate Studio
+                logger.info(f"[CREATE] Auto-patching imported project for Tesslate compatibility...")
+                try:
+                    if settings.deployment_mode == "kubernetes":
+                        # For Kubernetes, read files from pod, patch them, and write back
+                        from ..k8s_client import get_k8s_manager
+                        from ..services.framework_detector import FrameworkDetector
+                        k8s_manager = get_k8s_manager()
+
+                        # Check if package.json exists
+                        package_json_content = await k8s_manager.read_file_from_pod(
+                            user_id=current_user.id,
+                            project_id=str(db_project.id),
+                            file_path="package.json"
+                        )
+
+                        if package_json_content:
+                            # Detect framework
+                            import json
+                            try:
+                                framework, config = FrameworkDetector.detect_from_package_json(package_json_content)
+                                logger.info(f"[CREATE] Detected {framework} project")
+
+                                if framework == "vite":
+                                    logger.info(f"[CREATE] Applying Vite compatibility patches...")
+
+                                    # Write Tesslate-compatible vite.config.js
+                                    vite_config = ProjectPatcher.REQUIRED_VITE_CONFIG
+                                    await k8s_manager.write_file_to_pod(
+                                        user_id=current_user.id,
+                                        project_id=str(db_project.id),
+                                        file_path="vite.config.js",
+                                        content=vite_config
+                                    )
+                                    logger.info(f"[CREATE] ✅ Wrote Tesslate-compatible vite.config.js")
+
+                                    # Ensure index.html exists
+                                    index_html = await k8s_manager.read_file_from_pod(
+                                        user_id=current_user.id,
+                                        project_id=str(db_project.id),
+                                        file_path="index.html"
+                                    )
+                                    if not index_html:
+                                        await k8s_manager.write_file_to_pod(
+                                            user_id=current_user.id,
+                                            project_id=str(db_project.id),
+                                            file_path="index.html",
+                                            content=ProjectPatcher.MINIMAL_INDEX_HTML
+                                        )
+                                        logger.info(f"[CREATE] ✅ Created missing index.html")
+
+                                elif framework == "nextjs":
+                                    logger.info(f"[CREATE] Applying Next.js compatibility patches...")
+
+                                    # Write Tesslate-compatible next.config.js
+                                    next_config = FrameworkDetector.get_required_config_content("nextjs")
+                                    await k8s_manager.write_file_to_pod(
+                                        user_id=current_user.id,
+                                        project_id=str(db_project.id),
+                                        file_path="next.config.js",
+                                        content=next_config
+                                    )
+                                    logger.info(f"[CREATE] ✅ Wrote Tesslate-compatible next.config.js")
+                                    logger.warning(f"[CREATE] ⚠️ Next.js support is experimental. Dev server will run on port 3000.")
+
+                                else:
+                                    compatibility = FrameworkDetector.get_compatibility_message(framework)
+                                    logger.warning(f"[CREATE] ⚠️ {framework} project: {compatibility}")
+
+                            except Exception as parse_error:
+                                logger.warning(f"[CREATE] Could not parse package.json for patching: {parse_error}")
+                        else:
+                            logger.warning(f"[CREATE] ⚠️ No package.json found in imported project")
+
+                    else:
+                        # Docker mode - patch files on filesystem
+                        patcher = ProjectPatcher(project_path)
+                        patch_result = await patcher.auto_patch()
+
+                        if patch_result["patches_applied"]:
+                            logger.info(f"[CREATE] ✅ Applied patches: {', '.join(patch_result['patches_applied'])}")
+
+                        if patch_result["issues_detected"]:
+                            logger.warning(f"[CREATE] ⚠️ Issues detected: {', '.join(patch_result['issues_detected'])}")
+
+                except Exception as patch_error:
+                    logger.warning(f"[CREATE] Auto-patch encountered an error (project may still work): {patch_error}")
+                    # Don't fail the import if patching fails
+
+                # Save cloned files to database (for frontend display)
+                logger.info(f"[CREATE] Saving cloned files to database...")
+                files_saved = 0
+
+                if settings.deployment_mode == "docker":
+                    # Docker mode: Read files from filesystem
+                    for root, dirs, files in os.walk(project_path):
+                        # Skip node_modules, .git, dist, build directories
+                        dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
+
+                        for file in files:
+                            # Skip system files and binary files
+                            if (file.startswith('.') or
+                                file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'))):
+                                continue
+
+                            file_full_path = os.path.join(root, file)
+                            relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
+
+                            try:
+                                with open(file_full_path, 'r', encoding='utf-8', errors='replace') as f:
+                                    content = f.read()
+
+                                db_file = ProjectFile(
+                                    project_id=db_project.id,
+                                    file_path=relative_path,
+                                    content=content
+                                )
+                                db.add(db_file)
+                                files_saved += 1
+                            except Exception as e:
+                                logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
+                                continue
+
+                    logger.info(f"[CREATE] ✅ Saved {files_saved} files to database")
+
+                # Note: For Kubernetes mode, files are already in the pod and will be read on-demand
+
+                # Update project with Git info
+                db_project.has_git_repo = True
+                db_project.git_remote_url = project.github_repo_url
+
+                # Create git_repository record
+                from ..models import GitRepository
+                git_repo = GitRepository(
+                    project_id=db_project.id,
+                    user_id=current_user.id,
+                    repo_url=project.github_repo_url,
+                    repo_name=repo_info['repo'],
+                    repo_owner=repo_info['owner'],
+                    default_branch=branch,
+                    auth_method='pat' if access_token else 'none'
+                )
+                db.add(git_repo)
+                await db.commit()
+                await db.refresh(db_project)  # Refresh to get updated timestamps
+
+                logger.info(f"[CREATE] Git repository linked to project {db_project.id}")
+
+            except Exception as git_error:
+                logger.error(f"[CREATE] Failed to clone repository: {git_error}", exc_info=True)
+                # Clean up project (no need to stop container - it was never started)
+                await db.delete(db_project)
+                await db.commit()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to import repository: {str(git_error)}"
+                )
+
+            logger.info(f"[CREATE] Project {db_project.id} created from GitHub repository successfully")
+
+        elif project.source_type == "base":
+            logger.info(f"[CREATE] Creating from marketplace base: {project.base_id}")
+
+            if not project.base_id:
+                raise HTTPException(status_code=400, detail="base_id is required for source_type 'base'")
+
+            # Verify user has purchased this base
+            from ..models import UserPurchasedBase, MarketplaceBase
+            purchase = await db.scalar(
+                select(UserPurchasedBase).where(
+                    UserPurchasedBase.user_id == current_user.id,
+                    UserPurchasedBase.base_id == project.base_id,
+                    UserPurchasedBase.is_active == True
+                )
+            )
+            if not purchase:
+                raise HTTPException(status_code=403, detail="You have not acquired this project base.")
+
+            # Get the base's repository URL
+            base_repo = await db.get(MarketplaceBase, project.base_id)
+            if not base_repo:
+                raise HTTPException(status_code=404, detail="Project base not found.")
+
+            logger.info(f"[CREATE] Cloning base repository: {base_repo.git_repo_url}")
+
+            try:
+                # Try to clone using the base's Git repository
+                from ..services.git_manager import GitManager
+                from ..services.credential_manager import get_credential_manager
+
+                # Get GitHub credentials (optional for public repos)
+                credential_manager = get_credential_manager()
+                access_token = await credential_manager.get_access_token(db, current_user.id)
+
+                git_manager = GitManager(current_user.id, str(db_project.id))
+                await git_manager.clone_repository(
+                    repo_url=base_repo.git_repo_url,
+                    branch=base_repo.default_branch,
+                    auth_token=access_token,
+                    direct_to_filesystem=(settings.deployment_mode == "docker")
+                )
+
+                logger.info(f"[CREATE] Base cloned successfully from {base_repo.git_repo_url}")
+
+                # Parse TESSLATE.md and generate startup script for dynamic startup
+                try:
+                    from ..services.tesslate_parser import TesslateParser
+                    from ..services.startup_generator import StartupGenerator
+
+                    tesslate_md_path = os.path.join(project_path, "TESSLATE.md")
+
+                    if os.path.exists(tesslate_md_path):
+                        logger.info(f"[CREATE] Found TESSLATE.md, parsing for dynamic startup...")
+
+                        with open(tesslate_md_path, 'r', encoding='utf-8') as f:
+                            tesslate_content = f.read()
+
+                        # Parse configuration
+                        config = TesslateParser.parse(tesslate_content)
+
+                        # Generate startup script
+                        script_path = StartupGenerator.write_script(config, project_path)
+
+                        logger.info(f"[CREATE] Generated startup script for {config.framework} on port {config.port}")
+                    else:
+                        logger.info(f"[CREATE] No TESSLATE.md found, generating default Vite startup script")
+                        StartupGenerator.generate_default_script(project_path, "vite")
+
+                except Exception as parse_error:
+                    logger.warning(f"[CREATE] Failed to parse TESSLATE.md: {parse_error}, using default startup")
+                    # Generate default script as fallback
+                    try:
+                        from ..services.startup_generator import StartupGenerator
+                        StartupGenerator.generate_default_script(project_path, "vite")
+                    except Exception as fallback_error:
+                        logger.error(f"[CREATE] Failed to generate default script: {fallback_error}")
+
+                # Save cloned files to database (similar to GitHub import)
+                if settings.deployment_mode == "docker":
+                    files_saved = 0
+                    for root, dirs, files in os.walk(project_path):
+                        dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
+
+                        for file in files:
+                            if (file.startswith('.') or
+                                file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'))):
+                                continue
+
+                            file_full_path = os.path.join(root, file)
+                            relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
+
+                            try:
+                                with open(file_full_path, 'r', encoding='utf-8', errors='replace') as f:
+                                    content = f.read()
+
+                                db_file = ProjectFile(
+                                    project_id=db_project.id,
+                                    file_path=relative_path,
+                                    content=content
+                                )
+                                db.add(db_file)
+                                files_saved += 1
+                            except Exception as e:
+                                logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
+                                continue
+
+                    logger.info(f"[CREATE] Saved {files_saved} files to database")
+
+                # Mark as having Git repo
+                db_project.has_git_repo = True
+                db_project.git_remote_url = base_repo.git_repo_url
+
+                await db.commit()
+                await db.refresh(db_project)
+
+                logger.info(f"[CREATE] Project {db_project.id} created from base '{base_repo.name}' successfully")
+
+            except Exception as git_error:
+                logger.error(f"[CREATE] Failed to clone base repository: {git_error}", exc_info=True)
+
+                # FALLBACK: Use hardcoded template as safety net
+                logger.warning(f"[CREATE] Falling back to hardcoded template due to Git error")
+
+                template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "template"))
+
+                if not os.path.exists(template_dir):
+                    logger.error(f"[CREATE] Template directory not found: {template_dir}")
+                    await db.delete(db_project)
+                    await db.commit()
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to clone base and fallback template not found"
+                    )
+
+                # Copy template files
+                files_saved = 0
+                for root, dirs, files in os.walk(template_dir):
+                    dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build']]
+
+                    for file in files:
+                        if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+                            continue
+
+                        file_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(file_path, template_dir).replace('\\', '/')
+
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                                content = f.read()
+
+                            db_file = ProjectFile(
+                                project_id=db_project.id,
+                                file_path=relative_path,
+                                content=content
+                            )
+                            db.add(db_file)
+                            files_saved += 1
+                        except Exception as e:
+                            logger.warning(f"[CREATE] Could not read template file {relative_path}: {e}")
+
+                # In Docker mode, also copy to filesystem
+                if settings.deployment_mode == "docker":
+                    try:
+                        for root, dirs, files in os.walk(template_dir):
+                            dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build']]
+
+                            for file in files:
+                                src_path = os.path.join(root, file)
+                                rel_path = os.path.relpath(src_path, template_dir)
+                                dst_path = os.path.join(project_path, rel_path)
+
+                                parent_dir = os.path.dirname(dst_path)
+                                if parent_dir:
+                                    os.makedirs(parent_dir, exist_ok=True)
+
+                                shutil.copy2(src_path, dst_path)
+                    except Exception as copy_error:
+                        logger.error(f"[CREATE] Failed to copy template files: {copy_error}")
+
+                await db.commit()
+                await db.refresh(db_project)
+
+                logger.info(f"[CREATE] Project {db_project.id} created with fallback template after base clone failure")
+
+        else:
+            # Template mode (default behavior)
+            logger.info(f"[CREATE] Initializing from template")
+
+            # Get template directory to read files
+            template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "template"))
+
+            if not os.path.exists(template_dir):
+                logger.error(f"[CREATE] Template directory not found: {template_dir}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Template directory not found. Server configuration error."
+                )
+
+            logger.info(f"[CREATE] Reading template files from: {template_dir}")
+
+            # Save template files to database for frontend display and editing
+            files_saved = 0
+            for root, dirs, files in os.walk(template_dir):
+                # Skip node_modules, .git, dist, build directories
+                dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
+
+                for file in files:
+                    # Skip system files and binary files
+                    if (file.startswith('.') or
+                        file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'))):
+                        continue
+
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, template_dir).replace('\\', '/')
+
+                    try:
+                        # Read file content
+                        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                            content = f.read()
+
+                        # Save to database
+                        db_file = ProjectFile(
+                            project_id=db_project.id,
+                            file_path=relative_path,
+                            content=content
+                        )
+                        db.add(db_file)
+                        files_saved += 1
+
+                    except Exception as e:
+                        logger.warning(f"[CREATE] Could not read template file {relative_path}: {e}")
+                        continue
+
+            # Commit database changes
+            await db.commit()
+            logger.info(f"[CREATE] Saved {files_saved} template files to database for project {db_project.id}")
+            await db.refresh(db_project)  # Refresh to get updated timestamps
+
+            # In Docker mode, also copy template files to filesystem immediately
+            if settings.deployment_mode == "docker":
+                try:
+                    logger.info(f"[CREATE] Docker mode: Copying template files to filesystem")
+
+                    # Copy all template files to project directory (excluding node_modules)
+                    for root, dirs, files in os.walk(template_dir):
+                        # Skip node_modules in source
+                        dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', 'dist', 'build', '.next']]
+
+                        for file in files:
+                            src_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(src_path, template_dir)
+                            dst_path = os.path.join(project_path, rel_path)
+
+                            # Create directory if needed (with safety check for Windows Docker volumes)
+                            parent_dir = os.path.dirname(dst_path)
+                            if parent_dir:
+                                try:
+                                    os.makedirs(parent_dir, exist_ok=True)
+                                except FileExistsError:
+                                    # Handle race condition on Windows Docker volumes - verify it exists
+                                    if not os.path.exists(parent_dir):
+                                        # If it still doesn't exist, something is wrong
+                                        raise
+
+                            # Copy file
+                            shutil.copy2(src_path, dst_path)
+
+                    logger.info(f"[CREATE] ✅ Template files copied to {project_path}")
+                except Exception as copy_error:
+                    logger.error(f"[CREATE] Failed to copy template files: {copy_error}", exc_info=True)
+                    # Don't fail project creation, files are in DB
+
+            logger.info(f"[CREATE] Project {db_project.id} created successfully")
+
+        return db_project
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"[CREATE] Critical error during project creation: {e}", exc_info=True)
+
+        # Clean up failed project from database
+        try:
+            if 'db_project' in locals():
+                await db.delete(db_project)
+                await db.commit()
+                logger.info(f"[CREATE] Cleaned up failed project from database")
+        except Exception as cleanup_error:
+            logger.error(f"[CREATE] Error during cleanup: {cleanup_error}", exc_info=True)
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create project: {str(e)}"
+        )
+
+@router.get("/{project_slug}", response_model=ProjectSchema)
 async def get_project(
     project_slug: str,
     current_user: User = Depends(current_active_user),
@@ -647,58 +1179,13 @@ async def get_project_files(
     logger.info(f"[FILES] Returning {len(files)} files from database")
     return files
 
-async def _perform_container_startup(
-    project_id: UUID,
-    user_id: UUID,
-    project_slug: str,
-    project_path: str,
-    task: Task
-):
-    """
-    Background task worker for container startup.
-    This runs asynchronously without blocking the API response.
-    """
-    try:
-        task.add_log(f"Starting container for project {project_slug}")
-        task.update_progress(0, 4, "Initializing container...")
-
-        from ..dev_server_manager import get_container_manager
-        container_manager = get_container_manager()
-
-        task.update_progress(1, 4, "Building image and installing dependencies...")
-
-        # The container startup process will:
-        # 1. Build Docker image (if needed)
-        # 2. Start container
-        # 3. Run npm install
-        # 4. Wait for container ready
-        url = await container_manager.start_container(
-            project_path,
-            str(project_id),
-            user_id,
-            project_slug=project_slug
-        )
-
-        task.update_progress(4, 4, "Container ready")
-        task.add_log(f"Container started successfully: {url}")
-
-        return {"url": url, "hostname": url}
-
-    except Exception as e:
-        logger.error(f"[START-CONTAINER] Failed to start container: {e}", exc_info=True)
-        raise
-
-
 @router.post("/{project_slug}/start-dev-container")
 async def start_dev_container(
     project_slug: str,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Start a development environment for the project.
-    This operation runs in the background and returns immediately with a task ID.
-    """
+    """Start a development environment for the project."""
     # Get project and verify ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
     project_id = project.id  # For internal operations
@@ -708,37 +1195,16 @@ async def start_dev_container(
     # Start dev container (path is for metadata only in K8s mode)
     project_path = os.path.abspath(get_project_path(current_user.id, project_id))
 
-    # Create background task for container startup
-    task_manager = get_task_manager()
-    task = task_manager.create_task(
-        user_id=current_user.id,
-        task_type="container_startup",
-        metadata={
-            "project_id": str(project_id),
-            "project_slug": project_slug,
-            "project_name": project.name
-        }
-    )
-
-    # Start container in background
-    task_manager.start_background_task(
-        task.id,
-        _perform_container_startup,
-        project_id=project_id,
-        user_id=current_user.id,
-        project_slug=project_slug,
-        project_path=project_path
-    )
-
-    logger.info(f"[START-CONTAINER] Started background container startup for project {project_id} (task_id: {task.id})")
-
-    return {
-        "message": "Container startup initiated",
-        "task_id": task.id,
-        "project_id": str(project_id),
-        "project_slug": project_slug,
-        "status_endpoint": f"/api/tasks/{task.id}/status"
-    }
+    try:
+        from ..dev_server_manager import get_container_manager
+        container_manager = get_container_manager()
+        logger.info(f"[START-CONTAINER] Starting container for project {project_id}...")
+        url = await container_manager.start_container(project_path, str(project_id), current_user.id, project_slug=project.slug)
+        logger.info(f"[START-CONTAINER] ✅ Container started successfully: {url}")
+        return {"url": url, "hostname": url}
+    except Exception as e:
+        logger.error(f"[START-CONTAINER] ❌ Failed to start container: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to start development environment: {str(e)}")
 
 @router.post("/{project_slug}/restart-dev-container")
 async def restart_dev_container(
@@ -882,10 +1348,13 @@ async def get_dev_server_url(
                 logger.info(f"[DEV-URL] Created project directory: {project_path}")
             except Exception as e:
                 logger.error(f"[DEV-URL] Failed to create project directory: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to create project directory: {str(e)}")
+                # Try alternative method
+                import subprocess
+                subprocess.run(['mkdir', '-p', project_path], check=False, capture_output=True)
 
             # Give filesystem a moment to sync (Windows Docker volume issue)
-            await asyncio.sleep(0.1)
+            import time
+            time.sleep(0.1)
 
             # Verify directory was created
             if not os.path.exists(project_path):
@@ -1219,34 +1688,28 @@ async def get_all_dev_containers(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get containers: {str(e)}")
 
-async def _perform_project_deletion(
-    project_id: UUID,
-    user_id: UUID,
+@router.delete("/{project_slug}")
+async def delete_project(
     project_slug: str,
-    task: Task
-) -> None:
-    """Background worker to delete a project"""
-    from ..database import get_db
-    from ..dev_server_manager import get_container_manager
-    from ..utils.async_fileio import rmtree_async
-
-    # Get a new database session for this background task
-    db_gen = get_db()
-    db = await db_gen.__anext__()
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a project and ALL associated data including chats, messages, files, and containers."""
+    # Get project and verify ownership
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    project_id = project.id  # For internal operations
 
     try:
-        logger.info(f"[DELETE] Starting deletion of project {project_id} for user {user_id}")
-        task.update_progress(0, 100, "Stopping containers...")
+        logger.info(f"[DELETE] Starting deletion of project {project_id} for user {current_user.id}")
 
         # 1. Stop and remove any running containers/pods
         try:
+            from ..dev_server_manager import get_container_manager
             container_manager = get_container_manager()
-            await container_manager.stop_container(str(project_id), user_id)
+            await container_manager.stop_container(str(project_id), current_user.id)
             logger.info(f"[DELETE] Stopped containers for project {project_id}")
         except Exception as e:
             logger.warning(f"[DELETE] Error stopping containers: {e}")
-
-        task.update_progress(30, 100, "Deleting chats and messages...")
 
         # 2. Delete all chats associated with this project (and their messages will cascade)
         chats_result = await db.execute(
@@ -1260,96 +1723,35 @@ async def _perform_project_deletion(
 
         logger.info(f"[DELETE] Deleted {len(project_chats)} chats and their messages")
 
-        task.update_progress(50, 100, "Removing project from database...")
-
         # 3. Delete project from database (files will cascade automatically)
-        project_result = await db.execute(
-            select(Project).where(Project.id == project_id)
-        )
-        project = project_result.scalar_one_or_none()
-        if project:
-            await db.delete(project)  # Use ORM delete to trigger cascades
-            await db.commit()
-            logger.info(f"[DELETE] Deleted project from database")
+        await db.delete(project)  # Use ORM delete to trigger cascades
+        await db.commit()
+        logger.info(f"[DELETE] Deleted project from database")
 
-        task.update_progress(70, 100, "Deleting project files...")
-
-        # 4. Delete filesystem directory (Docker mode only - K8s uses PVCs)
+        # 5. Delete filesystem directory (Docker mode only - K8s uses PVCs)
         settings = get_settings()
         if settings.deployment_mode == "docker":
-            project_dir = os.path.abspath(get_project_path(user_id, project_id))
+            project_dir = os.path.abspath(get_project_path(current_user.id, project_id))
             if os.path.exists(project_dir):
                 try:
-                    # Use async version to avoid blocking
-                    await rmtree_async(project_dir)
+                    shutil.rmtree(project_dir)
                     logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
                 except PermissionError:
                     # On Windows, wait a moment and try again
                     await asyncio.sleep(1)
                     try:
-                        await rmtree_async(project_dir)
+                        shutil.rmtree(project_dir)
                         logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
                     except PermissionError as e:
                         logger.warning(f"[DELETE] Could not delete project directory: {e}")
 
-        task.update_progress(100, 100, "Project deleted successfully")
         logger.info(f"[DELETE] Successfully deleted project {project_id}")
+        return {"message": "Project deleted successfully", "project_id": project_id}
 
     except Exception as e:
         await db.rollback()
         logger.error(f"[DELETE] Error during project deletion: {e}", exc_info=True)
-        raise
-    finally:
-        await db_gen.aclose()
-
-
-@router.delete("/{project_slug}")
-async def delete_project(
-    project_slug: str,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Delete a project and ALL associated data including chats, messages, files, and containers.
-
-    This is a non-blocking operation. The deletion happens in the background and you can
-    track its progress using the returned task_id.
-    """
-    # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
-    project_id = project.id  # For internal operations
-
-    # Create a background task for deletion
-    from ..services.task_manager import get_task_manager
-    task_manager = get_task_manager()
-
-    task = task_manager.create_task(
-        user_id=current_user.id,
-        task_type="project_deletion",
-        metadata={
-            "project_id": str(project_id),
-            "project_slug": project_slug,
-            "project_name": project.name
-        }
-    )
-
-    # Start the background task
-    task_manager.start_background_task(
-        task_id=task.id,
-        coro=_perform_project_deletion,
-        project_id=project_id,
-        user_id=UUID(str(current_user.id)),
-        project_slug=project_slug
-    )
-
-    logger.info(f"[DELETE] Started background deletion for project {project_id}, task_id={task.id}")
-
-    return {
-        "message": "Project deletion started",
-        "task_id": task.id,
-        "project_id": str(project_id),
-        "project_slug": project_slug,
-        "status_endpoint": f"/api/tasks/{task.id}/status"
-    }
+        raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
 
 
 @router.post("/{project_slug}/generate-architecture-diagram")
@@ -1809,20 +2211,14 @@ async def list_asset_directories(
         if settings.deployment_mode == "docker":
             # Scan filesystem for directories
             if os.path.exists(project_path):
-                from ..utils.async_fileio import walk_directory_async
-                # Use async walk to avoid blocking
-                walk_results = await walk_directory_async(
-                    project_path,
-                    exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
-                )
-                for root, dirs, files in walk_results:
+                for root, dirs, files in os.walk(project_path):
                     for dir_name in dirs:
                         dir_full_path = os.path.join(root, dir_name)
                         # Get relative path from project root
                         rel_path = os.path.relpath(dir_full_path, project_path)
                         # Convert to forward slashes and add leading slash
                         rel_path = '/' + rel_path.replace('\\', '/')
-                        # Skip hidden directories
+                        # Skip hidden directories and common exclusions
                         if not any(part.startswith('.') for part in rel_path.split('/')):
                             directories_set.add(rel_path)
         else:
@@ -2336,13 +2732,12 @@ async def move_asset(
 
         # Move file in filesystem or pod
         if settings.deployment_mode == "docker":
-            # Ensure new directory exists (async to avoid blocking)
+            # Ensure new directory exists
             new_dir_absolute = os.path.dirname(new_file_path_absolute)
-            await asyncio.to_thread(os.makedirs, new_dir_absolute, exist_ok=True)
+            os.makedirs(new_dir_absolute, exist_ok=True)
 
             if os.path.exists(old_file_path):
-                # Use async to avoid blocking on large files
-                await asyncio.to_thread(shutil.move, old_file_path, new_file_path_absolute)
+                shutil.move(old_file_path, new_file_path_absolute)
                 logger.info(f"[ASSETS] Moved file: {old_file_path} -> {new_file_path_absolute}")
         else:
             # Kubernetes mode

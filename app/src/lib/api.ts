@@ -76,11 +76,17 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     // If error is 401, redirect to login
+    // BUT: Don't log out for task polling errors - they might be transient during background operations
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      const isTasksApi = error.config?.url?.includes('/api/tasks/');
+
+      if (!isTasksApi) {
+        localStorage.removeItem('token');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
+      // For tasks API, just reject the error without logging out
     }
 
     // If error is 403 and mentions CSRF, refetch token and retry
@@ -152,6 +158,36 @@ export const authApi = {
   },
 };
 
+export const tasksApi = {
+  getStatus: async (taskId: string) => {
+    const response = await api.get(`/api/tasks/${taskId}/status`);
+    return response.data;
+  },
+  getActiveTasks: async () => {
+    const response = await api.get('/api/tasks/user/active');
+    return response.data;
+  },
+  pollUntilComplete: async (taskId: string, interval = 1000): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const poll = async () => {
+        try {
+          const task = await tasksApi.getStatus(taskId);
+          if (task.status === 'completed') {
+            resolve(task);
+          } else if (task.status === 'failed' || task.status === 'cancelled') {
+            reject(new Error(task.error || 'Task failed'));
+          } else {
+            setTimeout(poll, interval);
+          }
+        } catch (error) {
+          reject(error);
+        }
+      };
+      poll();
+    });
+  },
+};
+
 export const projectsApi = {
   getAll: async () => {
     const response = await api.get('/api/projects/');
@@ -179,6 +215,7 @@ export const projectsApi = {
     }
 
     const response = await api.post('/api/projects/', body);
+    // Response now includes { project, task_id, status_endpoint }
     return response.data;
   },
   get: async (slug: string) => {
@@ -187,6 +224,7 @@ export const projectsApi = {
   },
   delete: async (slug: string) => {
     const response = await api.delete(`/api/projects/${slug}`);
+    // Response now includes { task_id, status_endpoint }
     return response.data;
   },
   getFiles: async (slug: string) => {
@@ -195,6 +233,11 @@ export const projectsApi = {
   },
   getDevServerUrl: async (slug: string) => {
     const response = await api.get(`/api/projects/${slug}/dev-server-url`);
+    return response.data;
+  },
+  startDevContainer: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/start-dev-container`);
+    // Response now includes { task_id, status_endpoint }
     return response.data;
   },
   restartDevServer: async (slug: string) => {

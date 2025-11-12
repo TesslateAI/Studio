@@ -12,6 +12,7 @@ import aiohttp
 from .config import get_settings
 from .base_container_manager import BaseContainerManager
 from .utils.resource_naming import get_container_name
+from .utils.async_subprocess import run_async, SubprocessResult
 
 
 class DockerContainerManager(BaseContainerManager):
@@ -29,7 +30,8 @@ class DockerContainerManager(BaseContainerManager):
         self.activity_tracker: Dict[str, float] = {}  # project_key -> last_activity_timestamp
         self.paused_at_tracker: Dict[str, float] = {}  # project_key -> paused_timestamp (for two-tier cleanup)
         # Detect the correct network name by checking which network Traefik is on
-        self.network_name = self._detect_traefik_network()
+        # Note: _detect_traefik_network is now async, so we defer network detection
+        self.network_name = None  # Will be set lazily on first use
         self.base_image_name = "tesslate-devserver:latest"
         self.container_label = "com.tesslate.devserver"
         self._docker_available = None  # Lazy check
@@ -41,32 +43,32 @@ class DockerContainerManager(BaseContainerManager):
         # When creating child containers, we need to use host paths, not container paths
         self._detect_host_mount_path()
 
-        print(f"[INFO] DevContainerManager initialized - Using network: {self.network_name}")
+        print(f"[INFO] DevContainerManager initialized")
         print("[INFO] Traefik-powered zero-port-conflict architecture")
 
-    def _detect_traefik_network(self) -> str:
+    async def _detect_traefik_network(self) -> str:
         """
         Detect which network Traefik is on to ensure preview containers use the same network.
         This handles both development (tesslate-network) and production (tesslate-studio_tesslate-network).
         """
         try:
             # Try to find Traefik container
-            result = subprocess.run(
+            result = await run_async(
                 ["docker", "ps", "--filter", "name=traefik", "--format", "{{.Names}}"],
+                timeout=5,
                 capture_output=True,
-                text=True,
-                timeout=5
+                text=True
             )
 
             if result.returncode == 0 and result.stdout.strip():
                 traefik_container = result.stdout.strip().split('\n')[0]
 
                 # Get Traefik's networks
-                network_result = subprocess.run(
+                network_result = await run_async(
                     ["docker", "inspect", traefik_container, "-f", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}"],
+                    timeout=5,
                     capture_output=True,
-                    text=True,
-                    timeout=5
+                    text=True
                 )
 
                 if network_result.returncode == 0:
@@ -83,11 +85,11 @@ class DockerContainerManager(BaseContainerManager):
                         return networks[0]
 
             # Fallback: check which tesslate network exists
-            network_list = subprocess.run(
+            network_list = await run_async(
                 ["docker", "network", "ls", "--filter", "name=tesslate", "--format", "{{.Name}}"],
+                timeout=5,
                 capture_output=True,
-                text=True,
-                timeout=5
+                text=True
             )
 
             if network_list.returncode == 0 and network_list.stdout.strip():
@@ -107,6 +109,13 @@ class DockerContainerManager(BaseContainerManager):
         print("[WARN] Could not detect network, using default: tesslate-network")
         return "tesslate-network"
 
+    async def _ensure_network_name(self) -> str:
+        """Ensure network name is detected (lazy initialization)"""
+        if self.network_name is None:
+            self.network_name = await self._detect_traefik_network()
+            print(f"[INFO] Using network: {self.network_name}")
+        return self.network_name
+
     def _detect_host_mount_path(self):
         """
         Detect the host paths for volume mounts in Docker-in-Docker scenarios.
@@ -116,12 +125,15 @@ class DockerContainerManager(BaseContainerManager):
         - ./orchestrator/app:/app/app (orchestrator code)
 
         We need to detect both to correctly map container paths to host paths.
+
+        Note: This is synchronous for __init__, subprocess calls will be converted when refactored
         """
         # Check if we're running in a container
         if os.path.exists('/.dockerenv'):
             # We're in a container - need to detect host paths for volume mounts
             try:
                 # Get all mounts for this container
+                # TODO: This subprocess call is in __init__ so kept synchronous for now
                 result = subprocess.run(
                     ["docker", "inspect", "-f", "{{ json .Mounts }}",
                      socket.gethostname()],
@@ -197,97 +209,100 @@ class DockerContainerManager(BaseContainerManager):
             # Path doesn't start with /app, assume it's already a host path
             return container_path
     
-    def _check_docker_available(self) -> bool:
+    async def _check_docker_available(self) -> bool:
         """Check if Docker is available and working (lazy/cached)."""
         if self._docker_available is not None:
             return self._docker_available
-        
+
         try:
             print("[DEBUG] Checking Docker availability...")
-            result = subprocess.run(
+            result = await run_async(
                 ["docker", "--version"],
+                timeout=5,
                 capture_output=True,
-                text=True,
-                timeout=5
+                text=True
             )
             if result.returncode != 0:
                 self._docker_available = False
                 return False
-            
+
             print(f"[OK] Docker available: {result.stdout.strip()}")
-            
+
             # Test Docker daemon
-            result = subprocess.run(
+            result = await run_async(
                 ["docker", "info"],
+                timeout=5,
                 capture_output=True,
-                text=True,
-                timeout=5
+                text=True
             )
             if result.returncode != 0:
                 print("[WARN] Docker daemon is not running")
                 self._docker_available = False
                 return False
-            
+
             self._docker_available = True
             return True
-                
+
         except Exception as e:
             print(f"[WARN] Docker check failed: {str(e)}")
             self._docker_available = False
             return False
     
-    def _ensure_network_exists(self) -> bool:
+    async def _ensure_network_exists(self) -> bool:
         """Ensure the development network exists (lazy initialization)."""
         if self._network_ready:
             return True
-            
+
+        # Ensure we have a network name first
+        network_name = await self._ensure_network_name()
+
         try:
             # Check if network exists
-            result = subprocess.run(
-                ["docker", "network", "inspect", self.network_name],
-                capture_output=True,
-                timeout=10
+            result = await run_async(
+                ["docker", "network", "inspect", network_name],
+                timeout=10,
+                capture_output=True
             )
-            
+
             if result.returncode != 0:
                 # Create network
-                print(f"[BUILD] Creating Docker network: {self.network_name}")
-                subprocess.run(
-                    ["docker", "network", "create", self.network_name],
+                print(f"[BUILD] Creating Docker network: {network_name}")
+                await run_async(
+                    ["docker", "network", "create", network_name],
+                    timeout=30,
                     capture_output=True,
-                    check=True,
-                    timeout=30
+                    check=True
                 )
-                print(f"[OK] Network created: {self.network_name}")
+                print(f"[OK] Network created: {network_name}")
             else:
-                print(f"[OK] Network exists: {self.network_name}")
-            
+                print(f"[OK] Network exists: {network_name}")
+
             self._network_ready = True
             return True
-                
+
         except Exception as e:
             print(f"[WARN] Network setup warning: {e}")
             return False  # Network issues are not fatal but we should know
     
-    def _ensure_base_image_exists(self) -> bool:
+    async def _ensure_base_image_exists(self) -> bool:
         """Ensure the base development image exists (built once, reused for all projects)."""
         if self._base_image_ready:
             return True
-        
+
         try:
             # Check if base image already exists
-            result = subprocess.run(
+            result = await run_async(
                 ["docker", "images", "-q", self.base_image_name],
+                timeout=10,
                 capture_output=True,
-                text=True,
-                timeout=10
+                text=True
             )
-            
+
             if result.stdout.strip():
                 print(f"[OK] Base image exists: {self.base_image_name}")
                 self._base_image_ready = True
                 return True
-            
+
             # Build base image only if it doesn't exist
             print(f"[BUILD] Building fast base development image (Node.js 20, ~30 seconds)...")
             dockerfile_path = self._get_dockerfile_path()
@@ -295,24 +310,24 @@ class DockerContainerManager(BaseContainerManager):
             if not os.path.exists(dockerfile_path):
                 raise FileNotFoundError(f"Dockerfile not found at: {dockerfile_path}")
 
-            build_result = subprocess.run([
+            build_result = await run_async([
                 "docker", "build",
                 "--pull",  # Pull latest base image
                 "-f", dockerfile_path,  # Use the actual Dockerfile.devserver
                 "-t", self.base_image_name,
                 os.path.dirname(dockerfile_path)  # Build context is orchestrator directory
-            ], capture_output=True, text=True, timeout=300)
-            
+            ], timeout=300, capture_output=True, text=True)
+
             if build_result.returncode != 0:
                 print(f"[ERROR] Base image build failed:")
                 print(f"STDERR: {build_result.stderr}")
                 print(f"STDOUT: {build_result.stdout}")
                 return False
-            
+
             print(f"[OK] Base development image built: {self.base_image_name}")
             self._base_image_ready = True
             return True
-            
+
         except Exception as e:
             print(f"[ERROR] Failed to create base image: {e}")
             return False
@@ -543,11 +558,11 @@ class DockerContainerManager(BaseContainerManager):
         # First, wait for container to be running
         while time.time() - start_time < timeout:
             try:
-                result = subprocess.run(
+                result = await run_async(
                     ["docker", "inspect", "--format='{{.State.Running}}'", container_name],
+                    timeout=5,
                     capture_output=True,
-                    text=True,
-                    timeout=5
+                    text=True
                 )
                 if result.returncode == 0 and "true" in result.stdout:
                     break
@@ -560,11 +575,11 @@ class DockerContainerManager(BaseContainerManager):
         logs_ready = False
         while time.time() - start_time < timeout:
             try:
-                result = subprocess.run(
+                result = await run_async(
                     ["docker", "logs", "--tail", "50", container_name],
+                    timeout=5,
                     capture_output=True,
-                    text=True,
-                    timeout=5
+                    text=True
                 )
                 if result.returncode == 0:
                     logs = result.stdout + result.stderr
@@ -663,18 +678,18 @@ class DockerContainerManager(BaseContainerManager):
         print(f"[INFO] Container name: {container_name}")
 
         # Check Docker availability first
-        if not self._check_docker_available():
+        if not await self._check_docker_available():
             raise RuntimeError(
                 "Docker is not available or not running. "
                 "Please install Docker Desktop and ensure it's running."
             )
 
         # Ensure base image exists (reuse existing if available)
-        if not self._ensure_base_image_exists():
+        if not await self._ensure_base_image_exists():
             raise RuntimeError("Failed to create base development image")
 
         # Ensure network exists
-        if not self._ensure_network_exists():
+        if not await self._ensure_network_exists():
             print("[WARN] Docker network setup failed, proceeding without custom network")
 
         abs_project_path = os.path.abspath(project_path)
@@ -829,7 +844,8 @@ class DockerContainerManager(BaseContainerManager):
             run_cmd.extend(self._get_traefik_labels(user_id, project_id, hostname, port, project_slug))
 
             # Add network (required for Traefik)
-            run_cmd.extend(["--network", self.network_name])
+            network_name = await self._ensure_network_name()
+            run_cmd.extend(["--network", network_name])
 
             # Determine startup command (priority order: TESSLATE.md > start_command param > start.sh > auto-detect)
             if tesslate_command:
@@ -890,21 +906,21 @@ class DockerContainerManager(BaseContainerManager):
             ])
             
             print(f"[DEBUG] Docker run command: {' '.join(run_cmd)}")
-            
+
             try:
-                run_result = subprocess.run(run_cmd, capture_output=True, text=True, timeout=60)  # Longer timeout for npm install
-                
+                run_result = await run_async(run_cmd, timeout=60, capture_output=True, text=True)  # Longer timeout for npm install
+
                 if run_result.returncode != 0:
                     error_msg = run_result.stderr or run_result.stdout
                     print(f"[ERROR] Traefik-enabled container start failed for user {user_id}, project {project_id}:")
                     print(f"STDERR: {run_result.stderr}")
                     print(f"STDOUT: {run_result.stdout}")
                     raise RuntimeError(f"Container start failed: {error_msg}")
-                
+
                 container_id = run_result.stdout.strip()
                 print(f"[OK] Traefik-enabled container started: {container_id[:12]} for user {user_id}")
-                
-            except subprocess.TimeoutExpired:
+
+            except asyncio.TimeoutError:
                 print(f"[ERROR] Container start timed out for user {user_id}, project {project_id}")
                 raise RuntimeError("Container start timed out")
             
@@ -940,16 +956,16 @@ class DockerContainerManager(BaseContainerManager):
     async def _ensure_project_dependencies(self, project_path: str) -> None:
         """Ensure project has its dependencies installed locally (for volume mount)."""
         node_modules_path = os.path.join(project_path, "node_modules")
-        
+
         if os.path.exists(node_modules_path):
             print(f"[OK] Project dependencies already installed")
             return
-        
+
         print(f"[INSTALL] Installing project dependencies...")
-        
+
         # Run npm install in a temporary container to avoid host dependency issues
         temp_container_name = f"npm-install-{int(time.time())}"
-        
+
         try:
             install_cmd = [
                 "docker", "run", "--rm",
@@ -959,17 +975,17 @@ class DockerContainerManager(BaseContainerManager):
                 self.base_image_name,
                 "npm", "install", "--silent"
             ]
-            
-            install_result = subprocess.run(install_cmd, capture_output=True, text=True, timeout=180)
-            
+
+            install_result = await run_async(install_cmd, timeout=180, capture_output=True, text=True)
+
             if install_result.returncode != 0:
                 error_msg = install_result.stderr or install_result.stdout
                 print(f"[ERROR] npm install failed: {error_msg}")
                 raise RuntimeError(f"Failed to install project dependencies: {error_msg}")
-            
+
             print(f"[OK] Project dependencies installed")
-            
-        except subprocess.TimeoutExpired:
+
+        except asyncio.TimeoutError:
             print("[ERROR] npm install timed out")
             raise RuntimeError("npm install timed out")
     
@@ -991,11 +1007,11 @@ class DockerContainerManager(BaseContainerManager):
         print(f"[PAUSE] Pausing container: {container_name}")
 
         try:
-            result = subprocess.run(
+            result = await run_async(
                 ["docker", "stop", container_name],
+                timeout=30,
                 capture_output=True,
-                text=True,
-                timeout=30
+                text=True
             )
 
             if result.returncode == 0:
@@ -1038,18 +1054,18 @@ class DockerContainerManager(BaseContainerManager):
             print(f"[WARN] No container found to stop for user {user_id}, project {project_id}")
             # Try to find any running containers matching this project by labels
             try:
-                result = subprocess.run(
+                result = await run_async(
                     ["docker", "ps", "-a", "--filter", f"label=com.tesslate.devserver.project_id={project_id}",
                      "--filter", f"label=com.tesslate.devserver.user_id={user_id}", "--format", "{{.Names}}"],
+                    timeout=10,
                     capture_output=True,
-                    text=True,
-                    timeout=10
+                    text=True
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     container_name = result.stdout.strip().split('\n')[0]
                     print(f"[DEBUG] Found container by labels: {container_name}")
-                    subprocess.run(["docker", "stop", container_name], capture_output=True, timeout=10)
-                    subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=10)
+                    await run_async(["docker", "stop", container_name], timeout=10, capture_output=True)
+                    await run_async(["docker", "rm", "-f", container_name], timeout=10, capture_output=True)
                     print(f"[OK] Force cleaned up container: {container_name}")
                 else:
                     print(f"[DEBUG] No matching container found by labels")
@@ -1061,28 +1077,28 @@ class DockerContainerManager(BaseContainerManager):
         hostname = container_info.get("hostname")
         
         print(f"[STOP] Stopping container: {container_name}")
-        
+
         try:
             # Stop container gracefully
-            subprocess.run([
+            await run_async([
                 "docker", "stop", container_name
-            ], capture_output=True, timeout=30)
-            
+            ], timeout=30, capture_output=True)
+
             # Remove container (should auto-remove with --rm flag)
-            subprocess.run([
+            await run_async([
                 "docker", "rm", "-f", container_name
-            ], capture_output=True, timeout=10)
-            
+            ], timeout=10, capture_output=True)
+
             print(f"[OK] Container stopped: {container_name}")
-            
+
         except Exception as e:
             print(f"[WARN] Error stopping container {container_name}: {e}")
-            
+
             # Force remove if graceful stop failed
             try:
-                subprocess.run([
+                await run_async([
                     "docker", "rm", "-f", container_name
-                ], capture_output=True, timeout=10)
+                ], timeout=10, capture_output=True)
             except Exception:
                 pass
         
@@ -1146,10 +1162,10 @@ class DockerContainerManager(BaseContainerManager):
             hostname = self._generate_hostname(project_slug)
 
             # Check if this container exists in Docker
-            result = subprocess.run([
+            result = await run_async([
                 "docker", "inspect", container_name,
                 "--format", "{{json .State}}"
-            ], capture_output=True, text=True, timeout=10)
+            ], timeout=10, capture_output=True, text=True)
 
             if result.returncode == 0:
                 # Container exists! Add it to tracking
@@ -1170,10 +1186,10 @@ class DockerContainerManager(BaseContainerManager):
 
         try:
             # Get container status
-            result = subprocess.run([
+            result = await run_async([
                 "docker", "inspect", container_name,
                 "--format", "{{json .State}}"
-            ], capture_output=True, text=True, timeout=10)
+            ], timeout=10, capture_output=True, text=True)
 
             if result.returncode == 0:
                 state = json.loads(result.stdout.strip())
@@ -1212,11 +1228,11 @@ class DockerContainerManager(BaseContainerManager):
             container_name = container_info.get("container_name")
             if container_name:
                 try:
-                    result = subprocess.run([
+                    result = await run_async([
                         "docker", "inspect", container_name,
                         "--format", "{{json .State}}"
-                    ], capture_output=True, text=True, timeout=5)
-                    
+                    ], timeout=5, capture_output=True, text=True)
+
                     if result.returncode == 0:
                         state = json.loads(result.stdout.strip())
                         container_data.update({
@@ -1260,16 +1276,16 @@ class DockerContainerManager(BaseContainerManager):
         
         print("[OK] All development containers stopped")
     
-    def force_rebuild_base_image(self) -> bool:
+    async def force_rebuild_base_image(self) -> bool:
         """Force rebuild the base image (for development/debugging)."""
         print("[REBUILD] Force rebuilding base image...")
 
         # Remove existing image
         try:
-            subprocess.run(
+            await run_async(
                 ["docker", "rmi", "-f", self.base_image_name],
-                capture_output=True,
-                timeout=30
+                timeout=30,
+                capture_output=True
             )
         except Exception:
             pass
@@ -1278,7 +1294,7 @@ class DockerContainerManager(BaseContainerManager):
         self._base_image_ready = False
 
         # Rebuild
-        return self._ensure_base_image_exists()
+        return await self._ensure_base_image_exists()
 
     async def execute_command_in_container(
         self,
@@ -1322,11 +1338,11 @@ class DockerContainerManager(BaseContainerManager):
 
         try:
             # Execute with timeout
-            result = subprocess.run(
+            result = await run_async(
                 exec_cmd,
+                timeout=timeout,
                 capture_output=True,
-                text=True,
-                timeout=timeout
+                text=True
             )
 
             # Return combined output (Git operations need both stdout and stderr)
@@ -1338,7 +1354,7 @@ class DockerContainerManager(BaseContainerManager):
 
             return output
 
-        except subprocess.TimeoutExpired:
+        except asyncio.TimeoutError:
             raise RuntimeError(f"Command execution timed out after {timeout} seconds")
         except Exception as e:
             raise RuntimeError(f"Failed to execute command in container {container_name}: {str(e)}")
@@ -1373,11 +1389,11 @@ class DockerContainerManager(BaseContainerManager):
                 container_name = container_info["container_name"]
 
                 # Try to restart stopped container
-                result = subprocess.run(
+                result = await run_async(
                     ["docker", "start", container_name],
+                    timeout=10,
                     capture_output=True,
-                    text=True,
-                    timeout=10
+                    text=True
                 )
 
                 if result.returncode == 0:
@@ -1474,11 +1490,11 @@ class DockerContainerManager(BaseContainerManager):
 
                 # Check if container is actually running
                 try:
-                    result = subprocess.run(
+                    result = await run_async(
                         ["docker", "inspect", container_name, "--format", "{{.State.Running}}"],
+                        timeout=5,
                         capture_output=True,
-                        text=True,
-                        timeout=5
+                        text=True
                     )
 
                     is_running = result.returncode == 0 and result.stdout.strip().lower() == "true"
@@ -1499,11 +1515,11 @@ class DockerContainerManager(BaseContainerManager):
                 # If no activity tracked yet, use container creation time as baseline
                 if last_activity == 0 and container_name:
                     try:
-                        result = subprocess.run(
+                        result = await run_async(
                             ["docker", "inspect", container_name, "--format", "{{.State.StartedAt}}"],
+                            timeout=5,
                             capture_output=True,
-                            text=True,
-                            timeout=5
+                            text=True
                         )
                         if result.returncode == 0 and result.stdout.strip():
                             # Parse Docker timestamp (ISO 8601 format)

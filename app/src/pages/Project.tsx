@@ -43,7 +43,7 @@ import {
   TerminalPanel
 } from '../components/panels';
 import CodeEditor from '../components/CodeEditor';
-import { projectsApi, marketplaceApi } from '../lib/api';
+import { projectsApi, marketplaceApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';

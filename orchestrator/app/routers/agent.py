@@ -240,7 +240,7 @@ async def execute_command(
                     else:
                         container_name = container_info["container_name"]
 
-                    import subprocess
+                    from ..utils.async_subprocess import run_async
                     docker_cmd = [
                         "docker", "exec",
                         "-w", f"/app/{request.working_dir}" if request.working_dir != "." else "/app",
@@ -248,7 +248,8 @@ async def execute_command(
                         "sh", "-c", validation.sanitized_command
                     ]
 
-                    result = subprocess.run(
+                    # Use async subprocess to avoid blocking
+                    result = await run_async(
                         docker_cmd,
                         capture_output=True,
                         text=True,

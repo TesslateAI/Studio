@@ -22,6 +22,7 @@ import Logout from './pages/Logout';
 import Referrals from './pages/Referrals';
 import { Walkthrough } from './components/Walkthrough';
 import { useReferralTracking } from './hooks/useReferralTracking';
+import { useTaskNotifications } from './hooks/useTaskNotifications';
 import axios from 'axios';
 // Billing components
 import SubscriptionPlans from './components/billing/SubscriptionPlans';
@@ -82,6 +83,9 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 function AppContent() {
   // Track referrals (must be inside BrowserRouter)
   useReferralTracking();
+
+  // Enable task notifications via WebSocket
+  useTaskNotifications();
 
   return (
     <>
