@@ -16,7 +16,6 @@ from .base import AbstractAgent
 from .models import ModelAdapter
 from .parser import AgentResponseParser, ToolCall
 from .tools.registry import ToolRegistry
-from .prompts import get_user_message_wrapper
 from .resource_limits import get_resource_limits, ResourceLimitExceeded
 
 logger = logging.getLogger(__name__)
@@ -122,6 +121,7 @@ class IterativeAgent(AbstractAgent):
         # Execution tracking
         self.steps: List[AgentStep] = []
         self.tool_calls_count = 0
+        self.last_step_had_errors = False  # Track if previous iteration had errors
 
         logger.info(
             f"IterativeAgent initialized - "
@@ -183,8 +183,8 @@ class IterativeAgent(AbstractAgent):
         # Initialize conversation with system prompt
         full_system_prompt = self._get_system_prompt()
 
-        # Get user message with full [CONTEXT] section
-        user_message = await get_user_message_wrapper(user_request, project_context)
+        # Use user request directly without context wrapper
+        user_message = user_request
 
         # Build messages list starting with system prompt
         self.messages = [
@@ -277,6 +277,14 @@ class IterativeAgent(AbstractAgent):
                         tool_results = await self._execute_tool_calls(tool_calls, context)
                         self.tool_calls_count += len(tool_calls)
 
+                        # Check if any tools failed or had parse errors
+                        self.last_step_had_errors = any(
+                            not result.get("success", False) for result in tool_results
+                        )
+                    else:
+                        # No tool calls means no errors in this iteration
+                        self.last_step_had_errors = False
+
                     # Record this step and yield to client
                     # Always extract conversational text to hide internal thinking from users
                     conversational = self.parser.get_conversational_text(response)
@@ -322,6 +330,21 @@ class IterativeAgent(AbstractAgent):
 
                     # Step 6: Check for completion
                     if is_complete:
+                        # DON'T allow completion if there were errors in this iteration
+                        if self.last_step_had_errors:
+                            logger.warning(
+                                f"[IterativeAgent] Task marked complete but had errors in iteration {iteration}. "
+                                f"Continuing to force retry."
+                            )
+                            # Add instruction to retry
+                            retry_instruction = (
+                                "\n\nYou marked the task as complete, but the previous tool calls had errors. "
+                                "You MUST fix the errors first before completing the task. "
+                                "Retry the failed operations with corrected parameters."
+                            )
+                            self.messages.append({"role": "user", "content": retry_instruction})
+                            continue  # Force next iteration
+
                         logger.info(f"[IterativeAgent] Task completed in {iteration} iterations")
                         conversational_text = self.parser.get_conversational_text(response)
                         yield {
@@ -340,6 +363,21 @@ class IterativeAgent(AbstractAgent):
                     # If no tool calls, check if we should complete
                     if not tool_calls:
                         conversational_text = self.parser.get_conversational_text(response)
+
+                        # DON'T complete if the previous iteration had errors - require retry
+                        if self.last_step_had_errors:
+                            logger.warning(
+                                f"[IterativeAgent] No tool calls in iteration {iteration}, "
+                                f"but previous step had errors. Continuing to force retry."
+                            )
+                            # Add instruction to retry
+                            retry_instruction = (
+                                "\n\nThe previous tool calls had errors. "
+                                "You MUST retry the failed operations with corrected parameters. "
+                                "Do NOT give up - fix the errors and try again."
+                            )
+                            self.messages.append({"role": "user", "content": retry_instruction})
+                            continue  # Force next iteration
 
                         # Complete if there's conversational text (simple greeting/question)
                         # OR if this is not the first iteration (agent gave up on finding actions)
@@ -435,7 +473,8 @@ class IterativeAgent(AbstractAgent):
                         "message": f"Failed to parse tool call for '{tool_call.parameters.get('tool_name', 'unknown')}'",
                         "error_details": tool_call.parameters.get('error'),
                         "problematic_json": tool_call.parameters.get('raw_params', ''),
-                        "suggestion": tool_call.parameters.get('suggestion', '')
+                        "suggestion": tool_call.parameters.get('suggestion', ''),
+                        "required_action": "You MUST retry this tool call with valid JSON. Fix the formatting errors and try again."
                     }
                 }
                 results.append(result)
@@ -461,7 +500,7 @@ class IterativeAgent(AbstractAgent):
 
     def _format_tool_results(self, results: List[Dict[str, Any]]) -> str:
         """
-        Format tool results for feeding back to the model.
+        Format tool results for feeding back to the model with intelligent truncation.
 
         Args:
             results: List of tool execution results
@@ -469,6 +508,9 @@ class IterativeAgent(AbstractAgent):
         Returns:
             Formatted string
         """
+        MAX_OUTPUT_LENGTH = 10000
+        MAX_PREVIEW_LENGTH = 5000
+
         formatted = ["Tool Results:\n"]
 
         for i, result in enumerate(results, 1):
@@ -485,30 +527,36 @@ class IterativeAgent(AbstractAgent):
                     if "message" in tool_result:
                         formatted.append(f"   message: {tool_result['message']}")
 
-                    # Show full content/stdout/output for agent context
-                    # DO NOT truncate - agent needs full context
-                    # NOTE: Content may contain JSX/HTML-like syntax, but we keep it raw
-                    # since the model needs to see the actual code (not HTML-escaped version)
-                    if "content" in tool_result:
-                        formatted.append(f"   content:")
-                        content_lines = tool_result["content"].split('\n')
-                        for line in content_lines:
-                            formatted.append(f"   | {line}")
-                    elif "stdout" in tool_result:
-                        formatted.append(f"   stdout:")
-                        stdout_lines = tool_result["stdout"].split('\n')
-                        for line in stdout_lines:
-                            formatted.append(f"   | {line}")
-                    elif "output" in tool_result:
-                        formatted.append(f"   output:")
-                        output_lines = tool_result["output"].split('\n')
-                        for line in output_lines:
-                            formatted.append(f"   | {line}")
-                    elif "preview" in tool_result:
-                        formatted.append(f"   preview:")
-                        preview_lines = tool_result["preview"].split('\n')
-                        for line in preview_lines:
-                            formatted.append(f"   | {line}")
+                    # Handle content/stdout/output with intelligent truncation
+                    output_field = None
+                    output_content = None
+
+                    for field in ["content", "stdout", "output", "preview"]:
+                        if field in tool_result:
+                            output_field = field
+                            output_content = tool_result[field]
+                            break
+
+                    if output_content:
+                        if len(output_content) > MAX_OUTPUT_LENGTH:
+                            # Truncate with warning - show head and tail
+                            elided_chars = len(output_content) - MAX_OUTPUT_LENGTH
+                            formatted.append(f"   <warning>Output truncated: {elided_chars} characters elided</warning>")
+                            formatted.append(f"   <suggestion>Try using head, tail, grep, or sed for more selective output</suggestion>")
+                            formatted.append(f"   <{output_field}_head>")
+                            for line in output_content[:MAX_PREVIEW_LENGTH].split('\n'):
+                                formatted.append(f"   | {line}")
+                            formatted.append(f"   </{output_field}_head>")
+                            formatted.append(f"   <elided>{elided_chars} characters</elided>")
+                            formatted.append(f"   <{output_field}_tail>")
+                            for line in output_content[-MAX_PREVIEW_LENGTH:].split('\n'):
+                                formatted.append(f"   | {line}")
+                            formatted.append(f"   </{output_field}_tail>")
+                        else:
+                            # Normal output - not truncated
+                            formatted.append(f"   {output_field}:")
+                            for line in output_content.split('\n'):
+                                formatted.append(f"   | {line}")
 
                     # Show files list (for list_files)
                     if "files" in tool_result:
@@ -567,6 +615,10 @@ class IterativeAgent(AbstractAgent):
 
                 # Show suggestion from result if available
                 if isinstance(result.get("result"), dict):
+                    # Show required action FIRST (most important)
+                    if "required_action" in result["result"]:
+                        formatted.append(f"   ⚠️ REQUIRED ACTION: {result['result']['required_action']}")
+
                     if "suggestion" in result["result"]:
                         formatted.append(f"   Suggestion: {result['result']['suggestion']}")
 
