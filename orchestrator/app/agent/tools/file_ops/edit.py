@@ -3,6 +3,10 @@ File Edit Tools
 
 Tools for making surgical edits to existing files.
 Supports single edits (patch_file) and batch edits (multi_edit).
+
+Retry Strategy:
+- Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
+- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
 """
 
 import logging
@@ -14,16 +18,22 @@ from ..registry import Tool, ToolCategory
 from ....config import get_settings
 from ..output_formatter import success_output, error_output
 from ....utils.resource_naming import get_project_path
+from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
+@tool_retry
 async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Apply search/replace edit to an existing file using fuzzy matching.
 
     This tool allows surgical edits to files without rewriting the entire content.
     Uses progressive fuzzy matching strategies to handle whitespace variations.
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError, IOError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
 
     Args:
         params: {
@@ -171,11 +181,16 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     )
 
 
+@tool_retry
 async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Apply multiple search/replace edits to a single file atomically.
 
     More efficient than multiple patch_file calls. All edits succeed or all fail.
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError, IOError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
 
     Args:
         params: {

@@ -2,6 +2,11 @@
 Web Fetch and Search Tools
 
 Tools for accessing external web content.
+
+Retry Strategy:
+- Automatically retries on transient failures (ConnectionError, TimeoutError, httpx.RequestError)
+- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
+- Does NOT retry on HTTP errors (4xx, 5xx) - those fail immediately
 """
 
 import logging
@@ -11,15 +16,22 @@ from urllib.parse import quote_plus
 
 from ..registry import Tool, ToolCategory
 from ..output_formatter import success_output, error_output
+from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
+@tool_retry
 async def web_fetch_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Fetch content from a URL.
 
     Useful for reading documentation, APIs, or other web resources.
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    - HTTP errors (404, 500, etc.) fail immediately without retry
 
     Args:
         params: {

@@ -806,7 +806,10 @@ async def agent_chat_stream(
                 await db.commit()
                 await db.refresh(chat)
 
-            # Save user message before streaming
+            # Fetch chat history BEFORE saving current message to avoid duplication
+            chat_history = await _get_chat_history(chat.id, db, limit=10)
+
+            # Save user message after fetching history
             user_message = Message(
                 chat_id=chat.id,
                 role="user",
@@ -814,9 +817,6 @@ async def agent_chat_stream(
             )
             db.add(user_message)
             await db.commit()
-
-            # Fetch chat history for context (excluding the just-added user message)
-            chat_history = await _get_chat_history(chat.id, db, limit=10)
 
             # Create agent using same pattern as HTTP endpoint
             from ..agent.factory import create_agent_from_db_model
@@ -1153,7 +1153,10 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             # Fallback to chat_id from frontend (for backwards compatibility)
             chat_id = data.get("chat_id", 1)
 
-        # Save user message
+        # Fetch chat history BEFORE saving current message to avoid duplication
+        chat_history = await _get_chat_history(chat_id, db, limit=10)
+
+        # Save user message after fetching history
         user_message = Message(
             chat_id=chat_id,
             role="user",
@@ -1161,9 +1164,6 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         )
         db.add(user_message)
         await db.commit()
-
-        # Fetch chat history for context (excluding the just-added user message)
-        chat_history = await _get_chat_history(chat_id, db, limit=10)
 
         # ============================================================================
         # NEW: Unified Agent Factory System

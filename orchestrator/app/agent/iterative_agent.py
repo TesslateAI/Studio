@@ -17,6 +17,7 @@ from .models import ModelAdapter
 from .parser import AgentResponseParser, ToolCall
 from .tools.registry import ToolRegistry
 from .prompts import get_user_message_wrapper
+from .resource_limits import get_resource_limits, ResourceLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,10 @@ class IterativeAgent(AbstractAgent):
 
         logger.info(f"[IterativeAgent] Starting - request: {user_request[:100]}...")
 
+        # Initialize resource limits tracking
+        limits = get_resource_limits()
+        run_id = f"user-{context.get('user_id')}-project-{context.get('project_id')}-{datetime.now(timezone.utc).timestamp()}"
+
         # Extract and prepare project context
         project_context = None
         if 'project_context' in context:
@@ -196,152 +201,186 @@ class IterativeAgent(AbstractAgent):
         self.messages.append({"role": "user", "content": user_message})
 
         # Main agent loop
-        for iteration in range(1, self.max_iterations + 1):
-            logger.info(f"[IterativeAgent] Iteration {iteration}/{self.max_iterations}")
+        try:
+            for iteration in range(1, self.max_iterations + 1):
+                logger.info(f"[IterativeAgent] Iteration {iteration}/{self.max_iterations}")
 
-            # DEBUG: Log full context being sent to LLM
-            logger.debug(f"[IterativeAgent] Context sent to LLM (iteration {iteration}):")
-            for idx, msg in enumerate(self.messages):
-                role = msg['role']
-                content = msg['content']
-                logger.debug(f"  Message {idx} [{role}]: {content[:500]}..." if len(content) > 500 else f"  Message {idx} [{role}]: {content}")
-
-            try:
-                # Step 1: Get model response (streaming)
-                response = ""
-                async for chunk in self.model.chat(self.messages):
-                    response += chunk
-                    # Yield text chunk to keep connection alive and show real-time generation
+                # Track iteration globally
+                try:
+                    limits.add_iteration(run_id)
+                except ResourceLimitExceeded as e:
+                    logger.warning(f"[IterativeAgent] Resource limit exceeded: {e}")
                     yield {
-                        'type': 'text_chunk',
-                        'data': {
-                            'content': chunk,
-                            'iteration': iteration
-                        }
+                        'type': 'error',
+                        'content': f'Resource limit exceeded: {str(e)}'
                     }
-
-                # DEBUG: Log full model response
-                logger.debug(f"[IterativeAgent] Full model response (iteration {iteration}):")
-                logger.debug(f"  {response}")
-                logger.debug(f"[IterativeAgent] Model response complete: {response[:200]}...")
-
-                # Step 2: Parse response
-                tool_calls = self.parser.parse(response)
-                thought = self.parser.extract_thought(response)
-                is_complete = self.parser.is_complete(response)
-
-                logger.info(
-                    f"[IterativeAgent] Iteration {iteration} - "
-                    f"tool_calls: {len(tool_calls)}, complete: {is_complete}"
-                )
-
-                # DEBUG: Log parsed data
-                logger.debug(f"[IterativeAgent] Parsed thought: {thought}")
-                logger.debug(f"[IterativeAgent] Parsed tool_calls: {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}")
-                logger.debug(f"[IterativeAgent] Is complete: {is_complete}")
-
-                # Step 3: Execute tools if any
-                # IMPORTANT: Always execute tool calls even if task is marked complete
-                # The agent may need to perform final actions before completion
-                tool_results = []
-                if tool_calls:
-                    tool_results = await self._execute_tool_calls(tool_calls, context)
-                    self.tool_calls_count += len(tool_calls)
-
-                # Record this step and yield to client
-                # Always extract conversational text to hide internal thinking from users
-                conversational = self.parser.get_conversational_text(response)
-                display_text = conversational if conversational else response
-
-                step = AgentStep(
-                    iteration=iteration,
-                    thought=thought,
-                    tool_calls=tool_calls,
-                    tool_results=tool_results,
-                    response_text=display_text,
-                    is_complete=is_complete
-                )
-                self.steps.append(step)
-
-                # Build step data with optional debug info
-                step_data = step.to_dict()
-
-                # Add debug data (only included if client requests it)
-                step_data['_debug'] = {
-                    'full_response': response,
-                    'context_messages_count': len(self.messages),
-                    'raw_tool_calls': [{'name': tc.name, 'params': tc.parameters} for tc in tool_calls],
-                    'raw_thought': thought,
-                    'is_complete': is_complete
-                }
-
-                yield {
-                    'type': 'agent_step',
-                    'data': step_data
-                }
-
-                # Step 4: Update conversation history
-                self.messages.append({"role": "assistant", "content": response})
-
-                # Step 5: Feed tool results back to model (if any)
-                if tool_results:
-                    results_text = self._format_tool_results(tool_results)
-                    self.messages.append({"role": "user", "content": results_text})
-
-                # Step 6: Check for completion
-                if is_complete:
-                    logger.info(f"[IterativeAgent] Task completed in {iteration} iterations")
-                    conversational_text = self.parser.get_conversational_text(response)
                     yield {
                         'type': 'complete',
                         'data': {
-                            'success': True,
+                            'success': False,
                             'iterations': iteration,
-                            'final_response': conversational_text or "Task completed successfully.",
+                            'final_response': '',
+                            'error': str(e),
                             'tool_calls_made': self.tool_calls_count,
-                            'completion_reason': 'task_complete_signal'
+                            'completion_reason': 'resource_limit_exceeded',
+                            'resource_stats': limits.get_stats(run_id)
                         }
                     }
                     return
 
-                # If no tool calls, check if we should complete
-                if not tool_calls:
-                    conversational_text = self.parser.get_conversational_text(response)
+                # DEBUG: Log full context being sent to LLM
+                logger.debug(f"[IterativeAgent] Context sent to LLM (iteration {iteration}):")
+                for idx, msg in enumerate(self.messages):
+                    role = msg['role']
+                    content = msg['content']
+                    logger.debug(f"  Message {idx} [{role}]: {content[:500]}..." if len(content) > 500 else f"  Message {idx} [{role}]: {content}")
 
-                    # Complete if there's conversational text (simple greeting/question)
-                    # OR if this is not the first iteration (agent gave up on finding actions)
-                    if conversational_text or iteration > 1:
-                        logger.info(f"[IterativeAgent] No tool calls in iteration {iteration}, assuming complete")
+                try:
+                    # Step 1: Get model response (streaming)
+                    response = ""
+                    async for chunk in self.model.chat(self.messages):
+                        response += chunk
+                        # Yield text chunk to keep connection alive and show real-time generation
+                        yield {
+                            'type': 'text_chunk',
+                            'data': {
+                                'content': chunk,
+                                'iteration': iteration
+                            }
+                        }
+
+                    # DEBUG: Log full model response
+                    logger.debug(f"[IterativeAgent] Full model response (iteration {iteration}):")
+                    logger.debug(f"  {response}")
+                    logger.debug(f"[IterativeAgent] Model response complete: {response[:200]}...")
+
+                    # Step 2: Parse response
+                    tool_calls = self.parser.parse(response)
+                    thought = self.parser.extract_thought(response)
+                    is_complete = self.parser.is_complete(response)
+
+                    logger.info(
+                        f"[IterativeAgent] Iteration {iteration} - "
+                        f"tool_calls: {len(tool_calls)}, complete: {is_complete}"
+                    )
+
+                    # DEBUG: Log parsed data
+                    logger.debug(f"[IterativeAgent] Parsed thought: {thought}")
+                    logger.debug(f"[IterativeAgent] Parsed tool_calls: {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}")
+                    logger.debug(f"[IterativeAgent] Is complete: {is_complete}")
+
+                    # Step 3: Execute tools if any
+                    # IMPORTANT: Always execute tool calls even if task is marked complete
+                    # The agent may need to perform final actions before completion
+                    tool_results = []
+                    if tool_calls:
+                        tool_results = await self._execute_tool_calls(tool_calls, context)
+                        self.tool_calls_count += len(tool_calls)
+
+                    # Record this step and yield to client
+                    # Always extract conversational text to hide internal thinking from users
+                    conversational = self.parser.get_conversational_text(response)
+                    display_text = conversational if conversational else response
+
+                    step = AgentStep(
+                        iteration=iteration,
+                        thought=thought,
+                        tool_calls=tool_calls,
+                        tool_results=tool_results,
+                        response_text=display_text,
+                        is_complete=is_complete
+                    )
+                    self.steps.append(step)
+
+                    # Build step data with optional debug info
+                    step_data = step.to_dict()
+
+                    # Add debug data (only included if client requests it)
+                    step_data['_debug'] = {
+                        'full_response': response,
+                        'context_messages_count': len(self.messages),
+                        'context_messages': self.messages.copy(),  # Full context history
+                        'raw_tool_calls': [{'name': tc.name, 'params': tc.parameters} for tc in tool_calls],
+                        'raw_thought': thought,
+                        'is_complete': is_complete,
+                        'conversational_text': conversational,
+                        'display_text': display_text
+                    }
+
+                    yield {
+                        'type': 'agent_step',
+                        'data': step_data
+                    }
+
+                    # Step 4: Update conversation history
+                    self.messages.append({"role": "assistant", "content": response})
+
+                    # Step 5: Feed tool results back to model (if any)
+                    if tool_results:
+                        results_text = self._format_tool_results(tool_results)
+                        self.messages.append({"role": "user", "content": results_text})
+
+                    # Step 6: Check for completion
+                    if is_complete:
+                        logger.info(f"[IterativeAgent] Task completed in {iteration} iterations")
+                        conversational_text = self.parser.get_conversational_text(response)
                         yield {
                             'type': 'complete',
                             'data': {
                                 'success': True,
                                 'iterations': iteration,
-                                'final_response': conversational_text or response,
+                                'final_response': conversational_text or "Task completed successfully.",
                                 'tool_calls_made': self.tool_calls_count,
-                                'completion_reason': 'no_more_actions'
+                                'completion_reason': 'task_complete_signal',
+                                'resource_stats': limits.get_stats(run_id)
                             }
                         }
                         return
 
-            except Exception as e:
-                logger.error(f"[IterativeAgent] Iteration {iteration} error: {e}", exc_info=True)
-                yield {
-                    'type': 'error',
-                    'content': f'Agent error: {str(e)}'
-                }
-                yield {
-                    'type': 'complete',
-                    'data': {
-                        'success': False,
-                        'iterations': iteration,
-                        'final_response': '',
-                        'error': str(e),
-                        'tool_calls_made': self.tool_calls_count,
-                        'completion_reason': 'error'
+                    # If no tool calls, check if we should complete
+                    if not tool_calls:
+                        conversational_text = self.parser.get_conversational_text(response)
+
+                        # Complete if there's conversational text (simple greeting/question)
+                        # OR if this is not the first iteration (agent gave up on finding actions)
+                        if conversational_text or iteration > 1:
+                            logger.info(f"[IterativeAgent] No tool calls in iteration {iteration}, assuming complete")
+                            yield {
+                                'type': 'complete',
+                                'data': {
+                                    'success': True,
+                                    'iterations': iteration,
+                                    'final_response': conversational_text or response,
+                                    'tool_calls_made': self.tool_calls_count,
+                                    'completion_reason': 'no_more_actions',
+                                    'resource_stats': limits.get_stats(run_id)
+                                }
+                            }
+                            return
+
+                except Exception as e:
+                    logger.error(f"[IterativeAgent] Iteration {iteration} error: {e}", exc_info=True)
+                    yield {
+                        'type': 'error',
+                        'content': f'Agent error: {str(e)}'
                     }
-                }
-                return
+                    yield {
+                        'type': 'complete',
+                        'data': {
+                            'success': False,
+                            'iterations': iteration,
+                            'final_response': '',
+                            'error': str(e),
+                            'tool_calls_made': self.tool_calls_count,
+                            'completion_reason': 'error',
+                            'resource_stats': limits.get_stats(run_id)
+                        }
+                    }
+                    return
+
+        finally:
+            # Cleanup per-run tracking data
+            limits.cleanup_run(run_id)
 
         # Reached max iterations
         logger.warning(f"[IterativeAgent] Reached max iterations ({self.max_iterations})")
@@ -355,7 +394,8 @@ class IterativeAgent(AbstractAgent):
                 'iterations': self.max_iterations,
                 'final_response': conversational_text or "Maximum iterations reached",
                 'tool_calls_made': self.tool_calls_count,
-                'completion_reason': 'max_iterations'
+                'completion_reason': 'max_iterations',
+                'resource_stats': limits.get_stats(run_id)
             }
         }
 
@@ -447,6 +487,8 @@ class IterativeAgent(AbstractAgent):
 
                     # Show full content/stdout/output for agent context
                     # DO NOT truncate - agent needs full context
+                    # NOTE: Content may contain JSX/HTML-like syntax, but we keep it raw
+                    # since the model needs to see the actual code (not HTML-escaped version)
                     if "content" in tool_result:
                         formatted.append(f"   content:")
                         content_lines = tool_result["content"].split('\n')

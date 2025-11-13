@@ -3,6 +3,10 @@ Bash Convenience Tool
 
 Simplified wrapper for one-off command execution.
 Auto-manages shell session lifecycle.
+
+Retry Strategy:
+- Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
+- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
 """
 
 import logging
@@ -13,16 +17,22 @@ from ..registry import Tool, ToolCategory
 from .session import shell_open_executor, shell_close_executor
 from .execute import shell_exec_executor
 from ..output_formatter import success_output, error_output
+from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
+@tool_retry
 async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Execute a single command (convenience wrapper).
 
     Opens a shell session, executes the command, returns output, and closes the session.
     Use this for one-off commands. For multiple commands, use shell_open + shell_exec.
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError, IOError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
 
     Args:
         params: {

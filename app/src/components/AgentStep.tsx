@@ -69,6 +69,7 @@ export default function AgentStep({ step, totalSteps }: AgentStepProps) {
         <AgentDebugPanel
           iteration={step.iteration}
           debugData={step._debug}
+          toolResults={step.tool_results}
         />
       )}
     </div>

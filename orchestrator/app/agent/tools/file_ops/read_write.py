@@ -3,6 +3,11 @@ File Read/Write Tools
 
 Tools for reading and writing files in user development environments.
 Deployment-aware: supports both Docker (local filesystem) and Kubernetes (pod API) modes.
+
+Retry Strategy:
+- Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
+- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
+- Non-retryable errors (FileNotFoundError, PermissionError) fail immediately
 """
 
 import logging
@@ -14,10 +19,12 @@ from ..registry import Tool, ToolCategory
 from ....config import get_settings
 from ..output_formatter import success_output, error_output, format_file_size, pluralize
 from ....utils.resource_naming import get_project_path
+from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
+@tool_retry
 async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Read a file from the user's development environment.
@@ -25,6 +32,11 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     Deployment-aware:
     - Docker mode: Reads from local filesystem at users/{user_id}/{project_id}/
     - Kubernetes mode: Reads from pod via K8s API
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError, IOError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    - FileNotFoundError and PermissionError fail immediately
 
     Args:
         params: {file_path: str}
@@ -105,6 +117,7 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
             )
 
 
+@tool_retry
 async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Write content to a file in the user's development environment.
@@ -112,6 +125,11 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     Deployment-aware:
     - Docker mode: Writes to local filesystem at users/{user_id}/{project_id}/
     - Kubernetes mode: Writes to pod via K8s API
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError, IOError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    - PermissionError fails immediately
 
     Args:
         params: {file_path: str, content: str}

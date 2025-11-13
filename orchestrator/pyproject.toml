@@ -45,6 +45,7 @@ dependencies = [
     "cryptography>=41.0.0",
     # Payment processing
     "stripe>=7.0.0",
+    "tenacity>=9.1.2",
 ]
 
 [dependency-groups]

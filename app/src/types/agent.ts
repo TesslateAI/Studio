@@ -13,15 +13,24 @@ export interface AgentStep {
   iteration: number;
   thought?: string;
   tool_calls: ToolCallDetail[];
+  tool_results?: Array<{
+    success: boolean;
+    tool: string;
+    result?: any;
+    error?: string;
+  }>;
   response_text: string;
   is_complete: boolean;
   timestamp: string;
   _debug?: {
     full_response?: string;
     context_messages_count?: number;
+    context_messages?: Array<{ role: string; content: string }>;
     raw_tool_calls?: Array<{ name: string; params: any }>;
     raw_thought?: string;
     is_complete?: boolean;
+    conversational_text?: string;
+    display_text?: string;
   };
 }
 

@@ -2,6 +2,10 @@
 Shell Execution Tools
 
 Tools for executing commands in shell sessions.
+
+Retry Strategy:
+- Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
+- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
 """
 
 import asyncio
@@ -11,12 +15,20 @@ from typing import Dict, Any
 
 from ..registry import Tool, ToolCategory
 from ..output_formatter import success_output, truncate_session_id, strip_ansi_codes
+from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
+@tool_retry
 async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute command and return output."""
+    """
+    Execute command and return output.
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError, IOError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    """
     from ....services.shell_session_manager import get_shell_session_manager
 
     session_id = params["session_id"]
