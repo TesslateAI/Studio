@@ -175,16 +175,38 @@ async def shell_session_cleanup_loop():
     from .database import AsyncSessionLocal
 
     logger.info("Shell session cleanup task started")
+    error_count = 0
+    max_consecutive_errors = 5
 
     while True:
+        db = None
         try:
             async with AsyncSessionLocal() as db:
                 session_manager = get_shell_session_manager()
                 closed_count = await session_manager.cleanup_idle_sessions(db)
                 if closed_count > 0:
                     logger.info(f"Auto-closed {closed_count} idle shell sessions")
+
+                # Reset error count on success
+                error_count = 0
+
         except Exception as e:
-            logger.error(f"Session cleanup error: {e}", exc_info=True)
+            error_count += 1
+            logger.error(f"Session cleanup error ({error_count}/{max_consecutive_errors}): {e}", exc_info=True)
+
+            # If too many consecutive errors, use exponential backoff
+            if error_count >= max_consecutive_errors:
+                backoff_time = min(300, 60 * (2 ** (error_count - max_consecutive_errors)))
+                logger.warning(f"Too many cleanup errors, backing off for {backoff_time}s")
+                await asyncio.sleep(backoff_time)
+                continue
+        finally:
+            # Ensure DB session is always closed
+            if db is not None:
+                try:
+                    await db.close()
+                except:
+                    pass
 
         # Run every 5 minutes
         await asyncio.sleep(300)
@@ -199,6 +221,9 @@ async def container_cleanup_loop():
     logger.info("  Tier 1: Pause containers idle for 5+ minutes")
     logger.info("  Tier 2: Remove containers paused for 24+ hours")
 
+    error_count = 0
+    max_consecutive_errors = 5
+
     while True:
         try:
             container_manager = get_container_manager()
@@ -206,11 +231,55 @@ async def container_cleanup_loop():
             cleaned = await container_manager.cleanup_idle_environments(idle_timeout_minutes=5)
             if cleaned:
                 logger.info(f"Cleanup processed {len(cleaned)} containers: {', '.join(cleaned)}")
+
+            # Reset error count on success
+            error_count = 0
+
         except Exception as e:
-            logger.error(f"Container cleanup error: {e}", exc_info=True)
+            error_count += 1
+            logger.error(f"Container cleanup error ({error_count}/{max_consecutive_errors}): {e}", exc_info=True)
+
+            # If too many consecutive errors, use exponential backoff
+            if error_count >= max_consecutive_errors:
+                backoff_time = min(300, 30 * (2 ** (error_count - max_consecutive_errors)))
+                logger.warning(f"Too many cleanup errors, backing off for {backoff_time}s")
+                await asyncio.sleep(backoff_time)
+                continue
 
         # Run every 2 minutes to check for idle containers
         await asyncio.sleep(120)
+
+
+async def stats_flush_loop():
+    """Background task to flush shell session stats to database."""
+    import asyncio
+    from .services.shell_session_manager import get_shell_session_manager
+    from .database import AsyncSessionLocal
+
+    logger.info("Stats flush task started - batches DB updates to prevent blocking")
+
+    while True:
+        db = None
+        try:
+            async with AsyncSessionLocal() as db:
+                session_manager = get_shell_session_manager()
+                updated_count = await session_manager.flush_pending_stats(db)
+                if updated_count > 0:
+                    logger.debug(f"Flushed stats for {updated_count} shell sessions")
+
+        except Exception as e:
+            logger.error(f"Stats flush error: {e}", exc_info=True)
+        finally:
+            # Ensure DB session is always closed
+            if db is not None:
+                try:
+                    await db.close()
+                except:
+                    pass
+
+        # Flush every 5 seconds to keep stats reasonably fresh
+        # while avoiding blocking on every keystroke
+        await asyncio.sleep(5)
 
 
 # Add security headers middleware
@@ -308,6 +377,7 @@ async def startup():
     # Start background cleanup tasks
     asyncio.create_task(shell_session_cleanup_loop())
     asyncio.create_task(container_cleanup_loop())
+    asyncio.create_task(stats_flush_loop())
 
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods

@@ -35,6 +35,9 @@ class ShellSessionManager:
     def __init__(self):
         self.pty_broker = get_pty_broker()
         self.active_sessions: Dict[str, PTYSession] = {}
+        # Track sessions that need stats updates (non-blocking batching)
+        self.pending_stats_updates: set = set()
+        self._stats_update_task = None
 
     async def create_session(
         self,
@@ -196,8 +199,9 @@ class ShellSessionManager:
 
         await self.pty_broker.write_to_pty(session_id, data)
 
-        # Update database stats
-        await self._update_session_stats(session_id, db)
+        # Queue stats update for batching (non-blocking)
+        # Stats will be flushed periodically by background task
+        self.pending_stats_updates.add(session_id)
 
     async def read_output(
         self,
@@ -247,8 +251,9 @@ class ShellSessionManager:
         # Get new output
         new_data, is_eof = await session.read_new_output()
 
-        # Update database stats
-        await self._update_session_stats(session_id, db, read_count=1)
+        # Queue stats update for batching (non-blocking)
+        # Stats will be flushed periodically by background task
+        self.pending_stats_updates.add(session_id)
 
         return {
             "output": base64.b64encode(new_data).decode('utf-8'),
@@ -430,6 +435,51 @@ class ShellSessionManager:
             if read_count > 0:
                 db_session.total_reads += read_count
             await db.commit()
+
+    async def flush_pending_stats(self, db: AsyncSession) -> int:
+        """
+        Flush all pending stats updates to database in a single batch.
+        This is called periodically to avoid blocking on every keystroke.
+        Returns number of sessions updated.
+        """
+        if not self.pending_stats_updates:
+            return 0
+
+        # Get snapshot of pending updates and clear the set
+        session_ids_to_update = list(self.pending_stats_updates)
+        self.pending_stats_updates.clear()
+
+        updated_count = 0
+        for session_id in session_ids_to_update:
+            try:
+                session = self.active_sessions.get(session_id)
+                if not session:
+                    continue
+
+                result = await db.execute(
+                    select(ShellSession).where(ShellSession.session_id == session_id)
+                )
+                db_session = result.scalar_one_or_none()
+                if db_session:
+                    db_session.bytes_read = session.bytes_read
+                    db_session.bytes_written = session.bytes_written
+                    db_session.last_activity_at = datetime.utcnow()
+                    updated_count += 1
+
+            except Exception as e:
+                logger.error(f"Failed to update stats for session {session_id}: {e}")
+                # Re-queue for next flush attempt
+                self.pending_stats_updates.add(session_id)
+
+        if updated_count > 0:
+            try:
+                await db.commit()
+            except Exception as e:
+                logger.error(f"Failed to commit stats updates: {e}")
+                # Re-queue all for retry
+                self.pending_stats_updates.update(session_ids_to_update)
+
+        return updated_count
 
 
 # Singleton instance

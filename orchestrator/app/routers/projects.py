@@ -2735,11 +2735,16 @@ async def interactive_terminal(
         await websocket.send_json({"type": "status", "message": "Starting shell session..."})
 
         try:
+            # Start a regular shell
+            # Tmux runs the dev server in the background, but we don't attach to it
+            # This avoids tmux's display layer conflicting with xterm.js
+            # Users can run "tmux attach -t main" manually if they want full tmux features
+            # Use 'exec' to replace the wrapper shell with an interactive shell
             session_info = await shell_manager.create_session(
                 user_id=user_id,
                 project_id=str(project.id),
                 db=db,
-                command="/bin/sh"
+                command="exec /bin/sh"
             )
             session_id = session_info["session_id"]
 
@@ -2769,6 +2774,23 @@ async def interactive_terminal(
         await websocket.send_json({"type": "output", "data": "\x1b[38;5;208m║   Tesslate Studio - Interactive Shell ║\x1b[0m\r\n"})
         await websocket.send_json({"type": "output", "data": "\x1b[38;5;208m╚═══════════════════════════════════════╝\x1b[0m\r\n\r\n"})
 
+        # Send any existing output history (scrollback) from the PTY buffer
+        # This ensures clients see the full history, not just new output
+        try:
+            if pty_session and hasattr(pty_session, 'output_buffer'):
+                async with pty_session.buffer_lock:
+                    if len(pty_session.output_buffer) > 0:
+                        # Send existing buffer contents
+                        existing_output = bytes(pty_session.output_buffer)
+                        if existing_output:
+                            await websocket.send_json({
+                                "type": "output",
+                                "data": existing_output.decode('utf-8', errors='replace')
+                            })
+                            logger.info(f"Sent {len(existing_output)} bytes of scrollback history to client")
+        except Exception as e:
+            logger.warning(f"Failed to send scrollback history: {e}")
+
         # Start background task to stream PTY output to WebSocket
         async def stream_output():
             """Stream PTY output to WebSocket"""
@@ -2788,8 +2810,10 @@ async def interactive_terminal(
                         await websocket.send_json({"type": "status", "message": "Shell session ended"})
                         break
 
-                    # Small delay to prevent tight loop
-                    await asyncio.sleep(0.05)
+                    # Increased delay from 50ms to 100ms to reduce CPU usage
+                    # This reduces polling from 20x/sec to 10x/sec per terminal
+                    # while still maintaining responsive terminal feel
+                    await asyncio.sleep(0.1)
 
             except WebSocketDisconnect:
                 logger.info(f"WebSocket disconnected during output streaming")

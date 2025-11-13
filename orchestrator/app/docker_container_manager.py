@@ -41,7 +41,10 @@ class DockerContainerManager(BaseContainerManager):
         # For Docker-in-Docker: convert container paths to host paths
         # The orchestrator runs in a container with ./orchestrator mounted at /app
         # When creating child containers, we need to use host paths, not container paths
-        self._detect_host_mount_path()
+        # Note: Now uses lazy async initialization to avoid blocking startup
+        self.host_users_base = None  # Will be set lazily on first use
+        self.host_mount_base = None  # Will be set lazily on first use
+        self._host_paths_ready = False  # Lazy initialization flag
 
         print(f"[INFO] DevContainerManager initialized")
         print("[INFO] Traefik-powered zero-port-conflict architecture")
@@ -116,7 +119,13 @@ class DockerContainerManager(BaseContainerManager):
             print(f"[INFO] Using network: {self.network_name}")
         return self.network_name
 
-    def _detect_host_mount_path(self):
+    async def _ensure_host_paths(self):
+        """Ensure host paths are detected (lazy initialization)"""
+        if not self._host_paths_ready:
+            await self._detect_host_mount_path()
+            self._host_paths_ready = True
+
+    async def _detect_host_mount_path(self):
         """
         Detect the host paths for volume mounts in Docker-in-Docker scenarios.
 
@@ -126,15 +135,14 @@ class DockerContainerManager(BaseContainerManager):
 
         We need to detect both to correctly map container paths to host paths.
 
-        Note: This is synchronous for __init__, subprocess calls will be converted when refactored
+        Note: Now async to prevent blocking startup
         """
         # Check if we're running in a container
         if os.path.exists('/.dockerenv'):
             # We're in a container - need to detect host paths for volume mounts
             try:
-                # Get all mounts for this container
-                # TODO: This subprocess call is in __init__ so kept synchronous for now
-                result = subprocess.run(
+                # Get all mounts for this container using async subprocess
+                result = await run_async(
                     ["docker", "inspect", "-f", "{{ json .Mounts }}",
                      socket.gethostname()],
                     capture_output=True,
@@ -284,13 +292,23 @@ class DockerContainerManager(BaseContainerManager):
             print(f"[WARN] Network setup warning: {e}")
             return False  # Network issues are not fatal but we should know
     
-    async def _ensure_base_image_exists(self) -> bool:
-        """Ensure the base development image exists (built once, reused for all projects)."""
-        if self._base_image_ready:
+    async def _ensure_base_image_exists(self, force_rebuild: bool = False) -> bool:
+        """
+        Ensure the base development image exists (built once, reused for all projects).
+
+        Args:
+            force_rebuild: Force rebuild even if image exists
+
+        Returns:
+            True if image exists or was built successfully, False otherwise
+        """
+        # Use in-memory cache flag for quick checks
+        if self._base_image_ready and not force_rebuild:
+            print(f"[CACHE] Base image already verified: {self.base_image_name}")
             return True
 
         try:
-            # Check if base image already exists
+            # Check if base image already exists in Docker
             result = await run_async(
                 ["docker", "images", "-q", self.base_image_name],
                 timeout=10,
@@ -298,25 +316,40 @@ class DockerContainerManager(BaseContainerManager):
                 text=True
             )
 
-            if result.stdout.strip():
-                print(f"[OK] Base image exists: {self.base_image_name}")
+            if result.stdout.strip() and not force_rebuild:
+                print(f"[CACHE] Base image found in Docker, skipping build: {self.base_image_name}")
                 self._base_image_ready = True
                 return True
 
-            # Build base image only if it doesn't exist
-            print(f"[BUILD] Building fast base development image (Node.js 20, ~30 seconds)...")
+            # Build base image if it doesn't exist or force rebuild requested
+            if force_rebuild:
+                print(f"[BUILD] Force rebuilding base development image...")
+            else:
+                print(f"[BUILD] Base image not found, building (Node.js 20, ~30 seconds)...")
+
             dockerfile_path = self._get_dockerfile_path()
 
             if not os.path.exists(dockerfile_path):
                 raise FileNotFoundError(f"Dockerfile not found at: {dockerfile_path}")
 
-            build_result = await run_async([
+            # Only pull latest base image on force rebuild to avoid slow restarts
+            build_args = [
                 "docker", "build",
-                "--pull",  # Pull latest base image
-                "-f", dockerfile_path,  # Use the actual Dockerfile.devserver
+                "-f", dockerfile_path,
                 "-t", self.base_image_name,
-                os.path.dirname(dockerfile_path)  # Build context is orchestrator directory
-            ], timeout=300, capture_output=True, text=True)
+                os.path.dirname(dockerfile_path)
+            ]
+
+            # Add --pull flag only on force rebuild
+            if force_rebuild:
+                build_args.insert(2, "--pull")
+
+            build_result = await run_async(
+                build_args,
+                timeout=300,
+                capture_output=True,
+                text=True
+            )
 
             if build_result.returncode != 0:
                 print(f"[ERROR] Base image build failed:")
@@ -647,7 +680,47 @@ class DockerContainerManager(BaseContainerManager):
             print(f"[WARN] Server HTTP health check timed out after {http_timeout}s, but container is running")
 
         return True  # Return True to allow container to continue - Traefik will handle routing when ready
-    
+
+    def _get_container_limits_for_tier(self, subscription_tier: str) -> dict:
+        """Get resource limits based on subscription tier."""
+        limits = {
+            "free": {
+                "max_containers": 2,
+                "max_storage_gb": 5,
+                "max_memory_gb": 2,
+                "max_cpus": 1.0,
+            },
+            "pro": {
+                "max_containers": 5,
+                "max_storage_gb": 20,
+                "max_memory_gb": 4,
+                "max_cpus": 2.0,
+            },
+            "enterprise": {
+                "max_containers": 20,
+                "max_storage_gb": 100,
+                "max_memory_gb": 8,
+                "max_cpus": 4.0,
+            }
+        }
+        return limits.get(subscription_tier, limits["free"])
+
+    async def _count_user_containers(self, user_id: UUID) -> int:
+        """Count running containers for a user."""
+        try:
+            filters = {
+                "label": [
+                    "com.tesslate.devserver=true",
+                    f"com.tesslate.devserver.user_id={user_id}"
+                ],
+                "status": "running"
+            }
+            containers = self.client.containers.list(filters=filters)
+            return len(containers)
+        except Exception as e:
+            print(f"[ERROR] Failed to count user containers: {e}")
+            return 0
+
     async def start_container(self, project_path: str, project_id: str, user_id: UUID, project_slug: str = None, skip_validation: bool = False,
                               environment_vars: Dict[str, str] = None, secrets: Dict[str, str] = None,
                               port: int = 5173, start_command: str = None) -> str:
@@ -683,6 +756,47 @@ class DockerContainerManager(BaseContainerManager):
                 "Docker is not available or not running. "
                 "Please install Docker Desktop and ensure it's running."
             )
+
+        # SECURITY: Rate limiting - Check container limits before starting
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy import select
+        from .models_auth import User
+        from fastapi import HTTPException
+
+        # Get user's subscription tier from database and apply resource limits
+        user_limits = self._get_container_limits_for_tier("free")  # Default to free tier
+        user_tier = "free"
+
+        # Get user's subscription tier from database
+        async with AsyncSession(self.client._custom_headers.get("db_engine", None)) if hasattr(self.client, "_custom_headers") else AsyncSession() as db:
+            try:
+                # Fetch user from database
+                from .database import AsyncSessionLocal
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(select(User).where(User.id == user_id))
+                    user = result.scalar_one_or_none()
+
+                    if user:
+                        # Get limits based on subscription tier
+                        user_tier = user.subscription_tier
+                        user_limits = self._get_container_limits_for_tier(user_tier)
+
+                        # Count current running containers
+                        running_count = await self._count_user_containers(user_id)
+
+                        print(f"[RATE_LIMIT] User {user.username} ({user_tier}): {running_count}/{user_limits['max_containers']} containers")
+
+                        # Check if limit exceeded
+                        if running_count >= user_limits['max_containers']:
+                            raise HTTPException(
+                                status_code=429,
+                                detail=f"Container limit reached ({running_count}/{user_limits['max_containers']}). "
+                                       f"Upgrade your plan or stop existing containers to create new ones."
+                            )
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"[WARN] Failed to check container limits: {e}. Proceeding without rate limiting.")
 
         # Ensure base image exists (reuse existing if available)
         if not await self._ensure_base_image_exists():
@@ -723,6 +837,9 @@ class DockerContainerManager(BaseContainerManager):
         if not os.path.exists(abs_project_path):
             raise FileNotFoundError(f"Project directory not found: {abs_project_path}")
 
+        # Ensure host paths are detected before converting (lazy async initialization)
+        await self._ensure_host_paths()
+
         # Convert container path to host path for Docker-in-Docker
         host_project_path = self._convert_to_host_path(abs_project_path)
 
@@ -752,6 +869,7 @@ class DockerContainerManager(BaseContainerManager):
         print(f"[INFO] Host path: {host_project_path}")
         print(f"[INFO] Hostname: {hostname}")
         print(f"[INFO] Using base image: {self.base_image_name}")
+        print(f"[SECURITY] Applying {user_tier} tier limits: {user_limits['max_memory_gb']}GB RAM, {user_limits['max_cpus']} CPUs, {user_limits['max_storage_gb']}GB disk")
 
         try:
             # Start container with Traefik labels for automatic routing
@@ -759,8 +877,29 @@ class DockerContainerManager(BaseContainerManager):
             run_cmd = [
                 "docker", "run",
                 "--rm",                                                  # Remove on exit
-                "--user", "root",                                        # Run as root to avoid permission issues with Windows volumes
                 "--name", container_name,                                # Multi-user container name
+
+                # SECURITY: Resource limits to prevent resource exhaustion (tier-based)
+                "--memory", f"{user_limits['max_memory_gb']}g",           # Memory limit based on tier
+                "--memory-swap", f"{user_limits['max_memory_gb']}g",      # No swap (prevent thrashing)
+                "--cpus", str(user_limits['max_cpus']),                   # CPU limit based on tier
+                "--pids-limit", "512",                                    # Prevent fork bombs
+                "--storage-opt", f"size={user_limits['max_storage_gb']}G",  # Disk quota based on tier
+
+                # SECURITY: Run as non-root user (uid 1000 matches Dockerfile USER)
+                "--user", "1000:1000",                                    # Non-root user for security
+
+                # SECURITY: Drop all capabilities except what's needed
+                "--cap-drop", "ALL",                                      # Drop all capabilities
+                "--cap-add", "NET_BIND_SERVICE",                          # Only allow binding to privileged ports
+
+                # SECURITY: Block access to internal services via hosts file
+                "--add-host", "tesslate-orchestrator:127.0.0.1",          # Block orchestrator access
+                "--add-host", "tesslate-postgres:127.0.0.1",              # Block postgres access
+                "--add-host", "tesslate-redis:127.0.0.1",                 # Block redis access
+                "--add-host", "postgres:127.0.0.1",                       # Block postgres shortname
+                "--add-host", "redis:127.0.0.1",                          # Block redis shortname
+
                 "-v", f"{host_project_path}:/app",                      # Source code volume (live sync!)
                 # Docker labels for organization and tracking
                 "--label", "com.tesslate.devserver=true",
@@ -833,10 +972,9 @@ class DockerContainerManager(BaseContainerManager):
                     run_cmd.extend(["-e", f"{key}={value}"])
                     print(f"[SECRET] Added secret: {key} (value hidden)")
 
-            # Working directory, user, and detached mode
+            # Working directory and detached mode
             run_cmd.extend([
                 "-w", "/app",                                           # Working directory
-                "--user", "root",                                        # Run as root to fix Windows volume permissions
                 "-d",                                                   # Detached mode
             ])
 

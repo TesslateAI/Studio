@@ -167,11 +167,41 @@ export const tasksApi = {
     const response = await api.get('/api/tasks/user/active');
     return response.data;
   },
-  pollUntilComplete: async (taskId: string, interval = 1000): Promise<any> => {
+  pollUntilComplete: async (
+    taskId: string,
+    interval = 1000,
+    maxRetries = 300,
+    timeout = 300000
+  ): Promise<any> => {
     return new Promise((resolve, reject) => {
+      let retryCount = 0;
+      const startTime = Date.now();
+
       const poll = async () => {
         try {
+          // Check timeout
+          if (Date.now() - startTime > timeout) {
+            reject(
+              new Error(
+                `Task polling timeout after ${timeout}ms for task ${taskId}`
+              )
+            );
+            return;
+          }
+
+          // Check max retries
+          if (retryCount >= maxRetries) {
+            reject(
+              new Error(
+                `Task polling exceeded max retries (${maxRetries}) for task ${taskId}`
+              )
+            );
+            return;
+          }
+
+          retryCount++;
           const task = await tasksApi.getStatus(taskId);
+
           if (task.status === 'completed') {
             resolve(task);
           } else if (task.status === 'failed' || task.status === 'cancelled') {

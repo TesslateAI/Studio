@@ -73,6 +73,10 @@ services:
       - LITELLM_TEAM_ID=${LITELLM_TEAM_ID}
       - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN}
       - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET}
+      # Agent Resource Limits
+      - AGENT_MAX_COST=${AGENT_MAX_COST:-20.0}
+      - AGENT_MAX_ITERATIONS=${AGENT_MAX_ITERATIONS:-100}
+      - AGENT_MAX_COST_PER_RUN=${AGENT_MAX_COST_PER_RUN:-5.0}
       - APP_PROTOCOL=${APP_PROTOCOL}
       - APP_DOMAIN=${APP_DOMAIN}
       - DEV_SERVER_BASE_URL=${APP_PROTOCOL}://${APP_DOMAIN}
@@ -129,6 +133,8 @@ services:
     restart: unless-stopped
     environment:
       - VITE_API_URL=
+      - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY:-}
+      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-}
     networks:
       - tesslate-network
     labels:
