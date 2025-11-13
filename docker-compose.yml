@@ -168,6 +168,8 @@ services:
     environment:
       - VITE_API_URL=${VITE_API_URL:-}
       - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
+      - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY:-}
+      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-}
       - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
       - FRONTEND_PORT=${FRONTEND_PORT:-5173}
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-docker}
