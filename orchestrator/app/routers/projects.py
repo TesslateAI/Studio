@@ -274,10 +274,16 @@ async def _setup_base_project(
     project_path: str
 ) -> None:
     """Setup project from marketplace base"""
-    task.update_progress(10, 100, f"Cloning marketplace base: {project_data.base_id}")
-
     if not project_data.base_id:
         raise ValueError("base_id is required for source_type 'base'")
+
+    # Check if this is the built-in template
+    if project_data.base_id == 'builtin':
+        task.update_progress(10, 100, "Setting up built-in Tesslate Frontend template")
+        await _setup_template_project(db_project, project_path, settings, db, task)
+        return
+
+    task.update_progress(10, 100, f"Cloning marketplace base: {project_data.base_id}")
 
     # Verify purchase
     from ..models import UserPurchasedBase, MarketplaceBase

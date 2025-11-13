@@ -50,14 +50,14 @@ export default function Dashboard() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', description: '' });
   const [isCreating, setIsCreating] = useState(false);
-  const [sourceType, setSourceType] = useState<'template' | 'github' | 'base'>('template');
+  const [sourceType, setSourceType] = useState<'template' | 'github' | 'base'>('base');
   const [githubRepoUrl, setGithubRepoUrl] = useState('');
   const [githubBranch, setGithubBranch] = useState('main');
   const [githubConnected, setGithubConnected] = useState(false);
   const [checkingGithub, setCheckingGithub] = useState(false);
   const [showGithubConnectModal, setShowGithubConnectModal] = useState(false);
   const [bases, setBases] = useState<any[]>([]);
-  const [selectedBase, setSelectedBase] = useState<number | null>(null);
+  const [selectedBase, setSelectedBase] = useState<string | null>('builtin');
   const [isBaseDropdownOpen, setIsBaseDropdownOpen] = useState(false);
   const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -206,7 +206,8 @@ export default function Dashboard() {
 
       setShowCreateModal(false);
       setNewProject({ name: '', description: '' });
-      setSourceType('template');
+      setSourceType('base');
+      setSelectedBase('builtin');
       setGithubRepoUrl('');
       setGithubBranch('main');
       setIsCreating(false);
@@ -631,25 +632,7 @@ export default function Dashboard() {
               {/* Source Type Selection */}
               <div>
                 <label className="block text-sm font-medium text-[var(--text)] mb-3">Project Source</label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <button
-                    onClick={() => setSourceType('template')}
-                    disabled={isCreating}
-                    className={`
-                      p-4 rounded-xl border-2 transition-all
-                      ${sourceType === 'template'
-                        ? 'border-[var(--primary)] bg-[rgba(var(--primary-rgb),0.1)]'
-                        : theme === 'light'
-                          ? 'border-black/10 bg-black/5 hover:border-black/20'
-                          : 'border-white/10 bg-white/5 hover:border-white/20'
-                      }
-                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                    `}
-                  >
-                    <FilePlus className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
-                    <div className="text-sm font-semibold text-[var(--text)]">Template</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Frontend-only (Vite)</div>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     onClick={() => setSourceType('base')}
                     disabled={isCreating}
@@ -665,8 +648,8 @@ export default function Dashboard() {
                     `}
                   >
                     <Package className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
-                    <div className="text-sm font-semibold text-[var(--text)]">From Base</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Use template</div>
+                    <div className="text-sm font-semibold text-[var(--text)]">Base</div>
+                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Start from template</div>
                   </button>
                   <button
                     onClick={() => setSourceType('github')}
@@ -693,120 +676,177 @@ export default function Dashboard() {
               {sourceType === 'base' && (
                 <div className="space-y-3">
                   <p className="text-sm text-white/60">
-                    Select a base from your library:
+                    Select a base to start your project:
                   </p>
-                  {bases.length === 0 ? (
-                    <div className="text-center py-6 bg-white/5 border border-white/10 rounded-xl">
-                      <Package className="w-12 h-12 text-white/40 mx-auto mb-3" weight="fill" />
-                      <p className="text-white/40 mb-3">No bases in your library</p>
-                      <button
-                        onClick={() => {
-                          setShowCreateModal(false);
-                          navigate('/marketplace');
-                        }}
-                        className="text-[var(--primary)] hover:text-[var(--primary-hover)] text-sm font-medium"
-                      >
-                        Browse Marketplace
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => !isCreating && setIsBaseDropdownOpen(!isBaseDropdownOpen)}
-                        disabled={isCreating}
-                        className={`
-                          w-full px-3 py-3 border rounded-lg text-left
-                          flex items-center justify-between transition-all
-                          ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-                          ${isBaseDropdownOpen
-                            ? 'border-[var(--primary)]'
-                            : theme === 'light'
-                              ? 'border-black/20 hover:border-black/30'
-                              : 'border-white/10 hover:border-white/20'
-                          }
-                          ${isCreating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                        `}
-                      >
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {selectedBase ? (
-                            <>
-                              <span className="text-xl flex-shrink-0">
-                                {bases.find(b => b.id === selectedBase)?.icon}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-medium text-[var(--text)] truncate">
-                                  {bases.find(b => b.id === selectedBase)?.name}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => !isCreating && setIsBaseDropdownOpen(!isBaseDropdownOpen)}
+                      disabled={isCreating}
+                      className={`
+                        w-full px-3 py-3 border rounded-lg text-left
+                        flex items-center justify-between transition-all
+                        ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
+                        ${isBaseDropdownOpen
+                          ? 'border-[var(--primary)]'
+                          : theme === 'light'
+                            ? 'border-black/20 hover:border-black/30'
+                            : 'border-white/10 hover:border-white/20'
+                        }
+                        ${isCreating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                      `}
+                    >
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        {selectedBase === 'builtin' ? (
+                          <>
+                            <span className="text-xl flex-shrink-0">📦</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium text-[var(--text)] truncate">
+                                Default Base
+                              </div>
+                              <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
+                                Frontend-only Vite + React template
+                              </div>
+                            </div>
+                          </>
+                        ) : selectedBase ? (
+                          <>
+                            <span className="text-xl flex-shrink-0">
+                              {bases.find(b => b.id === selectedBase)?.icon}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium text-[var(--text)] truncate">
+                                {bases.find(b => b.id === selectedBase)?.name}
+                              </div>
+                              <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
+                                {bases.find(b => b.id === selectedBase)?.description}
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <span className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>Choose a base...</span>
+                        )}
+                      </div>
+                      <CaretDown
+                        className={`flex-shrink-0 ml-2 transition-transform ${isBaseDropdownOpen ? 'rotate-180' : ''}`}
+                        size={16}
+                        weight="bold"
+                      />
+                    </button>
+
+                    {isBaseDropdownOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setIsBaseDropdownOpen(false)}
+                        />
+                        <div className={`absolute z-20 w-full mt-1 bg-[var(--surface)] border rounded-lg shadow-xl max-h-60 overflow-y-auto ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`}>
+                          {/* Built-in Default Base */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedBase('builtin');
+                              setIsBaseDropdownOpen(false);
+                            }}
+                            className={`
+                              w-full px-3 py-3 text-left transition-colors
+                              flex items-center gap-3
+                              ${selectedBase === 'builtin'
+                                ? 'bg-[rgba(var(--primary-rgb),0.1)]'
+                                : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
+                              }
+                            `}
+                          >
+                            <span className="text-xl flex-shrink-0">📦</span>
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-medium truncate ${selectedBase === 'builtin' ? 'text-[var(--primary)]' : 'text-[var(--text)]'}`}>
+                                Default Base
+                              </div>
+                              <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
+                                Frontend-only Vite + React template
+                              </div>
+                              <div className="flex gap-1 mt-1 flex-wrap">
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}>
+                                  Vite
+                                </span>
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}>
+                                  React
+                                </span>
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}>
+                                  TailwindCSS
+                                </span>
+                              </div>
+                            </div>
+                            {selectedBase === 'builtin' && (
+                              <Check size={20} weight="bold" className="flex-shrink-0 text-[var(--primary)]" />
+                            )}
+                          </button>
+
+                          {/* Separator if there are marketplace bases */}
+                          {bases.length > 0 && (
+                            <div className={`border-t my-1 ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`} />
+                          )}
+
+                          {/* Marketplace Bases */}
+                          {bases.map((base: any) => (
+                            <button
+                              key={base.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedBase(base.id);
+                                setIsBaseDropdownOpen(false);
+                              }}
+                              className={`
+                                w-full px-3 py-3 text-left transition-colors
+                                flex items-center gap-3
+                                ${selectedBase === base.id
+                                  ? 'bg-[rgba(var(--primary-rgb),0.1)]'
+                                  : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
+                                }
+                              `}
+                            >
+                              <span className="text-xl flex-shrink-0">{base.icon}</span>
+                              <div className="flex-1 min-w-0">
+                                <div className={`font-medium truncate ${selectedBase === base.id ? 'text-[var(--primary)]' : 'text-[var(--text)]'}`}>
+                                  {base.name}
                                 </div>
                                 <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                  {bases.find(b => b.id === selectedBase)?.description}
+                                  {base.description}
+                                </div>
+                                <div className="flex gap-1 mt-1 flex-wrap">
+                                  {base.tech_stack?.slice(0, 3).map((tech: string, idx: number) => (
+                                    <span
+                                      key={idx}
+                                      className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}
+                                    >
+                                      {tech}
+                                    </span>
+                                  ))}
                                 </div>
                               </div>
-                            </>
-                          ) : (
-                            <span className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>Choose a base...</span>
+                              {selectedBase === base.id && (
+                                <Check size={20} weight="bold" className="flex-shrink-0 text-[var(--primary)]" />
+                              )}
+                            </button>
+                          ))}
+
+                          {/* Browse Marketplace Link */}
+                          {bases.length === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowCreateModal(false);
+                                navigate('/marketplace');
+                              }}
+                              className={`w-full px-3 py-3 text-center text-sm font-medium text-[var(--primary)] hover:text-[var(--primary-hover)] ${theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'} transition-colors`}
+                            >
+                              Browse Marketplace for More Bases →
+                            </button>
                           )}
                         </div>
-                        <CaretDown
-                          className={`flex-shrink-0 ml-2 transition-transform ${isBaseDropdownOpen ? 'rotate-180' : ''}`}
-                          size={16}
-                          weight="bold"
-                        />
-                      </button>
-
-                      {isBaseDropdownOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setIsBaseDropdownOpen(false)}
-                          />
-                          <div className={`absolute z-20 w-full mt-1 bg-[var(--surface)] border rounded-lg shadow-xl max-h-60 overflow-y-auto ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`}>
-                            {bases.map((base: any) => (
-                              <button
-                                key={base.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedBase(base.id);
-                                  setIsBaseDropdownOpen(false);
-                                }}
-                                className={`
-                                  w-full px-3 py-3 text-left transition-colors
-                                  flex items-center gap-3
-                                  ${selectedBase === base.id
-                                    ? 'bg-[rgba(var(--primary-rgb),0.1)]'
-                                    : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
-                                  }
-                                `}
-                              >
-                                <span className="text-xl flex-shrink-0">{base.icon}</span>
-                                <div className="flex-1 min-w-0">
-                                  <div className={`font-medium truncate ${selectedBase === base.id ? 'text-[var(--primary)]' : 'text-[var(--text)]'}`}>
-                                    {base.name}
-                                  </div>
-                                  <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                    {base.description}
-                                  </div>
-                                  <div className="flex gap-1 mt-1 flex-wrap">
-                                    {base.tech_stack?.slice(0, 3).map((tech: string, idx: number) => (
-                                      <span
-                                        key={idx}
-                                        className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}
-                                      >
-                                        {tech}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                                {selectedBase === base.id && (
-                                  <Check size={20} weight="bold" className="flex-shrink-0 text-[var(--primary)]" />
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from uuid import UUID
 
 class UserBase(BaseModel):
@@ -52,7 +52,7 @@ class ProjectCreate(ProjectBase):
     source_type: str = "template"  # "template", "github", or "base"
     github_repo_url: Optional[str] = None
     github_branch: Optional[str] = "main"
-    base_id: Optional[UUID] = None
+    base_id: Optional[Union[UUID, str]] = None  # UUID for marketplace bases, 'builtin' for built-in template
 
     @field_validator('source_type')
     @classmethod
@@ -77,6 +77,12 @@ class ProjectCreate(ProjectBase):
         if info.data.get('source_type') == 'base':
             if not v:
                 raise ValueError('base_id is required when source_type is "base"')
+            # Accept 'builtin' string or UUID
+            if isinstance(v, str) and v != 'builtin':
+                try:
+                    UUID(v)  # Validate it's a valid UUID string
+                except ValueError:
+                    raise ValueError('base_id must be a valid UUID or "builtin"')
         return v
 
 class Project(ProjectBase):
