@@ -48,6 +48,7 @@ type NotificationCallback = (notification: Notification['notification']) => void
 class TaskService {
   private ws: WebSocket | null = null;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private pingInterval: NodeJS.Timeout | null = null;
   private taskCallbacks: Map<string, TaskCallback[]> = new Map();
   private globalTaskCallbacks: TaskCallback[] = [];
   private notificationCallbacks: NotificationCallback[] = [];
@@ -75,8 +76,14 @@ class TaskService {
         // Send authentication
         this.ws?.send(JSON.stringify({ token: `Bearer ${token}` }));
 
+        // Clear existing ping interval to prevent memory leak
+        if (this.pingInterval) {
+          clearInterval(this.pingInterval);
+          this.pingInterval = null;
+        }
+
         // Send ping every 30 seconds to keep connection alive
-        setInterval(() => {
+        this.pingInterval = setInterval(() => {
           if (this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({ type: 'ping' }));
           }
@@ -102,6 +109,12 @@ class TaskService {
         this.isConnecting = false;
         this.ws = null;
 
+        // Clear ping interval on disconnect
+        if (this.pingInterval) {
+          clearInterval(this.pingInterval);
+          this.pingInterval = null;
+        }
+
         // Reconnect after 5 seconds
         this.reconnectTimeout = setTimeout(() => {
           console.log('[TaskService] Attempting to reconnect...');
@@ -126,6 +139,11 @@ class TaskService {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
+    }
+
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
     }
 
     if (this.ws) {
@@ -220,16 +238,42 @@ class TaskService {
   }
 
   /**
-   * Poll task status until completion
+   * Poll task status until completion with timeout and max retries
    */
   async pollTaskUntilComplete(
     taskId: string,
     onUpdate?: (task: Task) => void,
-    interval = 1000
+    interval = 1000,
+    maxRetries = 300,
+    timeout = 300000
   ): Promise<Task> {
     return new Promise((resolve, reject) => {
+      let retryCount = 0;
+      const startTime = Date.now();
+
       const poll = async () => {
         try {
+          // Check timeout
+          if (Date.now() - startTime > timeout) {
+            reject(
+              new Error(
+                `Task polling timeout after ${timeout}ms for task ${taskId}`
+              )
+            );
+            return;
+          }
+
+          // Check max retries
+          if (retryCount >= maxRetries) {
+            reject(
+              new Error(
+                `Task polling exceeded max retries (${maxRetries}) for task ${taskId}`
+              )
+            );
+            return;
+          }
+
+          retryCount++;
           const task = await this.getTaskStatus(taskId);
 
           if (onUpdate) {

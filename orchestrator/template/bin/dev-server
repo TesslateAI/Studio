@@ -1,0 +1,65 @@
+#!/bin/sh
+# Helper script to interact with the dev server running in tmux
+
+case "$1" in
+  status)
+    if tmux has-session -t main 2>/dev/null; then
+      echo "✓ Dev server is running"
+      tmux capture-pane -t main -p | tail -20
+    else
+      echo "✗ Dev server is not running"
+    fi
+    ;;
+  logs)
+    if tmux has-session -t main 2>/dev/null; then
+      echo "📋 Dev server logs (last 50 lines):"
+      tmux capture-pane -t main -p -S -50
+    else
+      echo "✗ Dev server is not running"
+    fi
+    ;;
+  attach)
+    if tmux has-session -t main 2>/dev/null; then
+      echo "🔌 Attaching to dev server (Ctrl+B then D to detach)..."
+      sleep 1
+      tmux attach -t main
+    else
+      echo "✗ Dev server is not running"
+    fi
+    ;;
+  stop)
+    if tmux has-session -t main 2>/dev/null; then
+      echo "⏹️  Stopping dev server..."
+      tmux send-keys -t main C-c
+      sleep 1
+      echo "✓ Stop signal sent"
+    else
+      echo "✗ Dev server is not running"
+    fi
+    ;;
+  restart)
+    echo "🔄 Restarting dev server..."
+    if tmux has-session -t main 2>/dev/null; then
+      tmux send-keys -t main C-c
+      sleep 2
+      tmux send-keys -t main "npm run dev" Enter
+      echo "✓ Restart signal sent"
+    else
+      echo "✗ Dev server is not running"
+    fi
+    ;;
+  *)
+    cat <<EOF
+🚀 Dev Server Control Commands:
+
+  dev-server status   - Check if dev server is running
+  dev-server logs     - View recent dev server output
+  dev-server attach   - Attach to dev server terminal (Ctrl+B D to detach)
+  dev-server stop     - Stop the dev server
+  dev-server restart  - Restart the dev server
+
+💡 The dev server runs in a tmux session called 'main'
+   Use 'tmux attach -t main' for full tmux control
+EOF
+    ;;
+esac

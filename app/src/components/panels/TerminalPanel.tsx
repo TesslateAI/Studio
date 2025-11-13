@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Plus, X } from 'lucide-react';
+import { SearchAddon } from '@xterm/addon-search';
+import { Plus, X, Search, Wifi, WifiOff } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { createTerminalWebSocket } from '../../lib/api';
 import { useTheme } from '../../theme/ThemeContext';
@@ -16,10 +17,12 @@ interface TerminalTab {
   title: string;
   terminal: Terminal;
   fitAddon: FitAddon;
+  searchAddon: SearchAddon;
   ws: WebSocket | null;
   isMain: boolean;
   reconnectAttempts: number;
   reconnectTimer: NodeJS.Timeout | null;
+  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
 }
 
 export function TerminalPanel({ projectId }: TerminalPanelProps) {
@@ -36,33 +39,46 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
 
     const terminal = new Terminal({
       cursorBlink: true,
+      cursorStyle: 'block',
+      cursorWidth: 2,
       fontSize: 14,
-      fontFamily: 'JetBrains Mono, Fira Code, Consolas, monospace',
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace",
+      fontWeight: '400',
+      fontWeightBold: '700',
+      lineHeight: 1.2,
+      letterSpacing: 0,
       theme: {
         background: theme === 'dark' ? '#0a0a0a' : '#ffffff',
-        foreground: theme === 'dark' ? '#e5e5e5' : '#1a1a1a',
-        cursor: 'var(--primary)',
+        foreground: theme === 'dark' ? '#e5e7eb' : '#1f2937',
+        cursor: theme === 'dark' ? '#f97316' : '#ea580c',
         cursorAccent: theme === 'dark' ? '#000000' : '#ffffff',
-        selection: 'rgba(var(--primary-rgb), 0.3)',
-        black: '#000000',
-        red: '#ff5555',
-        green: '#50fa7b',
-        yellow: '#f1fa8c',
-        blue: '#bd93f9',
-        magenta: '#ff79c6',
-        cyan: '#8be9fd',
-        white: '#bfbfbf',
-        brightBlack: '#4d4d4d',
-        brightRed: '#ff6e67',
-        brightGreen: '#5af78e',
-        brightYellow: '#f4f99d',
-        brightBlue: '#caa9fa',
-        brightMagenta: '#ff92d0',
-        brightCyan: '#9aedfe',
-        brightWhite: '#e6e6e6',
+        selectionBackground: theme === 'dark' ? 'rgba(249, 115, 22, 0.25)' : 'rgba(234, 88, 12, 0.25)',
+        selectionForeground: theme === 'dark' ? '#ffffff' : '#000000',
+        // Modern color palette
+        black: '#1f2937',
+        red: '#ef4444',
+        green: '#10b981',
+        yellow: '#f59e0b',
+        blue: '#3b82f6',
+        magenta: '#a855f7',
+        cyan: '#06b6d4',
+        white: '#e5e7eb',
+        brightBlack: '#6b7280',
+        brightRed: '#f87171',
+        brightGreen: '#34d399',
+        brightYellow: '#fbbf24',
+        brightBlue: '#60a5fa',
+        brightMagenta: '#c084fc',
+        brightCyan: '#22d3ee',
+        brightWhite: '#f9fafb',
       },
-      scrollback: 10000,
+      scrollback: 50000, // Increased for better history
       convertEol: true,
+      allowProposedApi: true,
+      smoothScrollDuration: 100,
+      fastScrollModifier: 'shift',
+      fastScrollSensitivity: 5,
+      scrollSensitivity: 3,
     });
 
     const fitAddon = new FitAddon();
@@ -71,15 +87,20 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     const webLinksAddon = new WebLinksAddon();
     terminal.loadAddon(webLinksAddon);
 
+    const searchAddon = new SearchAddon();
+    terminal.loadAddon(searchAddon);
+
     const newTab: TerminalTab = {
       id: tabId,
       title: tabTitle,
       terminal,
       fitAddon,
+      searchAddon,
       ws: null,
       isMain,
       reconnectAttempts: 0,
       reconnectTimer: null,
+      connectionStatus: 'connecting',
     };
 
     setTabs(prev => [...prev, newTab]);
@@ -186,30 +207,13 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       ws.onopen = () => {
         // Reset reconnect attempts on successful connection
         tab.reconnectAttempts = 0;
+        tab.connectionStatus = 'connected';
+        setTabs(prev => [...prev]); // Trigger re-render for status indicator
 
-        if (isReconnect) {
-          tab.terminal.writeln('\x1b[32m✓ Reconnected to tmux session\x1b[0m');
-        } else {
-          tab.terminal.writeln('\x1b[32m✓ Connected to tmux session\x1b[0m');
-        }
-        tab.terminal.writeln('');
+        // Connection established - backend will send scrollback history automatically
+        // No need to write connection message, let the shell output speak for itself
 
-        // Send attach message to connect to tmux
-        if (tab.isMain) {
-          // Main tab attaches to main window (window 0)
-          ws.send(JSON.stringify({
-            type: 'attach',
-            window_id: 'main'
-          }));
-        } else {
-          // New tabs request a new tmux window
-          ws.send(JSON.stringify({
-            type: 'new_window',
-            name: tab.title
-          }));
-        }
-
-        // Send initial terminal size
+        // Send initial terminal size for proper rendering
         const dims = tab.fitAddon.proposeDimensions();
         if (dims) {
           ws.send(JSON.stringify({
@@ -225,8 +229,8 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
           const data = JSON.parse(event.data);
 
           if (data.type === 'output') {
-            // Clear terminal and write new output (tmux capture-pane returns full buffer)
-            tab.terminal.clear();
+            // Write incremental output - DO NOT clear the terminal
+            // The backend sends only new data, not the full buffer
             tab.terminal.write(data.data);
           } else if (data.type === 'attached') {
             tab.terminal.writeln(`\x1b[36m⟳ Attached to pane: ${data.pane_id}\x1b[0m\r\n`);
@@ -239,16 +243,21 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
           }
         } catch (e) {
           console.error('Failed to parse message:', e);
+          // If parsing fails, write raw data
           tab.terminal.write(event.data);
         }
       };
 
       ws.onerror = () => {
+        tab.connectionStatus = 'error';
+        setTabs(prev => [...prev]); // Trigger re-render for status indicator
         tab.terminal.writeln('\r\n\x1b[31m✗ Connection error\x1b[0m\r\n');
       };
 
       ws.onclose = () => {
         tab.ws = null;
+        tab.connectionStatus = 'disconnected';
+        setTabs(prev => [...prev]); // Trigger re-render for status indicator
 
         // Attempt to reconnect with exponential backoff
         const maxAttempts = 10;
@@ -260,24 +269,20 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
           tab.reconnectAttempts++;
 
           tab.terminal.writeln('');
-          tab.terminal.writeln(`\x1b[33m⚠ Connection closed. Reconnecting in ${Math.round(delay / 1000)}s... (attempt ${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`);
+          tab.terminal.writeln(`\x1b[33m⚠ Connection lost. Reconnecting in ${Math.round(delay / 1000)}s... (${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`);
+
+          tab.connectionStatus = 'connecting';
+          setTabs(prev => [...prev]); // Update status
 
           tab.reconnectTimer = setTimeout(() => {
             connectTerminal(tab, true);
           }, delay);
         } else {
+          tab.connectionStatus = 'error';
+          setTabs(prev => [...prev]); // Update status
+
           tab.terminal.writeln('');
-          tab.terminal.writeln('\x1b[31m✗ Connection failed after multiple attempts. Click to reconnect:\x1b[0m');
-          tab.terminal.writeln('\x1b[36m  → Refresh the page to try again\x1b[0m');
-
-          // Add click handler to allow manual reconnect
-          const reconnectHandler = () => {
-            tab.reconnectAttempts = 0;
-            connectTerminal(tab, true);
-          };
-
-          // Store handler so it can be cleaned up
-          (tab as any).reconnectHandler = reconnectHandler;
+          tab.terminal.writeln('\x1b[31m✗ Unable to reconnect. Please refresh the page.\x1b[0m');
         }
       };
 
@@ -348,60 +353,84 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--surface)] rounded-lg overflow-hidden">
-      {/* Tab Bar */}
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-[var(--bg-dark)] border-b border-[var(--sidebar-border)] overflow-x-auto">
-        {tabs.map(tab => (
-          <div
-            key={tab.id}
-            className={`
-              flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer
-              transition-colors min-w-fit
-              ${activeTabId === tab.id
-                ? 'bg-[rgba(var(--primary-rgb),0.1)] text-[var(--primary)]'
-                : 'bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]'
+    <div className="flex flex-col h-full bg-[var(--surface)] rounded-lg overflow-hidden shadow-xl border border-[var(--sidebar-border)]">
+      {/* Tab Bar - Improved with better mobile support */}
+      <div className="flex items-center gap-1 px-2 py-2 bg-[var(--bg-dark)] border-b border-[var(--sidebar-border)] overflow-x-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
+        <div className="flex items-center gap-1 min-w-0">
+          {tabs.map(tab => {
+            const getStatusIcon = () => {
+              switch (tab.connectionStatus) {
+                case 'connected':
+                  return <Wifi size={12} className="text-green-500" />;
+                case 'connecting':
+                  return <Wifi size={12} className="text-yellow-500 animate-pulse" />;
+                case 'disconnected':
+                case 'error':
+                  return <WifiOff size={12} className="text-red-500" />;
               }
-            `}
-            onClick={() => setActiveTabId(tab.id)}
-          >
-            <span className="text-sm font-medium whitespace-nowrap">{tab.title}</span>
-            {!tab.isMain && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(tab.id);
-                }}
-                className="p-0.5 hover:bg-white/10 rounded"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-        ))}
+            };
 
-        {/* New Shell Button */}
+            return (
+              <div
+                key={tab.id}
+                className={`
+                  group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer
+                  transition-all duration-200 min-w-fit
+                  ${activeTabId === tab.id
+                    ? 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 text-orange-500 shadow-md border border-orange-500/30'
+                    : 'bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)] border border-transparent'
+                  }
+                `}
+                onClick={() => setActiveTabId(tab.id)}
+              >
+                {getStatusIcon()}
+                <span className={`text-sm font-medium whitespace-nowrap ${activeTabId === tab.id ? 'font-semibold' : ''}`}>
+                  {tab.title}
+                </span>
+                {!tab.isMain && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTab(tab.id);
+                    }}
+                    className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 rounded transition-all duration-150"
+                    aria-label="Close tab"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* New Shell Button - Mobile friendly */}
         <button
           onClick={() => createTab(false)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md
-                   bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]
-                   transition-colors min-w-fit"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg ml-auto
+                   bg-[var(--surface)] text-[var(--text)]/70 hover:bg-orange-500/10 hover:text-orange-500
+                   transition-all duration-200 min-w-fit border border-[var(--sidebar-border)] hover:border-orange-500/30"
+          aria-label="New shell"
         >
-          <Plus size={14} />
-          <span className="text-sm font-medium">New Shell</span>
+          <Plus size={16} className="flex-shrink-0" />
+          <span className="text-sm font-medium hidden sm:inline">New Shell</span>
         </button>
       </div>
 
-      {/* Terminal Content */}
+      {/* Terminal Content - Better padding and overflow handling */}
       <div
         ref={terminalContainerRef}
-        className="flex-1 p-2"
-        style={{ minHeight: 0 }}
+        className="flex-1 p-3 overflow-hidden"
+        style={{ minHeight: 0, minWidth: 0 }}
       />
 
-      {/* Info Footer */}
-      <div className="px-4 py-2 bg-[#1a1a1a] border-t border-white/[0.08]">
-        <p className="text-xs text-gray-500">
-          💡 Tip: Use the Main tab to manage your app process. Create new shells for additional tasks.
+      {/* Info Footer - More compact on mobile */}
+      <div className="px-4 py-2.5 bg-gradient-to-r from-[#1a1a1a] to-[#151515] border-t border-white/[0.08]">
+        <p className="text-xs text-gray-500 hidden sm:block">
+          💡 Type <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">dev-server</code> to control your app (logs, stop, restart). Dev server runs in background.
+        </p>
+        <p className="text-xs text-gray-500 sm:hidden">
+          💡 Type <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">dev-server</code> for commands
         </p>
       </div>
     </div>
