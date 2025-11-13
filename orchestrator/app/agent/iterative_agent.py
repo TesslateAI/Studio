@@ -635,6 +635,14 @@ class IterativeAgent(AbstractAgent):
                             tools_text.append(f"  - {param_name} ({param_type}, {req_str}): {param_desc}")
                             tools_text.append("")
 
+            # Add examples if available
+            if hasattr(tool, 'examples') and tool.examples:
+                tools_text.append("Examples:")
+                tools_text.append("")
+                for example in tool.examples:
+                    tools_text.append(f"  {example}")
+                    tools_text.append("")
+
         tools_text.extend([
             "Rules and Constraints:",
             "",
