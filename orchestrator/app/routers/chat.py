@@ -976,12 +976,31 @@ async def agent_chat_stream(
             if hasattr(agent_instance, 'max_iterations'):
                 agent_instance.max_iterations = request.max_iterations or 20
 
+            # Build project context with TESSLATE.md and Git info
+            project_context = {
+                "project_name": project.name,
+                "project_description": project.description
+            }
+
+            # Build TESSLATE.md context
+            tesslate_context = await _build_tesslate_context(project, current_user.id, db)
+            if tesslate_context:
+                project_context["tesslate_context"] = tesslate_context
+                logger.info(f"[SSE-AGENT] Added TESSLATE.md context for project {project.id}")
+
+            # Build Git context
+            git_context = await _build_git_context(project, current_user.id, db)
+            if git_context:
+                project_context["git_context"] = git_context
+                logger.info(f"[SSE-AGENT] Added Git context for project {project.id}")
+
             # Prepare execution context
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
                 "db": db,
-                "chat_history": chat_history
+                "chat_history": chat_history,
+                "project_context": project_context
             }
 
             # Accumulate results for database persistence
@@ -1487,11 +1506,25 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'chat_history': chat_history
     }
 
-    if project:
-        execution_context['project_context'] = {
-            "project_name": project.name,
-            "project_description": project.description
-        }
+    # Add project context if available
+    try:
+        if project:
+            execution_context['project_context'] = {
+                "project_name": project.name,
+                "project_description": project.description
+            }
+
+            # Add tesslate_context if available
+            if tesslate_context:
+                execution_context['project_context']["tesslate_context"] = tesslate_context
+                logger.info(f"[UNIFIED-CHAT] Added TESSLATE.md context for project {project.id}")
+
+            # Add git_context if available
+            if git_context:
+                execution_context['project_context']["git_context"] = git_context
+                logger.info(f"[UNIFIED-CHAT] Added Git context for project {project.id}")
+    except NameError as e:
+        logger.warning(f"[UNIFIED-CHAT] Context variables not available: {e}")
 
     # 5. Run the agent and stream events back to the client
     full_response = ""

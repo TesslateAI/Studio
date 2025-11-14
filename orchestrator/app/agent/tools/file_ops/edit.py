@@ -89,7 +89,7 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     if current_content is None:
         return error_output(
             message=f"File '{file_path}' does not exist",
-            suggestion="Use write_file to create new files, or list_files to check available files",
+            suggestion="Use write_file to create new files, or execute_command with 'ls' to check available files",
             file_path=file_path
         )
 
@@ -247,7 +247,7 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     if current_content is None:
         return error_output(
             message=f"File '{file_path}' does not exist",
-            suggestion="Use write_file to create new files, or list_files to check available files",
+            suggestion="Use write_file to create new files, or execute_command with 'ls' to check available files",
             file_path=file_path
         )
 

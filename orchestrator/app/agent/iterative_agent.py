@@ -15,6 +15,7 @@ from uuid import UUID
 from .base import AbstractAgent
 from .models import ModelAdapter
 from .parser import AgentResponseParser, ToolCall
+from .prompts import get_user_message_wrapper
 from .tools.registry import ToolRegistry
 from .resource_limits import get_resource_limits, ResourceLimitExceeded
 
@@ -179,8 +180,8 @@ class IterativeAgent(AbstractAgent):
         # Initialize conversation with system prompt
         full_system_prompt = self._get_system_prompt()
 
-        # Use user request directly without context wrapper
-        user_message = user_request
+        # Get user message with full [CONTEXT] section
+        user_message = await get_user_message_wrapper(user_request, project_context)
 
         # Build messages list starting with system prompt
         self.messages = [
@@ -539,7 +540,7 @@ class IterativeAgent(AbstractAgent):
                             for line in output_content.split('\n'):
                                 formatted.append(f"   | {line}")
 
-                    # Show files list (for list_files)
+                    # Show files list (for directory listings)
                     if "files" in tool_result:
                         if isinstance(tool_result["files"], list):
                             if len(tool_result["files"]) > 0:
@@ -555,7 +556,7 @@ class IterativeAgent(AbstractAgent):
                         else:
                             formatted.append(f"   files: {tool_result['files']}")
 
-                    # Show directory (for list_files context)
+                    # Show directory (for directory context)
                     if "directory" in tool_result and "files" not in formatted[-1]:
                         formatted.append(f"   directory: {tool_result['directory']}")
 
@@ -676,7 +677,7 @@ class IterativeAgent(AbstractAgent):
             "",
             "Tool Call Format (Multiple Tools):",
             "",
-            "THOUGHT: I'll read the App.jsx file and list the components directory.",
+            "THOUGHT: I'll read the App.jsx file and check the project dependencies.",
             "",
             '[',
             '  {',
@@ -686,9 +687,9 @@ class IterativeAgent(AbstractAgent):
             '    }',
             '  },',
             '  {',
-            '    "tool_name": "list_files",',
+            '    "tool_name": "execute_command",',
             '    "parameters": {',
-            '      "directory": "src/components"',
+            '      "command": "cat package.json"',
             '    }',
             '  }',
             ']',

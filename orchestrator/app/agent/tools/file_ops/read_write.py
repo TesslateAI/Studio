@@ -66,7 +66,7 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
         if content is None:
             return error_output(
                 message=f"File '{file_path}' does not exist",
-                suggestion="Use list_files to browse available files in the directory",
+                suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
                 exists=False,
                 file_path=file_path
             )
@@ -90,7 +90,7 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
         if not os.path.exists(full_path):
             return error_output(
                 message=f"File '{file_path}' does not exist",
-                suggestion="Use list_files to browse available files in the directory",
+                suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
                 exists=False,
                 file_path=file_path
             )

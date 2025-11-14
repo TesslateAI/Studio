@@ -102,13 +102,8 @@ export function ChatInput({
   const executeCommand = (cmd: string) => {
     if (cmd === '/clear') {
       if (onClearHistory) {
-        const confirmed = window.confirm(
-          'Are you sure you want to clear all chat history? This action cannot be undone.'
-        );
-        if (confirmed) {
-          onClearHistory();
-          setMessage('');
-        }
+        onClearHistory();
+        setMessage('');
       }
     }
     // Add more command handlers here
@@ -202,12 +197,7 @@ export function ChatInput({
 
   const clearChatHistory = () => {
     if (onClearHistory) {
-      const confirmed = window.confirm(
-        'Are you sure you want to clear all chat history? This action cannot be undone.'
-      );
-      if (confirmed) {
-        onClearHistory();
-      }
+      onClearHistory();
     }
   };
 
