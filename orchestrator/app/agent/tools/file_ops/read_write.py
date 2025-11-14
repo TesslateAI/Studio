@@ -244,8 +244,8 @@ def register_read_write_tools(registry):
         executor=read_file_tool,
         category=ToolCategory.FILE_OPS,
         examples=[
-            '<tool_call><tool_name>read_file</tool_name><parameters>{"file_path": "package.json"}</parameters></tool_call>',
-            '<tool_call><tool_name>read_file</tool_name><parameters>{"file_path": "src/components/Header.jsx"}</parameters></tool_call>'
+            '{"tool_name": "read_file", "parameters": {"file_path": "package.json"}}',
+            '{"tool_name": "read_file", "parameters": {"file_path": "src/components/Header.jsx"}}'
         ]
     ))
 
@@ -269,7 +269,7 @@ def register_read_write_tools(registry):
         executor=write_file_tool,
         category=ToolCategory.FILE_OPS,
         examples=[
-            '<tool_call><tool_name>write_file</tool_name><parameters>{"file_path": "src/NewComponent.jsx", "content": "import React from \'react\'..."}</parameters></tool_call>'
+            '{"tool_name": "write_file", "parameters": {"file_path": "src/NewComponent.jsx", "content": "import React from \'react\'..."}}'
         ]
     ))
 

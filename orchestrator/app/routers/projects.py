@@ -950,8 +950,8 @@ async def get_dev_server_url(
             detail={
                 "error": "Failed to start development environment",
                 "message": str(e),
-                "user_id": current_user.id,
-                "project_id": project_id,
+                "user_id": str(current_user.id),
+                "project_id": str(project_id),
                 "hint": f"Check Kubernetes pod logs: kubectl logs -l app=dev-environment,user-id={current_user.id},project-id={project_id} -n tesslate-user-environments"
             }
         )

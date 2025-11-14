@@ -95,8 +95,8 @@ def register_execute_tools(registry):
         },
         executor=shell_exec_executor,
         examples=[
-            'shell_exec({"session_id": "abc123", "command": "npm install"})',
-            'shell_exec({"session_id": "abc123", "command": "echo \'Hello\'"})'
+            '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "npm install"}}',
+            '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "echo \'Hello\'"}}'
         ]
     ))
 

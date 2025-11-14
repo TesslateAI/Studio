@@ -218,8 +218,8 @@ async def container_cleanup_loop():
     from .dev_server_manager import get_container_manager
 
     logger.info("Container cleanup task started - two-tier cleanup system:")
-    logger.info("  Tier 1: Pause containers idle for 5+ minutes")
-    logger.info("  Tier 2: Remove containers paused for 24+ hours")
+    logger.info(f"  Tier 1: Pause containers idle for {settings.container_cleanup_tier1_idle_minutes}+ minutes")
+    logger.info(f"  Tier 2: Remove containers paused for {settings.container_cleanup_tier2_paused_hours}+ hours")
 
     error_count = 0
     max_consecutive_errors = 5
@@ -228,7 +228,7 @@ async def container_cleanup_loop():
         try:
             container_manager = get_container_manager()
             # Two-tier cleanup: pause idle containers, remove long-paused ones
-            cleaned = await container_manager.cleanup_idle_environments(idle_timeout_minutes=5)
+            cleaned = await container_manager.cleanup_idle_environments(idle_timeout_minutes=settings.container_cleanup_tier1_idle_minutes)
             if cleaned:
                 logger.info(f"Cleanup processed {len(cleaned)} containers: {', '.join(cleaned)}")
 
@@ -246,8 +246,8 @@ async def container_cleanup_loop():
                 await asyncio.sleep(backoff_time)
                 continue
 
-        # Run every 2 minutes to check for idle containers
-        await asyncio.sleep(120)
+        # Run cleanup at configured interval
+        await asyncio.sleep(settings.container_cleanup_interval_minutes * 60)
 
 
 async def stats_flush_loop():

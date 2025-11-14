@@ -97,8 +97,7 @@ class IterativeAgent(AbstractAgent):
         self,
         system_prompt: str,
         tools: Optional[ToolRegistry] = None,
-        model: Optional[ModelAdapter] = None,
-        max_iterations: int = 20
+        model: Optional[ModelAdapter] = None
     ):
         """
         Initialize the Iterative Agent.
@@ -107,12 +106,10 @@ class IterativeAgent(AbstractAgent):
             system_prompt: The system prompt for the agent
             tools: Registry of available tools (if None, uses global registry)
             model: Model adapter for LLM communication (can be set later)
-            max_iterations: Maximum number of agent loop iterations
         """
         super().__init__(system_prompt, tools)
 
         self.model = model
-        self.max_iterations = max_iterations
         self.parser = AgentResponseParser()
 
         # Conversation history
@@ -125,7 +122,6 @@ class IterativeAgent(AbstractAgent):
 
         logger.info(
             f"IterativeAgent initialized - "
-            f"max_iterations: {max_iterations}, "
             f"tools: {len(self.tools._tools) if self.tools else 0}"
         )
 
@@ -201,9 +197,11 @@ class IterativeAgent(AbstractAgent):
         self.messages.append({"role": "user", "content": user_message})
 
         # Main agent loop
+        iteration = 0
         try:
-            for iteration in range(1, self.max_iterations + 1):
-                logger.info(f"[IterativeAgent] Iteration {iteration}/{self.max_iterations}")
+            while True:
+                iteration += 1
+                logger.info(f"[IterativeAgent] Iteration {iteration}")
 
                 # Track iteration globally
                 try:
@@ -419,23 +417,6 @@ class IterativeAgent(AbstractAgent):
         finally:
             # Cleanup per-run tracking data
             limits.cleanup_run(run_id)
-
-        # Reached max iterations
-        logger.warning(f"[IterativeAgent] Reached max iterations ({self.max_iterations})")
-        last_response = self.steps[-1].response_text if self.steps else ""
-        conversational_text = self.parser.get_conversational_text(last_response)
-
-        yield {
-            'type': 'complete',
-            'data': {
-                'success': False,
-                'iterations': self.max_iterations,
-                'final_response': conversational_text or "Maximum iterations reached",
-                'tool_calls_made': self.tool_calls_count,
-                'completion_reason': 'max_iterations',
-                'resource_stats': limits.get_stats(run_id)
-            }
-        }
 
     async def _execute_tool_calls(
         self,
@@ -667,41 +648,50 @@ class IterativeAgent(AbstractAgent):
         tools_text = [
             "\n\n=== TOOL USAGE AND FORMATTING ===",
             "",
-            "Your actions are communicated through specific XML-style tool calls. You must include a THOUGHT section before every tool call to explain your reasoning.",
+            "Your actions are communicated through pure JSON format. You must include a THOUGHT section before every tool call to explain your reasoning.",
             "",
-            "CRITICAL: Parameters must be provided as VALID JSON inside the <parameters> tags.",
+            "CRITICAL: Tool calls must be VALID JSON objects or arrays.",
             "",
-            "JSON Escaping Rules (MUST FOLLOW):",
+            "JSON Formatting Rules (MUST FOLLOW):",
             "1. ALL quotes inside string values MUST be escaped with backslash: \\\"",
             "2. Newlines must be escaped as \\n, tabs as \\t, backslashes as \\\\",
             "3. Use only double quotes for JSON strings, never single quotes",
+            "4. Ensure proper JSON syntax: commas between properties, matching braces",
             "",
-            "Examples:",
+            "Escaping Examples:",
             '{"description": "The video for \\"Never Gonna Give You Up\\" by Rick Astley"}',
             '{"message": "Line 1\\nLine 2\\nLine 3"}',
             '{"path": "C:\\\\Users\\\\Documents\\\\file.txt"}',
             "",
-            "Tool Call Format:",
+            "Tool Call Format (Single Tool):",
             "",
-            "THOUGHT: I need to understand the current file structure to locate the main application file. I will list the files in the src directory to get an overview.",
+            "THOUGHT: I need to understand the current file structure to locate the main application file.",
             "",
-            "<tool_call>",
-            "<tool_name>TOOL_NAME_HERE</tool_name>",
-            "<parameters>",
-            '{"parameter_name": "value", "another_parameter": "value2"}',
-            "</parameters>",
-            "</tool_call>",
+            '{',
+            '  "tool_name": "read_file",',
+            '  "parameters": {',
+            '    "file_path": "src/App.jsx"',
+            '  }',
+            '}',
             "",
-            "Complete Example:",
+            "Tool Call Format (Multiple Tools):",
             "",
-            "THOUGHT: I will read the App.jsx file to understand the application structure.",
+            "THOUGHT: I'll read the App.jsx file and list the components directory.",
             "",
-            "<tool_call>",
-            "<tool_name>read_file</tool_name>",
-            "<parameters>",
-            '{"file_path": "src/App.jsx"}',
-            "</parameters>",
-            "</tool_call>",
+            '[',
+            '  {',
+            '    "tool_name": "read_file",',
+            '    "parameters": {',
+            '      "file_path": "src/App.jsx"',
+            '    }',
+            '  },',
+            '  {',
+            '    "tool_name": "list_files",',
+            '    "parameters": {',
+            '      "directory": "src/components"',
+            '    }',
+            '  }',
+            ']',
             "",
             "Available Tools:",
             ""

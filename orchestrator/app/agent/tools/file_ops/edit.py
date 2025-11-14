@@ -392,7 +392,7 @@ def register_edit_tools(registry):
         executor=patch_file_tool,
         category=ToolCategory.FILE_OPS,
         examples=[
-            '<tool_call><tool_name>patch_file</tool_name><parameters>{"file_path": "src/App.jsx", "search": "  <button className=\\"bg-blue-500\\">\\n    Click Me\\n  </button>", "replace": "  <button className=\\"bg-green-500\\">\\n    Click Me\\n  </button>"}</parameters></tool_call>'
+            '{"tool_name": "patch_file", "parameters": {"file_path": "src/App.jsx", "search": "  <button className=\\"bg-blue-500\\">\\n    Click Me\\n  </button>", "replace": "  <button className=\\"bg-green-500\\">\\n    Click Me\\n  </button>"}}'
         ]
     ))
 
@@ -430,7 +430,7 @@ def register_edit_tools(registry):
         executor=multi_edit_tool,
         category=ToolCategory.FILE_OPS,
         examples=[
-            '<tool_call><tool_name>multi_edit</tool_name><parameters>{"file_path": "src/App.jsx", "edits": [{"search": "const [count, setCount] = useState(0)", "replace": "const [count, setCount] = useState(10)"}, {"search": "bg-blue-500", "replace": "bg-green-500"}]}</parameters></tool_call>'
+            '{"tool_name": "multi_edit", "parameters": {"file_path": "src/App.jsx", "edits": [{"search": "const [count, setCount] = useState(0)", "replace": "const [count, setCount] = useState(10)"}, {"search": "bg-blue-500", "replace": "bg-green-500"}]}}'
         ]
     ))
 

@@ -43,7 +43,7 @@ class ResourceLimits:
 
     # Configuration (loaded from environment)
     max_cost: float = field(default_factory=lambda: float(os.getenv("AGENT_MAX_COST", "20.0")))
-    max_iterations: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_ITERATIONS", "100")))
+    max_iterations: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_ITERATIONS", "50")))
     max_cost_per_run: float = field(default_factory=lambda: float(os.getenv("AGENT_MAX_COST_PER_RUN", "5.0")))
 
     # Global counters (private - use methods for thread-safe access)

@@ -77,8 +77,8 @@ def register_session_tools(registry):
         },
         executor=shell_open_executor,
         examples=[
-            'shell_open({})',
-            'shell_open({"command": "/bin/sh"})'
+            '{"tool_name": "shell_open", "parameters": {}}',
+            '{"tool_name": "shell_open", "parameters": {"command": "/bin/sh"}}'
         ]
     ))
 
@@ -98,7 +98,7 @@ def register_session_tools(registry):
         },
         executor=shell_close_executor,
         examples=[
-            'shell_close({"session_id": "abc123"})'
+            '{"tool_name": "shell_close", "parameters": {"session_id": "abc123"}}'
         ]
     ))
 

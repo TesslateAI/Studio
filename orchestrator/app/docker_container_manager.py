@@ -708,15 +708,24 @@ class DockerContainerManager(BaseContainerManager):
     async def _count_user_containers(self, user_id: UUID) -> int:
         """Count running containers for a user."""
         try:
-            filters = {
-                "label": [
-                    "com.tesslate.devserver=true",
-                    f"com.tesslate.devserver.user_id={user_id}"
+            result = await run_async(
+                [
+                    "docker", "ps",
+                    "--filter", "label=com.tesslate.devserver=true",
+                    "--filter", f"label=com.tesslate.devserver.user_id={user_id}",
+                    "--filter", "status=running",
+                    "--format", "{{.ID}}"
                 ],
-                "status": "running"
-            }
-            containers = self.client.containers.list(filters=filters)
-            return len(containers)
+                timeout=10,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0:
+                # Count non-empty lines
+                container_ids = [line for line in result.stdout.strip().split('\n') if line]
+                return len(container_ids)
+            return 0
         except Exception as e:
             print(f"[ERROR] Failed to count user containers: {e}")
             return 0
@@ -768,35 +777,34 @@ class DockerContainerManager(BaseContainerManager):
         user_tier = "free"
 
         # Get user's subscription tier from database
-        async with AsyncSession(self.client._custom_headers.get("db_engine", None)) if hasattr(self.client, "_custom_headers") else AsyncSession() as db:
-            try:
-                # Fetch user from database
-                from .database import AsyncSessionLocal
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(select(User).where(User.id == user_id))
-                    user = result.scalar_one_or_none()
+        try:
+            # Fetch user from database
+            from .database import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(User).where(User.id == user_id))
+                user = result.scalar_one_or_none()
 
-                    if user:
-                        # Get limits based on subscription tier
-                        user_tier = user.subscription_tier
-                        user_limits = self._get_container_limits_for_tier(user_tier)
+                if user:
+                    # Get limits based on subscription tier
+                    user_tier = user.subscription_tier
+                    user_limits = self._get_container_limits_for_tier(user_tier)
 
-                        # Count current running containers
-                        running_count = await self._count_user_containers(user_id)
+                    # Count current running containers
+                    running_count = await self._count_user_containers(user_id)
 
-                        print(f"[RATE_LIMIT] User {user.username} ({user_tier}): {running_count}/{user_limits['max_containers']} containers")
+                    print(f"[RATE_LIMIT] User {user.username} ({user_tier}): {running_count}/{user_limits['max_containers']} containers")
 
-                        # Check if limit exceeded
-                        if running_count >= user_limits['max_containers']:
-                            raise HTTPException(
-                                status_code=429,
-                                detail=f"Container limit reached ({running_count}/{user_limits['max_containers']}). "
-                                       f"Upgrade your plan or stop existing containers to create new ones."
-                            )
-            except HTTPException:
-                raise
-            except Exception as e:
-                print(f"[WARN] Failed to check container limits: {e}. Proceeding without rate limiting.")
+                    # Check if limit exceeded
+                    if running_count >= user_limits['max_containers']:
+                        raise HTTPException(
+                            status_code=429,
+                            detail=f"Container limit reached ({running_count}/{user_limits['max_containers']}). "
+                                   f"Upgrade your plan or stop existing containers to create new ones."
+                        )
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[WARN] Failed to check container limits: {e}. Proceeding without rate limiting.")
 
         # Ensure base image exists (reuse existing if available)
         if not await self._ensure_base_image_exists():
@@ -1554,31 +1562,34 @@ class DockerContainerManager(BaseContainerManager):
     async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
         """
         Two-tier cleanup system for idle containers:
-        - Tier 1 (5 minutes idle): Pause running containers (stop without removing)
-        - Tier 2 (24 hours paused): Fully remove long-paused containers
+        - Tier 1 (configurable minutes idle): Pause running containers (stop without removing)
+        - Tier 2 (configurable hours paused): Fully remove long-paused containers
 
         Args:
-            idle_timeout_minutes: Minutes of inactivity before pausing (default: 5 for tier 1)
+            idle_timeout_minutes: Minutes of inactivity before pausing (from config)
 
         Returns:
             List of project keys that were paused or removed
         """
+        settings = get_settings()
+        tier2_paused_hours = settings.container_cleanup_tier2_paused_hours
+
         print(f"[CLEANUP] Two-tier cleanup starting...")
         print(f"[CLEANUP] Tier 1: Pause containers idle for {idle_timeout_minutes} minutes")
-        print(f"[CLEANUP] Tier 2: Remove containers paused for 24+ hours")
+        print(f"[CLEANUP] Tier 2: Remove containers paused for {tier2_paused_hours}+ hours")
 
         paused_containers = []
         removed_containers = []
         current_time = time.time()
 
-        # Tier 1 timeout: pause after idle_timeout_minutes (default 5 minutes)
+        # Tier 1 timeout: pause after idle_timeout_minutes (from config)
         tier1_timeout_seconds = idle_timeout_minutes * 60
 
-        # Tier 2 timeout: fully remove after 24 hours of being paused
-        tier2_timeout_seconds = 24 * 60 * 60
+        # Tier 2 timeout: fully remove after configured hours of being paused
+        tier2_timeout_seconds = tier2_paused_hours * 60 * 60
 
         try:
-            # ========== TIER 2: Remove long-paused containers (24+ hours) ==========
+            # ========== TIER 2: Remove long-paused containers ==========
             paused_keys_to_check = list(self.paused_at_tracker.keys())
 
             for project_key in paused_keys_to_check:
@@ -1587,7 +1598,7 @@ class DockerContainerManager(BaseContainerManager):
                 paused_hours = paused_duration / 3600
 
                 if paused_duration > tier2_timeout_seconds:
-                    # Container has been paused for 24+ hours, fully remove it
+                    # Container has been paused for configured hours, fully remove it
                     container_info = self.containers.get(project_key)
 
                     if container_info:
@@ -1614,7 +1625,7 @@ class DockerContainerManager(BaseContainerManager):
                         # Container info not found, clean up tracking
                         self.paused_at_tracker.pop(project_key, None)
 
-            # ========== TIER 1: Pause idle running containers (5+ minutes) ==========
+            # ========== TIER 1: Pause idle running containers ==========
             containers_to_check = list(self.containers.items())
 
             for project_key, container_info in containers_to_check:

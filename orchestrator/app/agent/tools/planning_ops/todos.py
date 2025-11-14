@@ -167,7 +167,7 @@ def register_planning_tools(registry):
         executor=todo_read_tool,
         category=ToolCategory.PROJECT,  # Using PROJECT category since there's no PLANNING category
         examples=[
-            '<tool_call><tool_name>todo_read</tool_name><parameters>{}</parameters></tool_call>'
+            '{"tool_name": "todo_read", "parameters": {}}'
         ]
     ))
 
@@ -207,7 +207,7 @@ def register_planning_tools(registry):
         executor=todo_write_tool,
         category=ToolCategory.PROJECT,
         examples=[
-            '<tool_call><tool_name>todo_write</tool_name><parameters>{"todos": [{"content": "Read package.json", "status": "completed"}, {"content": "Update dependencies", "status": "in_progress"}, {"content": "Run tests", "status": "pending", "priority": "high"}]}</parameters></tool_call>'
+            '{"tool_name": "todo_write", "parameters": {"todos": [{"content": "Read package.json", "status": "completed"}, {"content": "Update dependencies", "status": "in_progress"}, {"content": "Run tests", "status": "pending", "priority": "high"}]}}'
         ]
     ))
 

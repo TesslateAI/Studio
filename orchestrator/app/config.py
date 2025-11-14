@@ -135,6 +135,12 @@ class Settings(BaseSettings):
     # Billing settings
     usage_invoice_day: int = 1  # Day of month to generate usage invoices (1-28)
 
+    # Container Cleanup Configuration
+    # Two-tier cleanup system for idle dev containers
+    container_cleanup_interval_minutes: int = 2  # How often to run cleanup (default: every 2 minutes)
+    container_cleanup_tier1_idle_minutes: int = 15  # Tier 1: Pause containers idle for X minutes (default: 15)
+    container_cleanup_tier2_paused_hours: int = 24  # Tier 2: Remove containers paused for X hours (default: 24)
+
     class Config:
         # For Docker Compose: environment variables are passed directly
         # For native development: looks for .env in parent directory (project root)

@@ -125,8 +125,8 @@ def register_bash_tools(registry):
         },
         executor=bash_exec_tool,
         examples=[
-            '<tool_call><tool_name>bash_exec</tool_name><parameters>{"command": "npm install"}</parameters></tool_call>',
-            '<tool_call><tool_name>bash_exec</tool_name><parameters>{"command": "ls -la", "wait_seconds": 1.0}</parameters></tool_call>'
+            '{"tool_name": "bash_exec", "parameters": {"command": "npm install"}}',
+            '{"tool_name": "bash_exec", "parameters": {"command": "ls -la", "wait_seconds": 1.0}}'
         ]
     ))
 

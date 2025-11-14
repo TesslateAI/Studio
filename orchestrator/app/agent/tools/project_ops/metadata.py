@@ -70,7 +70,7 @@ def register_project_tools(registry):
         executor=get_project_info_tool,
         category=ToolCategory.PROJECT,
         examples=[
-            '<tool_call><tool_name>get_project_info</tool_name><parameters>{}</parameters></tool_call>'
+            '{"tool_name": "get_project_info", "parameters": {}}'
         ]
     ))
 
