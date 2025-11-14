@@ -136,10 +136,96 @@ async def _get_chat_history(
             if not msg.content or msg.role not in ['user', 'assistant']:
                 continue
 
-            formatted_messages.append({
-                "role": msg.role,
-                "content": msg.content
-            })
+            # For user messages, just add the content
+            if msg.role == 'user':
+                formatted_messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            # For assistant messages, check if there are agent iterations in metadata
+            elif msg.role == 'assistant':
+                metadata = msg.message_metadata or {}
+                steps = metadata.get('steps', [])
+
+                if steps:
+                    # Agent message with iterations - reconstruct full conversation
+                    # Include each iteration's response as a separate assistant message
+                    # to preserve the full context of the agent's thought process
+                    for step in steps:
+                        # Build a detailed response for each iteration
+                        thought = step.get('thought', '')
+                        response_text = step.get('response_text', '')
+                        tool_calls = step.get('tool_calls', [])
+
+                        iteration_content = ""
+
+                        # Add thought if present
+                        if thought:
+                            iteration_content += f"THOUGHT: {thought}\n\n"
+
+                        # Add tool calls if present
+                        if tool_calls:
+                            iteration_content += "Tool Calls:\n"
+                            for tc in tool_calls:
+                                tool_name = tc.get('name', 'unknown')
+                                tool_result = tc.get('result', {})
+                                success = tool_result.get('success', False)
+
+                                iteration_content += f"- {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
+
+                                # Add brief result summary
+                                if success and tool_result.get('result'):
+                                    result_data = tool_result['result']
+                                    if isinstance(result_data, dict):
+                                        if 'message' in result_data:
+                                            iteration_content += f"  {result_data['message']}\n"
+                                    else:
+                                        iteration_content += f"  {str(result_data)[:200]}\n"
+
+                            iteration_content += "\n"
+
+                        # Add response text
+                        if response_text:
+                            iteration_content += response_text
+
+                        if iteration_content.strip():
+                            formatted_messages.append({
+                                "role": "assistant",
+                                "content": iteration_content
+                            })
+
+                            # Add tool results as user feedback (simulating the iterative flow)
+                            if tool_calls:
+                                tool_results_feedback = "Tool Results:\n"
+                                for idx, tc in enumerate(tool_calls):
+                                    tool_name = tc.get('name', 'unknown')
+                                    tool_result = tc.get('result', {})
+                                    success = tool_result.get('success', False)
+
+                                    tool_results_feedback += f"\n{idx + 1}. {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
+
+                                    if tool_result.get('result'):
+                                        result_data = tool_result['result']
+                                        if isinstance(result_data, dict):
+                                            # Add key result fields
+                                            for key in ['message', 'content', 'stdout', 'output']:
+                                                if key in result_data:
+                                                    content = str(result_data[key])[:500]  # Limit content length
+                                                    tool_results_feedback += f"   {key}: {content}\n"
+                                                    break
+                                        else:
+                                            tool_results_feedback += f"   {str(result_data)[:500]}\n"
+
+                                formatted_messages.append({
+                                    "role": "user",
+                                    "content": tool_results_feedback
+                                })
+                else:
+                    # Regular assistant message without iterations
+                    formatted_messages.append({
+                        "role": msg.role,
+                        "content": msg.content
+                    })
 
         logger.info(f"[CHAT-HISTORY] Fetched {len(formatted_messages)} messages for chat {chat_id}")
         return formatted_messages
