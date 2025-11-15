@@ -687,7 +687,7 @@ class IterativeAgent(AbstractAgent):
             '    }',
             '  },',
             '  {',
-            '    "tool_name": "execute_command",',
+            '    "tool_name": "bash_exec",',
             '    "parameters": {',
             '      "command": "cat package.json"',
             '    }',
