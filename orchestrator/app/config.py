@@ -112,6 +112,17 @@ class Settings(BaseSettings):
     # Netlify API
     netlify_api_base: str = "https://api.netlify.com/api/v1"
 
+    # Deployment Provider OAuth Configuration
+    # Vercel OAuth (for deployments)
+    vercel_client_id: str = ""
+    vercel_client_secret: str = ""
+    vercel_oauth_redirect_uri: str = ""  # Backend callback URL
+
+    # Netlify OAuth (for deployments)
+    netlify_client_id: str = ""
+    netlify_client_secret: str = ""
+    netlify_oauth_redirect_uri: str = ""  # Backend callback URL
+
     # CSRF Protection
     csrf_secret_key: str = ""  # Separate secret for CSRF tokens (defaults to secret_key if not set)
     csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)

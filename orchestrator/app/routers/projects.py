@@ -302,6 +302,14 @@ async def _setup_base_project(
     if not base_repo:
         raise ValueError("Project base not found.")
 
+    # Initialize project settings from base metadata (for framework detection caching)
+    if base_repo.metadata:
+        if not db_project.settings:
+            db_project.settings = {}
+        db_project.settings.update(base_repo.metadata)
+        await db.commit()
+        logger.info(f"Initialized project settings from base metadata: {base_repo.metadata}")
+
     try:
         from ..services.git_manager import GitManager
         from ..services.credential_manager import get_credential_manager
