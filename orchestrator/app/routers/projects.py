@@ -931,6 +931,16 @@ async def get_dev_server_url(
 
             logger.info(f"[DEV-URL] Created {len(project_files)} files from database")
 
+            # Fix ownership for container access (containers run as uid=1000, gid=1000)
+            # This allows npm install and other write operations inside the container
+            try:
+                import subprocess
+                # Change ownership recursively to 1000:1000 (node user in container)
+                subprocess.run(['chown', '-R', '1000:1000', project_path], check=True, capture_output=True)
+                logger.info(f"[DEV-URL] Fixed ownership of {project_path} to 1000:1000")
+            except Exception as e:
+                logger.warning(f"[DEV-URL] Failed to fix ownership (non-critical): {e}")
+
         from ..dev_server_manager import get_container_manager
         container_manager = get_container_manager()
         url = await container_manager.start_container(project_path, str(project_id), current_user.id, project_slug=project.slug)

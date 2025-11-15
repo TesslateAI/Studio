@@ -1,11 +1,19 @@
 FROM node:20-alpine as builder
 
+# Accept build args for environment variables
+ARG VITE_PUBLIC_POSTHOG_KEY
+ARG VITE_PUBLIC_POSTHOG_HOST
+
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --force
+COPY package.json package-lock.json ./
+RUN npm install --prefer-offline --no-audit
 
 COPY . .
+
+# Set environment variables for Vite build
+ENV VITE_PUBLIC_POSTHOG_KEY=$VITE_PUBLIC_POSTHOG_KEY
+ENV VITE_PUBLIC_POSTHOG_HOST=$VITE_PUBLIC_POSTHOG_HOST
 RUN npm run build || npx vite build --mode production
 
 FROM nginx:alpine

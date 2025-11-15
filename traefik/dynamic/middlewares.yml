@@ -1,5 +1,11 @@
 http:
   middlewares:
+    # Strip /api prefix when routing to orchestrator
+    api-strip-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api"
+
     # Forward authentication middleware
     # Protects devcontainer access by verifying user identity
     devcontainer-auth:

@@ -1,0 +1,26 @@
+http:
+  routers:
+    orchestrator:
+      rule: "Host(`golockedin.com`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      service: orchestrator
+      entryPoints:
+        - web
+      priority: 100
+
+    app:
+      rule: "Host(`golockedin.com`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/traefik`)"
+      service: app
+      entryPoints:
+        - web
+      priority: 10
+
+  services:
+    orchestrator:
+      loadBalancer:
+        servers:
+          - url: "http://tesslate-orchestrator:8000"
+
+    app:
+      loadBalancer:
+        servers:
+          - url: "http://tesslate-app:80"
