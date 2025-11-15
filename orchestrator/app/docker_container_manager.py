@@ -777,9 +777,8 @@ class DockerContainerManager(BaseContainerManager):
         user_tier = "free"
 
         # Get user's subscription tier from database
+        from .database import AsyncSessionLocal
         try:
-            # Fetch user from database
-            from .database import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(User).where(User.id == user_id))
                 user = result.scalar_one_or_none()
@@ -815,6 +814,17 @@ class DockerContainerManager(BaseContainerManager):
             print("[WARN] Docker network setup failed, proceeding without custom network")
 
         abs_project_path = os.path.abspath(project_path)
+
+        # Fix ownership for container access (containers run as uid=1000, gid=1000)
+        # This allows npm install and other write operations inside the container
+        if os.path.exists(abs_project_path):
+            try:
+                import subprocess
+                # Change ownership recursively to 1000:1000 (node user in container)
+                subprocess.run(['chown', '-R', '1000:1000', abs_project_path], check=True, capture_output=True)
+                print(f"[PERMISSIONS] Fixed ownership of {abs_project_path} to 1000:1000")
+            except Exception as e:
+                print(f"[PERMISSIONS] Failed to fix ownership (non-critical): {e}")
 
         # Parse TESSLATE.md for startup configuration (command + port)
         tesslate_command, tesslate_port = self._parse_tesslate_startup_config(abs_project_path)
