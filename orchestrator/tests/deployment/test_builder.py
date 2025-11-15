@@ -40,7 +40,8 @@ class TestDeploymentBuilder:
         """Test successful build trigger."""
         builder = DeploymentBuilder()
 
-        with patch.object(builder.container_manager, "execute_command_in_container") as mock_exec:
+        # execute_command_in_container is an async method, so we need AsyncMock
+        with patch.object(builder.container_manager, "execute_command_in_container", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = (0, "Build completed successfully")
 
             with patch.object(builder, "_get_project_path") as mock_path:

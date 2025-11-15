@@ -10,7 +10,7 @@ This module tests the deployment API endpoints:
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, UTC
 
 from app.routers import deployment_credentials, deployment_oauth, deployments
 from app.models import DeploymentCredential, Deployment, Project, User
@@ -53,10 +53,33 @@ class TestDeploymentCredentialsRouter:
             mock_service.encrypt.return_value = "encrypted_token"
             mock_enc.return_value = mock_service
 
+            # Create a mock credential object with all required attributes
+            mock_credential = MagicMock(spec=DeploymentCredential)
+            mock_credential.id = uuid4()
+            mock_credential.user_id = mock_user.id
+            mock_credential.project_id = None
+            mock_credential.provider = "vercel"
+            mock_credential.access_token_encrypted = "encrypted_token"
+            mock_credential.metadata = {"team_id": "team_abc123"}
+            mock_credential.created_at = datetime.now()
+            mock_credential.updated_at = datetime.now()
+
             # Mock database operations
             mock_db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
             mock_db.commit = AsyncMock()
             mock_db.refresh = AsyncMock()
+            mock_db.add = MagicMock()
+
+            # Mock the credential object after add/refresh
+            def mock_refresh_side_effect(obj):
+                # Update the object with mock values
+                if isinstance(obj, MagicMock):
+                    obj.created_at = mock_credential.created_at
+                    obj.updated_at = mock_credential.updated_at
+                    obj.id = mock_credential.id
+
+            mock_db.refresh.side_effect = mock_refresh_side_effect
+            mock_db.rollback = AsyncMock()
 
             response = await deployment_credentials.create_credential(
                 request=request,
@@ -189,9 +212,9 @@ class TestDeploymentsRouter:
         mock_deployment.provider = "vercel"
         mock_deployment.status = "success"
         mock_deployment.deployment_url = "https://test.vercel.app"
-        mock_deployment.created_at = datetime.utcnow()
-        mock_deployment.updated_at = datetime.utcnow()
-        mock_deployment.completed_at = datetime.utcnow()
+        mock_deployment.created_at = datetime.now(UTC)
+        mock_deployment.updated_at = datetime.now(UTC)
+        mock_deployment.completed_at = datetime.now(UTC)
         mock_deployment.logs = ["Build started", "Build completed"]
         mock_deployment.error = None
         mock_deployment.deployment_id = "deploy_123"
@@ -233,9 +256,9 @@ class TestDeploymentsRouter:
         mock_deployment.provider = "vercel"
         mock_deployment.status = "success"
         mock_deployment.deployment_url = "https://test.vercel.app"
-        mock_deployment.created_at = datetime.utcnow()
-        mock_deployment.updated_at = datetime.utcnow()
-        mock_deployment.completed_at = datetime.utcnow()
+        mock_deployment.created_at = datetime.now(UTC)
+        mock_deployment.updated_at = datetime.now(UTC)
+        mock_deployment.completed_at = datetime.now(UTC)
         mock_deployment.logs = ["Build completed"]
         mock_deployment.error = None
         mock_deployment.deployment_id = "deploy_123"

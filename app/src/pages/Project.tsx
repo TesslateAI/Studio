@@ -40,7 +40,8 @@ import {
   SettingsPanel,
   AssetsPanel,
   KanbanPanel,
-  TerminalPanel
+  TerminalPanel,
+  DeploymentsPanel
 } from '../components/panels';
 import CodeEditor from '../components/CodeEditor';
 import { projectsApi, marketplaceApi, tasksApi } from '../lib/api';
@@ -49,7 +50,7 @@ import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
 import { motion, AnimatePresence } from 'framer-motion';
 
-type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
+type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | 'deployments' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 
 interface UIAgent {
@@ -476,15 +477,16 @@ export default function Project() {
       onClick: () => window.open('https://docs.tesslate.com', '_blank')
     },
     {
+      icon: <Rocket size={18} />,
+      title: 'Deployments',
+      onClick: () => togglePanel('deployments'),
+      active: activePanel === 'deployments'
+    },
+    {
       icon: <Gear size={18} />,
       title: 'Settings',
       onClick: () => togglePanel('settings'),
       active: activePanel === 'settings'
-    },
-    {
-      icon: <Rocket size={18} />,
-      title: 'Deploy',
-      onClick: () => toast('Deploy feature coming soon!', { icon: '🚀' })
     },
     {
       icon: <ShareNetwork size={18} />,
@@ -819,6 +821,17 @@ export default function Project() {
         onClose={() => setActivePanel(null)}
       >
         <SettingsPanel projectSlug={slug!} />
+      </FloatingPanel>
+
+      <FloatingPanel
+        title="Deployments"
+        icon={<Rocket size={20} />}
+        isOpen={activePanel === 'deployments'}
+        onClose={() => setActivePanel(null)}
+        defaultSize={{ width: 800, height: 700 }}
+        defaultPosition={{ x: 150, y: 100 }}
+      >
+        <DeploymentsPanel projectSlug={slug!} />
       </FloatingPanel>
 
       {/* Chat Interface or Empty State */}

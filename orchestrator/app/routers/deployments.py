@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from ..database import get_db
 from ..models import Deployment, DeploymentCredential, Project, User
-from ..auth import get_current_user
+from ..users import current_active_user
 from ..services.deployment_encryption import get_deployment_encryption_service, DeploymentEncryptionError
 from ..services.deployment.manager import DeploymentManager
 from ..services.deployment.base import DeploymentConfig
@@ -184,7 +184,7 @@ def prepare_provider_credentials(
 async def deploy_project(
     project_slug: str,
     request: DeploymentRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -424,7 +424,7 @@ async def list_project_deployments(
     status_filter: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -507,7 +507,7 @@ async def list_project_deployments(
 @router.get("/deployment/{deployment_id}", response_model=DeploymentResponse)
 async def get_deployment(
     deployment_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -567,7 +567,7 @@ async def get_deployment(
 @router.get("/deployment/{deployment_id}/status", response_model=DeploymentStatusResponse)
 async def get_deployment_status(
     deployment_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -653,7 +653,7 @@ async def get_deployment_status(
 @router.get("/deployment/{deployment_id}/logs", response_model=List[str])
 async def get_deployment_logs(
     deployment_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -731,7 +731,7 @@ async def get_deployment_logs(
 @router.delete("/deployment/{deployment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_deployment(
     deployment_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """

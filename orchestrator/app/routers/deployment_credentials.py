@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from ..database import get_db
 from ..models import DeploymentCredential, User, Project
-from ..auth import get_current_user
+from ..users import current_active_user
 from ..services.deployment_encryption import get_deployment_encryption_service, DeploymentEncryptionError
 from ..services.deployment.manager import DeploymentManager
 
@@ -82,11 +82,21 @@ class TestCredentialResponse(BaseModel):
     provider_info: Optional[dict] = None
 
 
+class CredentialListResponse(BaseModel):
+    """Response containing list of credentials."""
+    credentials: List[CredentialResponse]
+
+
+class ProviderListResponse(BaseModel):
+    """Response containing list of providers."""
+    providers: List[ProviderInfo]
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
 
-@router.get("/providers", response_model=List[ProviderInfo])
+@router.get("/providers", response_model=ProviderListResponse)
 async def list_providers():
     """
     List all available deployment providers.
@@ -96,7 +106,7 @@ async def list_providers():
     """
     try:
         providers = DeploymentManager.list_available_providers()
-        return providers
+        return {"providers": providers}
     except Exception as e:
         logger.error(f"Failed to list providers: {e}", exc_info=True)
         raise HTTPException(
@@ -105,11 +115,11 @@ async def list_providers():
         )
 
 
-@router.get("/", response_model=List[CredentialResponse])
+@router.get("/", response_model=CredentialListResponse)
 async def list_credentials(
     provider: Optional[str] = None,
     project_id: Optional[UUID] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -148,14 +158,14 @@ async def list_credentials(
                 user_id=cred.user_id,
                 project_id=cred.project_id,
                 provider=cred.provider,
-                metadata=cred.metadata,
+                metadata=cred.provider_metadata,
                 created_at=cred.created_at.isoformat(),
                 updated_at=cred.updated_at.isoformat(),
                 is_default=(cred.project_id is None)
             ))
 
         logger.info(f"User {current_user.id} listed {len(responses)} deployment credentials")
-        return responses
+        return {"credentials": responses}
 
     except Exception as e:
         logger.error(f"Failed to list credentials: {e}", exc_info=True)
@@ -168,7 +178,7 @@ async def list_credentials(
 @router.post("/", response_model=CredentialResponse, status_code=status.HTTP_201_CREATED)
 async def create_credential(
     request: CreateCredentialRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -232,7 +242,7 @@ async def create_credential(
         if existing:
             # Update existing credential
             existing.access_token_encrypted = encrypted_token
-            existing.metadata = request.metadata.model_dump() if request.metadata else None
+            existing.provider_metadata = request.metadata.model_dump() if request.metadata else None
             await db.commit()
             await db.refresh(existing)
 
@@ -243,7 +253,7 @@ async def create_credential(
                 user_id=existing.user_id,
                 project_id=existing.project_id,
                 provider=existing.provider,
-                metadata=existing.metadata,
+                metadata=existing.provider_metadata,
                 created_at=existing.created_at.isoformat(),
                 updated_at=existing.updated_at.isoformat(),
                 is_default=(existing.project_id is None)
@@ -255,7 +265,7 @@ async def create_credential(
                 project_id=request.project_id,
                 provider=provider_lower,
                 access_token_encrypted=encrypted_token,
-                metadata=request.metadata.model_dump() if request.metadata else None
+                provider_metadata=request.metadata.model_dump() if request.metadata else None
             )
 
             db.add(credential)
@@ -269,7 +279,7 @@ async def create_credential(
                 user_id=credential.user_id,
                 project_id=credential.project_id,
                 provider=credential.provider,
-                metadata=credential.metadata,
+                metadata=credential.provider_metadata,
                 created_at=credential.created_at.isoformat(),
                 updated_at=credential.updated_at.isoformat(),
                 is_default=(credential.project_id is None)
@@ -296,7 +306,7 @@ async def create_credential(
 async def update_credential(
     credential_id: UUID,
     request: UpdateCredentialRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -336,7 +346,7 @@ async def update_credential(
 
         # Update metadata if provided
         if request.metadata:
-            credential.metadata = request.metadata.model_dump()
+            credential.provider_metadata = request.metadata.model_dump()
 
         await db.commit()
         await db.refresh(credential)
@@ -348,7 +358,7 @@ async def update_credential(
             user_id=credential.user_id,
             project_id=credential.project_id,
             provider=credential.provider,
-            metadata=credential.metadata,
+            metadata=credential.provider_metadata,
             created_at=credential.created_at.isoformat(),
             updated_at=credential.updated_at.isoformat(),
             is_default=(credential.project_id is None)
@@ -374,7 +384,7 @@ async def update_credential(
 @router.delete("/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_credential(
     credential_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -423,7 +433,7 @@ async def delete_credential(
 @router.post("/test/{credential_id}", response_model=TestCredentialResponse)
 async def test_credential(
     credential_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -463,14 +473,14 @@ async def test_credential(
         provider_credentials = {"token": access_token}
 
         # Add metadata to credentials
-        if credential.metadata:
+        if credential.provider_metadata:
             if credential.provider == "cloudflare":
                 provider_credentials["api_token"] = access_token
-                if "account_id" in credential.metadata:
-                    provider_credentials["account_id"] = credential.metadata["account_id"]
+                if "account_id" in credential.provider_metadata:
+                    provider_credentials["account_id"] = credential.provider_metadata["account_id"]
             elif credential.provider in ["vercel", "netlify"]:
-                if "team_id" in credential.metadata:
-                    provider_credentials["team_id"] = credential.metadata["team_id"]
+                if "team_id" in credential.provider_metadata:
+                    provider_credentials["team_id"] = credential.provider_metadata["team_id"]
 
         # Get provider instance (this validates credentials)
         try:

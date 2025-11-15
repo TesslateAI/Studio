@@ -20,6 +20,7 @@ import AuthCallback from './pages/AuthCallback';
 import OAuthLoginCallback from './pages/OAuthLoginCallback';
 import Logout from './pages/Logout';
 import Referrals from './pages/Referrals';
+import AccountSettings from './pages/AccountSettings';
 import { Walkthrough } from './components/Walkthrough';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
@@ -206,6 +207,7 @@ function AppContent() {
             <Route path="/marketplace/success" element={<MarketplaceSuccess />} />
             <Route path="/library" element={<Library />} />
             <Route path="/feedback" element={<Feedback />} />
+            <Route path="/settings" element={<AccountSettings />} />
           </Route>
 
           {/* Standalone Routes */}
@@ -230,6 +232,15 @@ function AppContent() {
             element={
               <PrivateRoute>
                 <AdminDashboard />
+              </PrivateRoute>
+            }
+          />
+          {/* Account Settings Route */}
+          <Route
+            path="/settings"
+            element={
+              <PrivateRoute>
+                <AccountSettings />
               </PrivateRoute>
             }
           />
