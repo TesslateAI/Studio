@@ -90,6 +90,28 @@ class Settings(BaseSettings):
     # This is derived from secret_key if not provided
     github_token_encryption_key: str = ""
 
+    # Deployment Configuration
+    # Encryption key for deployment credentials (base64 encoded Fernet key)
+    # If not provided, derived from secret_key
+    # Generate a new key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    deployment_encryption_key: str = ""
+
+    # Deployment timeout in seconds (default: 600 = 10 minutes)
+    deployment_timeout: int = 600
+
+    # Default build output directory (can be overridden per framework)
+    deployment_build_dir: str = "dist"
+
+    # Provider-specific settings
+    # Cloudflare Workers API
+    cloudflare_api_base: str = "https://api.cloudflare.com/client/v4"
+
+    # Vercel API
+    vercel_api_base: str = "https://api.vercel.com"
+
+    # Netlify API
+    netlify_api_base: str = "https://api.netlify.com/api/v1"
+
     # CSRF Protection
     csrf_secret_key: str = ""  # Separate secret for CSRF tokens (defaults to secret_key if not set)
     csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)

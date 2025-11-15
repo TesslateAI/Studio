@@ -115,6 +115,13 @@ services:
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - COOKIE_SAMESITE=${COOKIE_SAMESITE:-lax}
       - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+      # Deployment Configuration
+      - DEPLOYMENT_ENCRYPTION_KEY=${DEPLOYMENT_ENCRYPTION_KEY:-}
+      - DEPLOYMENT_TIMEOUT=${DEPLOYMENT_TIMEOUT:-600}
+      - DEPLOYMENT_BUILD_DIR=${DEPLOYMENT_BUILD_DIR:-dist}
+      - CLOUDFLARE_API_BASE=${CLOUDFLARE_API_BASE:-https://api.cloudflare.com/client/v4}
+      - VERCEL_API_BASE=${VERCEL_API_BASE:-https://api.vercel.com}
+      - NETLIFY_API_BASE=${NETLIFY_API_BASE:-https://api.netlify.com/api/v1}
       # Stripe Payment Integration
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
