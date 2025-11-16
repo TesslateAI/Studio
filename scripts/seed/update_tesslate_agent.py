@@ -121,6 +121,7 @@ This is the reference implementation that showcases Tesslate's core methodology 
         agent.system_prompt = TESSLATE_AGENT_SYSTEM_PROMPT
         agent.source_type = "open"  # Make it open source
         agent.is_forkable = True     # Allow forking
+        agent.tools = None           # Access to all tools
         agent.features = [
             "Autonomous coding",
             "Multi-step planning",
@@ -135,6 +136,7 @@ This is the reference implementation that showcases Tesslate's core methodology 
         print("✓ Updated system_prompt")
         print("✓ Set source_type='open'")
         print("✓ Set is_forkable=True")
+        print("✓ Set tools=None (all tools)")
         print("✓ Updated description and features")
 
         await db.commit()

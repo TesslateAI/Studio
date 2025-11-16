@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package,
@@ -42,6 +42,9 @@ import {
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileMenu } from '../components/ui';
 import { ConfirmDialog } from '../components/modals';
+import { MarkerPalette } from '../components/ui/MarkerPalette';
+import { ToolManagement } from '../components/ToolManagement';
+import { ImageUpload } from '../components/ImageUpload';
 import { marketplaceApi, secretsApi, usersApi, billingApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
@@ -59,9 +62,11 @@ interface LibraryAgent {
   source_type: 'open' | 'closed';
   is_forkable: boolean;
   icon: string;
+  avatar_url?: string | null;
   pricing_type: string;
   features: string[];
   tools?: string[] | null;
+  tool_configs?: Record<string, { description?: string; examples?: string[] }> | null;
   purchase_date: string;
   purchase_type: string;
   expires_at: string | null;
@@ -463,17 +468,43 @@ export default function Library() {
           onClose={() => setEditingAgent(null)}
           onSave={async (updatedData) => {
             try {
-              const response = await marketplaceApi.updateAgent(editingAgent.id, updatedData);
-              if (response.forked) {
-                toast.success('Created a custom fork with your changes!');
+              let response;
+              if (!editingAgent.id || editingAgent.id === '') {
+                // Creating a new agent
+                const createData = {
+                  name: updatedData.name || '',
+                  description: updatedData.description || '',
+                  system_prompt: updatedData.system_prompt || '',
+                  mode: 'agent',
+                  agent_type: 'IterativeAgent',
+                  model: updatedData.model || (models.length > 0 ? models[0].id : ''),
+                };
+                response = await marketplaceApi.createCustomAgent(createData);
+
+                // Update with additional fields (tools, tool_configs, avatar_url)
+                if (updatedData.tools || updatedData.tool_configs || updatedData.avatar_url) {
+                  await marketplaceApi.updateAgent(response.id, {
+                    tools: updatedData.tools,
+                    tool_configs: updatedData.tool_configs,
+                    avatar_url: updatedData.avatar_url,
+                  });
+                }
+
+                toast.success('Agent created successfully!');
               } else {
-                toast.success('Agent updated successfully');
+                // Updating existing agent
+                response = await marketplaceApi.updateAgent(editingAgent.id, updatedData);
+                if (response.forked) {
+                  toast.success('Created a custom fork with your changes!');
+                } else {
+                  toast.success('Agent updated successfully');
+                }
               }
               setEditingAgent(null);
               loadLibraryAgents();
             } catch (error: any) {
-              console.error('Update failed:', error);
-              toast.error(error.response?.data?.detail || 'Failed to update agent');
+              console.error('Save failed:', error);
+              toast.error(error.response?.data?.detail || 'Failed to save agent');
             }
           }}
         />
@@ -563,6 +594,46 @@ function AgentsTab({
           </div>
           <div className="text-sm text-[var(--text)]/60">Custom</div>
         </div>
+      </div>
+
+      {/* Create New Agent Button */}
+      <div className="mb-6">
+        <button
+          onClick={() => {
+            const newAgent: LibraryAgent = {
+              id: '',
+              name: '',
+              slug: '',
+              description: '',
+              category: 'general',
+              mode: 'agent',
+              agent_type: 'IterativeAgent',
+              model: models.length > 0 ? models[0].id : '',
+              source_type: 'open',
+              is_forkable: false,
+              icon: '🤖',
+              avatar_url: null,
+              pricing_type: 'free',
+              features: [],
+              tools: [],
+              tool_configs: {},
+              purchase_date: new Date().toISOString(),
+              purchase_type: 'free',
+              expires_at: null,
+              is_custom: true,
+              parent_agent_id: null,
+              system_prompt: '',
+              is_enabled: true,
+              is_published: false,
+              usage_count: 0
+            };
+            setEditingAgent(newAgent);
+          }}
+          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors flex items-center gap-2"
+        >
+          <Plus size={18} />
+          Create New Agent
+        </button>
       </div>
 
       {/* Agents Grid */}
@@ -1377,7 +1448,17 @@ function AgentCard({
 
       {/* Header */}
       <div className="flex items-start gap-4 mb-4 pr-20">
-        <div className="text-4xl">{agent.icon}</div>
+        {agent.avatar_url ? (
+          <img
+            src={agent.avatar_url}
+            alt={agent.name}
+            className="w-16 h-16 rounded-xl object-cover border-2 border-[var(--text)]/10"
+          />
+        ) : (
+          <div className="w-16 h-16 rounded-xl bg-[var(--surface)] border-2 border-[var(--text)]/10 flex items-center justify-center p-3">
+            <img src="/favicon.svg" alt="Tesslate" className="w-full h-full" />
+          </div>
+        )}
         <div className="flex-1">
           <h3 className="font-heading font-bold text-[var(--text)] text-xl mb-2">{agent.name}</h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -1450,20 +1531,27 @@ function AgentCard({
       {/* Tools */}
       <div className="mb-4">
         <div className="flex flex-wrap gap-1.5">
-          {(agent.tools && agent.tools.length > 0 ? agent.tools : ALL_TOOLS).map((toolName, idx) => {
-            const tool = getToolIcon(toolName);
-            if (!tool) return null;
-            return (
-              <div
-                key={idx}
-                className="flex items-center gap-1 px-2 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs rounded-md font-medium"
-                title={tool.label}
-              >
-                {tool.icon}
-                <span>{tool.label}</span>
-              </div>
-            );
-          })}
+          {!agent.tools || agent.tools.length === 0 ? (
+            <div className="flex items-center gap-1 px-2 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs rounded-md font-medium">
+              <Wrench size={12} />
+              <span>All Tools</span>
+            </div>
+          ) : (
+            agent.tools.map((toolName, idx) => {
+              const tool = getToolIcon(toolName);
+              if (!tool) return null;
+              return (
+                <div
+                  key={idx}
+                  className="flex items-center gap-1 px-2 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs rounded-md font-medium"
+                  title={tool.label}
+                >
+                  {tool.icon}
+                  <span>{tool.label}</span>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -1563,7 +1651,7 @@ function EditAgentModal({
   agent: LibraryAgent;
   availableModels: string[];
   onClose: () => void;
-  onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string }) => void;
+  onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string; tools?: string[]; tool_configs?: Record<string, { description?: string; examples?: string[] }>; avatar_url?: string | null }) => void;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description);
@@ -1571,10 +1659,37 @@ function EditAgentModal({
   const currentModel = agent.selected_model || agent.model;
   const [model, setModel] = useState(currentModel);
   const [originalPrompt] = useState(agent.system_prompt || '');
+  const [tools, setTools] = useState<string[]>(agent.tools || []);
+  const [toolConfigs, setToolConfigs] = useState<Record<string, { description?: string; examples?: string[] }>>(agent.tool_configs || {});
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(agent.avatar_url || null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleReset = () => {
     setSystemPrompt(originalPrompt);
     toast.success('Reset to original system prompt');
+  };
+
+  const insertMarker = (marker: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = systemPrompt;
+
+    const newText =
+      text.substring(0, start) +
+      `{${marker}}` +
+      text.substring(end);
+
+    setSystemPrompt(newText);
+
+    // Move cursor after inserted marker
+    setTimeout(() => {
+      textarea.focus();
+      const newPos = start + marker.length + 2;
+      textarea.setSelectionRange(newPos, newPos);
+    }, 0);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1583,13 +1698,16 @@ function EditAgentModal({
       name,
       description,
       system_prompt: systemPrompt,
-      model
+      model,
+      tools,
+      tool_configs: toolConfigs,
+      avatar_url: avatarUrl
     });
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-3xl lg:max-w-6xl w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
             <Pencil size={24} />
@@ -1604,84 +1722,126 @@ function EditAgentModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Agent Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
-              required
-            />
-          </div>
+          {/* Two-column layout on desktop */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column: Basic Info & System Prompt */}
+            <div className="space-y-4">
+              {/* Logo Upload */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Agent Logo
+                </label>
+                <ImageUpload
+                  value={avatarUrl}
+                  onChange={setAvatarUrl}
+                  maxSizeKB={200}
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Description
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
-              required
-            />
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Agent Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                  required
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Model
-            </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-              disabled={agent.source_type !== 'open' && !agent.is_custom}
-            >
-              {availableModels.length > 0 ? (
-                availableModels.map((modelName) => (
-                  <option key={modelName} value={modelName}>
-                    {modelName}
-                  </option>
-                ))
-              ) : (
-                <option value={model}>{model}</option>
-              )}
-            </select>
-            {agent.source_type !== 'open' && !agent.is_custom && (
-              <p className="mt-1 text-xs text-[var(--text)]/40">
-                Model can only be changed for open source agents
-              </p>
-            )}
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                  required
+                />
+              </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-[var(--text)]">
-                System Prompt
-              </label>
-              {systemPrompt !== originalPrompt && (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 text-xs rounded transition-colors"
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Model
+                </label>
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                  disabled={agent.source_type !== 'open' && !agent.is_custom}
                 >
-                  Reset to Default
-                </button>
-              )}
+                  {availableModels.length > 0 ? (
+                    availableModels.map((modelName) => (
+                      <option key={modelName} value={modelName}>
+                        {modelName}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={model}>{model}</option>
+                  )}
+                </select>
+                {agent.source_type !== 'open' && !agent.is_custom && (
+                  <p className="mt-1 text-xs text-[var(--text)]/40">
+                    Model can only be changed for open source agents
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-[var(--text)]">
+                    System Prompt
+                  </label>
+                  {systemPrompt !== originalPrompt && (
+                    <button
+                      type="button"
+                      onClick={handleReset}
+                      className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 text-xs rounded transition-colors"
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  ref={textareaRef}
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  rows={12}
+                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm resize-y"
+                  required
+                />
+                <p className="mt-1 text-xs text-[var(--text)]/40">
+                  {systemPrompt.length} characters
+                </p>
+
+                {/* Marker Palette */}
+                <div className="mt-4 p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
+                  <h3 className="text-sm font-semibold text-[var(--text)] mb-3">
+                    Available Markers
+                  </h3>
+                  <MarkerPalette onInsertMarker={insertMarker} />
+                </div>
+              </div>
             </div>
-            <textarea
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={10}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm resize-y"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              {systemPrompt.length} characters
-            </p>
+
+            {/* Right Column: Tool Management */}
+            <div className="space-y-4">
+              <div className="p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
+                <ToolManagement
+                  selectedTools={tools}
+                  toolConfigs={toolConfigs}
+                  onToolsChange={(newTools, newConfigs) => {
+                    setTools(newTools);
+                    setToolConfigs(newConfigs);
+                  }}
+                  availableModels={availableModels}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">

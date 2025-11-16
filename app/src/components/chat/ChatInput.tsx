@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
 import { ToolDropdown } from './ToolDropdown';
+import { EditModeStatus, type EditMode } from './EditModeStatus';
 import { Gear } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
@@ -32,6 +33,9 @@ interface ChatInputProps {
   onStop?: () => void;
   onClearHistory?: () => void;
   isExpanded?: boolean;
+  editMode?: EditMode;
+  onModeChange?: (mode: EditMode) => void;
+  onPlanMode?: () => void;
 }
 
 export function ChatInput({
@@ -46,7 +50,10 @@ export function ChatInput({
   isExecuting = false,
   onStop,
   onClearHistory,
-  isExpanded = true
+  isExpanded = true,
+  editMode = 'allow',
+  onModeChange,
+  onPlanMode
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -59,6 +66,7 @@ export function ChatInput({
   // Available slash commands
   const slashCommands = [
     { command: '/clear', description: 'Clear chat history' },
+    { command: '/plan', description: 'Toggle plan mode' },
     // Add more commands here as needed
   ];
 
@@ -103,6 +111,11 @@ export function ChatInput({
     if (cmd === '/clear') {
       if (onClearHistory) {
         onClearHistory();
+        setMessage('');
+      }
+    } else if (cmd === '/plan') {
+      if (onPlanMode) {
+        onPlanMode();
         setMessage('');
       }
     }
@@ -273,7 +286,12 @@ export function ChatInput({
       )}
 
       {/* Two-row layout */}
-      <div className={`flex flex-col bg-[var(--surface)] border-2 border-[var(--border-color)] w-full ${isExpanded ? 'rounded-b-3xl' : 'rounded-3xl'} max-md:rounded-b-none`}>
+      <div className={`flex flex-col bg-[var(--surface)] border w-full ${isExpanded ? 'rounded-b-3xl' : 'rounded-3xl'} max-md:rounded-b-none ${
+        editMode === 'ask' ? 'border-gray-400' :
+        editMode === 'allow' ? 'border-orange-400' :
+        editMode === 'plan' ? 'border-green-400' :
+        'border-[var(--border-color)]'
+      }`}>
         {/* First row: Growing textarea */}
         <div className="px-3 flex items-center border-b border-[var(--border-color)]" style={{ minHeight: '44px' }}>
           <textarea
@@ -306,6 +324,17 @@ export function ChatInput({
 
           {/* Spacer */}
           <div className="flex-1" />
+
+          {/* Edit Mode Status */}
+          {onModeChange && (
+            <div className="flex-shrink-0">
+              <EditModeStatus
+                mode={editMode}
+                onModeChange={onModeChange}
+                className="scale-90"
+              />
+            </div>
+          )}
 
           {/* Settings button */}
           <button

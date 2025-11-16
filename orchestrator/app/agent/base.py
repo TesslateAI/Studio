@@ -9,6 +9,7 @@ can be dynamically instantiated and executed.
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Dict, Any, Optional
 from .tools.registry import ToolRegistry
+from .prompts import substitute_markers
 
 
 class AbstractAgent(ABC):
@@ -33,6 +34,23 @@ class AbstractAgent(ABC):
         """
         self.system_prompt = system_prompt
         self.tools = tools
+
+    def get_processed_system_prompt(self, context: Dict[str, Any]) -> str:
+        """
+        Get the system prompt with markers substituted based on runtime context.
+
+        This method should be called by agent implementations whenever they need
+        to use the system prompt, to ensure markers like {mode}, {mode_instructions},
+        {project_name}, etc. are replaced with actual values.
+
+        Args:
+            context: Execution context containing edit_mode, project_context, etc.
+
+        Returns:
+            System prompt with all {marker} placeholders replaced
+        """
+        tool_names = list(self.tools._tools.keys()) if self.tools else None
+        return substitute_markers(self.system_prompt, context, tool_names)
 
     @abstractmethod
     async def run(

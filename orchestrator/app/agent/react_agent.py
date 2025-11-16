@@ -1,9 +1,12 @@
 """
-Iterative Agent
+ReAct Agent
 
-Model-agnostic agent that uses a think-act-reflect loop with tool calling.
-This agent iteratively processes tasks by thinking, calling tools, and reflecting
-on results until the task is complete.
+A ReAct (Reasoning + Acting) agent that explicitly separates reasoning from action.
+This agent follows the ReAct paradigm: Thought (Reasoning) → Action → Observation loop
+until the task is complete.
+
+Based on the paper "ReAct: Synergizing Reasoning and Acting in Language Models"
+https://arxiv.org/abs/2210.03629
 """
 
 import logging
@@ -47,16 +50,16 @@ def _convert_uuids_to_strings(obj: Any) -> Any:
 
 
 @dataclass
-class AgentStep:
+class ReActStep:
     """
-    Represents one iteration of the agent's execution loop.
+    Represents one iteration of the ReAct agent's execution loop.
 
-    Each step captures the agent's thinking, actions taken, and results received.
+    Each step captures the agent's reasoning, actions taken, and observations received.
     """
     iteration: int
-    thought: Optional[str]
-    tool_calls: List[ToolCall]
-    tool_results: List[Dict[str, Any]]
+    thought: Optional[str]  # Reasoning step
+    tool_calls: List[ToolCall]  # Actions
+    tool_results: List[Dict[str, Any]]  # Observations
     response_text: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     is_complete: bool = False
@@ -80,18 +83,21 @@ class AgentStep:
         }
 
 
-class IterativeAgent(AbstractAgent):
+class ReActAgent(AbstractAgent):
     """
-    Iterative agent that works with any language model.
+    ReAct agent that explicitly implements the Reasoning + Acting paradigm.
 
     Uses prompt engineering and regex parsing to enable tool calling
     without requiring model-specific function calling APIs.
 
-    This agent follows a think-act-reflect loop:
-    1. Think: Analyze the task and decide what to do
-    2. Act: Execute tools to accomplish sub-tasks
-    3. Reflect: Review results and decide next steps
+    This agent follows the ReAct loop:
+    1. Thought (Reasoning): Analyze the task and reason about what to do
+    2. Action: Execute tools to accomplish sub-tasks
+    3. Observation: Receive and analyze results
     4. Repeat until task is complete
+
+    The key difference from IterativeAgent is the explicit emphasis on
+    structured reasoning before each action.
     """
 
     def __init__(
@@ -101,7 +107,7 @@ class IterativeAgent(AbstractAgent):
         model: Optional[ModelAdapter] = None
     ):
         """
-        Initialize the Iterative Agent.
+        Initialize the ReAct Agent.
 
         Args:
             system_prompt: The system prompt for the agent
@@ -117,12 +123,12 @@ class IterativeAgent(AbstractAgent):
         self.messages: List[Dict[str, str]] = []
 
         # Execution tracking
-        self.steps: List[AgentStep] = []
+        self.steps: List[ReActStep] = []
         self.tool_calls_count = 0
         self.last_step_had_errors = False  # Track if previous iteration had errors
 
         logger.info(
-            f"IterativeAgent initialized - "
+            f"ReActAgent initialized - "
             f"tools: {len(self.tools._tools) if self.tools else 0}"
         )
 
@@ -136,13 +142,13 @@ class IterativeAgent(AbstractAgent):
         context: Dict[str, Any]
     ) -> AsyncIterator[Dict[str, Any]]:
         """
-        Run the agent to complete a user request.
+        Run the ReAct agent to complete a user request.
 
-        This is the main agent loop that:
-        1. Gets response from model
-        2. Parses for tool calls
+        This is the main ReAct loop that:
+        1. Gets reasoning + action from model
+        2. Parses for tool calls (actions)
         3. Executes tools
-        4. Feeds results back to model
+        4. Feeds observations back to model
         5. Repeats until complete or max iterations
 
         Args:
@@ -159,7 +165,7 @@ class IterativeAgent(AbstractAgent):
             }
             return
 
-        logger.info(f"[IterativeAgent] Starting - request: {user_request[:100]}...")
+        logger.info(f"[ReActAgent] Starting - request: {user_request[:100]}...")
 
         # Initialize resource limits tracking
         limits = get_resource_limits()
@@ -191,24 +197,24 @@ class IterativeAgent(AbstractAgent):
         # Include chat history if provided (for conversation continuity)
         chat_history = context.get('chat_history', [])
         if chat_history:
-            logger.info(f"[IterativeAgent] Including {len(chat_history)} previous messages for context")
+            logger.info(f"[ReActAgent] Including {len(chat_history)} previous messages for context")
             self.messages.extend(chat_history)
 
         # Add current user message
         self.messages.append({"role": "user", "content": user_message})
 
-        # Main agent loop
+        # Main ReAct loop
         iteration = 0
         try:
             while True:
                 iteration += 1
-                logger.info(f"[IterativeAgent] Iteration {iteration}")
+                logger.info(f"[ReActAgent] Iteration {iteration}")
 
                 # Track iteration globally
                 try:
                     limits.add_iteration(run_id)
                 except ResourceLimitExceeded as e:
-                    logger.warning(f"[IterativeAgent] Resource limit exceeded: {e}")
+                    logger.warning(f"[ReActAgent] Resource limit exceeded: {e}")
                     yield {
                         'type': 'error',
                         'content': f'Resource limit exceeded: {str(e)}'
@@ -228,7 +234,7 @@ class IterativeAgent(AbstractAgent):
                     return
 
                 # DEBUG: Log full context being sent to LLM
-                logger.debug(f"[IterativeAgent] Context sent to LLM (iteration {iteration}):")
+                logger.debug(f"[ReActAgent] Context sent to LLM (iteration {iteration}):")
                 for idx, msg in enumerate(self.messages):
                     role = msg['role']
                     content = msg['content']
@@ -249,9 +255,9 @@ class IterativeAgent(AbstractAgent):
                         }
 
                     # DEBUG: Log full model response
-                    logger.debug(f"[IterativeAgent] Full model response (iteration {iteration}):")
+                    logger.debug(f"[ReActAgent] Full model response (iteration {iteration}):")
                     logger.debug(f"  {response}")
-                    logger.debug(f"[IterativeAgent] Model response complete: {response[:200]}...")
+                    logger.debug(f"[ReActAgent] Model response complete: {response[:200]}...")
 
                     # Step 2: Parse response
                     tool_calls = self.parser.parse(response)
@@ -259,23 +265,22 @@ class IterativeAgent(AbstractAgent):
                     is_complete = self.parser.is_complete(response)
 
                     logger.info(
-                        f"[IterativeAgent] Iteration {iteration} - "
+                        f"[ReActAgent] Iteration {iteration} - "
                         f"tool_calls: {len(tool_calls)}, complete: {is_complete}"
                     )
 
                     # DEBUG: Log parsed data
-                    logger.debug(f"[IterativeAgent] Parsed thought: {thought}")
-                    logger.debug(f"[IterativeAgent] Parsed tool_calls: {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}")
-                    logger.debug(f"[IterativeAgent] Is complete: {is_complete}")
+                    logger.debug(f"[ReActAgent] Parsed thought (Reasoning): {thought}")
+                    logger.debug(f"[ReActAgent] Parsed tool_calls (Actions): {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}")
+                    logger.debug(f"[ReActAgent] Is complete: {is_complete}")
 
-                    # Step 3: Execute tools if any
-                    # IMPORTANT: Always execute tool calls even if task is marked complete
-                    # The agent may need to perform final actions before completion
+                    # Step 3: Execute tools (Actions) if any
                     tool_results = []
                     if tool_calls:
                         tool_results = await self._execute_tool_calls(tool_calls, context)
+                        self.tool_calls_count += len(tool_calls)
 
-                        # Check for approval requests
+                        # Check for approval requests (Ask Before Edit mode)
                         for idx, result in enumerate(tool_results):
                             if result.get("approval_required"):
                                 from .tools.approval_manager import get_approval_manager
@@ -299,17 +304,17 @@ class IterativeAgent(AbstractAgent):
                                     }
                                 }
 
-                                logger.info(f"[IterativeAgent] Waiting for approval {approval_id}")
+                                logger.info(f"[ReActAgent] Waiting for user approval for {result['tool']}")
 
                                 # Wait for user response
                                 await request.event.wait()
 
-                                logger.info(f"[IterativeAgent] Received response: {request.response}")
+                                logger.info(f"[ReActAgent] Received approval response: {request.response}")
 
                                 # Handle response
                                 if request.response == 'stop':
                                     # User cancelled - terminate agent execution completely
-                                    logger.info(f"[IterativeAgent] User stopped execution at {result['tool']}")
+                                    logger.info(f"[ReActAgent] User stopped execution at {result['tool']}")
                                     yield {
                                         'type': 'complete',
                                         'data': {
@@ -322,7 +327,7 @@ class IterativeAgent(AbstractAgent):
                                     return  # Terminate agent execution
                                 else:
                                     # allow_once or allow_all - retry execution with approval check bypassed
-                                    logger.info(f"[IterativeAgent] Retrying {tool_calls[idx].name} with approval granted")
+                                    logger.info(f"[ReActAgent] Retrying {tool_calls[idx].name} with approval granted")
                                     # Create modified context that skips approval check for this execution
                                     approved_context = {**context, 'skip_approval_check': True}
                                     tool_results[idx] = await self.tools.execute(
@@ -330,8 +335,6 @@ class IterativeAgent(AbstractAgent):
                                         parameters=tool_calls[idx].parameters,
                                         context=approved_context
                                     )
-
-                        self.tool_calls_count += len(tool_calls)
 
                         # Check if any tools failed or had parse errors
                         self.last_step_had_errors = any(
@@ -344,22 +347,9 @@ class IterativeAgent(AbstractAgent):
                     # Record this step and yield to client
                     # Always extract conversational text to hide internal thinking from users
                     conversational = self.parser.get_conversational_text(response)
+                    display_text = conversational if conversational else response
 
-                    # If no conversational text, create a user-friendly summary
-                    if conversational:
-                        display_text = conversational
-                    elif tool_calls:
-                        # Show what tools are being executed
-                        tool_names = [tc.name for tc in tool_calls]
-                        if len(tool_names) == 1:
-                            display_text = f"Executing {tool_names[0]}..."
-                        else:
-                            display_text = f"Executing {len(tool_names)} tools: {', '.join(tool_names)}"
-                    else:
-                        # Show the thought if available, otherwise full response
-                        display_text = thought if thought else response
-
-                    step = AgentStep(
+                    step = ReActStep(
                         iteration=iteration,
                         thought=thought,
                         tool_calls=tool_calls,
@@ -392,7 +382,7 @@ class IterativeAgent(AbstractAgent):
                     # Step 4: Update conversation history
                     self.messages.append({"role": "assistant", "content": response})
 
-                    # Step 5: Feed tool results back to model (if any)
+                    # Step 5: Feed tool results back to model (Observations)
                     if tool_results:
                         results_text = self._format_tool_results(tool_results)
                         self.messages.append({"role": "user", "content": results_text})
@@ -402,19 +392,19 @@ class IterativeAgent(AbstractAgent):
                         # DON'T allow completion if there were errors in this iteration
                         if self.last_step_had_errors:
                             logger.warning(
-                                f"[IterativeAgent] Task marked complete but had errors in iteration {iteration}. "
+                                f"[ReActAgent] Task marked complete but had errors in iteration {iteration}. "
                                 f"Continuing to force retry."
                             )
                             # Add instruction to retry
                             retry_instruction = (
-                                "\n\nYou marked the task as complete, but the previous tool calls had errors. "
+                                "\n\nYou marked the task as complete, but the previous actions had errors. "
                                 "You MUST fix the errors first before completing the task. "
                                 "Retry the failed operations with corrected parameters."
                             )
                             self.messages.append({"role": "user", "content": retry_instruction})
                             continue  # Force next iteration
 
-                        logger.info(f"[IterativeAgent] Task completed in {iteration} iterations")
+                        logger.info(f"[ReActAgent] Task completed in {iteration} iterations")
                         conversational_text = self.parser.get_conversational_text(response)
                         yield {
                             'type': 'complete',
@@ -436,12 +426,12 @@ class IterativeAgent(AbstractAgent):
                         # DON'T complete if the previous iteration had errors - require retry
                         if self.last_step_had_errors:
                             logger.warning(
-                                f"[IterativeAgent] No tool calls in iteration {iteration}, "
+                                f"[ReActAgent] No tool calls in iteration {iteration}, "
                                 f"but previous step had errors. Continuing to force retry."
                             )
                             # Add instruction to retry
                             retry_instruction = (
-                                "\n\nThe previous tool calls had errors. "
+                                "\n\nThe previous actions had errors. "
                                 "You MUST retry the failed operations with corrected parameters. "
                                 "Do NOT give up - fix the errors and try again."
                             )
@@ -449,7 +439,7 @@ class IterativeAgent(AbstractAgent):
                             continue  # Force next iteration
 
                         # No tool calls in this iteration - assume complete
-                        logger.info(f"[IterativeAgent] No tool calls in iteration {iteration}, assuming complete")
+                        logger.info(f"[ReActAgent] No tool calls in iteration {iteration}, assuming complete")
                         yield {
                             'type': 'complete',
                             'data': {
@@ -464,7 +454,7 @@ class IterativeAgent(AbstractAgent):
                         return
 
                 except Exception as e:
-                    logger.error(f"[IterativeAgent] Iteration {iteration} error: {e}", exc_info=True)
+                    logger.error(f"[ReActAgent] Iteration {iteration} error: {e}", exc_info=True)
                     yield {
                         'type': 'error',
                         'content': f'Agent error: {str(e)}'
@@ -493,17 +483,17 @@ class IterativeAgent(AbstractAgent):
         context: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Execute a list of tool calls.
+        Execute a list of tool calls (Actions in ReAct terminology).
 
         Args:
             tool_calls: List of ToolCall objects
             context: Execution context
 
         Returns:
-            List of tool results
+            List of tool results (Observations in ReAct terminology)
         """
         if not self.tools:
-            logger.error("[IterativeAgent] No tool registry available")
+            logger.error("[ReActAgent] No tool registry available")
             return [{
                 "success": False,
                 "error": "No tool registry available"
@@ -514,7 +504,7 @@ class IterativeAgent(AbstractAgent):
         for i, tool_call in enumerate(tool_calls):
             # Handle parse errors specially
             if tool_call.name == "__parse_error__":
-                logger.warning(f"[IterativeAgent] Parse error detected for tool: {tool_call.parameters.get('tool_name')}")
+                logger.warning(f"[ReActAgent] Parse error detected for tool: {tool_call.parameters.get('tool_name')}")
                 result = {
                     "success": False,
                     "tool": tool_call.parameters.get('tool_name', 'unknown'),
@@ -530,7 +520,7 @@ class IterativeAgent(AbstractAgent):
                 results.append(result)
                 continue
 
-            logger.info(f"[IterativeAgent] Executing tool {i+1}/{len(tool_calls)}: {tool_call.name}")
+            logger.info(f"[ReActAgent] Executing action {i+1}/{len(tool_calls)}: {tool_call.name}")
 
             result = await self.tools.execute(
                 tool_name=tool_call.name,
@@ -540,28 +530,28 @@ class IterativeAgent(AbstractAgent):
 
             results.append(result)
 
-            # Log result
+            # Log result (Observation)
             if result.get("success", False):
-                logger.info(f"[IterativeAgent] Tool {tool_call.name} succeeded")
+                logger.info(f"[ReActAgent] Action {tool_call.name} succeeded")
             else:
-                logger.warning(f"[IterativeAgent] Tool {tool_call.name} failed: {result.get('error')}")
+                logger.warning(f"[ReActAgent] Action {tool_call.name} failed: {result.get('error')}")
 
         return results
 
     def _format_tool_results(self, results: List[Dict[str, Any]]) -> str:
         """
-        Format tool results for feeding back to the model with intelligent truncation.
+        Format tool results (Observations) for feeding back to the model.
 
         Args:
             results: List of tool execution results
 
         Returns:
-            Formatted string
+            Formatted string with observations
         """
         MAX_OUTPUT_LENGTH = 10000
         MAX_PREVIEW_LENGTH = 5000
 
-        formatted = ["Tool Results:\n"]
+        formatted = ["Observation:\n"]
 
         for i, result in enumerate(results, 1):
             tool_name = result.get("tool", "unknown")
@@ -684,10 +674,10 @@ class IterativeAgent(AbstractAgent):
 
     def _get_system_prompt(self, context: Dict[str, Any]) -> str:
         """
-        Build the complete system prompt for the agent.
+        Build the complete system prompt for the ReAct agent.
 
         The prompt has two parts:
-        1. Agent's custom system prompt (with marker substitution)
+        1. Agent's custom system prompt (with marker substitution) emphasizing ReAct methodology
         2. Tool information (available tools, formatting, usage rules)
 
         Args:
@@ -719,11 +709,16 @@ class IterativeAgent(AbstractAgent):
             return ""
 
         tools_text = [
-            "\n\n=== TOOL USAGE AND FORMATTING ===",
+            "\n\n=== REACT METHODOLOGY: REASONING + ACTING ===",
             "",
-            "Your actions are communicated through pure JSON format. You must include a THOUGHT section before every tool call to explain your reasoning.",
+            "You must follow the ReAct paradigm: Thought → Action → Observation.",
             "",
-            "CRITICAL: Tool calls must be VALID JSON objects or arrays.",
+            "1. THOUGHT: Explain your reasoning about what to do next and why.",
+            "2. ACTION: Execute tools (formatted as JSON) to gather information or make changes.",
+            "3. OBSERVATION: You will receive results from your actions.",
+            "4. Repeat this cycle until the task is complete.",
+            "",
+            "CRITICAL: Every action MUST be preceded by a THOUGHT section explaining your reasoning.",
             "",
             "JSON Formatting Rules (MUST FOLLOW):",
             "1. ALL quotes inside string values MUST be escaped with backslash: \\\"",
@@ -736,7 +731,7 @@ class IterativeAgent(AbstractAgent):
             '{"message": "Line 1\\nLine 2\\nLine 3"}',
             '{"path": "C:\\\\Users\\\\Documents\\\\file.txt"}',
             "",
-            "Tool Call Format (Single Tool):",
+            "ReAct Format (Single Action):",
             "",
             "THOUGHT: I need to understand the current file structure to locate the main application file.",
             "",
@@ -747,9 +742,9 @@ class IterativeAgent(AbstractAgent):
             '  }',
             '}',
             "",
-            "Tool Call Format (Multiple Tools):",
+            "ReAct Format (Multiple Actions):",
             "",
-            "THOUGHT: I'll read the App.jsx file and check the project dependencies.",
+            "THOUGHT: I'll read the App.jsx file and check the project dependencies to understand the current setup.",
             "",
             '[',
             '  {',
@@ -801,11 +796,11 @@ class IterativeAgent(AbstractAgent):
                     tools_text.append("")
 
         tools_text.extend([
-            "Rules and Constraints:",
+            "ReAct Rules and Constraints:",
             "",
-            "One Tool Call per Thought: Always include a THOUGHT section before tool calls.",
+            "Explicit Reasoning: ALWAYS include a THOUGHT section before actions explaining your reasoning.",
             "",
-            "Wait for Observation: ALWAYS wait for the observation from your previous tool use before issuing the next command. Do not assume the outcome of any action.",
+            "Wait for Observation: ALWAYS wait for the observation from your previous action before issuing the next command. Do not assume the outcome of any action.",
             "",
             "Conciseness: Be professional and concise. Do not provide conversational filler.",
             "",
@@ -816,7 +811,7 @@ class IterativeAgent(AbstractAgent):
             "",
             "Task Completion:",
             "",
-            "Output TASK_COMPLETE when you have fully satisfied the user's original request. Do NOT mark complete just because a tool succeeded. Verify the entire task is done."
+            "Output TASK_COMPLETE when you have fully satisfied the user's original request. Do NOT mark complete just because an action succeeded. Verify the entire task is done."
         ])
 
         return "\n".join(tools_text)

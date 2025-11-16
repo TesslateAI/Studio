@@ -350,6 +350,7 @@ async def get_marketplace_agents(
             "is_forkable": agent.is_forkable,
             "is_active": agent.is_active,
             "icon": agent.icon,
+            "avatar_url": agent.avatar_url,  # Custom logo/profile picture
             "pricing_type": agent.pricing_type,
             "price": agent.price / 100.0 if agent.price else 0,  # Convert cents to dollars
             "usage_count": agent.usage_count or 0,  # Number of messages sent to this agent
@@ -422,6 +423,7 @@ async def get_agent_details(
         "system_prompt": agent.system_prompt,  # Include system prompt for forking
         "model": agent.model,
         "icon": agent.icon,
+        "avatar_url": agent.avatar_url,  # Custom logo/profile picture
         "preview_image": agent.preview_image,
         "pricing_type": agent.pricing_type,
         "price": agent.price / 100.0 if agent.price else 0,
@@ -1100,13 +1102,15 @@ async def update_custom_agent(
                 system_prompt=update_data.get('system_prompt', agent.system_prompt),
                 mode=agent.mode,
                 agent_type=agent.agent_type,
-                tools=agent.tools,
+                tools=update_data.get('tools', agent.tools),
+                tool_configs=update_data.get('tool_configs', agent.tool_configs),
                 model=update_data.get('model', agent.model),
                 is_forkable=False,
                 parent_agent_id=agent.id,
                 forked_by_user_id=current_user.id,
                 config={},
                 icon=agent.icon,
+                avatar_url=update_data.get('avatar_url', agent.avatar_url),
                 preview_image=agent.preview_image,
                 pricing_type="free",
                 price=0,
@@ -1167,6 +1171,13 @@ async def update_custom_agent(
         agent.system_prompt = update_data['system_prompt']
     if update_data.get('model'):
         agent.model = update_data['model']
+    if 'tools' in update_data:
+        agent.tools = update_data['tools']
+    if 'tool_configs' in update_data:
+        agent.tool_configs = update_data['tool_configs']
+    if 'avatar_url' in update_data:
+        agent.avatar_url = update_data['avatar_url']
+    if update_data.get('model'):
         agent.required_models = [update_data['model']]
 
     await db.commit()
@@ -1214,8 +1225,11 @@ async def get_user_agents(
             "is_forkable": agent.is_forkable,
             "system_prompt": agent.system_prompt,  # Include for editing
             "icon": agent.icon,
+            "avatar_url": agent.avatar_url,  # Custom logo/profile picture
             "pricing_type": agent.pricing_type,
             "features": agent.features,
+            "tools": agent.tools,  # List of enabled tool names
+            "tool_configs": agent.tool_configs,  # Custom tool descriptions/examples
             "purchase_date": purchase.purchase_date.isoformat(),
             "purchase_type": purchase.purchase_type,
             "expires_at": purchase.expires_at.isoformat() if purchase.expires_at else None,

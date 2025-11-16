@@ -257,6 +257,7 @@ class MarketplaceAgent(Base):
     mode = Column(String, nullable=True)  # "stream" or "agent" (deprecated, use agent_type)
     agent_type = Column(String, nullable=True)  # StreamAgent, IterativeAgent, etc.
     tools = Column(JSON, nullable=True)  # List of tool names: ["read_file", "write_file", ...]
+    tool_configs = Column(JSON, nullable=True)  # Custom tool descriptions/prompts: {"read_file": {"description": "...", "examples": [...]}}
     model = Column(String, nullable=True)  # Specific model for this agent (e.g., "cerebras/llama3.1-8b")
 
     # Forking (for open source agents)
@@ -267,6 +268,7 @@ class MarketplaceAgent(Base):
     config = Column(JSON, nullable=True)  # Editable configuration for forked agents
 
     icon = Column(String, default="🤖")  # emoji or phosphor icon name
+    avatar_url = Column(String, nullable=True)  # URL to uploaded logo/profile picture
     preview_image = Column(String, nullable=True)
 
     # Pricing

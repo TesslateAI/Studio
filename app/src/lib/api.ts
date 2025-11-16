@@ -385,6 +385,12 @@ export const chatApi = {
       reader.releaseLock();
     }
   },
+  sendApprovalResponse: async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop'): Promise<void> => {
+    await api.post('/api/chat/agent/approval', {
+      approval_id: approvalId,
+      response: response
+    });
+  },
 };
 
 export const marketplaceApi = {
@@ -448,6 +454,9 @@ export const marketplaceApi = {
     description?: string;
     system_prompt?: string;
     model?: string;
+    tools?: string[];
+    tool_configs?: Record<string, { description?: string; examples?: string[] }>;
+    avatar_url?: string | null;
   }) => {
     const response = await api.patch(`/api/marketplace/agents/${agentId}`, data);
     return response.data;

@@ -43,7 +43,8 @@ class ResourceLimits:
 
     # Configuration (loaded from environment)
     max_cost: float = field(default_factory=lambda: float(os.getenv("AGENT_MAX_COST", "20.0")))
-    max_iterations: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_ITERATIONS", "50")))
+    max_iterations: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_ITERATIONS", "1000")))  # Global limit (high for monitoring)
+    max_iterations_per_run: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_ITERATIONS_PER_RUN", "50")))  # Per-message limit
     max_cost_per_run: float = field(default_factory=lambda: float(os.getenv("AGENT_MAX_COST_PER_RUN", "5.0")))
 
     # Global counters (private - use methods for thread-safe access)
@@ -96,7 +97,7 @@ class ResourceLimits:
             run_id: Optional run identifier for per-run tracking
 
         Raises:
-            ResourceLimitExceeded: If global iteration limit exceeded
+            ResourceLimitExceeded: If global or per-run iteration limit exceeded
         """
         with self._lock:
             self._total_iterations += 1
@@ -110,6 +111,13 @@ class ResourceLimits:
             # Track per-run if run_id provided
             if run_id:
                 self._run_iterations[run_id] = self._run_iterations.get(run_id, 0) + 1
+
+                # Check per-run iteration limit (50 iterations per message)
+                if self._run_iterations[run_id] > self.max_iterations_per_run:
+                    raise ResourceLimitExceeded(
+                        f"Per-message iteration limit exceeded: {self._run_iterations[run_id]} > {self.max_iterations_per_run}. "
+                        f"Agent has exhausted its iteration budget for this message."
+                    )
 
             logger.debug(f"Added iteration, Total: {self._total_iterations}")
 
@@ -137,12 +145,15 @@ class ResourceLimits:
 
             if run_id and (run_id in self._run_costs or run_id in self._run_iterations):
                 cost = self._run_costs.get(run_id, 0.0)
+                iterations = self._run_iterations.get(run_id, 0)
                 stats["run"] = {
                     "run_id": run_id,
                     "cost": cost,
-                    "iterations": self._run_iterations.get(run_id, 0),
+                    "iterations": iterations,
                     "cost_limit": self.max_cost_per_run,
-                    "cost_utilization": (cost / self.max_cost_per_run * 100) if self.max_cost_per_run > 0 else 0
+                    "iteration_limit": self.max_iterations_per_run,
+                    "cost_utilization": (cost / self.max_cost_per_run * 100) if self.max_cost_per_run > 0 else 0,
+                    "iteration_utilization": (iterations / self.max_iterations_per_run * 100) if self.max_iterations_per_run > 0 else 0
                 }
 
             return stats
@@ -199,11 +210,17 @@ class ResourceLimits:
                 )
 
             # Check per-run limits
-            if run_id and run_id in self._run_costs:
-                if self._run_costs[run_id] >= self.max_cost_per_run:
+            if run_id:
+                if run_id in self._run_costs and self._run_costs[run_id] >= self.max_cost_per_run:
                     raise ResourceLimitExceeded(
                         f"Per-run cost limit reached for run '{run_id}': "
                         f"${self._run_costs[run_id]:.4f} >= ${self.max_cost_per_run:.4f}"
+                    )
+
+                if run_id in self._run_iterations and self._run_iterations[run_id] >= self.max_iterations_per_run:
+                    raise ResourceLimitExceeded(
+                        f"Per-message iteration limit reached for run '{run_id}': "
+                        f"{self._run_iterations[run_id]} >= {self.max_iterations_per_run}"
                     )
 
 
@@ -225,7 +242,8 @@ def get_resource_limits() -> ResourceLimits:
             f"Initialized resource limits: "
             f"max_cost=${_global_limits.max_cost}, "
             f"max_iterations={_global_limits.max_iterations}, "
-            f"max_cost_per_run=${_global_limits.max_cost_per_run}"
+            f"max_cost_per_run=${_global_limits.max_cost_per_run}, "
+            f"max_iterations_per_run={_global_limits.max_iterations_per_run}"
         )
     return _global_limits
 

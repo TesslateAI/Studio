@@ -1,5 +1,7 @@
 import React from 'react';
 import { Zap } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import AgentStep from './AgentStep';
 import { type AgentMessageData } from '../types/agent';
 
@@ -7,9 +9,10 @@ interface AgentMessageProps {
   agentData: AgentMessageData;
   finalResponse: string;
   agentIcon?: string;
+  agentAvatarUrl?: string;
 }
 
-export default function AgentMessage({ agentData, finalResponse, agentIcon }: AgentMessageProps) {
+export default function AgentMessage({ agentData, finalResponse, agentIcon, agentAvatarUrl }: AgentMessageProps) {
   // In development, show all steps (to display debug panels)
   // In production, only show steps with meaningful content
   const isDevelopment = import.meta.env.DEV;
@@ -26,15 +29,19 @@ export default function AgentMessage({ agentData, finalResponse, agentIcon }: Ag
 
   return (
     <div className="message my-4 flex gap-3">
-      {/* Avatar - use agent icon or default */}
+      {/* Avatar - use agent logo, icon, or default */}
       <div className="message-avatar flex-shrink-0">
-        <div className="w-8 h-8 rounded-full bg-[var(--surface)] border border-[var(--border-color)] flex items-center justify-center">
-          {agentIcon ? (
-            <span className="text-base leading-none">{agentIcon}</span>
-          ) : (
-            <Zap className="w-4 h-4 text-[var(--text)]" fill="currentColor" />
-          )}
-        </div>
+        {agentAvatarUrl ? (
+          <img
+            src={agentAvatarUrl}
+            alt="Agent"
+            className="w-8 h-8 rounded-full object-cover border border-[var(--border-color)]"
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-[var(--surface)] border border-[var(--border-color)] flex items-center justify-center p-1.5">
+            <img src="/favicon.svg" alt="Tesslate" className="w-full h-full" />
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -65,7 +72,38 @@ export default function AgentMessage({ agentData, finalResponse, agentIcon }: Ag
         {finalResponse && finalResponse.trim() && (
           <div className="mt-2">
             <div className="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]">
-              {finalResponse}
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  // Style paragraphs
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  // Style lists
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                  li: ({ children }) => <li className="ml-2">{children}</li>,
+                  // Style code
+                  code: ({ children, ...props }) => {
+                    const inline = !String(children).includes('\n');
+                    return inline ? (
+                      <code className="bg-black/20 px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>
+                    ) : (
+                      <code className="block bg-black/20 px-3 py-2 rounded my-2 text-xs font-mono overflow-x-auto">{children}</code>
+                    );
+                  },
+                  // Style links
+                  a: ({ href, children }) => (
+                    <a href={href} className="underline hover:opacity-80" target="_blank" rel="noopener noreferrer">
+                      {children}
+                    </a>
+                  ),
+                  // Style headings
+                  h1: ({ children }) => <h1 className="text-xl font-bold mb-2 mt-3">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 mt-3">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 mt-2">{children}</h3>,
+                }}
+              >
+                {finalResponse}
+              </ReactMarkdown>
             </div>
           </div>
         )}

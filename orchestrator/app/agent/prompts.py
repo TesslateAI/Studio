@@ -4,8 +4,9 @@ Agent System Prompts
 System prompts that teach ANY language model how to use tools.
 """
 
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import UUID
+from datetime import datetime
 from .tools.registry import ToolRegistry
 from ..utils.resource_naming import get_project_path, get_container_name
 
@@ -178,5 +179,101 @@ async def get_user_message_wrapper(
     message_parts.append(f"\n=== User Request ===\n{user_request}")
 
     return "\n".join(message_parts)
+
+
+def get_mode_instructions(mode: str) -> str:
+    """
+    Get mode-specific instructions for the agent.
+
+    Args:
+        mode: Edit mode ('allow', 'ask', 'plan')
+
+    Returns:
+        Instructions text for the given mode
+    """
+    if mode == 'plan':
+        return """
+[PLAN MODE ACTIVE]
+You are in read-only planning mode. You MUST NOT execute any file modifications or shell commands.
+Instead, create a detailed markdown plan explaining what changes you would make.
+All read operations (read_file, get_project_info, etc.) are allowed and encouraged for gathering context.
+Format your plan clearly with headings, bullet points, and code examples where helpful.
+"""
+    elif mode == 'ask':
+        return """
+[ASK BEFORE EDIT MODE]
+You can propose file modifications and shell commands, but they require user approval.
+The user will be prompted to approve each dangerous operation before execution.
+Read operations proceed without approval.
+"""
+    else:  # allow
+        return """
+[FULL EDIT MODE]
+You have full access to all tools including file modifications and shell commands.
+Execute changes directly as needed to accomplish the user's goals.
+"""
+
+
+def substitute_markers(
+    system_prompt: str,
+    context: Dict[str, Any],
+    tool_names: Optional[list] = None
+) -> str:
+    """
+    Substitute {marker} placeholders in system prompts with actual runtime values.
+
+    This allows agent system prompts to include dynamic content that changes based
+    on the current execution context (edit mode, project info, etc.).
+
+    Available markers:
+        {mode} - Current edit mode ('allow', 'ask', 'plan')
+        {mode_instructions} - Detailed instructions for the current mode
+        {project_name} - Name of the current project
+        {project_description} - Description of the current project
+        {timestamp} - Current ISO timestamp
+        {user_name} - User's name (if available)
+        {project_path} - Project directory path
+        {git_branch} - Current git branch (if available)
+        {tool_list} - Comma-separated list of available tools
+
+    Args:
+        system_prompt: The agent's system prompt with {marker} placeholders
+        context: Execution context dict with user_id, project_id, edit_mode, etc.
+        tool_names: Optional list of tool names available to the agent
+
+    Returns:
+        System prompt with markers replaced by actual values
+
+    Example:
+        >>> prompt = "You are in {mode} mode. {mode_instructions} Project: {project_name}"
+        >>> result = substitute_markers(prompt, {"edit_mode": "plan", "project_context": {"project_name": "MyApp"}})
+        >>> print(result)
+        You are in plan mode. [PLAN MODE ACTIVE]... Project: MyApp
+    """
+    # Extract values from context
+    edit_mode = context.get('edit_mode', 'allow')
+    project_context = context.get('project_context', {})
+
+    # Build marker replacement map
+    markers = {
+        'mode': edit_mode,
+        'mode_instructions': get_mode_instructions(edit_mode),
+        'project_name': project_context.get('project_name', 'Unknown Project'),
+        'project_description': project_context.get('project_description', ''),
+        'timestamp': datetime.now().isoformat(),
+        'user_name': context.get('user_name', ''),
+        'project_path': f"/app",  # Standard container path
+        'git_branch': project_context.get('git_context', {}).get('branch', ''),
+        'tool_list': ', '.join(tool_names) if tool_names else '',
+    }
+
+    # Replace each {marker} with its value
+    result = system_prompt
+    for marker, value in markers.items():
+        placeholder = f'{{{marker}}}'
+        if placeholder in result:
+            result = result.replace(placeholder, str(value))
+
+    return result
 
 

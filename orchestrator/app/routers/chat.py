@@ -420,6 +420,12 @@ async def delete_project_messages(
             # No chat exists, nothing to delete
             return {"success": True, "message": "No chat history found", "deleted_count": 0}
 
+        # Clear approval tracking for this session
+        from ..agent.tools.approval_manager import get_approval_manager
+        approval_mgr = get_approval_manager()
+        approval_mgr.clear_session_approvals(chat.id)
+        logger.info(f"[CHAT] Cleared approvals for chat session {chat.id}")
+
         # Delete all messages for this chat
         from sqlalchemy import delete as sql_delete
         delete_result = await db.execute(
@@ -647,8 +653,10 @@ async def agent_chat(
         context = {
             "user_id": current_user.id,
             "project_id": request.project_id,
+            "chat_id": chat.id,
             "db": db,
-            "chat_history": chat_history
+            "chat_history": chat_history,
+            "edit_mode": request.edit_mode
         }
 
         # Get project context
@@ -827,6 +835,43 @@ async def agent_chat(
         )
 
 
+@router.post("/agent/approval")
+async def handle_agent_approval(
+    approval_data: dict,
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Handle approval response for agent tool execution.
+
+    This endpoint allows the frontend to respond to approval requests
+    when using SSE streaming (which is one-way communication).
+
+    Args:
+        approval_data: {approval_id: str, response: str}
+        current_user: Authenticated user
+
+    Returns:
+        Success confirmation
+    """
+    from ..agent.tools.approval_manager import get_approval_manager
+
+    approval_id = approval_data.get("approval_id")
+    response = approval_data.get("response")  # 'allow_once', 'allow_all', 'stop'
+
+    if not approval_id or not response:
+        raise HTTPException(
+            status_code=400,
+            detail="approval_id and response are required"
+        )
+
+    logger.info(f"[APPROVAL] Received approval response: {response} for {approval_id}")
+
+    approval_mgr = get_approval_manager()
+    approval_mgr.respond_to_approval(approval_id, response)
+
+    return {"success": True, "message": "Approval response processed"}
+
+
 @router.post("/agent/stream")
 async def agent_chat_stream(
     request: AgentChatRequest,
@@ -842,6 +887,7 @@ async def agent_chat_stream(
     **Event Types:**
     - text_chunk: LLM text generation as it happens
     - agent_step: Tool calls and results when iteration completes
+    - approval_required: Tool needs user approval (SSE is one-way, use /agent/approval endpoint to respond)
     - complete: Final response when task finishes
     - error: Error information if execution fails
 
@@ -998,9 +1044,11 @@ async def agent_chat_stream(
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
+                "chat_id": chat.id,
                 "db": db,
                 "chat_history": chat_history,
-                "project_context": project_context
+                "project_context": project_context,
+                "edit_mode": request.edit_mode
             }
 
             # Accumulate results for database persistence
@@ -1222,9 +1270,27 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
 
         return
 
+    # Handle approval response (Ask Before Edit mode)
+    if data.get("type") == "approval_response":
+        from ..agent.tools.approval_manager import get_approval_manager
+        approval_mgr = get_approval_manager()
+
+        approval_id = data.get("approval_id")
+        response = data.get("response")  # 'allow_once', 'allow_all', 'stop'
+
+        logger.info(f"[WebSocket] Received approval response: {response} for {approval_id}")
+
+        if approval_id and response:
+            approval_mgr.respond_to_approval(approval_id, response)
+        else:
+            logger.warning(f"[WebSocket] Invalid approval response: missing approval_id or response")
+
+        return
+
     message_content = data.get("message")
     project_id = data.get("project_id")
     agent_id = data.get("agent_id")  # Get agent_id from request
+    edit_mode = data.get("edit_mode", "ask")  # Get edit_mode from request, default to ask
 
     # Track activity when user sends a message
     if project_id:
@@ -1498,12 +1564,14 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'user': user,
         'user_id': user.id,
         'project_id': project_id,
+        'chat_id': chat_id,
         'db': db,
         'project_context_str': project_context_str,
         'has_existing_files': has_existing_files,
         'model': model_name,  # Use the resolved model name (user's selection or agent's default)
         'api_base': settings.litellm_api_base,
-        'chat_history': chat_history
+        'chat_history': chat_history,
+        'edit_mode': edit_mode
     }
 
     # Add project context if available

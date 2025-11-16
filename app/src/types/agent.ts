@@ -40,6 +40,7 @@ export interface AgentChatRequest {
   agent_id?: string;  // ID of the agent to use
   max_iterations?: number;
   minimal_prompts?: boolean;
+  edit_mode?: 'allow' | 'ask' | 'plan';  // Edit control mode
 }
 
 export interface AgentChatResponse {
@@ -73,6 +74,22 @@ export interface DBMessage {
     completion_reason?: string;
   };
   created_at: string;
+}
+
+export interface ApprovalRequestData {
+  approval_id: string;
+  tool_name: string;
+  tool_parameters: any;
+  tool_description: string;
+}
+
+export interface ApprovalMessage {
+  id: string;
+  type: 'approval_request';
+  approvalId: string;
+  toolName: string;
+  toolParameters: any;
+  toolDescription: string;
 }
 
 export interface Agent {

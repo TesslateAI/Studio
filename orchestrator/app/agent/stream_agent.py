@@ -80,9 +80,10 @@ class StreamAgent(AbstractAgent):
             }
             return
 
-        # Build the complete prompt starting with system message
+        # Build the complete prompt starting with system message (with marker substitution)
+        processed_system_prompt = self.get_processed_system_prompt(context)
         messages = [
-            {"role": "system", "content": self.system_prompt}
+            {"role": "system", "content": processed_system_prompt}
         ]
 
         # Include chat history if provided (for conversation continuity)

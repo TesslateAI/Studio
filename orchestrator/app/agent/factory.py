@@ -16,6 +16,7 @@ from typing import Dict, Type, Optional
 from .base import AbstractAgent
 from .stream_agent import StreamAgent
 from .iterative_agent import IterativeAgent
+from .react_agent import ReActAgent
 from .tools.registry import create_scoped_tool_registry, get_tool_registry
 from ..models import MarketplaceAgent as MarketplaceAgentModel
 
@@ -26,9 +27,9 @@ logger = logging.getLogger(__name__)
 AGENT_CLASS_MAP: Dict[str, Type[AbstractAgent]] = {
     "StreamAgent": StreamAgent,
     "IterativeAgent": IterativeAgent,
+    "ReActAgent": ReActAgent,
     # Add new agent types here as you create them!
     # Example:
-    # "ReActAgent": ReActAgent,
     # "PlannerAgent": PlannerAgent,
 }
 
@@ -87,11 +88,15 @@ async def create_agent_from_db_model(
     tools = None
     if agent_model.tools:
         logger.info(f"[AgentFactory] Creating scoped tool registry with tools: {agent_model.tools}")
-        tools = create_scoped_tool_registry(agent_model.tools)
+        # Pass custom tool configurations if available
+        tool_configs = agent_model.tool_configs if hasattr(agent_model, 'tool_configs') else None
+        if tool_configs:
+            logger.info(f"[AgentFactory] Applying custom tool configurations for {len(tool_configs)} tools")
+        tools = create_scoped_tool_registry(agent_model.tools, tool_configs)
     else:
-        # For IterativeAgent, use global registry if no specific tools defined
-        if agent_type_str == "IterativeAgent":
-            logger.info(f"[AgentFactory] Using global tool registry for IterativeAgent")
+        # For IterativeAgent and ReActAgent, use global registry if no specific tools defined
+        if agent_type_str in ["IterativeAgent", "ReActAgent"]:
+            logger.info(f"[AgentFactory] Using global tool registry for {agent_type_str}")
             tools = get_tool_registry()
 
     # Instantiate the agent
@@ -106,6 +111,12 @@ async def create_agent_from_db_model(
             system_prompt=agent_model.system_prompt,
             tools=tools,
             model=model_adapter  # IterativeAgent needs a model adapter
+        )
+    elif agent_type_str == "ReActAgent":
+        agent = ReActAgent(
+            system_prompt=agent_model.system_prompt,
+            tools=tools,
+            model=model_adapter  # ReActAgent needs a model adapter
         )
     else:
         # Generic instantiation for future agent types

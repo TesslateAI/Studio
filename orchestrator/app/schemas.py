@@ -223,6 +223,7 @@ class AgentChatRequest(BaseModel):
     agent_id: Optional[UUID] = None  # ID of the agent to use
     max_iterations: Optional[int] = 20
     minimal_prompts: Optional[bool] = False
+    edit_mode: Optional[str] = 'ask'  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)
 
     @field_validator('message')
     @classmethod
@@ -232,6 +233,13 @@ class AgentChatRequest(BaseModel):
         if len(v) > 10000:
             raise ValueError('Message cannot exceed 10000 characters')
         return v.strip()
+
+    @field_validator('edit_mode')
+    @classmethod
+    def validate_edit_mode(cls, v):
+        if v not in ['allow', 'ask', 'plan']:
+            raise ValueError('edit_mode must be "allow", "ask", or "plan"')
+        return v
 
 
 class ToolCallDetail(BaseModel):

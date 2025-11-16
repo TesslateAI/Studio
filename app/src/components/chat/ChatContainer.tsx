@@ -4,6 +4,8 @@ import { Loader2, FileCode, X } from 'lucide-react';
 import { PencilSimple, Storefront, Books } from '@phosphor-icons/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
+import { EditModeStatus, type EditMode } from './EditModeStatus';
+import { ApprovalRequestCard } from './ApprovalRequestCard';
 import { createWebSocket, chatApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
@@ -13,6 +15,7 @@ interface Agent {
   id: string;
   name: string;
   icon: string;  // Emoji string from backend
+  avatar_url?: string;  // Uploaded logo URL
   active?: boolean;
   backendId?: number;  // Link to backend agent ID
   mode?: 'stream' | 'agent';
@@ -20,10 +23,11 @@ interface Agent {
 
 interface Message {
   id: string;
-  type: 'user' | 'ai';
+  type: 'user' | 'ai' | 'approval_request';
   content: string;
   agentData?: AgentMessageData;
   agentIcon?: string;
+  agentAvatarUrl?: string;
   agentType?: string;
   toolCalls?: Array<{
     name: string;
@@ -33,6 +37,11 @@ interface Message {
     label: string;
     onClick: () => void;
   }>;
+  // Approval-specific fields
+  approvalId?: string;
+  toolName?: string;
+  toolParameters?: any;
+  toolDescription?: string;
 }
 
 interface StreamingFile {
@@ -74,6 +83,7 @@ export function ChatContainer({
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<Agent>(initialCurrentAgent);
+  const [editMode, setEditMode] = useState<EditMode>('ask');
   const [isStreaming, setIsStreaming] = useState(false);
   const [agentExecuting, setAgentExecuting] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
@@ -326,6 +336,18 @@ export function ChatContainer({
               });
               return newMap;
             });
+          } else if (data.type === 'approval_required') {
+            // Handle approval request - add approval message to chat
+            const approvalMessage: Message = {
+              id: `approval-${Date.now()}`,
+              type: 'approval_request',
+              content: '',
+              approvalId: data.data.approval_id,
+              toolName: data.data.tool_name,
+              toolParameters: data.data.tool_parameters,
+              toolDescription: data.data.tool_description,
+            };
+            setMessages(prev => [...prev, approvalMessage]);
           }
         };
 
@@ -481,7 +503,8 @@ export function ChatContainer({
     wsRef.current.send(JSON.stringify({
       message,
       project_id: projectId,
-      agent_id: currentAgent.backendId  // Include agent_id
+      agent_id: currentAgent.backendId,  // Include agent_id
+      edit_mode: editMode  // Include edit mode
     }));
   };
 
@@ -563,6 +586,7 @@ export function ChatContainer({
         completion_reason: 'in_progress',
       },
       agentIcon: currentAgent.icon,
+      agentAvatarUrl: currentAgent.avatar_url,
       agentType: currentAgent.name,
     };
     setMessages(prev => [...prev, thinkingMessage]);
@@ -574,6 +598,7 @@ export function ChatContainer({
           message,
           agent_id: currentAgent.backendId?.toString(),
           max_iterations: 20,
+          edit_mode: editMode,
         },
         (event) => {
           if (event.type === 'agent_step') {
@@ -600,6 +625,7 @@ export function ChatContainer({
                 completion_reason: 'step_complete',
               },
               agentIcon: currentAgent.icon,
+              agentAvatarUrl: currentAgent.avatar_url,
               agentType: currentAgent.name,
             };
 
@@ -639,6 +665,7 @@ export function ChatContainer({
                     completion_reason: 'complete',
                   },
                   agentIcon: currentAgent.icon,
+                  agentAvatarUrl: currentAgent.avatar_url,
                   agentType: currentAgent.name,
                 }];
               });
@@ -646,7 +673,20 @@ export function ChatContainer({
 
             toast.success('Task completed successfully');
           } else if (event.type === 'error') {
-            throw new Error(event.data.message || 'Agent execution failed');
+            const errorMsg = (event as any).content || event.data?.message || 'Agent execution failed';
+            throw new Error(errorMsg);
+          } else if (event.type === 'approval_required') {
+            // Handle approval request - add approval message to chat
+            const approvalMessage: Message = {
+              id: `approval-${Date.now()}`,
+              type: 'approval_request',
+              content: '',
+              approvalId: event.data.approval_id,
+              toolName: event.data.tool_name,
+              toolParameters: event.data.tool_parameters,
+              toolDescription: event.data.tool_description,
+            };
+            setMessages(prev => [...prev, approvalMessage]);
           }
         },
         controller.signal
@@ -708,6 +748,48 @@ export function ChatContainer({
     } catch (error) {
       console.error('[CHAT] Failed to clear history:', error);
       toast.error('Failed to clear chat history');
+    }
+  };
+
+  const handleApprovalResponse = async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop', toolName: string) => {
+    // Define write tools that should switch mode
+    const WRITE_TOOLS = new Set(['write_file', 'patch_file', 'multi_edit']);
+
+    // Send approval response via WebSocket (for stream mode)
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'approval_response',
+        approval_id: approvalId,
+        response: response
+      }));
+    } else if (agentExecuting) {
+      // Send approval response via HTTP API (for SSE agent mode)
+      try {
+        await chatApi.sendApprovalResponse(approvalId, response);
+        console.log('[APPROVAL] Response sent via HTTP API');
+      } catch (error) {
+        console.error('[APPROVAL] Failed to send response:', error);
+        toast.error('Failed to send approval response');
+        return;
+      }
+    }
+
+    // Remove approval message from chat
+    setMessages(prev => prev.filter(msg =>
+      !(msg.type === 'approval_request' && msg.approvalId === approvalId)
+    ));
+
+    // Handle mode switching for write tools
+    if (response === 'allow_all' && WRITE_TOOLS.has(toolName)) {
+      // Switch to "Allow All Edits" mode
+      setEditMode('allow');
+      toast.success('Switched to "Allow All Edits" mode');
+    } else if (response === 'allow_once') {
+      toast.success('Approved this operation');
+    } else if (response === 'allow_all') {
+      toast.success('Approved all operations of this type for this session');
+    } else {
+      toast.error('Operation cancelled');
     }
   };
 
@@ -972,6 +1054,24 @@ export function ChatContainer({
           }
           const shouldAnimate = isNewMessage && !isLoadingHistory;
 
+          // Render approval request message
+          if (message.type === 'approval_request' && message.approvalId) {
+            return (
+              <div
+                key={message.id}
+                className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
+              >
+                <ApprovalRequestCard
+                  approvalId={message.approvalId}
+                  toolName={message.toolName || 'unknown'}
+                  toolParameters={message.toolParameters}
+                  toolDescription={message.toolDescription || 'No description provided'}
+                  onRespond={handleApprovalResponse}
+                />
+              </div>
+            );
+          }
+
           // Render agent message with special component
           if (message.type === 'ai' && message.agentData) {
             return (
@@ -983,6 +1083,7 @@ export function ChatContainer({
                   agentData={message.agentData}
                   finalResponse={message.content}
                   agentIcon={message.agentIcon}
+                  agentAvatarUrl={message.agentAvatarUrl}
                 />
               </div>
             );
@@ -995,9 +1096,10 @@ export function ChatContainer({
               className={shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}
             >
               <ChatMessage
-                type={message.type}
-                content={renderMessageContent(message.content, false)}
+                type={message.type as 'user' | 'ai'}
+                content={message.content || ''}
                 agentIcon={message.agentIcon}
+                agentAvatarUrl={message.agentAvatarUrl}
                 toolCalls={message.toolCalls}
                 actions={message.actions}
               />
@@ -1032,6 +1134,9 @@ export function ChatContainer({
           onStop={stopAgentExecution}
           onClearHistory={handleClearHistory}
           isExpanded={isExpanded}
+          editMode={editMode}
+          onModeChange={setEditMode}
+          onPlanMode={() => setEditMode('plan')}
         />
       </div>
     </div>

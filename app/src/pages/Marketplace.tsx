@@ -51,6 +51,7 @@ interface MarketplaceItem {
   is_forkable: boolean;
   is_active: boolean;
   icon: string;
+  avatar_url?: string | null;
   pricing_type: string;
   price: number;
   downloads: number;
@@ -482,8 +483,12 @@ function ItemCard({ item, onClick, onPurchase, theme }: {
       </div>
 
       {/* Image - Full Bleed */}
-      <div className="w-full h-40 bg-gradient-to-br from-orange-500/20 to-purple-500/20 rounded-t-2xl flex items-center justify-center">
-        <div className="text-6xl">{item.icon}</div>
+      <div className="w-full h-40 bg-gradient-to-br from-orange-500/20 to-purple-500/20 rounded-t-2xl flex items-center justify-center p-10">
+        {item.avatar_url ? (
+          <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover rounded-lg" />
+        ) : (
+          <img src="/favicon.svg" alt="Tesslate" className="w-full h-full" />
+        )}
       </div>
 
       {/* Content */}
@@ -566,7 +571,13 @@ function ItemDetailModal({ item, onClose, onPurchase, theme }: {
         <div className="bg-gradient-to-r from-orange-500/20 to-purple-500/20 p-8 border-b border-white/10">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-4">
-              <div className="text-5xl">{item.icon}</div>
+              <div className="w-16 h-16 flex items-center justify-center">
+                {item.avatar_url ? (
+                  <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover rounded-lg" />
+                ) : (
+                  <img src="/favicon.svg" alt="Tesslate" className="w-full h-full" />
+                )}
+              </div>
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <h2 className="font-heading text-3xl font-bold text-[var(--text)]">{item.name}</h2>
