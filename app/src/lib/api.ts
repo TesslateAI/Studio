@@ -918,6 +918,43 @@ export const deploymentCredentialsApi = {
     const response = await api.post(`/api/deployment-credentials/test/${credentialId}`);
     return response.data;
   },
+
+  // Start OAuth flow (redirects to provider)
+  startOAuth: async (provider: string, projectId?: string) => {
+    const params = new URLSearchParams();
+    if (projectId) {
+      params.append('project_id', projectId);
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+
+    // Make authenticated API call to get OAuth URL
+    const response = await api.get(`/api/deployment-oauth/${provider}/authorize${query}`);
+    const { auth_url } = response.data;
+
+    // Redirect to the OAuth provider
+    window.location.href = auth_url;
+    return response.data;
+  },
+
+  // Save manual credentials (alias for create for better semantics)
+  saveManual: async (provider: string, credentials: Record<string, string>) => {
+    // Extract the token field (different providers use different names)
+    const tokenField = credentials.api_token || credentials.access_token || credentials.token;
+
+    // Extract other fields as metadata
+    const metadata: Record<string, string> = {};
+    for (const [key, value] of Object.entries(credentials)) {
+      if (!['api_token', 'access_token', 'token'].includes(key)) {
+        metadata[key] = value;
+      }
+    }
+
+    return deploymentCredentialsApi.create({
+      provider,
+      access_token: tokenField,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    });
+  },
 };
 
 // ============================================================================

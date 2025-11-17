@@ -20,6 +20,7 @@ from ..models import DeploymentCredential, User
 from ..auth import get_current_user
 from ..services.deployment_encryption import get_deployment_encryption_service, DeploymentEncryptionError
 from ..config import get_settings
+from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,12 @@ def verify_state_token(state: str) -> Optional[str]:
 @router.get("/vercel/authorize")
 async def vercel_authorize(
     project_id: Optional[UUID] = Query(None, description="Optional project ID for project-specific credential"),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Initiate Vercel OAuth flow.
 
-    Redirects the user to Vercel's OAuth authorization page.
+    Returns the OAuth authorization URL for the frontend to redirect to.
     After authorization, Vercel will redirect back to /vercel/callback.
 
     Args:
@@ -72,7 +73,7 @@ async def vercel_authorize(
         current_user: Current authenticated user
 
     Returns:
-        Redirect to Vercel OAuth URL
+        JSON with auth_url to redirect to
     """
     settings = get_settings()
 
@@ -100,8 +101,8 @@ async def vercel_authorize(
         f"&scope=deployments"  # Request deployment permissions
     )
 
-    logger.info(f"Redirecting user {current_user.id} to Vercel OAuth")
-    return RedirectResponse(url=oauth_url)
+    logger.info(f"Generated Vercel OAuth URL for user {current_user.id}")
+    return {"auth_url": oauth_url}
 
 
 @router.get("/vercel/callback")
@@ -245,12 +246,12 @@ async def vercel_callback(
 @router.get("/netlify/authorize")
 async def netlify_authorize(
     project_id: Optional[UUID] = Query(None, description="Optional project ID for project-specific credential"),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Initiate Netlify OAuth flow.
 
-    Redirects the user to Netlify's OAuth authorization page.
+    Returns the OAuth authorization URL for the frontend to redirect to.
     After authorization, Netlify will redirect back to /netlify/callback.
 
     Args:
@@ -258,7 +259,7 @@ async def netlify_authorize(
         current_user: Current authenticated user
 
     Returns:
-        Redirect to Netlify OAuth URL
+        JSON with auth_url to redirect to
     """
     settings = get_settings()
 
@@ -286,8 +287,8 @@ async def netlify_authorize(
         f"&response_type=code"
     )
 
-    logger.info(f"Redirecting user {current_user.id} to Netlify OAuth")
-    return RedirectResponse(url=oauth_url)
+    logger.info(f"Generated Netlify OAuth URL for user {current_user.id}")
+    return {"auth_url": oauth_url}
 
 
 @router.get("/netlify/callback")

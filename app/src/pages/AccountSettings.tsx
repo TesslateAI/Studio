@@ -14,13 +14,14 @@ import {
 } from '@phosphor-icons/react';
 import { deploymentCredentialsApi } from '../lib/api';
 import toast from 'react-hot-toast';
-import { DashboardLayout } from '../components/DashboardLayout';
 
 interface Provider {
   name: string;
   display_name: string;
+  description: string;
   auth_type: string;
-  required_fields: string[];
+  required_credentials: string[];
+  optional_credentials?: string[];
 }
 
 interface DeploymentCredential {
@@ -69,17 +70,30 @@ export default function AccountSettings() {
     setShowSecret({});
   };
 
-  const handleProviderSelect = (providerName: string) => {
-    setSelectedProvider(providerName);
+  const handleProviderSelect = async (providerName: string) => {
     const provider = providers.find(p => p.name === providerName);
-    if (provider) {
-      // Initialize form data with empty values for required fields
-      const initialData: Record<string, string> = {};
-      provider.required_fields.forEach(field => {
-        initialData[field] = '';
-      });
-      setFormData(initialData);
+    if (!provider) return;
+
+    // For OAuth providers, start OAuth flow
+    if (provider.auth_type === 'oauth') {
+      try {
+        await deploymentCredentialsApi.startOAuth(providerName);
+        // The startOAuth function will redirect the user, so this line won't execute
+      } catch (error: any) {
+        console.error('Failed to start OAuth:', error);
+        toast.error(error.response?.data?.detail || 'Failed to start OAuth flow');
+      }
+      return;
     }
+
+    // For manual providers, show form
+    setSelectedProvider(providerName);
+    // Initialize form data with empty values for required credentials
+    const initialData: Record<string, string> = {};
+    provider.required_credentials.forEach(field => {
+      initialData[field] = '';
+    });
+    setFormData(initialData);
   };
 
   const handleFormChange = (field: string, value: string) => {
@@ -95,8 +109,8 @@ export default function AccountSettings() {
     const provider = providers.find(p => p.name === selectedProvider);
     if (!provider) return;
 
-    // Validate required fields
-    for (const field of provider.required_fields) {
+    // Validate required credentials
+    for (const field of provider.required_credentials) {
       if (!formData[field] || !formData[field].trim()) {
         toast.error(`${field} is required`);
         return;
@@ -196,9 +210,8 @@ export default function AccountSettings() {
   const availableProviders = providers.filter(p => !connectedProviderNames.includes(p.name));
 
   return (
-    <DashboardLayout>
-      <div className="min-h-screen bg-gradient-to-br from-[var(--background)] to-[var(--background-dark)]">
-        <div className="max-w-5xl mx-auto px-6 py-12">
+    <div className="min-h-screen bg-gradient-to-br from-[var(--background)] to-[var(--background-dark)]">
+      <div className="max-w-5xl mx-auto px-6 py-12">
           {/* Header */}
           <div className="mb-8">
             <button
@@ -344,10 +357,9 @@ export default function AccountSettings() {
             </div>
           )}
         </div>
-      </div>
 
-      {/* Add Provider Modal */}
-      {showAddModal && (
+        {/* Add Provider Modal */}
+        {showAddModal && (
         <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
           onClick={() => !isAdding && setShowAddModal(false)}
@@ -409,7 +421,7 @@ export default function AccountSettings() {
                     </div>
                   </div>
 
-                  {providers.find(p => p.name === selectedProvider)?.required_fields.map((field) => (
+                  {providers.find(p => p.name === selectedProvider)?.required_credentials.map((field) => (
                     <div key={field}>
                       <label className="block text-sm font-semibold text-[var(--text)] mb-2">
                         {field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
@@ -472,7 +484,7 @@ export default function AccountSettings() {
             )}
           </div>
         </div>
-      )}
-    </DashboardLayout>
-  );
-}
+        )}
+      </div>
+    );
+  }

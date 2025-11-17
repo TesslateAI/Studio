@@ -116,7 +116,7 @@ export default function Marketplace() {
       {
         icon: <Gear className="w-5 h-5" weight="fill" />,
         title: 'Settings',
-        onClick: () => toast('Settings coming soon!')
+        onClick: () => navigate('/settings')
       },
       {
         icon: <SignOut className="w-5 h-5" weight="fill" />,

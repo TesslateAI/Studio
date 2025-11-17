@@ -359,7 +359,7 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
 
       {isExpanded ? (
         <button
-          onClick={() => toast('Settings coming soon!')}
+          onClick={() => navigate('/settings')}
           className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
         >
           <Settings size={18} className="text-[var(--sidebar-text)]/40 group-hover:text-[var(--sidebar-text)] transition-colors" />
@@ -368,7 +368,7 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
       ) : (
         <Tooltip content="Settings" side="right" delay={200}>
           <button
-            onClick={() => toast('Settings coming soon!')}
+            onClick={() => navigate('/settings')}
             className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
           >
             <Settings size={18} className="text-[var(--sidebar-text)]/40 group-hover:text-[var(--sidebar-text)] transition-colors" />

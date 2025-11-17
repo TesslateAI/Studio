@@ -94,7 +94,7 @@ export default function ProjectOverview() {
       {
         icon: <Settings className="w-5 h-5" />,
         title: 'Settings',
-        onClick: () => toast('Settings coming soon!')
+        onClick: () => navigate('/settings')
       },
       {
         icon: <LogOut className="w-5 h-5" />,
