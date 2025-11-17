@@ -810,7 +810,7 @@ export function ChatContainer({
         className={`
           chat-container
           fixed
-          z-[150]
+          z-40
           flex flex-col
           bg-[var(--bg-dark)]
           backdrop-blur-xl saturate-180

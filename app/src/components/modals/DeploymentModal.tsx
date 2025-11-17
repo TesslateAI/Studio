@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   X,
   Rocket,
@@ -37,6 +38,7 @@ export function DeploymentModal({
   onClose,
   onSuccess
 }: DeploymentModalProps) {
+  const navigate = useNavigate();
   const [providers, setProviders] = useState<Provider[]>([]);
   const [credentials, setCredentials] = useState<DeploymentCredential[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
@@ -149,7 +151,7 @@ export function DeploymentModal({
       onClick={onClose}
     >
       <div
-        className="bg-[var(--surface)] rounded-3xl w-full max-w-2xl shadow-2xl border border-white/10 max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--surface)] rounded-3xl w-full max-w-3xl shadow-2xl border border-white/10 max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -197,9 +199,13 @@ export function DeploymentModal({
                 Go to Account Settings to connect Cloudflare, Vercel, or Netlify.
               </p>
               <button
-                onClick={onClose}
-                className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-semibold transition-all"
+                onClick={() => {
+                  onClose();
+                  navigate('/settings');
+                }}
+                className="flex items-center gap-2 px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-semibold transition-all"
               >
+                <Gear size={18} weight="bold" />
                 Go to Settings
               </button>
             </div>
