@@ -482,16 +482,12 @@ async def test_credential(
                 if "team_id" in credential.provider_metadata:
                     provider_credentials["team_id"] = credential.provider_metadata["team_id"]
 
-        # Get provider instance (this validates credentials)
+        # Get provider instance and test credentials with real API call
         try:
             provider = DeploymentManager.get_provider(credential.provider, provider_credentials)
 
-            # For providers that support it, try to fetch account info
-            provider_info = {}
-            if credential.provider == "cloudflare" and "account_id" in provider_credentials:
-                provider_info["account_id"] = provider_credentials["account_id"]
-            elif credential.provider == "vercel" and "team_id" in provider_credentials:
-                provider_info["team_id"] = provider_credentials["team_id"]
+            # Call the provider's test_credentials method to make a real API call
+            provider_info = await provider.test_credentials()
 
             logger.info(f"Credential {credential_id} test successful for provider {credential.provider}")
 

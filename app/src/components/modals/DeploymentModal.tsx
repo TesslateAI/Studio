@@ -7,7 +7,9 @@ import {
   Warning,
   Plus,
   Trash,
-  Gear
+  Gear,
+  Info,
+  CaretDown
 } from '@phosphor-icons/react';
 import { deploymentsApi, deploymentCredentialsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -216,40 +218,68 @@ export function DeploymentModal({
                 <label className="block text-sm font-semibold text-[var(--text)] mb-3">
                   Deployment Provider
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {connectedProviders.map((provider) => (
-                    <button
-                      key={provider}
-                      onClick={() => setSelectedProvider(provider)}
-                      className={`
-                        p-4 rounded-lg border-2 transition-all text-left
-                        ${selectedProvider === provider
-                          ? `${getProviderColor(provider)} border-2`
-                          : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
-                        }
-                      `}
-                    >
-                      <div className="flex items-center gap-3">
-                        <CloudArrowUp size={24} className={selectedProvider === provider ? '' : 'text-[var(--text)]/60'} />
-                        <div>
-                          <div className="font-semibold text-[var(--text)]">
-                            {getProviderDisplay(provider)}
-                          </div>
-                          <div className="text-xs text-[var(--text)]/60 mt-1">
-                            {credentials.find(c => c.provider === provider)?.metadata?.account_name || 'Connected'}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                <div className="relative">
+                  <select
+                    value={selectedProvider}
+                    onChange={(e) => {
+                      if (e.target.value === 'add-more') {
+                        onClose();
+                        navigate('/settings');
+                      } else {
+                        setSelectedProvider(e.target.value);
+                      }
+                    }}
+                    className="w-full px-4 py-3 pr-10 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-orange-500 appearance-none cursor-pointer"
+                  >
+                    {connectedProviders.map((provider) => {
+                      const credential = credentials.find(c => c.provider === provider);
+                      const accountInfo = credential?.metadata?.account_name;
+                      const displayText = accountInfo
+                        ? `${getProviderDisplay(provider)} - ${accountInfo}`
+                        : getProviderDisplay(provider);
+                      return (
+                        <option key={provider} value={provider} className="bg-[var(--surface)] text-[var(--text)]">
+                          {displayText}
+                        </option>
+                      );
+                    })}
+                    <option value="add-more" className="bg-[var(--surface)] text-purple-400">
+                      + Connect More Providers...
+                    </option>
+                  </select>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <CaretDown size={20} className="text-[var(--text)]/60" weight="bold" />
+                  </div>
                 </div>
+                <p className="text-xs text-[var(--text)]/60 mt-2">
+                  Select a provider to deploy to, or connect additional providers in Settings
+                </p>
               </div>
 
               {/* Deployment Mode */}
               <div>
-                <label className="block text-sm font-semibold text-[var(--text)] mb-3">
-                  Deployment Mode
-                </label>
+                <div className="flex items-center gap-2 mb-3">
+                  <label className="block text-sm font-semibold text-[var(--text)]">
+                    Deployment Mode
+                  </label>
+                  <div className="group relative">
+                    <Info
+                      size={16}
+                      className="text-[var(--text)]/40 hover:text-[var(--text)]/60 transition-colors cursor-help"
+                      weight="fill"
+                    />
+                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                      <div className="text-xs text-[var(--text)]/80 space-y-2">
+                        <p className="font-semibold text-[var(--text)]">About deployment modes</p>
+                        <ul className="space-y-1.5 list-disc list-inside">
+                          <li><strong>Source Build:</strong> Upload code and build remotely on the provider's platform</li>
+                          <li><strong>Pre-built:</strong> Build locally and upload only the production files</li>
+                        </ul>
+                      </div>
+                      <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white/20"></div>
+                    </div>
+                  </div>
+                </div>
                 <div className="space-y-3">
                   <button
                     onClick={() => setDeploymentMode('source')}
@@ -329,9 +359,29 @@ export function DeploymentModal({
               {/* Environment Variables */}
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <label className="block text-sm font-semibold text-[var(--text)]">
-                    Environment Variables
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="block text-sm font-semibold text-[var(--text)]">
+                      Environment Variables
+                    </label>
+                    <div className="group relative">
+                      <Info
+                        size={16}
+                        className="text-[var(--text)]/40 hover:text-[var(--text)]/60 transition-colors cursor-help"
+                        weight="fill"
+                      />
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                        <div className="text-xs text-[var(--text)]/80 space-y-2">
+                          <p className="font-semibold text-[var(--text)]">About environment variables</p>
+                          <ul className="space-y-1.5 list-disc list-inside">
+                            <li>Environment variables are securely passed to your deployment</li>
+                            <li>Use them for API keys, secrets, and configuration values</li>
+                            <li>Values are encrypted in transit and at rest on the provider's platform</li>
+                          </ul>
+                        </div>
+                        <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white/20"></div>
+                      </div>
+                    </div>
+                  </div>
                   <button
                     onClick={addEnvVar}
                     className="flex items-center gap-1 text-sm text-purple-400 hover:text-purple-300 transition-colors"
@@ -378,31 +428,6 @@ export function DeploymentModal({
                 <p className="text-xs text-[var(--text)]/60 mt-2">
                   Add environment variables that your application needs at runtime
                 </p>
-              </div>
-
-              {/* Pre-deployment Info */}
-              <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <Gear size={20} className="text-blue-400 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-blue-400">
-                    <p className="font-semibold mb-1">Before deployment:</p>
-                    <ul className="list-disc list-inside space-y-1 text-xs">
-                      {deploymentMode === 'source' ? (
-                        <>
-                          <li>Your source code will be uploaded to {getProviderDisplay(selectedProvider)}</li>
-                          <li>{getProviderDisplay(selectedProvider)} will build your project remotely</li>
-                          <li>You'll receive a live URL when deployment completes</li>
-                        </>
-                      ) : (
-                        <>
-                          <li>Your project will be built locally</li>
-                          <li>Built files will be uploaded to {getProviderDisplay(selectedProvider)}</li>
-                          <li>You'll receive a live URL when deployment completes</li>
-                        </>
-                      )}
-                    </ul>
-                  </div>
-                </div>
               </div>
             </>
           )}

@@ -273,6 +273,41 @@ class NetlifyProvider(BaseDeploymentProvider):
             "Content-Type": "application/json"
         }
 
+    async def test_credentials(self) -> Dict[str, any]:
+        """
+        Test if credentials are valid by making a real API call to Netlify.
+
+        Returns:
+            Dictionary with validation result
+
+        Raises:
+            ValueError: If credentials are invalid
+        """
+        url = f"{self.API_BASE}/sites"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=self._get_headers())
+                response.raise_for_status()
+
+                # If we get here, credentials are valid
+                data = response.json()
+                return {
+                    "valid": True,
+                    "site_count": len(data) if isinstance(data, list) else 0
+                }
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError("Invalid Netlify access token")
+            elif e.response.status_code == 403:
+                raise ValueError("Access token does not have required permissions")
+            else:
+                raise ValueError(f"Netlify API error: {e.response.status_code}")
+        except httpx.TimeoutException:
+            raise ValueError("Connection to Netlify API timed out")
+        except Exception as e:
+            raise ValueError(f"Failed to validate credentials: {str(e)}")
+
     async def get_deployment_status(self, deployment_id: str) -> Dict:
         """
         Get deployment status from Netlify.

@@ -278,6 +278,54 @@ class VercelProvider(BaseDeploymentProvider):
             "Content-Type": "application/json"
         }
 
+    async def test_credentials(self) -> Dict[str, any]:
+        """
+        Test if credentials are valid by making a real API call to Vercel.
+
+        Returns:
+            Dictionary with validation result
+
+        Raises:
+            ValueError: If credentials are invalid
+        """
+        team_id = self.credentials.get("team_id")
+        url = f"{self.API_BASE}/v9/projects"
+        params = {}
+        if team_id:
+            params["teamId"] = team_id
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    url,
+                    headers=self._get_headers(),
+                    params=params
+                )
+                response.raise_for_status()
+
+                # If we get here, credentials are valid
+                data = response.json()
+                result = {
+                    "valid": True,
+                    "project_count": len(data.get('projects', []))
+                }
+                if team_id:
+                    result["team_id"] = team_id
+                return result
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError("Invalid Vercel access token")
+            elif e.response.status_code == 403:
+                if team_id:
+                    raise ValueError("Access token does not have permission to access this team")
+                raise ValueError("Access token does not have required permissions")
+            else:
+                raise ValueError(f"Vercel API error: {e.response.status_code}")
+        except httpx.TimeoutException:
+            raise ValueError("Connection to Vercel API timed out")
+        except Exception as e:
+            raise ValueError(f"Failed to validate credentials: {str(e)}")
+
     async def get_deployment_status(self, deployment_id: str) -> Dict:
         """
         Get deployment status from Vercel.

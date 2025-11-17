@@ -348,6 +348,44 @@ export default {
             "Content-Type": "application/json"
         }
 
+    async def test_credentials(self) -> Dict[str, any]:
+        """
+        Test if credentials are valid by making a real API call to Cloudflare.
+
+        Returns:
+            Dictionary with validation result
+
+        Raises:
+            ValueError: If credentials are invalid
+        """
+        url = f"{self.API_BASE}/accounts/{self.credentials['account_id']}/workers/scripts"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=self._get_headers())
+                response.raise_for_status()
+
+                # If we get here, credentials are valid
+                data = response.json()
+                return {
+                    "valid": True,
+                    "account_id": self.credentials['account_id'],
+                    "script_count": len(data.get('result', []))
+                }
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError("Invalid API token")
+            elif e.response.status_code == 403:
+                raise ValueError("API token does not have required permissions")
+            elif e.response.status_code == 404:
+                raise ValueError("Account ID not found")
+            else:
+                raise ValueError(f"Cloudflare API error: {e.response.status_code}")
+        except httpx.TimeoutException:
+            raise ValueError("Connection to Cloudflare API timed out")
+        except Exception as e:
+            raise ValueError(f"Failed to validate credentials: {str(e)}")
+
     async def get_deployment_status(self, deployment_id: str) -> Dict:
         """
         Get deployment status from Cloudflare.

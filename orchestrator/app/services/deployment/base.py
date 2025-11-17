@@ -74,6 +74,21 @@ class BaseDeploymentProvider(ABC):
         pass
 
     @abstractmethod
+    async def test_credentials(self) -> Dict:
+        """
+        Test if credentials are valid by making a real API call to the provider.
+
+        This method should make an actual API request to verify the credentials work.
+
+        Returns:
+            Dictionary with validation result and provider info
+
+        Raises:
+            ValueError: If credentials are invalid or API call fails
+        """
+        pass
+
+    @abstractmethod
     async def deploy(
         self,
         files: List[DeploymentFile],
