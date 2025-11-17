@@ -55,7 +55,7 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
         limit: 20,
         offset: 0,
       });
-      setDeployments(data.deployments || []);
+      setDeployments(Array.isArray(data) ? data : []);
     } catch (error: any) {
       console.error('Failed to load deployments:', error);
       toast.error(error.response?.data?.detail || 'Failed to load deployments');

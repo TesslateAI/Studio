@@ -38,6 +38,10 @@ router = APIRouter(prefix="/api/deployments", tags=["deployments"])
 class DeploymentRequest(BaseModel):
     """Request to deploy a project."""
     provider: str = Field(..., description="Deployment provider (cloudflare, vercel, netlify)")
+    deployment_mode: Optional[str] = Field(
+        None,
+        description="Deployment mode: 'source' (provider builds) or 'pre-built' (upload built files). Default varies by provider."
+    )
     custom_domain: Optional[str] = Field(None, description="Custom domain")
     env_vars: Dict[str, str] = Field(default_factory=dict, description="Environment variables")
     build_command: Optional[str] = Field(None, description="Custom build command override")
@@ -292,37 +296,65 @@ async def deploy_project(
                 framework_was_detected = True
                 await db.commit()
 
-        # 6. Run build
-        deployment.logs.append(f"Building project (framework: {framework})")
+        # 6. Determine deployment mode (source vs pre-built)
+        # Default modes per provider:
+        # - Vercel: source (standard Vercel workflow)
+        # - Cloudflare: pre-built (upload to Workers)
+        # - Netlify: source (standard Netlify workflow)
+        deployment_mode = request.deployment_mode
+        if not deployment_mode:
+            # Set sensible defaults per provider
+            default_modes = {
+                "vercel": "source",
+                "netlify": "source",
+                "cloudflare": "pre-built"
+            }
+            deployment_mode = default_modes.get(provider_lower, "pre-built")
+            deployment.logs.append(f"Using default deployment mode for {provider_lower}: {deployment_mode}")
+        else:
+            deployment.logs.append(f"Using requested deployment mode: {deployment_mode}")
         await db.commit()
 
-        try:
-            success, build_output = await builder.trigger_build(
-                user_id=str(current_user.id),
-                project_id=str(project.id),
-                framework=framework,
-                custom_build_command=request.build_command,
-                project_settings=project.settings
-            )
+        # 7. Run build (skip if source mode - provider will build)
+        use_source_deployment = (deployment_mode == "source")
 
-            if not success:
-                raise BuildError("Build failed")
-
-            deployment.logs.append("Build completed successfully")
+        if use_source_deployment:
+            deployment.logs.append(f"Skipping local build - {provider_lower} will build remotely (framework: {framework})")
+            await db.commit()
+        else:
+            deployment.logs.append(f"Building project locally (framework: {framework})")
             await db.commit()
 
-        except BuildError as e:
-            deployment.status = "failed"
-            deployment.error = f"Build failed: {str(e)}"
-            deployment.completed_at = datetime.utcnow()
-            await db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Build failed: {str(e)}"
-            )
+            try:
+                success, build_output = await builder.trigger_build(
+                    user_id=str(current_user.id),
+                    project_id=str(project.id),
+                    framework=framework,
+                    custom_build_command=request.build_command,
+                    project_settings=project.settings
+                )
 
-        # 7. Collect files
-        deployment.logs.append("Collecting deployment files")
+                if not success:
+                    raise BuildError("Build failed")
+
+                deployment.logs.append("Build completed successfully")
+                await db.commit()
+
+            except BuildError as e:
+                deployment.status = "failed"
+                deployment.error = f"Build failed: {str(e)}"
+                deployment.completed_at = datetime.utcnow()
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Build failed: {str(e)}"
+                )
+
+        # 8. Collect files
+        if use_source_deployment:
+            deployment.logs.append("Collecting source files for remote build")
+        else:
+            deployment.logs.append("Collecting built files")
         deployment.status = "deploying"
         await db.commit()
 
@@ -330,7 +362,8 @@ async def deploy_project(
             user_id=str(current_user.id),
             project_id=str(project.id),
             framework=framework,
-            project_settings=project.settings
+            project_settings=project.settings,
+            collect_source=use_source_deployment
         )
 
         deployment.logs.append(f"Collected {len(files)} files")
@@ -344,6 +377,7 @@ async def deploy_project(
             project_id=str(project.id),
             project_name=project.name,
             framework=framework,
+            deployment_mode=deployment_mode,
             build_command=request.build_command,
             env_vars=request.env_vars,
             custom_domain=request.custom_domain
@@ -357,7 +391,8 @@ async def deploy_project(
             deployment.status = "success"
             deployment.deployment_id = result.deployment_id
             deployment.deployment_url = result.deployment_url
-            deployment.logs.extend(result.logs)
+            # For JSON fields, we need to create a new list to trigger SQLAlchemy's change detection
+            deployment.logs = deployment.logs + result.logs
             deployment.metadata = result.metadata
             deployment.completed_at = datetime.utcnow()
 
@@ -367,8 +402,17 @@ async def deploy_project(
         else:
             deployment.status = "failed"
             deployment.error = result.error
-            deployment.logs.extend(result.logs)
+            # For JSON fields, we need to create a new list to trigger SQLAlchemy's change detection
+            deployment.logs = deployment.logs + result.logs
             deployment.completed_at = datetime.utcnow()
+
+            # Extract deployment_id from metadata if available (for failed deployments)
+            if result.metadata and "deployment_id" in result.metadata:
+                deployment.deployment_id = result.metadata["deployment_id"]
+
+            # Try to get deployment_url if it's in metadata
+            if result.deployment_url:
+                deployment.deployment_url = result.deployment_url
 
             logger.error(f"Deployment {deployment.id} failed: {result.error}")
 

@@ -97,15 +97,15 @@ class DeploymentBuilder:
             logger.info(f"Running build command in container: {build_command}")
 
             # Execute build command in container
-            exit_code, output = await self.container_manager.execute_command_in_container(
-                user_id=user_id,
-                project_id=project_id,
-                command=build_command,
-                workdir="/app"
-            )
-
-            if exit_code != 0:
-                error_msg = f"Build failed with exit code {exit_code}: {output}"
+            # Note: execute_command_in_container expects a List[str] and raises RuntimeError on failure
+            try:
+                output = await self.container_manager.execute_command_in_container(
+                    user_id=user_id,
+                    project_id=project_id,
+                    command=["/bin/sh", "-c", f"cd /app && {build_command}"]
+                )
+            except RuntimeError as e:
+                error_msg = f"Build failed: {str(e)}"
                 logger.error(error_msg)
                 raise BuildError(error_msg)
 
@@ -122,12 +122,11 @@ class DeploymentBuilder:
         project_id: str,
         framework: Optional[str] = None,
         custom_output_dir: Optional[str] = None,
-        project_settings: Optional[Dict] = None
+        project_settings: Optional[Dict] = None,
+        collect_source: bool = False
     ) -> List[DeploymentFile]:
         """
-        Collect built files from the project container.
-
-        This method reads files from the build output directory inside the container.
+        Collect files from the project for deployment.
 
         Args:
             user_id: User ID
@@ -135,6 +134,7 @@ class DeploymentBuilder:
             framework: Framework type (auto-detected if not provided)
             custom_output_dir: Custom output directory override
             project_settings: Project settings dict (for cached framework info)
+            collect_source: If True, collect source files; if False, collect built files
 
         Returns:
             List of DeploymentFile objects
@@ -146,45 +146,54 @@ class DeploymentBuilder:
             # Get project path
             project_path = self._get_project_path(user_id, project_id)
 
-            # Detect framework using priority: parameter > cached > auto-detect
-            if not framework:
-                # Try to use cached framework from project settings
-                if project_settings and project_settings.get("framework"):
-                    framework = project_settings["framework"]
-                    logger.debug(f"Using cached framework from project settings: {framework}")
-                else:
-                    # Fallback: Auto-detect from package.json
-                    package_json_path = os.path.join(project_path, "package.json")
-                    if os.path.exists(package_json_path):
-                        with open(package_json_path, 'r') as f:
-                            package_json_content = f.read()
-                        framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
-                    else:
-                        framework = "vite"
+            if collect_source:
+                # Collect source files for deployment (Vercel will build)
+                logger.info(f"Collecting source files from: {project_path}")
+                files = await self._collect_files_recursive(project_path, ".")
+                logger.info(f"Collected {len(files)} source files for deployment")
+                return files
 
-            # Get output directory with priority: custom > cached > framework default
-            if custom_output_dir:
-                output_dir = custom_output_dir
-            elif project_settings and project_settings.get("output_directory"):
-                output_dir = project_settings["output_directory"]
-                logger.debug(f"Using cached output directory from project settings: {output_dir}")
             else:
-                output_dir = self._get_build_output_dir(framework)
-            build_path = os.path.join(project_path, output_dir)
+                # Collect built files (original behavior)
+                # Detect framework using priority: parameter > cached > auto-detect
+                if not framework:
+                    # Try to use cached framework from project settings
+                    if project_settings and project_settings.get("framework"):
+                        framework = project_settings["framework"]
+                        logger.debug(f"Using cached framework from project settings: {framework}")
+                    else:
+                        # Fallback: Auto-detect from package.json
+                        package_json_path = os.path.join(project_path, "package.json")
+                        if os.path.exists(package_json_path):
+                            with open(package_json_path, 'r') as f:
+                                package_json_content = f.read()
+                            framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
+                        else:
+                            framework = "vite"
 
-            logger.info(f"Collecting deployment files from: {build_path}")
+                # Get output directory with priority: custom > cached > framework default
+                if custom_output_dir:
+                    output_dir = custom_output_dir
+                elif project_settings and project_settings.get("output_directory"):
+                    output_dir = project_settings["output_directory"]
+                    logger.debug(f"Using cached output directory from project settings: {output_dir}")
+                else:
+                    output_dir = self._get_build_output_dir(framework)
+                build_path = os.path.join(project_path, output_dir)
 
-            # Verify build output exists
-            if not os.path.exists(build_path):
-                error_msg = f"Build output directory not found: {build_path}"
-                logger.error(error_msg)
-                raise FileNotFoundError(error_msg)
+                logger.info(f"Collecting deployment files from: {build_path}")
 
-            # Collect files
-            files = await self._collect_files_recursive(build_path, output_dir)
+                # Verify build output exists
+                if not os.path.exists(build_path):
+                    error_msg = f"Build output directory not found: {build_path}"
+                    logger.error(error_msg)
+                    raise FileNotFoundError(error_msg)
 
-            logger.info(f"Collected {len(files)} files for deployment")
-            return files
+                # Collect files
+                files = await self._collect_files_recursive(build_path, output_dir)
+
+                logger.info(f"Collected {len(files)} files for deployment")
+                return files
 
         except Exception as e:
             logger.error(f"Failed to collect deployment files: {e}", exc_info=True)

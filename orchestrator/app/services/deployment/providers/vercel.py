@@ -61,6 +61,9 @@ class VercelProvider(BaseDeploymentProvider):
                 # Normalize path
                 normalized_path = file.path.replace('\\', '/')
 
+                # Log each file being uploaded
+                logs.append(f"  - {normalized_path} ({len(file.content)} bytes)")
+
                 files_payload.append({
                     "file": normalized_path,
                     "data": base64.b64encode(file.content).decode('utf-8'),
@@ -69,19 +72,29 @@ class VercelProvider(BaseDeploymentProvider):
 
             # Step 2: Create deployment
             logs.append("Creating deployment...")
-            framework_config = self.get_framework_config(config.framework)
 
             deployment_data = {
                 "name": project_name,
                 "files": files_payload,
-                "projectSettings": {
-                    "framework": self._map_framework(config.framework),
-                    "buildCommand": config.build_command or framework_config.get("build_command"),
-                    "devCommand": config.start_command or framework_config.get("dev_command"),
-                    "outputDirectory": framework_config.get("output_dir", "dist")
-                },
                 "target": "production"
             }
+
+            # Configure based on deployment mode
+            if config.deployment_mode == "source":
+                # Source mode: Send source files and let Vercel build
+                logs.append("Deployment mode: source (Vercel will build the project)")
+                framework_name = self._map_framework(config.framework or "vite")
+                if framework_name:
+                    logs.append(f"Configuring Vercel build for framework: {framework_name}")
+                    deployment_data["projectSettings"] = {
+                        "framework": framework_name,
+                        "buildCommand": config.build_command or "npm run build",
+                        "outputDirectory": self._get_output_directory(config.framework or "vite")
+                    }
+            else:
+                # Pre-built mode: Send built files only, no build configuration
+                logs.append("Deployment mode: pre-built (uploading static files)")
+                # Don't set projectSettings - Vercel will serve files as-is
 
             # Add environment variables if provided
             if config.env_vars:
@@ -111,6 +124,9 @@ class VercelProvider(BaseDeploymentProvider):
             deployment_url = f"https://{result['url']}"
 
             logs.append(f"Deployment created: {deployment_id}")
+            logs.append(f"Initial status: {result.get('readyState', 'UNKNOWN')}")
+            if result.get('error'):
+                logs.append(f"Error in creation response: {result['error']}")
 
             # Step 3: Wait for build to complete
             logs.append("Building deployment...")
@@ -135,8 +151,15 @@ class VercelProvider(BaseDeploymentProvider):
                 error_msg = f"Build failed with status: {status}"
                 all_logs.append(error_msg)
 
+                # Add deployment URL for debugging
+                all_logs.append(f"Vercel deployment ID: {deployment_id}")
+                all_logs.append(f"Vercel URL: {deployment_url}")
+                all_logs.append(f"Check logs at: https://vercel.com/deployments/{deployment_id}")
+
                 return DeploymentResult(
                     success=False,
+                    deployment_id=deployment_id,  # Include deployment_id even for failures
+                    deployment_url=deployment_url,  # Include deployment_url even for failures
                     error=error_msg,
                     logs=all_logs,
                     metadata={"deployment_id": deployment_id}
@@ -227,6 +250,27 @@ class VercelProvider(BaseDeploymentProvider):
         }
         return mapping.get(framework.lower())
 
+    def _get_output_directory(self, framework: str) -> str:
+        """
+        Get the output directory for a framework.
+
+        Args:
+            framework: Internal framework identifier
+
+        Returns:
+            Output directory name
+        """
+        output_dirs = {
+            "vite": "dist",
+            "nextjs": ".next",
+            "react": "build",
+            "vue": "dist",
+            "svelte": "dist",
+            "nuxt": ".nuxt",
+            "angular": "dist"
+        }
+        return output_dirs.get(framework.lower(), "dist")
+
     def _get_headers(self) -> Dict[str, str]:
         """Get headers for Vercel API requests."""
         return {
@@ -311,11 +355,24 @@ class VercelProvider(BaseDeploymentProvider):
                 )
                 if response.status_code == 200:
                     events = response.json()
-                    return [
-                        f"[{event.get('type', 'INFO')}] {event.get('payload', {}).get('text', '')}"
-                        for event in events
-                        if event.get('payload', {}).get('text')
-                    ]
-                return []
-        except Exception:
-            return []
+                    log_lines = []
+                    for event in events:
+                        event_type = event.get('type', 'INFO')
+                        payload = event.get('payload', {})
+
+                        # Get text from payload
+                        if payload.get('text'):
+                            log_lines.append(f"[{event_type}] {payload['text']}")
+
+                        # Also check for error details
+                        if payload.get('message'):
+                            log_lines.append(f"[{event_type}] {payload['message']}")
+
+                        # Include the full event for debugging if it's an error
+                        if event_type == 'error' and not payload.get('text') and not payload.get('message'):
+                            log_lines.append(f"[ERROR] {payload}")
+
+                    return log_lines if log_lines else ["No logs available"]
+                return [f"Failed to fetch logs: HTTP {response.status_code}"]
+        except Exception as e:
+            return [f"Error fetching logs: {str(e)}"]

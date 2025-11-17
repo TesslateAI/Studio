@@ -28,6 +28,7 @@ class DeploymentConfig(BaseModel):
     project_id: str = Field(..., description="Unique project identifier")
     project_name: str = Field(..., description="Human-readable project name")
     framework: str = Field(..., description="Framework type (vite, nextjs, react, etc.)")
+    deployment_mode: str = Field(default="pre-built", description="Deployment mode: 'source' or 'pre-built'")
     build_command: Optional[str] = Field(None, description="Custom build command override")
     start_command: Optional[str] = Field(None, description="Custom start command for server frameworks")
     env_vars: Dict[str, str] = Field(default_factory=dict, description="Environment variables")

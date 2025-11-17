@@ -40,6 +40,7 @@ export function DeploymentModal({
   const [providers, setProviders] = useState<Provider[]>([]);
   const [credentials, setCredentials] = useState<DeploymentCredential[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [deploymentMode, setDeploymentMode] = useState<'source' | 'pre-built'>('source');
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
   const [customDomain, setCustomDomain] = useState('');
   const [isDeploying, setIsDeploying] = useState(false);
@@ -90,6 +91,7 @@ export function DeploymentModal({
     try {
       const result = await deploymentsApi.deploy(projectSlug, {
         provider: selectedProvider,
+        deployment_mode: deploymentMode,
         custom_domain: customDomain.trim() || undefined,
         env_vars: Object.keys(env_vars).length > 0 ? env_vars : undefined,
       });
@@ -237,6 +239,69 @@ export function DeploymentModal({
                 </div>
               </div>
 
+              {/* Deployment Mode */}
+              <div>
+                <label className="block text-sm font-semibold text-[var(--text)] mb-3">
+                  Deployment Mode
+                </label>
+                <div className="space-y-3">
+                  <button
+                    onClick={() => setDeploymentMode('source')}
+                    className={`
+                      w-full p-4 rounded-lg border-2 transition-all text-left
+                      ${deploymentMode === 'source'
+                        ? 'border-purple-500 bg-purple-500/10'
+                        : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
+                      }
+                    `}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
+                        deploymentMode === 'source' ? 'border-purple-500' : 'border-[var(--text)]/30'
+                      }`}>
+                        {deploymentMode === 'source' && (
+                          <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-[var(--text)]">Source Build (Recommended)</div>
+                        <div className="text-xs text-[var(--text)]/60 mt-1">
+                          Upload source code and let {getProviderDisplay(selectedProvider)} build your project.
+                          Standard workflow with automatic framework detection.
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setDeploymentMode('pre-built')}
+                    className={`
+                      w-full p-4 rounded-lg border-2 transition-all text-left
+                      ${deploymentMode === 'pre-built'
+                        ? 'border-purple-500 bg-purple-500/10'
+                        : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
+                      }
+                    `}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
+                        deploymentMode === 'pre-built' ? 'border-purple-500' : 'border-[var(--text)]/30'
+                      }`}>
+                        {deploymentMode === 'pre-built' && (
+                          <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-[var(--text)]">Pre-built</div>
+                        <div className="text-xs text-[var(--text)]/60 mt-1">
+                          Build locally and upload only the built files. Faster deployment, consistent with local builds.
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               {/* Custom Domain */}
               <div>
                 <label htmlFor="customDomain" className="block text-sm font-semibold text-[var(--text)] mb-2">
@@ -316,9 +381,19 @@ export function DeploymentModal({
                   <div className="text-sm text-blue-400">
                     <p className="font-semibold mb-1">Before deployment:</p>
                     <ul className="list-disc list-inside space-y-1 text-xs">
-                      <li>Your project will be built automatically</li>
-                      <li>Build output will be deployed to {getProviderDisplay(selectedProvider)}</li>
-                      <li>You'll receive a live URL when deployment completes</li>
+                      {deploymentMode === 'source' ? (
+                        <>
+                          <li>Your source code will be uploaded to {getProviderDisplay(selectedProvider)}</li>
+                          <li>{getProviderDisplay(selectedProvider)} will build your project remotely</li>
+                          <li>You'll receive a live URL when deployment completes</li>
+                        </>
+                      ) : (
+                        <>
+                          <li>Your project will be built locally</li>
+                          <li>Built files will be uploaded to {getProviderDisplay(selectedProvider)}</li>
+                          <li>You'll receive a live URL when deployment completes</li>
+                        </>
+                      )}
                     </ul>
                   </div>
                 </div>

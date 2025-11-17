@@ -108,8 +108,11 @@ async def vercel_authorize(
 @router.get("/vercel/callback")
 async def vercel_callback(
     code: str = Query(..., description="Authorization code from Vercel"),
-    state: str = Query(..., description="State token for CSRF protection"),
-    db: AsyncSession = Depends(get_db)
+    state: Optional[str] = Query(None, description="State token for CSRF protection"),
+    configurationId: Optional[str] = Query(None, description="Vercel configuration ID"),
+    teamId: Optional[str] = Query(None, description="Vercel team ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(current_active_user)
 ):
     """
     Vercel OAuth callback endpoint.
@@ -117,10 +120,17 @@ async def vercel_callback(
     This endpoint is called by Vercel after the user authorizes the application.
     It exchanges the authorization code for an access token and stores it securely.
 
+    Supports two flows:
+    1. Direct OAuth flow (with state token)
+    2. Marketplace installation flow (with configurationId, no state)
+
     Args:
         code: Authorization code from Vercel
-        state: State token for CSRF verification
+        state: State token for CSRF verification (optional for marketplace flow)
+        configurationId: Vercel configuration ID (for marketplace installations)
+        teamId: Vercel team ID (optional)
         db: Database session
+        current_user: Current authenticated user (optional)
 
     Returns:
         Redirect to frontend settings page
@@ -128,24 +138,38 @@ async def vercel_callback(
     settings = get_settings()
 
     try:
-        # Parse state (may contain project_id)
+        # Determine which flow we're using
         project_id = None
-        if ":" in state:
-            state, project_id_str = state.split(":", 1)
-            try:
-                project_id = UUID(project_id_str)
-            except ValueError:
-                logger.warning(f"Invalid project_id in state: {project_id_str}")
+        user_id = None
 
-        # Verify state token
-        user_id_str = verify_state_token(state)
-        if not user_id_str:
+        if state:
+            # Standard OAuth flow with state token
+            # Parse state (may contain project_id)
+            if ":" in state:
+                state, project_id_str = state.split(":", 1)
+                try:
+                    project_id = UUID(project_id_str)
+                except ValueError:
+                    logger.warning(f"Invalid project_id in state: {project_id_str}")
+
+            # Verify state token
+            user_id_str = verify_state_token(state)
+            if not user_id_str:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired state token"
+                )
+            user_id = UUID(user_id_str)
+        elif current_user:
+            # Marketplace installation flow - user is already authenticated
+            user_id = current_user.id
+            logger.info(f"Vercel marketplace installation for user {user_id}")
+        else:
+            # No state and no current user - can't proceed
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired state token"
+                detail="Missing authentication: no state token or current user"
             )
-
-        user_id = UUID(user_id_str)
 
         # Exchange code for access token
         async with httpx.AsyncClient() as client:
@@ -168,11 +192,13 @@ async def vercel_callback(
                 detail="Failed to obtain access token from Vercel"
             )
 
-        # Optionally fetch team information
-        team_id = token_data.get("team_id")
+        # Optionally fetch team information and store configuration ID
+        team_id = token_data.get("team_id") or teamId
         metadata = {}
         if team_id:
             metadata["team_id"] = team_id
+        if configurationId:
+            metadata["configuration_id"] = configurationId
 
             # Fetch team name
             try:
