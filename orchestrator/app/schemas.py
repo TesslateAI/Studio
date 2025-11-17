@@ -89,11 +89,72 @@ class Project(ProjectBase):
     id: UUID
     slug: str  # URL-safe identifier for routing
     owner_id: UUID
+    network_name: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True
+
+
+# Container Schemas
+
+class ContainerBase(BaseModel):
+    name: str
+    directory: Optional[str] = None
+
+class ContainerCreate(ContainerBase):
+    project_id: UUID
+    base_id: Union[UUID, str]  # UUID for marketplace bases, 'builtin' for built-in
+    position_x: float = 0
+    position_y: float = 0
+
+class ContainerUpdate(BaseModel):
+    name: Optional[str] = None
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
+    port: Optional[int] = None
+    environment_vars: Optional[Dict[str, Any]] = None
+
+class Container(ContainerBase):
+    id: UUID
+    project_id: UUID
+    base_id: Optional[UUID] = None
+    container_name: str
+    directory: str
+    port: Optional[int] = None
+    internal_port: Optional[int] = None
+    environment_vars: Optional[Dict[str, Any]] = None
+    position_x: float
+    position_y: float
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Container Connection Schemas
+
+class ContainerConnectionCreate(BaseModel):
+    project_id: UUID
+    source_container_id: UUID
+    target_container_id: UUID
+    connection_type: str = "depends_on"
+    label: Optional[str] = None
+
+class ContainerConnection(BaseModel):
+    id: UUID
+    project_id: UUID
+    source_container_id: UUID
+    target_container_id: UUID
+    connection_type: str
+    label: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 
 class ProjectFileBase(BaseModel):
     file_path: str

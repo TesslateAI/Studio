@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   CaretLeft,
@@ -63,9 +63,13 @@ interface UIAgent {
 export default function Project() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const containerId = searchParams.get('container');
+
   const { theme, toggleTheme } = useTheme();
   const [project, setProject] = useState<any>(null);
   const [files, setFiles] = useState<any[]>([]);
+  const [container, setContainer] = useState<any>(null);
   const [agents, setAgents] = useState<UIAgent[]>([]);
   const [activeView, setActiveView] = useState<MainViewType>('preview');
   const [activePanel, setActivePanel] = useState<PanelType>(null);
@@ -90,6 +94,20 @@ export default function Project() {
       loadAgents(); // Load user's enabled agents from library
     }
   }, [slug]);
+
+  // Load container when containerId changes
+  useEffect(() => {
+    if (containerId && slug) {
+      loadContainer();
+    }
+  }, [containerId, slug]);
+
+  // Reload files when container changes (to apply filtering)
+  useEffect(() => {
+    if (container) {
+      loadFiles();
+    }
+  }, [container]);
 
   useEffect(() => {
     localStorage.setItem('projectSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
@@ -247,9 +265,32 @@ export default function Project() {
     if (!slug) return;
     try {
       const filesData = await projectsApi.getFiles(slug);
-      setFiles(filesData);
+
+      // If viewing a specific container, filter files to that container's directory
+      if (containerId && container) {
+        const containerDir = container.directory;
+        const filteredFiles = filesData.filter((file: any) =>
+          file.file_path.startsWith(containerDir + '/')
+        );
+        setFiles(filteredFiles);
+      } else {
+        setFiles(filesData);
+      }
     } catch (error) {
       console.error('Failed to load files:', error);
+    }
+  };
+
+  const loadContainer = async () => {
+    if (!slug || !containerId) return;
+    try {
+      const containers = await projectsApi.getContainers(slug);
+      const foundContainer = containers.find((c: any) => c.id === containerId);
+      if (foundContainer) {
+        setContainer(foundContainer);
+      }
+    } catch (error) {
+      console.error('Failed to load container:', error);
     }
   };
 
@@ -326,6 +367,14 @@ export default function Project() {
       const response = await projectsApi.getDevServerUrl(slug);
       const token = localStorage.getItem('token');
       const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
+
+      // Handle multi-container projects (no single dev server)
+      if (response.status === 'multi_container') {
+        toast.dismiss('dev-server');
+        setDevServerUrl(null);
+        setDevServerUrlWithAuth(null);
+        return;
+      }
 
       if (response.status === 'ready' && response.url) {
         toast.dismiss('dev-server');
@@ -777,7 +826,7 @@ export default function Project() {
 
           {/* Terminal View */}
           <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-            <TerminalPanel projectId={slug!} />
+            <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
           </div>
         </div>
       </div>

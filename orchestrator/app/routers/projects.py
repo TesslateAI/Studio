@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
 from sqlalchemy.orm.attributes import flag_modified
 from ..database import get_db
-from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset
-from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema
+from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset, Container, ContainerConnection, MarketplaceBase
+from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema, Container as ContainerSchema, ContainerCreate, ContainerUpdate, ContainerConnection as ContainerConnectionSchema, ContainerConnectionCreate
 from ..config import get_settings
 from ..utils.slug_generator import generate_project_slug
 from ..utils.resource_naming import get_project_path
@@ -810,6 +810,22 @@ async def get_dev_server_url(
     try:
         settings = get_settings()
 
+        # Check if this is a multi-container project
+        containers_result = await db.execute(
+            select(Container).where(Container.project_id == project.id)
+        )
+        containers = containers_result.scalars().all()
+
+        if containers:
+            # Multi-container project - dev servers managed via docker-compose
+            logger.info(f"[DEV-URL] Multi-container project detected ({len(containers)} containers)")
+            return {
+                "url": None,
+                "status": "multi_container",
+                "message": "Multi-container project. Each container has its own dev server."
+            }
+
+        # Legacy single-container project
         # Auto-restart container if it was stopped by cleanup task
         from ..dev_server_manager import get_container_manager
         container_manager = get_container_manager()
@@ -2907,3 +2923,437 @@ async def interactive_terminal(
             await websocket.close()
         except:
             pass
+
+
+# ============================================================================
+# Container Management Endpoints (Node Graph / Monorepo)
+# ============================================================================
+
+@router.get("/{project_slug}/containers", response_model=List[ContainerSchema])
+async def get_project_containers(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all containers for a project (for the React Flow node graph).
+    Returns containers with their positions and base information.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    result = await db.execute(
+        select(Container).where(Container.project_id == project.id)
+    )
+    containers = result.scalars().all()
+
+    return containers
+
+
+@router.post("/{project_slug}/containers", response_model=ContainerSchema)
+async def add_container_to_project(
+    project_slug: str,
+    container_data: ContainerCreate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Add a base as a container to the project.
+    This clones the base's git repo into a subdirectory and sets up the container.
+
+    Flow:
+    1. User drags base from sidebar onto canvas
+    2. Frontend calls this endpoint with base_id and position
+    3. Backend clones base repo into project/packages/{base_name}
+    4. Creates Container record
+    5. Regenerates docker-compose.yml with all containers
+    6. Returns container data for React Flow node
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        # Get base information
+        if container_data.base_id == "builtin":
+            base_name = "main"
+            base_icon = "📦"
+            git_repo_url = None  # Built-in template, already in project
+        else:
+            base_result = await db.execute(
+                select(MarketplaceBase).where(MarketplaceBase.id == container_data.base_id)
+            )
+            base = base_result.scalar_one_or_none()
+
+            if not base:
+                raise HTTPException(status_code=404, detail="Base not found")
+
+            base_name = base.slug
+            base_icon = base.icon
+            git_repo_url = base.git_repo_url
+
+        # Determine container directory and name
+        container_name = container_data.name or base_name
+        container_directory = f"packages/{container_name}"
+        docker_container_name = f"{project.slug}-{container_name}"
+
+        # Create Container record
+        new_container = Container(
+            project_id=project.id,
+            base_id=None if container_data.base_id == "builtin" else container_data.base_id,
+            name=container_name,
+            directory=container_directory,
+            container_name=docker_container_name,
+            position_x=container_data.position_x,
+            position_y=container_data.position_y,
+            port=None,  # Will be auto-assigned
+            status="stopped"
+        )
+
+        db.add(new_container)
+        await db.commit()
+        await db.refresh(new_container)
+
+        logger.info(f"[CONTAINER] Created container {new_container.id} for project {project.id}")
+
+        # Regenerate docker-compose.yml for the project
+        try:
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+            # Get all containers and connections for this project
+            containers_result = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            all_containers = containers_result.scalars().all()
+
+            connections_result = await db.execute(
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+            )
+            all_connections = connections_result.scalars().all()
+
+            # Update docker-compose.yml
+            orchestrator = get_compose_orchestrator()
+            await orchestrator.write_compose_file(
+                project, all_containers, all_connections, current_user.id
+            )
+
+            logger.info(f"[CONTAINER] Updated docker-compose.yml for project {project.id}")
+        except Exception as e:
+            logger.warning(f"[CONTAINER] Failed to update docker-compose.yml: {e}")
+
+        # Clone base repository and save files to database
+        if git_repo_url:
+            try:
+                from ..services.git_manager import GitManager
+                from ..utils import walk_directory_async, read_file_async
+                from ..config import get_settings
+
+                settings = get_settings()
+
+                # Clone the base repository into the container directory
+                project_dir = os.path.join("/app/projects", str(current_user.id), str(project.id))
+                container_path = os.path.join(project_dir, container_directory)
+
+                # Ensure container directory exists
+                os.makedirs(container_path, exist_ok=True)
+
+                logger.info(f"[CONTAINER] Cloning base repo {git_repo_url} into {container_path}")
+
+                # Clone the repository
+                git_manager = GitManager(current_user.id, str(project.id))
+                import subprocess
+                clone_result = subprocess.run(
+                    ["git", "clone", git_repo_url, container_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+
+                if clone_result.returncode != 0:
+                    logger.error(f"[CONTAINER] Git clone failed: {clone_result.stderr}")
+                    raise Exception(f"Failed to clone repository: {clone_result.stderr}")
+
+                logger.info(f"[CONTAINER] Successfully cloned base repo")
+
+                # Save files to database with container directory prefix
+                if settings.deployment_mode == "docker":
+                    files_saved = 0
+                    walk_results = await walk_directory_async(
+                        container_path,
+                        exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', 'venv']
+                    )
+
+                    for root, dirs, files in walk_results:
+                        for file in files:
+                            if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+                                continue
+
+                            file_full_path = os.path.join(root, file)
+                            # Make path relative to project root (including container directory)
+                            relative_to_project = os.path.relpath(file_full_path, project_dir).replace('\\', '/')
+
+                            try:
+                                content = await read_file_async(file_full_path)
+
+                                # Check if file already exists
+                                existing_file_result = await db.execute(
+                                    select(ProjectFile).where(
+                                        ProjectFile.project_id == project.id,
+                                        ProjectFile.file_path == relative_to_project
+                                    )
+                                )
+                                existing_file = existing_file_result.scalar_one_or_none()
+
+                                if existing_file:
+                                    # Update existing file
+                                    existing_file.content = content
+                                else:
+                                    # Create new file
+                                    db_file = ProjectFile(
+                                        project_id=project.id,
+                                        file_path=relative_to_project,
+                                        content=content
+                                    )
+                                    db.add(db_file)
+
+                                files_saved += 1
+                            except Exception as e:
+                                logger.warning(f"[CONTAINER] Could not read file {relative_to_project}: {e}")
+
+                    await db.commit()
+                    logger.info(f"[CONTAINER] Saved {files_saved} files from base to database")
+
+            except Exception as e:
+                logger.error(f"[CONTAINER] Failed to clone base repository: {e}", exc_info=True)
+                # Don't fail the entire operation if git clone fails
+                # The container record is still created
+
+        return new_container
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to add container: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to add container: {str(e)}")
+
+
+@router.patch("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
+async def update_container(
+    project_slug: str,
+    container_id: UUID,
+    container_data: ContainerUpdate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update container settings (mainly position for React Flow).
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    try:
+        # Update fields
+        if container_data.name is not None:
+            container.name = container_data.name
+        if container_data.position_x is not None:
+            container.position_x = container_data.position_x
+        if container_data.position_y is not None:
+            container.position_y = container_data.position_y
+        if container_data.port is not None:
+            container.port = container_data.port
+        if container_data.environment_vars is not None:
+            container.environment_vars = container_data.environment_vars
+            flag_modified(container, 'environment_vars')
+
+        await db.commit()
+        await db.refresh(container)
+
+        return container
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to update container: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update container: {str(e)}")
+
+
+@router.delete("/{project_slug}/containers/{container_id}")
+async def delete_container(
+    project_slug: str,
+    container_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Remove a container from the project.
+    Deletes the container record and its directory from the monorepo.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    try:
+        # Delete container directory
+        # TODO: Implement file deletion from project directory
+
+        # Delete container from database (connections will cascade)
+        await db.delete(container)
+        await db.commit()
+
+        logger.info(f"[CONTAINER] Deleted container {container_id} from project {project.id}")
+
+        # Regenerate docker-compose.yml
+        try:
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+            # Get remaining containers and connections
+            containers_result = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            remaining_containers = containers_result.scalars().all()
+
+            connections_result = await db.execute(
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+            )
+            remaining_connections = connections_result.scalars().all()
+
+            # Update docker-compose.yml
+            orchestrator = get_compose_orchestrator()
+            await orchestrator.write_compose_file(
+                project, remaining_containers, remaining_connections, current_user.id
+            )
+
+            logger.info(f"[CONTAINER] Updated docker-compose.yml after deletion")
+        except Exception as e:
+            logger.warning(f"[CONTAINER] Failed to update docker-compose.yml: {e}")
+
+        return {"message": "Container deleted successfully"}
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to delete container: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete container: {str(e)}")
+
+
+@router.get("/{project_slug}/containers/connections", response_model=List[ContainerConnectionSchema])
+async def get_container_connections(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all connections between containers in the project.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    result = await db.execute(
+        select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+    )
+    connections = result.scalars().all()
+
+    return connections
+
+
+@router.post("/{project_slug}/containers/connections", response_model=ContainerConnectionSchema)
+async def create_container_connection(
+    project_slug: str,
+    connection_data: ContainerConnectionCreate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a connection between two containers (React Flow edge).
+    This represents a dependency or network connection.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        # Verify both containers exist and belong to this project
+        source = await db.get(Container, connection_data.source_container_id)
+        target = await db.get(Container, connection_data.target_container_id)
+
+        if not source or source.project_id != project.id:
+            raise HTTPException(status_code=404, detail="Source container not found")
+        if not target or target.project_id != project.id:
+            raise HTTPException(status_code=404, detail="Target container not found")
+
+        # Create connection
+        new_connection = ContainerConnection(
+            project_id=project.id,
+            source_container_id=connection_data.source_container_id,
+            target_container_id=connection_data.target_container_id,
+            connection_type=connection_data.connection_type,
+            label=connection_data.label
+        )
+
+        db.add(new_connection)
+        await db.commit()
+        await db.refresh(new_connection)
+
+        logger.info(f"[CONTAINER] Created connection {new_connection.id} in project {project.id}")
+
+        # Regenerate docker-compose.yml with updated depends_on
+        try:
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+            containers_result = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            all_containers = containers_result.scalars().all()
+
+            connections_result = await db.execute(
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+            )
+            all_connections = connections_result.scalars().all()
+
+            orchestrator = get_compose_orchestrator()
+            await orchestrator.write_compose_file(
+                project, all_containers, all_connections, current_user.id
+            )
+
+            logger.info(f"[CONTAINER] Updated docker-compose.yml with new connection")
+        except Exception as e:
+            logger.warning(f"[CONTAINER] Failed to update docker-compose.yml: {e}")
+
+        return new_connection
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to create connection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create connection: {str(e)}")
+
+
+@router.delete("/{project_slug}/containers/connections/{connection_id}")
+async def delete_container_connection(
+    project_slug: str,
+    connection_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a connection between containers.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    connection = await db.get(ContainerConnection, connection_id)
+    if not connection or connection.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    try:
+        await db.delete(connection)
+        await db.commit()
+
+        logger.info(f"[CONTAINER] Deleted connection {connection_id} from project {project.id}")
+
+        # TODO: Update docker-compose.yml
+
+        return {"message": "Connection deleted successfully"}
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to delete connection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete connection: {str(e)}")

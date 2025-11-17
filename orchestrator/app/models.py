@@ -24,6 +24,9 @@ class Project(Base):
     architecture_diagram = Column(Text, nullable=True)  # Stored Mermaid diagram
     settings = Column(JSON, nullable=True)  # Project settings: preview_mode, etc.
 
+    # Multi-container support (monorepo)
+    network_name = Column(String, nullable=True)  # Docker network name: tesslate-{slug}
+
     # Deployment tracking (for billing)
     deploy_type = Column(String, default="development")  # development, deployed
     is_deployed = Column(Boolean, default=False)  # Quick query for deployed status
@@ -43,6 +46,65 @@ class Project(Base):
     agent_command_logs = relationship("AgentCommandLog", back_populates="project", cascade="all, delete-orphan")
     kanban_board = relationship("KanbanBoard", back_populates="project", uselist=False, cascade="all, delete-orphan")
     notes = relationship("ProjectNote", back_populates="project", uselist=False, cascade="all, delete-orphan")
+    containers = relationship("Container", back_populates="project", cascade="all, delete-orphan")
+
+
+class Container(Base):
+    """Containers in a project (monorepo architecture - each base becomes a container)."""
+    __tablename__ = "containers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    base_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_bases.id"), nullable=True)  # NULL for custom containers
+
+    # Container info
+    name = Column(String, nullable=False)  # Display name (e.g., "frontend", "api", "database")
+    directory = Column(String, nullable=False)  # Directory in monorepo (e.g., "packages/frontend")
+    container_name = Column(String, nullable=False)  # Docker container name
+
+    # Docker configuration
+    port = Column(Integer, nullable=True)  # Exposed port
+    internal_port = Column(Integer, nullable=True)  # Container internal port
+    environment_vars = Column(JSON, nullable=True)  # Environment variables
+    dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
+
+    # React Flow position
+    position_x = Column(Float, default=0)
+    position_y = Column(Float, default=0)
+
+    # Status tracking
+    status = Column(String, default="stopped")  # stopped, starting, running, failed
+    last_started_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project", back_populates="containers")
+    base = relationship("MarketplaceBase")
+    connections_from = relationship("ContainerConnection", foreign_keys="ContainerConnection.source_container_id", back_populates="source_container", cascade="all, delete-orphan")
+    connections_to = relationship("ContainerConnection", foreign_keys="ContainerConnection.target_container_id", back_populates="target_container", cascade="all, delete-orphan")
+
+
+class ContainerConnection(Base):
+    """Connections between containers in the React Flow graph (represents dependencies/networking)."""
+    __tablename__ = "container_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    source_container_id = Column(UUID(as_uuid=True), ForeignKey("containers.id"), nullable=False)
+    target_container_id = Column(UUID(as_uuid=True), ForeignKey("containers.id"), nullable=False)
+
+    # Connection metadata
+    connection_type = Column(String, default="depends_on")  # depends_on, network, custom
+    label = Column(String, nullable=True)  # Optional label for the edge
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    source_container = relationship("Container", foreign_keys=[source_container_id], back_populates="connections_from")
+    target_container = relationship("Container", foreign_keys=[target_container_id], back_populates="connections_to")
+
 
 class ProjectFile(Base):
     __tablename__ = "project_files"

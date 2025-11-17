@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectsApi, marketplaceApi, authApi, tasksApi } from '../lib/api';
-import { githubApi } from '../lib/github-api';
+import { projectsApi, authApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import {
   MobileMenu,
-  ProjectCard,
-  MarketplaceCard
+  ProjectCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
-import { GitHubConnectModal, ConfirmDialog } from '../components/modals';
+import { ConfirmDialog } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import {
@@ -20,12 +18,9 @@ import {
   Sun,
   Moon,
   FilePlus,
-  GithubLogo,
-  GitBranch,
   Books,
   SignOut,
   CaretDown,
-  Check,
   Coins,
   CreditCard,
   User
@@ -47,18 +42,7 @@ export default function Dashboard() {
   const { theme, toggleTheme } = useTheme();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newProject, setNewProject] = useState({ name: '', description: '' });
   const [isCreating, setIsCreating] = useState(false);
-  const [sourceType, setSourceType] = useState<'template' | 'github' | 'base'>('base');
-  const [githubRepoUrl, setGithubRepoUrl] = useState('');
-  const [githubBranch, setGithubBranch] = useState('main');
-  const [githubConnected, setGithubConnected] = useState(false);
-  const [checkingGithub, setCheckingGithub] = useState(false);
-  const [showGithubConnectModal, setShowGithubConnectModal] = useState(false);
-  const [bases, setBases] = useState<any[]>([]);
-  const [selectedBase, setSelectedBase] = useState<string | null>('builtin');
-  const [isBaseDropdownOpen, setIsBaseDropdownOpen] = useState(false);
   const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
@@ -89,35 +73,6 @@ export default function Dashboard() {
     loadProjects();
   }, []);
 
-  useEffect(() => {
-    if (showCreateModal) {
-      checkGithubConnection();
-      loadUserBases();
-    }
-  }, [showCreateModal]);
-
-  // Handle Ctrl+Enter keyboard shortcut for creating project
-  useEffect(() => {
-    if (!showCreateModal) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        // Check if form is valid before submitting
-        const isValid = newProject.name.trim() &&
-          (sourceType !== 'github' || githubRepoUrl.trim()) &&
-          (sourceType !== 'base' || selectedBase !== null);
-
-        if (isValid && !isCreating) {
-          createProject();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showCreateModal, newProject, sourceType, githubRepoUrl, selectedBase, isCreating]);
-
   const loadProjects = async () => {
     try {
       const data = await projectsApi.getAll();
@@ -135,92 +90,34 @@ export default function Dashboard() {
     }
   };
 
-  const checkGithubConnection = async () => {
-    setCheckingGithub(true);
-    try {
-      const status = await githubApi.getStatus();
-      setGithubConnected(status.connected);
-    } catch (error) {
-      setGithubConnected(false);
-    } finally {
-      setCheckingGithub(false);
-    }
-  };
-
-  const loadUserBases = async () => {
-    try {
-      const data = await marketplaceApi.getUserBases();
-      setBases(data.bases || []);
-    } catch (error) {
-      console.error('Failed to load bases:', error);
-      setBases([]);
-    }
-  };
-
-  const createProject = async () => {
-    if (!newProject.name.trim()) {
-      toast.error('Project name is required');
-      return;
-    }
-
-    if (sourceType === 'github') {
-      if (!githubRepoUrl.trim()) {
-        toast.error('GitHub repository URL is required');
-        return;
-      }
-      // GitHub connection is optional - works for public repos without authentication
-    }
-
-    if (sourceType === 'base') {
-      if (!selectedBase) {
-        toast.error('Please select a base');
-        return;
-      }
-    }
+  const createEmptyProject = async () => {
+    if (isCreating) return;
 
     setIsCreating(true);
-    const creatingToast = toast.loading(
-      sourceType === 'github'
-        ? 'Importing from GitHub...'
-        : sourceType === 'base'
-        ? 'Creating from base...'
-        : 'Creating your project...'
-    );
+    const creatingToast = toast.loading('Creating project...');
 
     try {
+      // Generate a unique project name
+      const timestamp = Date.now();
+      const projectName = `Untitled Project ${timestamp}`;
+
+      // Create empty project (no base)
       const response = await projectsApi.create(
-        newProject.name,
-        newProject.description,
-        sourceType,
-        githubRepoUrl || undefined,
-        githubBranch || 'main',
-        selectedBase || undefined
+        projectName,
+        '',
+        'base',
+        undefined,
+        'main',
+        undefined
       );
 
-      // Response now includes { project, task_id, status_endpoint }
       const project = response.project;
-      const taskId = response.task_id;
 
-      // Update toast to show it's processing in background
-      toast.success('Project created! Setting up files...', { id: creatingToast, duration: 3000 });
-
-      setShowCreateModal(false);
-      setNewProject({ name: '', description: '' });
-      setSourceType('base');
-      setSelectedBase('builtin');
-      setGithubRepoUrl('');
-      setGithubBranch('main');
+      toast.success('Project created!', { id: creatingToast, duration: 2000 });
       setIsCreating(false);
 
-      // Navigate to project immediately
+      // Navigate to project graph canvas
       navigate(`/project/${project.slug}`);
-
-      // Poll for task completion in background (notifications will show via WebSocket)
-      if (taskId) {
-        tasksApi.pollUntilComplete(taskId).catch((err) => {
-          console.error('Project setup failed:', err);
-        });
-      }
     } catch (error: any) {
       const detail = error?.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to create project';
@@ -564,7 +461,8 @@ export default function Dashboard() {
             <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"}>
               {/* Create New Project Card */}
               <button
-                onClick={() => setShowCreateModal(true)}
+                onClick={createEmptyProject}
+                disabled={isCreating}
                 className={`
                   group bg-white/[0.01] rounded-2xl p-6
                   border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
@@ -573,14 +471,19 @@ export default function Dashboard() {
                   hover:transform hover:-translate-y-1
                   flex flex-col items-center justify-center gap-3
                   ${filteredProjects.length === 0 ? 'w-full min-h-[400px]' : 'min-h-[240px]'}
+                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
               >
                 <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
                   <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
                 </div>
                 <div className="text-center">
-                  <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">Create New Project</h3>
-                  <p className="text-sm text-gray-500">Start building something amazing</p>
+                  <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
+                    {isCreating ? 'Creating...' : 'Create New Project'}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {isCreating ? 'Opening canvas...' : 'Start building something amazing'}
+                  </p>
                 </div>
               </button>
 
@@ -616,374 +519,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-      {/* Create Project Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => !isCreating && setShowCreateModal(false)}>
-          <div className="bg-[var(--surface)] p-8 rounded-3xl w-full max-w-lg shadow-2xl border border-white/10" onClick={(e) => e.stopPropagation()}>
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
-              </div>
-              <h2 className="font-heading text-2xl font-bold text-[var(--text)] mb-2">Create New Project</h2>
-              <p className="text-gray-500">Choose how to start your project</p>
-            </div>
-
-            <div className="space-y-4">
-              {/* Source Type Selection */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-3">Project Source</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setSourceType('base')}
-                    disabled={isCreating}
-                    className={`
-                      p-4 rounded-xl border-2 transition-all
-                      ${sourceType === 'base'
-                        ? 'border-[var(--primary)] bg-[rgba(var(--primary-rgb),0.1)]'
-                        : theme === 'light'
-                          ? 'border-black/10 bg-black/5 hover:border-black/20'
-                          : 'border-white/10 bg-white/5 hover:border-white/20'
-                      }
-                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                    `}
-                  >
-                    <Package className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
-                    <div className="text-sm font-semibold text-[var(--text)]">Base</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Start from template</div>
-                  </button>
-                  <button
-                    onClick={() => setSourceType('github')}
-                    disabled={isCreating}
-                    className={`
-                      p-4 rounded-xl border-2 transition-all
-                      ${sourceType === 'github'
-                        ? 'border-[var(--primary)] bg-[rgba(var(--primary-rgb),0.1)]'
-                        : theme === 'light'
-                          ? 'border-black/10 bg-black/5 hover:border-black/20'
-                          : 'border-white/10 bg-white/5 hover:border-white/20'
-                      }
-                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                    `}
-                  >
-                    <GithubLogo className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
-                    <div className="text-sm font-semibold text-[var(--text)]">GitHub</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Import repository</div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Base Selection */}
-              {sourceType === 'base' && (
-                <div className="space-y-3">
-                  <p className="text-sm text-white/60">
-                    Select a base to start your project:
-                  </p>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => !isCreating && setIsBaseDropdownOpen(!isBaseDropdownOpen)}
-                      disabled={isCreating}
-                      className={`
-                        w-full px-3 py-3 border rounded-lg text-left
-                        flex items-center justify-between transition-all
-                        ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-                        ${isBaseDropdownOpen
-                          ? 'border-[var(--primary)]'
-                          : theme === 'light'
-                            ? 'border-black/20 hover:border-black/30'
-                            : 'border-white/10 hover:border-white/20'
-                        }
-                        ${isCreating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                      `}
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        {selectedBase === 'builtin' ? (
-                          <>
-                            <span className="text-xl flex-shrink-0">📦</span>
-                            <div className="min-w-0 flex-1">
-                              <div className="font-medium text-[var(--text)] truncate">
-                                Default Base
-                              </div>
-                              <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                Frontend-only Vite + React template
-                              </div>
-                            </div>
-                          </>
-                        ) : selectedBase ? (
-                          <>
-                            <span className="text-xl flex-shrink-0">
-                              {bases.find(b => b.id === selectedBase)?.icon}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="font-medium text-[var(--text)] truncate">
-                                {bases.find(b => b.id === selectedBase)?.name}
-                              </div>
-                              <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                {bases.find(b => b.id === selectedBase)?.description}
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <span className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>Choose a base...</span>
-                        )}
-                      </div>
-                      <CaretDown
-                        className={`flex-shrink-0 ml-2 transition-transform ${isBaseDropdownOpen ? 'rotate-180' : ''}`}
-                        size={16}
-                        weight="bold"
-                      />
-                    </button>
-
-                    {isBaseDropdownOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setIsBaseDropdownOpen(false)}
-                        />
-                        <div className={`absolute z-20 w-full mt-1 bg-[var(--surface)] border rounded-lg shadow-xl max-h-60 overflow-y-auto ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`}>
-                          {/* Built-in Default Base */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedBase('builtin');
-                              setIsBaseDropdownOpen(false);
-                            }}
-                            className={`
-                              w-full px-3 py-3 text-left transition-colors
-                              flex items-center gap-3
-                              ${selectedBase === 'builtin'
-                                ? 'bg-[rgba(var(--primary-rgb),0.1)]'
-                                : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
-                              }
-                            `}
-                          >
-                            <span className="text-xl flex-shrink-0">📦</span>
-                            <div className="flex-1 min-w-0">
-                              <div className={`font-medium truncate ${selectedBase === 'builtin' ? 'text-[var(--primary)]' : 'text-[var(--text)]'}`}>
-                                Default Base
-                              </div>
-                              <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                Frontend-only Vite + React template
-                              </div>
-                              <div className="flex gap-1 mt-1 flex-wrap">
-                                <span className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}>
-                                  Vite
-                                </span>
-                                <span className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}>
-                                  React
-                                </span>
-                                <span className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}>
-                                  TailwindCSS
-                                </span>
-                              </div>
-                            </div>
-                            {selectedBase === 'builtin' && (
-                              <Check size={20} weight="bold" className="flex-shrink-0 text-[var(--primary)]" />
-                            )}
-                          </button>
-
-                          {/* Separator if there are marketplace bases */}
-                          {bases.length > 0 && (
-                            <div className={`border-t my-1 ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`} />
-                          )}
-
-                          {/* Marketplace Bases */}
-                          {bases.map((base: any) => (
-                            <button
-                              key={base.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedBase(base.id);
-                                setIsBaseDropdownOpen(false);
-                              }}
-                              className={`
-                                w-full px-3 py-3 text-left transition-colors
-                                flex items-center gap-3
-                                ${selectedBase === base.id
-                                  ? 'bg-[rgba(var(--primary-rgb),0.1)]'
-                                  : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
-                                }
-                              `}
-                            >
-                              <span className="text-xl flex-shrink-0">{base.icon}</span>
-                              <div className="flex-1 min-w-0">
-                                <div className={`font-medium truncate ${selectedBase === base.id ? 'text-[var(--primary)]' : 'text-[var(--text)]'}`}>
-                                  {base.name}
-                                </div>
-                                <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                  {base.description}
-                                </div>
-                                <div className="flex gap-1 mt-1 flex-wrap">
-                                  {base.tech_stack?.slice(0, 3).map((tech: string, idx: number) => (
-                                    <span
-                                      key={idx}
-                                      className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}
-                                    >
-                                      {tech}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                              {selectedBase === base.id && (
-                                <Check size={20} weight="bold" className="flex-shrink-0 text-[var(--primary)]" />
-                              )}
-                            </button>
-                          ))}
-
-                          {/* Browse Marketplace Link */}
-                          {bases.length === 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowCreateModal(false);
-                                navigate('/marketplace');
-                              }}
-                              className={`w-full px-3 py-3 text-center text-sm font-medium text-[var(--primary)] hover:text-[var(--primary-hover)] ${theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'} transition-colors`}
-                            >
-                              Browse Marketplace for More Bases →
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* GitHub Connection Status */}
-              {sourceType === 'github' && (
-                <div className={`border rounded-xl p-3 ${theme === 'light' ? 'bg-black/5 border-black/10' : 'bg-white/5 border-white/10'}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <GithubLogo className="w-4 h-4" weight="fill" />
-                      <span className="text-sm font-medium text-[var(--text)]">GitHub Connection:</span>
-                      {checkingGithub ? (
-                        <span className="text-xs text-gray-500">Checking...</span>
-                      ) : githubConnected ? (
-                        <span className="text-xs text-green-400">✓ Connected</span>
-                      ) : (
-                        <span className="text-xs text-[var(--primary)]">Not Connected</span>
-                      )}
-                    </div>
-                    {!githubConnected && !checkingGithub && (
-                      <button
-                        onClick={() => setShowGithubConnectModal(true)}
-                        disabled={isCreating}
-                        className="text-xs bg-[var(--status-purple)] hover:bg-[var(--status-purple)]/80 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg font-medium transition-all"
-                      >
-                        Connect
-                      </button>
-                    )}
-                  </div>
-                  {!githubConnected && !checkingGithub && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      Connection optional for public repos. Required for private repos.
-                    </p>
-                  )}
-                  {githubConnected && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      You can import both public and private repositories.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* GitHub Repository URL */}
-              {sourceType === 'github' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Repository URL</label>
-                    <input
-                      type="text"
-                      value={githubRepoUrl}
-                      onChange={(e) => setGithubRepoUrl(e.target.value)}
-                      className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                      placeholder="https://github.com/username/repository"
-                      disabled={isCreating}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Branch</label>
-                    <div className="relative">
-                      <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                      <input
-                        type="text"
-                        value={githubBranch}
-                        onChange={(e) => setGithubBranch(e.target.value)}
-                        className={`w-full border text-[var(--text)] pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                        placeholder="main"
-                        disabled={isCreating}
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* Project Name & Description */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-2">Project Name</label>
-                <input
-                  type="text"
-                  value={newProject.name}
-                  onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                  className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                  placeholder="My Awesome App"
-                  disabled={isCreating}
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-2">Description</label>
-                <textarea
-                  value={newProject.description}
-                  onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-                  className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                  rows={3}
-                  placeholder="Describe your project..."
-                  disabled={isCreating}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={createProject}
-                  disabled={
-                    isCreating ||
-                    !newProject.name.trim() ||
-                    (sourceType === 'github' && !githubRepoUrl.trim()) ||
-                    (sourceType === 'base' && !selectedBase)
-                  }
-                  className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
-                >
-                  {isCreating
-                    ? sourceType === 'github' ? 'Importing...' : sourceType === 'base' ? 'Creating...' : 'Creating...'
-                    : sourceType === 'github' ? 'Import & Create' : sourceType === 'base' ? 'Create from Base' : 'Create Project'
-                  }
-                </button>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  disabled={isCreating}
-                  className="flex-1 bg-white/5 border border-white/10 text-[var(--text)] py-3 rounded-xl font-semibold hover:bg-white/10 transition-all disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* GitHub Connect Modal */}
-      <GitHubConnectModal
-        isOpen={showGithubConnectModal}
-        onClose={() => setShowGithubConnectModal(false)}
-        onSuccess={() => {
-          checkGithubConnection();
-          setShowGithubConnectModal(false);
-        }}
-      />
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog

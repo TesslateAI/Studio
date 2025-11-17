@@ -13,6 +13,7 @@
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
     "@monaco-editor/react": "^4.7.0",
+    "@xyflow/react": "^12.3.4",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-slot": "^1.2.3",
     "@tiptap/extension-code-block-lowlight": "^3.7.2",

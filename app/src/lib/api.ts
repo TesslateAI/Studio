@@ -301,6 +301,10 @@ export const projectsApi = {
     const response = await api.post(`/api/projects/${id}/fork`);
     return response.data;
   },
+  getContainers: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/containers`);
+    return response.data;
+  },
 };
 
 export const chatApi = {
