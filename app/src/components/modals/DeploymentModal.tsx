@@ -44,7 +44,7 @@ export function DeploymentModal({
   const [providers, setProviders] = useState<Provider[]>([]);
   const [credentials, setCredentials] = useState<DeploymentCredential[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
-  const [deploymentMode, setDeploymentMode] = useState<'source' | 'pre-built'>('source');
+  const [deploymentMode, setDeploymentMode] = useState<'source' | 'pre-built'>('pre-built');
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
   const [customDomain, setCustomDomain] = useState('');
   const [isDeploying, setIsDeploying] = useState(false);
@@ -55,6 +55,21 @@ export function DeploymentModal({
       loadData();
     }
   }, [isOpen]);
+
+  // Auto-select appropriate deployment mode when provider changes
+  useEffect(() => {
+    if (!selectedProvider) return;
+
+    // Default deployment modes per provider
+    const providerDefaults: Record<string, 'source' | 'pre-built'> = {
+      vercel: 'source',
+      netlify: 'pre-built',
+      cloudflare: 'pre-built',
+    };
+
+    const defaultMode = providerDefaults[selectedProvider.toLowerCase()] || 'pre-built';
+    setDeploymentMode(defaultMode);
+  }, [selectedProvider]);
 
   const loadData = async () => {
     try {
@@ -100,8 +115,49 @@ export function DeploymentModal({
         env_vars: Object.keys(env_vars).length > 0 ? env_vars : undefined,
       });
 
-      toast.success('Deployment started successfully!');
-      onSuccess();
+      console.log('Deployment result:', result);
+
+      if (result.status === 'success' && result.deployment_url) {
+        // Try to open in new tab
+        try {
+          const newWindow = window.open(result.deployment_url, '_blank', 'noopener,noreferrer');
+          if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+            // Popup was blocked
+            throw new Error('Popup blocked');
+          }
+          toast.success('Deployment successful! Opening in new tab...');
+        } catch (e) {
+          // Fallback: Copy to clipboard and show clickable link
+          navigator.clipboard.writeText(result.deployment_url).catch(() => {});
+          toast.success(
+            (t) => (
+              <div>
+                <div className="font-semibold mb-1">Deployment successful!</div>
+                <a
+                  href={result.deployment_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:text-blue-300 underline text-sm break-all"
+                  onClick={() => toast.dismiss(t.id)}
+                >
+                  Click to open: {result.deployment_url}
+                </a>
+                <div className="text-xs text-gray-400 mt-1">URL copied to clipboard</div>
+              </div>
+            ),
+            { duration: 10000 }
+          );
+        }
+        onSuccess();
+      } else if (result.status === 'success') {
+        toast.success('Deployment completed successfully!');
+        onSuccess();
+      } else if (result.status === 'building' || result.status === 'deploying') {
+        toast.success('Deployment started! This may take a few minutes...');
+        onSuccess();
+      } else {
+        toast.error(result.error || 'Deployment failed');
+      }
     } catch (error: any) {
       console.error('Deployment failed:', error);
       toast.error(error.response?.data?.detail || 'Failed to start deployment');
@@ -215,9 +271,25 @@ export function DeploymentModal({
             <>
               {/* Provider Selection */}
               <div>
-                <label className="block text-sm font-semibold text-[var(--text)] mb-3">
-                  Deployment Provider
-                </label>
+                <div className="flex items-center gap-2 mb-3">
+                  <label className="block text-sm font-semibold text-[var(--text)]">
+                    Deployment Provider
+                  </label>
+                  <div className="group relative">
+                    <Info
+                      size={16}
+                      className="text-[var(--text)]/40 hover:text-[var(--text)]/60 transition-colors cursor-help"
+                      weight="fill"
+                    />
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                      <div className="text-xs text-[var(--text)]/80 space-y-2">
+                        <p className="font-semibold text-[var(--text)]">Select deployment provider</p>
+                        <p>Choose which hosting provider to deploy your project to. You can connect additional providers in Settings.</p>
+                      </div>
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
+                    </div>
+                  </div>
+                </div>
                 <div className="relative">
                   <select
                     value={selectedProvider}
@@ -251,9 +323,6 @@ export function DeploymentModal({
                     <CaretDown size={20} className="text-[var(--text)]/60" weight="bold" />
                   </div>
                 </div>
-                <p className="text-xs text-[var(--text)]/60 mt-2">
-                  Select a provider to deploy to, or connect additional providers in Settings
-                </p>
               </div>
 
               {/* Deployment Mode */}
@@ -268,71 +337,60 @@ export function DeploymentModal({
                       className="text-[var(--text)]/40 hover:text-[var(--text)]/60 transition-colors cursor-help"
                       weight="fill"
                     />
-                    <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                       <div className="text-xs text-[var(--text)]/80 space-y-2">
                         <p className="font-semibold text-[var(--text)]">About deployment modes</p>
                         <ul className="space-y-1.5 list-disc list-inside">
-                          <li><strong>Source Build:</strong> Upload code and build remotely on the provider's platform</li>
-                          <li><strong>Pre-built:</strong> Build locally and upload only the production files</li>
+                          <li><strong>Pre-built:</strong> Build locally and upload only the production files. Faster deployment, consistent with local builds.</li>
+                          <li><strong>Source Build:</strong> Upload source code and let the provider build your project remotely. Only supported by some providers (Vercel).</li>
                         </ul>
                       </div>
-                      <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white/20"></div>
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
                     </div>
                   </div>
                 </div>
-                <div className="space-y-3">
-                  <button
-                    onClick={() => setDeploymentMode('source')}
-                    className={`
-                      w-full p-4 rounded-lg border-2 transition-all text-left
-                      ${deploymentMode === 'source'
-                        ? 'border-purple-500 bg-purple-500/10'
-                        : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
-                      }
-                    `}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
-                        deploymentMode === 'source' ? 'border-purple-500' : 'border-[var(--text)]/30'
-                      }`}>
-                        {deploymentMode === 'source' && (
-                          <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-semibold text-[var(--text)]">Source Build (Recommended)</div>
-                        <div className="text-xs text-[var(--text)]/60 mt-1">
-                          Upload source code and let {getProviderDisplay(selectedProvider)} build your project.
-                          Standard workflow with automatic framework detection.
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
+                <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setDeploymentMode('pre-built')}
                     className={`
-                      w-full p-4 rounded-lg border-2 transition-all text-left
+                      p-4 rounded-lg border-2 transition-all text-left
                       ${deploymentMode === 'pre-built'
                         ? 'border-purple-500 bg-purple-500/10'
                         : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
                       }
                     `}
                   >
-                    <div className="flex items-start gap-3">
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
                         deploymentMode === 'pre-built' ? 'border-purple-500' : 'border-[var(--text)]/30'
                       }`}>
                         {deploymentMode === 'pre-built' && (
                           <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
                         )}
                       </div>
-                      <div className="flex-1">
-                        <div className="font-semibold text-[var(--text)]">Pre-built</div>
-                        <div className="text-xs text-[var(--text)]/60 mt-1">
-                          Build locally and upload only the built files. Faster deployment, consistent with local builds.
-                        </div>
+                      <div className="font-semibold text-[var(--text)]">Pre-built</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setDeploymentMode('source')}
+                    className={`
+                      p-4 rounded-lg border-2 transition-all text-left
+                      ${deploymentMode === 'source'
+                        ? 'border-purple-500 bg-purple-500/10'
+                        : 'border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20'
+                      }
+                    `}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                        deploymentMode === 'source' ? 'border-purple-500' : 'border-[var(--text)]/30'
+                      }`}>
+                        {deploymentMode === 'source' && (
+                          <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                        )}
                       </div>
+                      <div className="font-semibold text-[var(--text)]">Source Build</div>
                     </div>
                   </button>
                 </div>
@@ -340,9 +398,25 @@ export function DeploymentModal({
 
               {/* Custom Domain */}
               <div>
-                <label htmlFor="customDomain" className="block text-sm font-semibold text-[var(--text)] mb-2">
-                  Custom Domain (Optional)
-                </label>
+                <div className="flex items-center gap-2 mb-2">
+                  <label htmlFor="customDomain" className="block text-sm font-semibold text-[var(--text)]">
+                    Custom Domain (Optional)
+                  </label>
+                  <div className="group relative">
+                    <Info
+                      size={16}
+                      className="text-[var(--text)]/40 hover:text-[var(--text)]/60 transition-colors cursor-help"
+                      weight="fill"
+                    />
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                      <div className="text-xs text-[var(--text)]/80 space-y-2">
+                        <p className="font-semibold text-[var(--text)]">Custom domain</p>
+                        <p>Enter a custom domain name for your deployment. You'll need to configure DNS settings to point to your deployment after it's created.</p>
+                      </div>
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
+                    </div>
+                  </div>
+                </div>
                 <input
                   id="customDomain"
                   type="text"
@@ -351,9 +425,6 @@ export function DeploymentModal({
                   placeholder="example.com"
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
-                <p className="text-xs text-[var(--text)]/60 mt-2">
-                  Enter a custom domain name for your deployment (requires DNS configuration)
-                </p>
               </div>
 
               {/* Environment Variables */}
@@ -369,7 +440,7 @@ export function DeploymentModal({
                         className="text-[var(--text)]/40 hover:text-[var(--text)]/60 transition-colors cursor-help"
                         weight="fill"
                       />
-                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-80 p-4 bg-[var(--surface)] border border-white/20 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                         <div className="text-xs text-[var(--text)]/80 space-y-2">
                           <p className="font-semibold text-[var(--text)]">About environment variables</p>
                           <ul className="space-y-1.5 list-disc list-inside">
@@ -378,7 +449,7 @@ export function DeploymentModal({
                             <li>Values are encrypted in transit and at rest on the provider's platform</li>
                           </ul>
                         </div>
-                        <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-8 border-r-8 border-t-8 border-l-transparent border-r-transparent border-t-white/20"></div>
+                        <div className="absolute left-1/2 -translate-x-1/2 bottom-full w-0 h-0 border-l-8 border-r-8 border-b-8 border-l-transparent border-r-transparent border-b-white/20"></div>
                       </div>
                     </div>
                   </div>
@@ -425,9 +496,6 @@ export function DeploymentModal({
                     ))}
                   </div>
                 )}
-                <p className="text-xs text-[var(--text)]/60 mt-2">
-                  Add environment variables that your application needs at runtime
-                </p>
               </div>
             </>
           )}

@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 import httpx
 import asyncio
 import hashlib
+import mimetypes
 from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentResult, DeploymentFile
 
 
@@ -208,13 +209,16 @@ class NetlifyProvider(BaseDeploymentProvider):
                 if not normalized_path.startswith('/'):
                     normalized_path = '/' + normalized_path
 
+                # Determine correct MIME type based on file extension
+                content_type = self._get_content_type(normalized_path)
+
                 # Upload file
                 url = f"{self.API_BASE}/deploys/{deploy_id}/files{normalized_path}"
                 response = await client.put(
                     url,
                     headers={
                         **self._get_headers(),
-                        "Content-Type": "application/octet-stream"
+                        "Content-Type": content_type
                     },
                     content=file.content
                 )
@@ -265,6 +269,38 @@ class NetlifyProvider(BaseDeploymentProvider):
             except Exception as e:
                 logs.append(f"Error polling status: {str(e)}")
                 return 'error'
+
+    def _get_content_type(self, file_path: str) -> str:
+        """
+        Determine the correct MIME type for a file based on its extension.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            MIME type string
+        """
+        # Initialize mimetypes if not already done
+        if not mimetypes.inited:
+            mimetypes.init()
+
+        # Add custom MIME types for common web files
+        mimetypes.add_type('application/javascript', '.js')
+        mimetypes.add_type('application/javascript', '.mjs')
+        mimetypes.add_type('text/javascript', '.jsx')
+        mimetypes.add_type('text/css', '.css')
+        mimetypes.add_type('text/html', '.html')
+        mimetypes.add_type('application/json', '.json')
+        mimetypes.add_type('image/svg+xml', '.svg')
+        mimetypes.add_type('text/plain', '.txt')
+        mimetypes.add_type('text/plain', '.md')
+        mimetypes.add_type('application/wasm', '.wasm')
+
+        # Guess MIME type from file extension
+        mime_type, _ = mimetypes.guess_type(file_path)
+
+        # Default to application/octet-stream if unknown
+        return mime_type or 'application/octet-stream'
 
     def _get_headers(self) -> Dict[str, str]:
         """Get headers for Netlify API requests."""

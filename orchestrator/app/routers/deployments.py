@@ -298,15 +298,15 @@ async def deploy_project(
 
         # 6. Determine deployment mode (source vs pre-built)
         # Default modes per provider:
-        # - Vercel: source (standard Vercel workflow)
+        # - Vercel: source (has Git/CLI integration for builds)
         # - Cloudflare: pre-built (upload to Workers)
-        # - Netlify: source (standard Netlify workflow)
+        # - Netlify: pre-built (file upload API doesn't trigger builds)
         deployment_mode = request.deployment_mode
         if not deployment_mode:
             # Set sensible defaults per provider
             default_modes = {
                 "vercel": "source",
-                "netlify": "source",
+                "netlify": "pre-built",
                 "cloudflare": "pre-built"
             }
             deployment_mode = default_modes.get(provider_lower, "pre-built")
