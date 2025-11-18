@@ -7,7 +7,7 @@ import {
   ProjectCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
-import { ConfirmDialog } from '../components/modals';
+import { ConfirmDialog, CreateProjectModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import {
@@ -46,6 +46,7 @@ export default function Dashboard() {
   const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [userName, setUserName] = useState<string>('');
   const [userCredits, setUserCredits] = useState<number>(0);
   const [userTier, setUserTier] = useState<string>('free');
@@ -90,17 +91,13 @@ export default function Dashboard() {
     }
   };
 
-  const createEmptyProject = async () => {
+  const handleCreateProject = async (projectName: string) => {
     if (isCreating) return;
 
     setIsCreating(true);
     const creatingToast = toast.loading('Creating project...');
 
     try {
-      // Generate a unique project name
-      const timestamp = Date.now();
-      const projectName = `Untitled Project ${timestamp}`;
-
       // Create empty project (no base)
       const response = await projectsApi.create(
         projectName,
@@ -114,6 +111,7 @@ export default function Dashboard() {
       const project = response.project;
 
       toast.success('Project created!', { id: creatingToast, duration: 2000 });
+      setShowCreateDialog(false);
       setIsCreating(false);
 
       // Navigate to project graph canvas
@@ -461,7 +459,7 @@ export default function Dashboard() {
             <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"}>
               {/* Create New Project Card */}
               <button
-                onClick={createEmptyProject}
+                onClick={() => setShowCreateDialog(true)}
                 disabled={isCreating}
                 className={`
                   group bg-white/[0.01] rounded-2xl p-6
@@ -479,10 +477,10 @@ export default function Dashboard() {
                 </div>
                 <div className="text-center">
                   <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
-                    {isCreating ? 'Creating...' : 'Create New Project'}
+                    Create New Project
                   </h3>
                   <p className="text-sm text-gray-500">
-                    {isCreating ? 'Opening canvas...' : 'Start building something amazing'}
+                    Start building something amazing
                   </p>
                 </div>
               </button>
@@ -533,6 +531,14 @@ export default function Dashboard() {
         confirmText="Delete"
         cancelText="Cancel"
         variant="danger"
+      />
+
+      {/* Create Project Modal */}
+      <CreateProjectModal
+        isOpen={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onConfirm={handleCreateProject}
+        isLoading={isCreating}
       />
 
     </>

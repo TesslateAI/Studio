@@ -168,24 +168,24 @@ export function ProjectCard({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex gap-1.5 sm:gap-2">
+        <div className="flex gap-2">
           <button
             onClick={onOpen}
             className="
-              flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)]
-              text-white font-semibold py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg sm:rounded-xl
+              flex-1 min-w-0 bg-[var(--primary)] hover:bg-[var(--primary-hover)]
+              text-white font-semibold py-2.5 px-4 rounded-xl
               transition-all duration-200
-              flex items-center justify-center gap-1.5 sm:gap-2
+              flex items-center justify-center gap-2
               shadow-lg shadow-[rgba(var(--primary-rgb),0.2)]
               hover:shadow-xl hover:shadow-[rgba(var(--primary-rgb),0.3)]
               hover:scale-[1.02]
-              text-sm sm:text-base
+              text-sm
             "
           >
-            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="currentColor" viewBox="0 0 256 256">
+            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
               <path d="M224.49,136.49l-72,72a12,12,0,0,1-17,0l-72-72a12,12,0,0,1,17-17L116,155V40a12,12,0,0,1,24,0V155l35.51-35.52a12,12,0,0,1,17,17ZM216,204H40a12,12,0,0,0,0,24H216a12,12,0,0,0,0-24Z" />
             </svg>
-            <span className="hidden xs:inline sm:inline">Open</span>
+            <span className="hidden sm:inline truncate">Open</span>
           </button>
 
           {onFork && (
@@ -195,19 +195,19 @@ export function ProjectCard({
                 onFork();
               }}
               className="
-                flex-1 bg-white/5 hover:bg-white/10
-                text-[var(--text)] font-semibold py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg sm:rounded-xl
+                flex-1 min-w-0 bg-white/5 hover:bg-white/10
+                text-[var(--text)] font-semibold py-2.5 px-4 rounded-xl
                 border border-white/10 hover:border-white/20
                 transition-all duration-200
-                flex items-center justify-center gap-1.5 sm:gap-2
+                flex items-center justify-center gap-2
                 hover:scale-[1.02]
-                text-sm sm:text-base
+                text-sm
               "
             >
-              <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="currentColor" viewBox="0 0 256 256">
+              <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
                 <path d="M224,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V95a32,32,0,1,0-16,0v17a24,24,0,0,0,24,24h40v25a32,32,0,1,0,16,0V136h40a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,224,64ZM48,64A16,16,0,1,1,64,80,16,16,0,0,1,48,64ZM144,192a16,16,0,1,1-16-16A16,16,0,0,1,144,192ZM192,80a16,16,0,1,1,16-16A16,16,0,0,1,192,80Z" />
               </svg>
-              <span className="hidden xs:inline sm:inline">Fork</span>
+              <span className="hidden sm:inline truncate">Fork</span>
             </button>
           )}
 
@@ -217,9 +217,9 @@ export function ProjectCard({
               onDelete();
             }}
             className="
-              bg-white/5 hover:bg-[rgba(var(--status-red-rgb),0.1)]
+              flex-shrink-0 bg-white/5 hover:bg-[rgba(var(--status-red-rgb),0.1)]
               text-[var(--status-gray)] hover:text-[var(--status-red)]
-              font-semibold py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg sm:rounded-xl
+              font-semibold py-2.5 px-4 rounded-xl
               border border-white/10 hover:border-[rgba(var(--status-red-rgb),0.3)]
               transition-all duration-200
               flex items-center justify-center
@@ -227,7 +227,7 @@ export function ProjectCard({
             "
             title="Delete project"
           >
-            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="currentColor" viewBox="0 0 256 256">
+            <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
               <path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z" />
             </svg>
           </button>

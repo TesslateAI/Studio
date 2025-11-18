@@ -289,6 +289,12 @@ export const projectsApi = {
     });
     return response.data;
   },
+  deleteFile: async (slug: string, filePath: string) => {
+    const response = await api.delete(`/api/projects/${slug}/files`, {
+      data: { file_path: filePath }
+    });
+    return response.data;
+  },
   getSettings: async (slug: string) => {
     const response = await api.get(`/api/projects/${slug}/settings`);
     return response.data;

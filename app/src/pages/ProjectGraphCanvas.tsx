@@ -45,6 +45,7 @@ import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
 import api, { projectsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
+import { fileEvents } from '../utils/fileEvents';
 import toast from 'react-hot-toast';
 
 const nodeTypes: NodeTypes = {
@@ -109,6 +110,66 @@ export const ProjectGraphCanvas = () => {
   useEffect(() => {
     localStorage.setItem('graphCanvasSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
   }, [isLeftSidebarExpanded]);
+
+  // Listen for file events - PRIMARY real-time update mechanism
+  useEffect(() => {
+    const unsubscribe = fileEvents.on((detail) => {
+      console.log('File event received:', detail.type, detail.filePath);
+      // Refresh the file list when any file changes
+      loadFiles();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [slug]);
+
+  // Smart Polling - BACKUP mechanism for edge cases
+  useEffect(() => {
+    if (!slug) return;
+
+    let pollInterval: NodeJS.Timeout | null = null;
+    let isTabVisible = true;
+
+    const handleVisibilityChange = () => {
+      isTabVisible = !document.hidden;
+
+      if (isTabVisible && !pollInterval) {
+        startPolling();
+      } else if (!isTabVisible && pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
+    const startPolling = () => {
+      // Poll every 30 seconds - events handle most changes, this catches edge cases
+      pollInterval = setInterval(() => {
+        if (isTabVisible && slug) {
+          loadFiles();
+        }
+      }, 30000);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    if (isTabVisible) {
+      startPolling();
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [slug]);
+
+  // View-switch refresh - refresh when switching to code view
+  useEffect(() => {
+    if (activeView === 'code' && slug) {
+      loadFiles();
+    }
+  }, [activeView, slug]);
 
   const fetchProjectData = async () => {
     try {
@@ -192,6 +253,8 @@ export const ProjectGraphCanvas = () => {
     if (!slug) return;
 
     // Track if this is a new file or an update
+    const isNewFile = !files.find(f => f.file_path === filePath);
+
     setFiles(prev => {
       const existing = prev.find(f => f.file_path === filePath);
       if (existing) {
@@ -204,11 +267,14 @@ export const ProjectGraphCanvas = () => {
 
     try {
       await projectsApi.saveFile(slug, filePath, content);
+
+      // Emit file event to refresh the code editor file tree
+      fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
     } catch (error) {
       console.error('Failed to save file:', error);
       toast.error(`Failed to save ${filePath}`);
     }
-  }, [slug]);
+  }, [slug, files]);
 
   const togglePanel = (panel: PanelType) => {
     setActivePanel(activePanel === panel ? null : panel);
@@ -297,21 +363,67 @@ export const ProjectGraphCanvas = () => {
 
   const handleDeleteContainer = useCallback(
     async (containerId: string) => {
-      if (!confirm('Are you sure you want to delete this container?')) return;
+      // Get container name for the confirmation message
+      const containerNode = nodes.find(n => n.id === containerId);
+      const containerName = containerNode?.data?.name || 'this container';
+
+      if (!confirm(`Are you sure you want to delete ${containerName}?`)) return;
 
       try {
+        // Delete the container from backend
         await api.delete(`/api/projects/${slug}/containers/${containerId}`);
+
+        // Remove from graph
         setNodes((nds) => nds.filter((node) => node.id !== containerId));
         setEdges((eds) =>
           eds.filter((edge) => edge.source !== containerId && edge.target !== containerId)
         );
+
         toast.success('Container deleted');
+
+        // Ask if user wants to delete associated files
+        const deleteFiles = confirm(
+          `Do you also want to delete all files associated with ${containerName}?\n\nThis will permanently delete all code files in the container's directory.`
+        );
+
+        if (deleteFiles) {
+          // Find all files that belong to this container
+          const containerFiles = files.filter(file => {
+            // Files are typically organized as: containerName/...
+            const pathParts = file.file_path.split('/');
+            return pathParts[0] === containerName || pathParts[0] === containerId;
+          });
+
+          if (containerFiles.length === 0) {
+            toast.info('No files found for this container');
+            return;
+          }
+
+          // Delete each file
+          const deletePromises = containerFiles.map(file =>
+            projectsApi.deleteFile(slug!, file.file_path)
+          );
+
+          try {
+            await Promise.all(deletePromises);
+            toast.success(`Deleted ${containerFiles.length} file(s)`);
+
+            // Refresh file list
+            loadFiles();
+
+            // Emit file event
+            fileEvents.emit('files-changed');
+          } catch (error) {
+            console.error('Failed to delete some files:', error);
+            toast.error('Failed to delete some files');
+          }
+        }
       } catch (error) {
         console.error('Failed to delete container:', error);
         toast.error('Failed to delete container');
       }
     },
-    [slug, setNodes, setEdges]
+    [slug, nodes, files, setNodes, setEdges, loadFiles]
   );
 
   const handleNodeDragStop = useCallback(
