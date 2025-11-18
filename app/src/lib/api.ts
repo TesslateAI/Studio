@@ -321,7 +321,23 @@ export const projectsApi = {
   },
   startContainer: async (slug: string, containerId: string) => {
     const response = await api.post(`/api/projects/${slug}/containers/${containerId}/start`);
-    return response.data;
+    const { task_id, already_started } = response.data;
+
+    if (already_started) {
+      console.log('[Container Start] Reusing existing task:', task_id);
+    }
+
+    const completedTask = await tasksApi.pollUntilComplete(task_id);
+
+    if (completedTask.status !== 'completed') {
+      throw new Error(completedTask.error || 'Container start failed');
+    }
+
+    return {
+      ...completedTask.result,
+      message: response.data.message,
+      task_id
+    };
   },
   stopContainer: async (slug: string, containerId: string) => {
     const response = await api.post(`/api/projects/${slug}/containers/${containerId}/stop`);
@@ -1004,8 +1020,11 @@ export const deploymentsApi = {
   // Trigger a new deployment
   deploy: async (projectSlug: string, data: {
     provider: string;
+    deployment_mode?: 'source' | 'pre-built';
     custom_domain?: string;
     env_vars?: Record<string, string>;
+    build_command?: string;
+    framework?: string;
   }) => {
     const response = await api.post(`/api/deployments/${projectSlug}/deploy`, data);
     return response.data;

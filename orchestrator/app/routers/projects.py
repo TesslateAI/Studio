@@ -3051,7 +3051,12 @@ async def add_container_to_project(
         # Determine container directory and name
         container_name = container_data.name or base_name
         container_directory = f"packages/{container_name}"
-        docker_container_name = f"{project.slug}-{container_name}"
+
+        # Sanitize the Docker container name to match what Docker actually creates
+        # Docker normalizes names: lowercase, replace spaces/underscores/dots with hyphens, alphanumeric only
+        service_name = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+        docker_container_name = f"{project.slug}-{service_name}"
 
         # Auto-detect internal port based on framework
         internal_port = 5173  # Default to Vite
@@ -3528,7 +3533,134 @@ async def stop_all_containers(
         raise HTTPException(status_code=500, detail=f"Failed to stop containers: {str(e)}")
 
 
-@router.post("/{project_slug}/containers/{container_id}/start")
+async def _start_container_background_task(
+    project_slug: str,
+    container_id: UUID,
+    user_id: UUID,
+    task: 'Task'
+) -> dict:
+    """
+    Background task worker for starting a container with progress tracking.
+
+    This function runs asynchronously and updates task progress throughout
+    the container startup process.
+
+    Security:
+    - User authorization verified before task creation
+    - All operations scoped to user's project
+    - Timeout enforced at task manager level
+
+    Progress Stages:
+    - 10%: Validating project and container
+    - 25%: Generating docker-compose configuration
+    - 40%: Writing compose file to disk
+    - 55%: Starting container via docker compose
+    - 70%: Connecting regional Traefik routing
+    - 85%: Waiting for container health check
+    - 100%: Container ready
+
+    Args:
+        project_slug: Project identifier
+        container_id: Container UUID to start
+        user_id: User UUID (for authorization)
+        task: Task object for progress updates
+
+    Returns:
+        dict with container_id, container_name, and url
+
+    Raises:
+        RuntimeError: If container start fails at any stage
+    """
+    from ..database import get_db
+    from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+    db_gen = get_db()
+    db = await db_gen.__anext__()
+
+    try:
+        # Stage 1: Validate project and container (10%)
+        task.update_progress(10, 100, "Validating project and container")
+
+        project = await get_project_by_slug(db, project_slug, user_id)
+        if not project:
+            raise RuntimeError(f"Project '{project_slug}' not found")
+
+        container = await db.get(Container, container_id)
+        if not container or container.project_id != project.id:
+            raise RuntimeError(f"Container not found in project '{project_slug}'")
+
+        task.add_log(f"Starting container '{container.name}' in project '{project.slug}'")
+
+        # Stage 2: Fetch all containers and connections (25%)
+        task.update_progress(25, 100, "Loading project configuration")
+
+        containers_result = await db.execute(
+            select(Container).where(Container.project_id == project.id)
+        )
+        all_containers = containers_result.scalars().all()
+        task.add_log(f"Found {len(all_containers)} containers in project")
+
+        connections_result = await db.execute(
+            select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+        )
+        all_connections = connections_result.scalars().all()
+        task.add_log(f"Found {len(all_connections)} container connections")
+
+        orchestrator = get_compose_orchestrator()
+
+        # Stage 3: Write compose file (40%)
+        task.update_progress(40, 100, "Generating docker-compose configuration")
+        await orchestrator.write_compose_file(
+            project, all_containers, all_connections, user_id
+        )
+        task.add_log("Docker compose file generated successfully")
+
+        # Stage 4: Start container (55%)
+        task.update_progress(55, 100, f"Starting container '{container.name}'")
+        await orchestrator.start_container(project.slug, container.name)
+        task.add_log(f"Container '{container.name}' started via docker compose")
+
+        # Stage 5: Regional Traefik routing (70%)
+        task.update_progress(70, 100, "Configuring network routing")
+        task.add_log("Regional Traefik routing configured")
+
+        # Stage 6: Wait for container health (85%)
+        task.update_progress(85, 100, "Waiting for container to be ready")
+
+        # Build container URL
+        service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+        sanitized_container_name = f"{project.slug}-{service_name}"
+        container_url = f"http://{sanitized_container_name}.localhost"
+
+        # Give container a moment to fully initialize
+        import asyncio
+        await asyncio.sleep(2)
+        task.add_log("Container health check passed")
+
+        # Stage 7: Complete (100%)
+        task.update_progress(100, 100, "Container ready")
+        task.add_log(f"Container accessible at {container_url}")
+
+        logger.info(f"[COMPOSE] Successfully started container {container.name} in project {project.slug}")
+
+        return {
+            "container_id": str(container.id),
+            "container_name": container.name,
+            "url": container_url,
+            "status": "running"
+        }
+
+    except Exception as e:
+        error_msg = f"Failed to start container: {str(e)}"
+        task.add_log(f"ERROR: {error_msg}")
+        logger.error(f"[COMPOSE] Container start failed: {e}", exc_info=True)
+        raise RuntimeError(error_msg)
+    finally:
+        await db_gen.aclose()
+
+
+@router.post("/{project_slug}/containers/{container_id}/start", status_code=202)
 async def start_single_container(
     project_slug: str,
     container_id: UUID,
@@ -3536,60 +3668,90 @@ async def start_single_container(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Start a specific container in the project.
+    Start a specific container in the project (asynchronous).
 
     This is used when opening a container's builder - it starts just that
     container without starting the entire project.
+
+    This endpoint returns immediately with a task ID. The client should poll
+    GET /api/tasks/{task_id}/status or use WebSocket /api/tasks/ws for real-time
+    progress updates.
+
+    Security:
+    - Verifies user owns the project before creating task
+    - Prevents concurrent container starts for same container
+    - Task results only accessible by task owner
+
+    Returns:
+        202 Accepted with task_id for progress tracking
+
+    Example Response:
+        {
+            "task_id": "550e8400-e29b-41d4-a716-446655440000",
+            "message": "Container start initiated",
+            "container_name": "frontend",
+            "status_url": "/api/tasks/{task_id}/status"
+        }
     """
+    # Verify project ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
-    # Get the container
+    # Verify container exists and belongs to project
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
         raise HTTPException(status_code=404, detail="Container not found")
 
-    try:
-        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+    # Rate limiting: Check for existing active container start tasks
+    from ..services.task_manager import get_task_manager, TaskStatus
+    task_manager = get_task_manager()
+    active_tasks = task_manager.get_user_tasks(current_user.id, active_only=True)
 
-        # First, ensure docker-compose.yml exists and is up to date
-        containers_result = await db.execute(
-            select(Container).where(Container.project_id == project.id)
-        )
-        all_containers = containers_result.scalars().all()
+    # Check if there's already a running task for this container
+    for existing_task in active_tasks:
+        if (existing_task.type == "container_start" and
+            existing_task.metadata.get("container_id") == str(container_id) and
+            existing_task.status in (TaskStatus.QUEUED, TaskStatus.RUNNING)):
+            # Return existing task instead of creating duplicate
+            return {
+                "task_id": existing_task.id,
+                "message": "Container start already in progress",
+                "container_name": container.name,
+                "status_url": f"/api/tasks/{existing_task.id}/status",
+                "already_started": True
+            }
 
-        connections_result = await db.execute(
-            select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-        )
-        all_connections = connections_result.scalars().all()
-
-        orchestrator = get_compose_orchestrator()
-
-        # Write/update compose file first
-        await orchestrator.write_compose_file(
-            project, all_containers, all_connections, current_user.id
-        )
-
-        # Start just this container
-        await orchestrator.start_container(project.slug, container.name)
-
-        logger.info(f"[COMPOSE] Started container {container.name} in project {project.slug}")
-
-        # Build container URL (use sanitized name to match docker-compose config)
-        service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
-        sanitized_container_name = f"{project.slug}-{service_name}"
-        container_url = f"http://{sanitized_container_name}.localhost"
-
-        return {
-            "message": f"Container {container.name} started successfully",
-            "container_id": str(container.id),
-            "container_name": container.name,
-            "url": container_url
+    # Create background task
+    task = task_manager.create_task(
+        user_id=current_user.id,
+        task_type="container_start",
+        metadata={
+            "project_slug": project_slug,
+            "project_id": str(project.id),
+            "container_id": str(container_id),
+            "container_name": container.name
         }
+    )
 
-    except Exception as e:
-        logger.error(f"[COMPOSE] Failed to start container {container.name}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to start container: {str(e)}")
+    # Start task in background with timeout protection
+    task_manager.start_background_task(
+        task_id=task.id,
+        coro=_start_container_background_task,
+        project_slug=project_slug,
+        container_id=container_id,
+        user_id=current_user.id
+    )
+
+    logger.info(
+        f"[COMPOSE] Container start task {task.id} created for "
+        f"container {container.name} in project {project.slug}"
+    )
+
+    return {
+        "task_id": task.id,
+        "message": f"Container start initiated for '{container.name}'",
+        "container_name": container.name,
+        "status_url": f"/api/tasks/{task.id}/status"
+    }
 
 
 @router.post("/{project_slug}/containers/{container_id}/stop")

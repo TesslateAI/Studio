@@ -18,13 +18,14 @@ from sqlalchemy import select, and_, desc
 from pydantic import BaseModel, Field
 
 from ..database import get_db
-from ..models import Deployment, DeploymentCredential, Project, User
+from ..models import Deployment, DeploymentCredential, Project, User, Container
 from ..users import current_active_user
 from ..services.deployment_encryption import get_deployment_encryption_service, DeploymentEncryptionError
 from ..services.deployment.manager import DeploymentManager
 from ..services.deployment.base import DeploymentConfig
 from ..services.deployment.builder import get_deployment_builder, BuildError
 from ..services.framework_detector import FrameworkDetector
+from ..utils.async_subprocess import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,110 @@ async def deploy_project(
             deployment.logs.append(f"Using requested deployment mode: {deployment_mode}")
         await db.commit()
 
-        # 7. Run build (skip if source mode - provider will build)
+        # 7. Find the primary container for multi-container projects
+        result = await db.execute(
+            select(Container)
+            .where(Container.project_id == project.id)
+            .order_by(Container.created_at.asc())
+        )
+        containers = result.scalars().all()
+
+        # Determine which container to build in
+        build_container_name = None
+        build_directory = None
+
+        if containers:
+            # Multi-container project - use the first container (or find the frontend/main one)
+            # TODO: Add logic to identify the primary/frontend container
+            primary_container = containers[0]
+            build_container_name = primary_container.container_name
+            build_directory = primary_container.directory
+
+            deployment.logs.append(f"Multi-container project: building in container '{primary_container.name}' ({build_container_name})")
+            logger.info(f"Using container {build_container_name} for build (directory: {build_directory})")
+        else:
+            # Single-container project (legacy)
+            deployment.logs.append("Single-container project")
+            logger.info("Single-container project - using legacy container management")
+
+        await db.commit()
+
+        # 8. Ensure dev container is running
+        if build_container_name:
+            # For multi-container projects, verify the specific container is running
+            deployment.logs.append(f"Verifying container {build_container_name} is running")
+            await db.commit()
+
+            result = await run_async(
+                ["docker", "inspect", "--format", "{{.State.Running}}", build_container_name],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            is_running = result.stdout.strip() == "true"
+
+            if not is_running:
+                error_msg = f"Container {build_container_name} is not running. Please start your project containers first."
+                deployment.status = "failed"
+                deployment.error = error_msg
+                deployment.completed_at = datetime.utcnow()
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_msg
+                )
+
+            deployment.logs.append(f"Container {build_container_name} is running")
+            await db.commit()
+        else:
+            # Single-container project - use legacy container management
+            from ..dev_server_manager import get_container_manager
+            container_manager = get_container_manager()
+
+            deployment.logs.append("Ensuring development container is running")
+            await db.commit()
+
+            try:
+                status_info = await container_manager.get_container_status(
+                    project_id=str(project.id),
+                    user_id=current_user.id
+                )
+
+                is_running = status_info.get("running", False) if isinstance(status_info, dict) else False
+
+                if not is_running:
+                    deployment.logs.append("Creating/starting development container")
+                    await db.commit()
+
+                    # Get project path
+                    project_path = builder._get_project_path(str(current_user.id), str(project.id))
+
+                    # Start the container (this will create it if it doesn't exist)
+                    url = await container_manager.start_container(
+                        project_path=project_path,
+                        project_id=str(project.id),
+                        user_id=current_user.id,
+                        project_slug=project.slug
+                    )
+                    deployment.logs.append(f"Development container started: {url}")
+                    await db.commit()
+                else:
+                    deployment.logs.append("Development container already running")
+                    await db.commit()
+            except Exception as e:
+                error_msg = f"Failed to start container: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                deployment.status = "failed"
+                deployment.error = error_msg
+                deployment.completed_at = datetime.utcnow()
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=error_msg
+                )
+
+        # 8. Run build (skip if source mode - provider will build)
         use_source_deployment = (deployment_mode == "source")
 
         if use_source_deployment:
@@ -329,9 +433,11 @@ async def deploy_project(
                 success, build_output = await builder.trigger_build(
                     user_id=str(current_user.id),
                     project_id=str(project.id),
+                    project_slug=project.slug,
                     framework=framework,
                     custom_build_command=request.build_command,
-                    project_settings=project.settings
+                    project_settings=project.settings,
+                    container_name=build_container_name
                 )
 
                 if not success:
@@ -350,7 +456,7 @@ async def deploy_project(
                     detail=f"Build failed: {str(e)}"
                 )
 
-        # 8. Collect files
+        # 9. Collect files
         if use_source_deployment:
             deployment.logs.append("Collecting source files for remote build")
         else:
@@ -363,13 +469,14 @@ async def deploy_project(
             project_id=str(project.id),
             framework=framework,
             project_settings=project.settings,
-            collect_source=use_source_deployment
+            collect_source=use_source_deployment,
+            container_directory=build_directory
         )
 
         deployment.logs.append(f"Collected {len(files)} files")
         await db.commit()
 
-        # 8. Deploy to provider
+        # 10. Deploy to provider
         deployment.logs.append(f"Deploying to {provider_lower}")
         await db.commit()
 
@@ -386,7 +493,7 @@ async def deploy_project(
         provider = DeploymentManager.get_provider(provider_lower, provider_credentials)
         result = await provider.deploy(files, config)
 
-        # 9. Update deployment record
+        # 11. Update deployment record
         if result.success:
             deployment.status = "success"
             deployment.deployment_id = result.deployment_id

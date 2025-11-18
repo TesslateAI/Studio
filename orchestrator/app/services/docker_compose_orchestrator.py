@@ -139,6 +139,10 @@ class DockerComposeOrchestrator:
                 network_name: {
                     'driver': 'bridge',
                     'name': network_name
+                },
+                # Regional Traefik network for routing (external - created by regional_traefik_manager)
+                'tesslate-regional-traefik-network': {
+                    'external': True
                 }
             },
             'services': {}
@@ -231,7 +235,8 @@ class DockerComposeOrchestrator:
                 'container_name': sanitized_container_name,
                 'user': '1000:1000',  # SECURITY: Run as non-root user (permissions fixed on host)
                 'working_dir': '/app',  # CRITICAL: Run in /app where user code is mounted, not /template
-                'networks': [network_name],  # ONLY project network - Traefik connects dynamically
+                # Connect to both project network AND regional Traefik network for routing
+                'networks': [network_name, 'tesslate-regional-traefik-network'],
                 'volumes': volumes,
                 'environment': environment,
                 'labels': labels,

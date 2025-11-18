@@ -106,6 +106,11 @@ class RegionalTraefikManager:
                         '--providers.docker.network=' + self.get_regional_network_name(),
                         # Regional Traefik listens on port 80 (internal only, not exposed to host)
                         '--entrypoints.web.address=:80',
+                        # Transport-level timeouts for slow-starting dev servers (Next.js takes 2+ min)
+                        # Traefik 2.x requires static config for timeouts (no label support)
+                        '--entryPoints.web.transport.respondingTimeouts.readTimeout=600s',
+                        '--entryPoints.web.transport.respondingTimeouts.writeTimeout=600s',
+                        '--entryPoints.web.transport.respondingTimeouts.idleTimeout=600s',
                         # Log level
                         '--log.level=INFO',
                         # Enable access logs for debugging
@@ -183,6 +188,8 @@ class RegionalTraefikManager:
         with open(compose_file, 'w') as f:
             yaml.dump(compose_config, f, default_flow_style=False, sort_keys=False)
 
+        logger.info(f"[REGIONAL-TRAEFIK] Generated compose file: {compose_file}")
+        logger.info(f"[REGIONAL-TRAEFIK] Timeout configuration: readTimeout=600s, writeTimeout=600s, idleTimeout=600s")
         logger.info(f"[REGIONAL-TRAEFIK] Starting {container_name}...")
 
         try:

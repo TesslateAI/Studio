@@ -10,6 +10,7 @@ import os
 import asyncio
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
+from uuid import UUID
 
 from .base import DeploymentFile
 from ...services.framework_detector import FrameworkDetector
@@ -39,9 +40,11 @@ class DeploymentBuilder:
         self,
         user_id: str,
         project_id: str,
+        project_slug: str,
         framework: Optional[str] = None,
         custom_build_command: Optional[str] = None,
-        project_settings: Optional[Dict] = None
+        project_settings: Optional[Dict] = None,
+        container_name: Optional[str] = None
     ) -> Tuple[bool, str]:
         """
         Trigger a build inside the project container.
@@ -49,9 +52,11 @@ class DeploymentBuilder:
         Args:
             user_id: User ID
             project_id: Project ID
+            project_slug: Project slug (for container naming)
             framework: Framework type (auto-detected if not provided)
             custom_build_command: Custom build command override
             project_settings: Project settings dict (for cached framework info)
+            container_name: Specific container name to build in (for multi-container projects)
 
         Returns:
             Tuple of (success: bool, output: str)
@@ -99,11 +104,30 @@ class DeploymentBuilder:
             # Execute build command in container
             # Note: execute_command_in_container expects a List[str] and raises RuntimeError on failure
             try:
-                output = await self.container_manager.execute_command_in_container(
-                    user_id=user_id,
-                    project_id=project_id,
-                    command=["/bin/sh", "-c", f"cd /app && {build_command}"]
-                )
+                # For multi-container projects, execute directly with docker exec
+                if container_name:
+                    from ...utils.async_subprocess import run_async
+                    logger.info(f"Executing build in specific container: {container_name}")
+
+                    result = await run_async(
+                        ["docker", "exec", container_name, "/bin/sh", "-c", f"cd /app && {build_command}"],
+                        timeout=300,
+                        capture_output=True,
+                        text=True
+                    )
+
+                    output = result.stdout + result.stderr
+
+                    if result.returncode != 0:
+                        raise RuntimeError(f"Command failed with exit code {result.returncode}: {output}")
+                else:
+                    # Single container project - use container manager
+                    output = await self.container_manager.execute_command_in_container(
+                        user_id=UUID(user_id),
+                        project_id=project_id,
+                        command=["/bin/sh", "-c", f"cd /app && {build_command}"],
+                        project_slug=project_slug
+                    )
             except RuntimeError as e:
                 error_msg = f"Build failed: {str(e)}"
                 logger.error(error_msg)
@@ -123,7 +147,8 @@ class DeploymentBuilder:
         framework: Optional[str] = None,
         custom_output_dir: Optional[str] = None,
         project_settings: Optional[Dict] = None,
-        collect_source: bool = False
+        collect_source: bool = False,
+        container_directory: Optional[str] = None
     ) -> List[DeploymentFile]:
         """
         Collect files from the project for deployment.
@@ -135,6 +160,7 @@ class DeploymentBuilder:
             custom_output_dir: Custom output directory override
             project_settings: Project settings dict (for cached framework info)
             collect_source: If True, collect source files; if False, collect built files
+            container_directory: Subdirectory within project (for multi-container projects)
 
         Returns:
             List of DeploymentFile objects
@@ -145,6 +171,11 @@ class DeploymentBuilder:
         try:
             # Get project path
             project_path = self._get_project_path(user_id, project_id)
+
+            # For multi-container projects, use the container's subdirectory
+            if container_directory:
+                project_path = os.path.join(project_path, container_directory)
+                logger.info(f"Multi-container project: using directory {container_directory}")
 
             if collect_source:
                 # Collect source files for deployment (Vercel will build)
