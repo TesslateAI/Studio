@@ -35,6 +35,32 @@ from app.config import get_settings
 from app.models import MarketplaceBase
 
 
+# Framework metadata mapping for bases
+FRAMEWORK_METADATA = {
+    "nextjs": {
+        "framework": "nextjs",
+        "build_command": "npm run build",
+        "output_directory": ".next",
+        "dev_command": "npm run dev",
+        "port": 3000
+    },
+    "vite": {
+        "framework": "vite",
+        "build_command": "npm run build",
+        "output_directory": "dist",
+        "dev_command": "npm run dev",
+        "port": 5173
+    },
+    "expo": {
+        "framework": "expo",
+        "build_command": None,  # Expo doesn't have a traditional build for dev
+        "output_directory": None,
+        "dev_command": "npm start",
+        "port": 19000
+    }
+}
+
+
 async def seed_bases():
     """Seed initial marketplace bases."""
     settings = get_settings()
@@ -69,6 +95,7 @@ async def seed_bases():
                 reviews_count=0,
                 features=["App Router", "API Routes", "React Server Components", "TypeScript", "Tailwind CSS", "Hot Reload"],
                 tech_stack=["Next.js 15", "React 19", "TypeScript", "Tailwind CSS"],
+                metadata=FRAMEWORK_METADATA["nextjs"],  # Add framework metadata
                 is_featured=True,
                 is_active=True
             ),
@@ -89,6 +116,7 @@ async def seed_bases():
                 reviews_count=0,
                 features=["Vite Frontend", "FastAPI Backend", "Dual Hot Reload", "CORS Configured", "PostgreSQL Ready", "Example CRUD API"],
                 tech_stack=["Vite", "React", "FastAPI", "Python", "PostgreSQL"],
+                metadata=FRAMEWORK_METADATA["vite"],  # Add framework metadata
                 is_featured=True,
                 is_active=True
             ),
@@ -109,6 +137,7 @@ async def seed_bases():
                 reviews_count=0,
                 features=["Vite Frontend", "Go Backend", "Air Hot Reload", "Chi Router", "CORS Middleware", "WebSocket Support", "REST API"],
                 tech_stack=["Vite", "React", "Go", "Chi Router", "Air"],
+                metadata=FRAMEWORK_METADATA["vite"],  # Add framework metadata
                 is_featured=True,
                 is_active=True
             ),
@@ -129,6 +158,7 @@ async def seed_bases():
                 reviews_count=0,
                 features=["File-based Routing", "Expo Router", "Multi-platform (iOS/Android/Web)", "Hot Reload", "TypeScript", "React Native 0.81", "Metro Bundler", "React 19"],
                 tech_stack=["Expo SDK 54", "React Native 0.81", "React 19", "TypeScript", "Metro"],
+                metadata=FRAMEWORK_METADATA["expo"],  # Add framework metadata
                 is_featured=True,
                 is_active=True
             )

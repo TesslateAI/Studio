@@ -42,6 +42,8 @@ import {
   KanbanPanel,
   TerminalPanel
 } from '../components/panels';
+import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
+import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
 import { projectsApi, marketplaceApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
@@ -81,6 +83,8 @@ export default function Project() {
     const saved = localStorage.getItem('projectSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
+  const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
+  const [showDeployModal, setShowDeployModal] = useState(false);
   // Note: We still have projectId for internal use, but it comes from the loaded project object
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -548,11 +552,6 @@ export default function Project() {
       active: activePanel === 'settings'
     },
     {
-      icon: <Rocket size={18} />,
-      title: 'Deploy',
-      onClick: () => toast('Deploy feature coming soon!', { icon: '🚀' })
-    },
-    {
       icon: <ShareNetwork size={18} />,
       title: 'Share',
       onClick: () => toast('Share feature coming soon!', { icon: '🔗' })
@@ -742,16 +741,35 @@ export default function Project() {
             ]}
           />
 
-          {/* Mobile hamburger menu */}
-          <button
-            onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-            className="md:hidden p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors"
-            aria-label="Open menu"
-          >
-            <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Deploy Button with Dropdown */}
+            <div className="relative hidden md:block">
+              <button
+                onClick={() => setShowDeploymentsDropdown(!showDeploymentsDropdown)}
+                className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg font-semibold transition-all text-sm"
+              >
+                <Rocket size={16} weight="bold" />
+                Deploy
+              </button>
+              <DeploymentsDropdown
+                projectSlug={slug!}
+                isOpen={showDeploymentsDropdown}
+                onClose={() => setShowDeploymentsDropdown(false)}
+                onOpenDeployModal={() => setShowDeployModal(true)}
+              />
+            </div>
+
+            {/* Mobile hamburger menu */}
+            <button
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors"
+              aria-label="Open menu"
+            >
+              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Main View Container */}
@@ -935,6 +953,19 @@ export default function Project() {
 
       {/* Discord Support */}
       <DiscordSupport />
+
+      {/* Deployment Modal */}
+      {showDeployModal && (
+        <DeploymentModal
+          projectSlug={slug!}
+          isOpen={showDeployModal}
+          onClose={() => setShowDeployModal(false)}
+          onSuccess={() => {
+            setShowDeployModal(false);
+            toast.success('Deployment started successfully!');
+          }}
+        />
+      )}
     </div>
   );
 }

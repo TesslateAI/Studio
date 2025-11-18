@@ -308,7 +308,7 @@ export default function Dashboard() {
       {
         icon: <Gear className="w-5 h-5" weight="fill" />,
         title: 'Settings',
-        onClick: () => toast('Settings coming soon!')
+        onClick: () => navigate('/settings')
       },
       {
         icon: <SignOut className="w-5 h-5" weight="fill" />,
@@ -411,7 +411,7 @@ export default function Dashboard() {
                       <button
                         onClick={() => {
                           setShowUserDropdown(false);
-                          toast('Settings coming soon!');
+                          navigate('/settings');
                         }}
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
                       >

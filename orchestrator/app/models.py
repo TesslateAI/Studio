@@ -47,6 +47,8 @@ class Project(Base):
     kanban_board = relationship("KanbanBoard", back_populates="project", uselist=False, cascade="all, delete-orphan")
     notes = relationship("ProjectNote", back_populates="project", uselist=False, cascade="all, delete-orphan")
     containers = relationship("Container", back_populates="project", cascade="all, delete-orphan")
+    deployment_credentials = relationship("DeploymentCredential", back_populates="project", cascade="all, delete-orphan")
+    deployments = relationship("Deployment", back_populates="project", cascade="all, delete-orphan")
 
 
 class Container(Base):
@@ -294,6 +296,78 @@ class GitRepository(Base):
 
     project = relationship("Project", back_populates="git_repository")
     user = relationship("User", back_populates="git_repositories")
+
+
+# ============================================================================
+# Deployment Models
+# ============================================================================
+
+class DeploymentCredential(Base):
+    """Store encrypted deployment credentials for various providers (Cloudflare, Vercel, Netlify, etc.)."""
+    __tablename__ = "deployment_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)  # NULL for user defaults, set for project overrides
+    provider = Column(String(50), nullable=False)  # cloudflare, vercel, netlify, etc.
+
+    # Encrypted credentials
+    access_token_encrypted = Column(Text, nullable=False)  # Encrypted API token/access token
+
+    # Provider-specific metadata (stored as JSON)
+    # Examples:
+    # - Cloudflare: {"account_id": "xxx", "dispatch_namespace": "yyy"}
+    # - Vercel: {"team_id": "xxx"}
+    # - Netlify: (no additional metadata needed)
+    provider_metadata = Column('metadata', JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="deployment_credentials")
+    project = relationship("Project", back_populates="deployment_credentials")
+
+    # Unique constraint: one credential per user/provider, OR one per project/provider
+    __table_args__ = (
+        # Ensure only one credential per user/provider/project combination
+        # For user defaults: project_id is NULL
+        # For project overrides: project_id is set
+        # This allows: one default credential per provider AND one override per project/provider
+        # PostgreSQL: NULL values are considered distinct, so this works as intended
+        {"schema": None},
+    )
+
+
+class Deployment(Base):
+    """Track deployment history and status for projects."""
+    __tablename__ = "deployments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(50), nullable=False, index=True)  # cloudflare, vercel, netlify
+
+    # Deployment identifiers
+    deployment_id = Column(String(255), nullable=True)  # Provider's deployment ID (e.g., Vercel deployment ID)
+    deployment_url = Column(String(500), nullable=True)  # Live deployment URL
+
+    # Deployment status
+    status = Column(String(50), nullable=False, default="pending", index=True)  # pending, building, deploying, success, failed
+    error = Column(Text, nullable=True)  # Error message if deployment failed
+
+    # Deployment logs and metadata
+    logs = Column(JSON, nullable=True)  # Array of log messages
+    deployment_metadata = Column('metadata', JSON, nullable=True)  # Provider-specific metadata (build info, etc.)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)  # When deployment finished (success or failure)
+
+    # Relationships
+    project = relationship("Project", back_populates="deployments")
+    user = relationship("User", back_populates="deployments")
 
 
 # ============================================================================

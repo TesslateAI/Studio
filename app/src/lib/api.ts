@@ -907,6 +907,174 @@ export const billingApi = {
 // Feedback System API
 // ============================================================================
 
+// ============================================================================
+// Deployment Credentials API
+// ============================================================================
+
+export const deploymentCredentialsApi = {
+  // Get available deployment providers
+  getProviders: async () => {
+    const response = await api.get('/api/deployment-credentials/providers');
+    return response.data;
+  },
+
+  // List user's connected credentials
+  list: async (provider?: string) => {
+    const response = await api.get('/api/deployment-credentials', {
+      params: { provider },
+    });
+    return response.data;
+  },
+
+  // Add new credential
+  create: async (data: {
+    provider: string;
+    access_token: string;
+    metadata?: Record<string, any>;
+    project_id?: string;
+  }) => {
+    const response = await api.post('/api/deployment-credentials', data);
+    return response.data;
+  },
+
+  // Update credential
+  update: async (credentialId: string, data: {
+    access_token?: string;
+    metadata?: Record<string, any>;
+  }) => {
+    const response = await api.put(`/api/deployment-credentials/${credentialId}`, data);
+    return response.data;
+  },
+
+  // Delete credential
+  delete: async (credentialId: string) => {
+    const response = await api.delete(`/api/deployment-credentials/${credentialId}`);
+    return response.data;
+  },
+
+  // Test credential validity
+  test: async (credentialId: string) => {
+    const response = await api.post(`/api/deployment-credentials/test/${credentialId}`);
+    return response.data;
+  },
+
+  // Start OAuth flow (redirects to provider)
+  startOAuth: async (provider: string, projectId?: string) => {
+    const params = new URLSearchParams();
+    if (projectId) {
+      params.append('project_id', projectId);
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+
+    // Make authenticated API call to get OAuth URL
+    const response = await api.get(`/api/deployment-oauth/${provider}/authorize${query}`);
+    const { auth_url } = response.data;
+
+    // Redirect to the OAuth provider
+    window.location.href = auth_url;
+    return response.data;
+  },
+
+  // Save manual credentials (alias for create for better semantics)
+  saveManual: async (provider: string, credentials: Record<string, string>) => {
+    // Extract the token field (different providers use different names)
+    const tokenField = credentials.api_token || credentials.access_token || credentials.token;
+
+    // Extract other fields as metadata
+    const metadata: Record<string, string> = {};
+    for (const [key, value] of Object.entries(credentials)) {
+      if (!['api_token', 'access_token', 'token'].includes(key)) {
+        metadata[key] = value;
+      }
+    }
+
+    return deploymentCredentialsApi.create({
+      provider,
+      access_token: tokenField,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    });
+  },
+};
+
+// ============================================================================
+// Deployment API
+// ============================================================================
+
+export const deploymentsApi = {
+  // Trigger a new deployment
+  deploy: async (projectSlug: string, data: {
+    provider: string;
+    custom_domain?: string;
+    env_vars?: Record<string, string>;
+  }) => {
+    const response = await api.post(`/api/deployments/${projectSlug}/deploy`, data);
+    return response.data;
+  },
+
+  // List project deployments
+  listProjectDeployments: async (projectSlug: string, params?: {
+    provider?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const response = await api.get(`/api/deployments/${projectSlug}/deployments`, {
+      params,
+    });
+    return response.data;
+  },
+
+  // Get deployment details
+  get: async (deploymentId: string) => {
+    const response = await api.get(`/api/deployments/deployments/${deploymentId}`);
+    return response.data;
+  },
+
+  // Get deployment status
+  getStatus: async (deploymentId: string) => {
+    const response = await api.get(`/api/deployments/deployments/${deploymentId}/status`);
+    return response.data;
+  },
+
+  // Get deployment logs
+  getLogs: async (deploymentId: string) => {
+    const response = await api.get(`/api/deployments/deployments/${deploymentId}/logs`);
+    return response.data;
+  },
+
+  // Delete deployment
+  delete: async (deploymentId: string) => {
+    const response = await api.delete(`/api/deployments/deployments/${deploymentId}`);
+    return response.data;
+  },
+
+  // Stream deployment progress (SSE)
+  streamProgress: (deploymentId: string, onMessage: (data: any) => void, onError?: (error: any) => void) => {
+    const eventSource = new EventSource(
+      `${API_URL}/api/deployments/deployments/${deploymentId}/stream`,
+      { withCredentials: true }
+    );
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        onMessage(data);
+      } catch (error) {
+        console.error('Failed to parse SSE message:', error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      if (onError) {
+        onError(error);
+      }
+      eventSource.close();
+    };
+
+    return eventSource;
+  },
+};
+
 export const feedbackApi = {
   // List all feedback posts
   list: async (params?: {
