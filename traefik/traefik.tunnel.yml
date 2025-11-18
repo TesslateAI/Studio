@@ -34,7 +34,7 @@ providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
-    network: "tesslate-network"
+    # Network omitted - Traefik will auto-discover containers across all networks
 
 log:
   level: INFO

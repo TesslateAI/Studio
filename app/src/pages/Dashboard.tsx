@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectsApi, authApi } from '../lib/api';
+import { projectsApi, authApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import {
   MobileMenu,

@@ -288,6 +288,23 @@ export default function Project() {
       const foundContainer = containers.find((c: any) => c.id === containerId);
       if (foundContainer) {
         setContainer(foundContainer);
+
+        // Auto-start the container when opening builder
+        try {
+          toast.loading(`Starting container ${foundContainer.name}...`, { id: 'container-start' });
+          const response = await projectsApi.startContainer(slug, containerId);
+          toast.success(`Container ${foundContainer.name} started!`, { id: 'container-start', duration: 2000 });
+
+          // Set container-specific preview URL for multi-container projects
+          if (response.url) {
+            setDevServerUrl(response.url);
+            setDevServerUrlWithAuth(response.url);
+            setCurrentPreviewUrl(response.url);
+          }
+        } catch (error) {
+          console.error('Failed to start container:', error);
+          toast.error('Failed to start container', { id: 'container-start' });
+        }
       }
     } catch (error) {
       console.error('Failed to load container:', error);

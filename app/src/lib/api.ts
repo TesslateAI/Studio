@@ -305,6 +305,26 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}/containers`);
     return response.data;
   },
+  startAllContainers: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/containers/start-all`);
+    return response.data;
+  },
+  stopAllContainers: async (slug: string) => {
+    const response = await api.post(`/api/projects/${slug}/containers/stop-all`);
+    return response.data;
+  },
+  startContainer: async (slug: string, containerId: string) => {
+    const response = await api.post(`/api/projects/${slug}/containers/${containerId}/start`);
+    return response.data;
+  },
+  stopContainer: async (slug: string, containerId: string) => {
+    const response = await api.post(`/api/projects/${slug}/containers/${containerId}/stop`);
+    return response.data;
+  },
+  getContainersStatus: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/containers/status`);
+    return response.data;
+  },
 };
 
 export const chatApi = {

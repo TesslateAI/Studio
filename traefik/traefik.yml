@@ -12,7 +12,7 @@ providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
-    network: "tesslate-network"
+    # Network omitted - Traefik will auto-discover containers across all networks
   file:
     directory: /etc/traefik/dynamic
     watch: true

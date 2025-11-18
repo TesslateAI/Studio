@@ -1261,6 +1261,8 @@ async def _perform_project_deletion(
     from ..database import get_db
     from ..dev_server_manager import get_container_manager
     from ..utils.async_fileio import rmtree_async
+    from ..services.docker_compose_orchestrator import get_compose_orchestrator
+    from ..services.regional_traefik_manager import get_regional_traefik_manager
 
     # Get a new database session for this background task
     db_gen = get_db()
@@ -1270,11 +1272,60 @@ async def _perform_project_deletion(
         logger.info(f"[DELETE] Starting deletion of project {project_id} for user {user_id}")
         task.update_progress(0, 100, "Stopping containers...")
 
-        # 1. Stop and remove any running containers/pods
+        # 1. Stop and remove containers using new orchestrator
         try:
-            container_manager = get_container_manager()
-            await container_manager.stop_container(str(project_id), user_id)
-            logger.info(f"[DELETE] Stopped containers for project {project_id}")
+            # Get compose orchestrator
+            compose_orchestrator = get_compose_orchestrator()
+            regional_manager = get_regional_traefik_manager()
+
+            # Get project to access slug
+            project_result = await db.execute(
+                select(Project).where(Project.id == project_id)
+            )
+            project = project_result.scalar_one_or_none()
+
+            if project:
+                try:
+                    # Stop the entire project (all containers)
+                    await compose_orchestrator.stop_project(project.slug)
+                    logger.info(f"[DELETE] Stopped all containers for project {project.slug}")
+                except Exception as e:
+                    logger.warning(f"[DELETE] Error stopping project containers: {e}")
+
+                try:
+                    # Disconnect regional Traefik from project network
+                    regional_index = regional_manager.get_regional_index_for_project(project.slug)
+                    regional_traefik_name = regional_manager.get_regional_traefik_name(regional_index)
+                    network_name = f"tesslate-{project.slug}"
+
+                    logger.info(f"[DELETE] Disconnecting {regional_traefik_name} from {network_name}")
+                    process = await asyncio.create_subprocess_exec(
+                        'docker', 'network', 'disconnect', network_name, regional_traefik_name,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await process.communicate()
+
+                    # Remove project network
+                    logger.info(f"[DELETE] Removing network {network_name}")
+                    process = await asyncio.create_subprocess_exec(
+                        'docker', 'network', 'rm', network_name,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await process.communicate()
+
+                    logger.info(f"[DELETE] Cleaned up networks for project {project.slug}")
+                except Exception as e:
+                    logger.warning(f"[DELETE] Error cleaning up networks: {e}")
+
+            # Also try legacy container manager for backward compatibility
+            try:
+                container_manager = get_container_manager()
+                await container_manager.stop_container(str(project_id), user_id)
+            except Exception as e:
+                logger.debug(f"[DELETE] Legacy container manager: {e}")
+
         except Exception as e:
             logger.warning(f"[DELETE] Error stopping containers: {e}")
 
@@ -2994,6 +3045,21 @@ async def add_container_to_project(
         container_directory = f"packages/{container_name}"
         docker_container_name = f"{project.slug}-{container_name}"
 
+        # Auto-detect internal port based on framework
+        internal_port = 5173  # Default to Vite
+        if base_name:
+            base_lower = base_name.lower()
+            if 'next' in base_lower:
+                internal_port = 3000  # Next.js
+            elif 'fastapi' in base_lower or 'python' in base_lower:
+                internal_port = 8000  # FastAPI/Python
+            elif 'go' in base_lower:
+                internal_port = 8080  # Go
+            elif 'vite' in base_lower or 'react' in base_lower:
+                internal_port = 5173  # Vite/React
+
+        logger.info(f"[CONTAINER] Auto-detected port {internal_port} for base {base_name}")
+
         # Create Container record
         new_container = Container(
             project_id=project.id,
@@ -3004,6 +3070,7 @@ async def add_container_to_project(
             position_x=container_data.position_x,
             position_y=container_data.position_y,
             port=None,  # Will be auto-assigned
+            internal_port=internal_port,  # Set framework-specific port
             status="stopped"
         )
 
@@ -3042,13 +3109,13 @@ async def add_container_to_project(
         if git_repo_url:
             try:
                 from ..services.git_manager import GitManager
-                from ..utils import walk_directory_async, read_file_async
+                from ..utils.async_fileio import walk_directory_async, read_file_async
                 from ..config import get_settings
 
                 settings = get_settings()
 
                 # Clone the base repository into the container directory
-                project_dir = os.path.join("/app/projects", str(current_user.id), str(project.id))
+                project_dir = os.path.join("/app/users", str(current_user.id), str(project.id))
                 container_path = os.path.join(project_dir, container_directory)
 
                 # Ensure container directory exists
@@ -3071,6 +3138,19 @@ async def add_container_to_project(
                     raise Exception(f"Failed to clone repository: {clone_result.stderr}")
 
                 logger.info(f"[CONTAINER] Successfully cloned base repo")
+
+                # Fix permissions for user 1000 (container user) - SECURITY: Prevents need for root in container
+                logger.info(f"[CONTAINER] Setting permissions for container user (1000:1000)")
+                chown_result = subprocess.run(
+                    ["chown", "-R", "1000:1000", container_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if chown_result.returncode != 0:
+                    logger.warning(f"[CONTAINER] Failed to set permissions: {chown_result.stderr}")
+                else:
+                    logger.info(f"[CONTAINER] Permissions set successfully")
 
                 # Save files to database with container directory prefix
                 if settings.deployment_mode == "docker":
@@ -3357,3 +3437,210 @@ async def delete_container_connection(
         await db.rollback()
         logger.error(f"[CONTAINER] Failed to delete connection: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete connection: {str(e)}")
+
+
+# ============================================================================
+# Multi-Container Orchestration Endpoints (Start/Stop)
+# ============================================================================
+
+@router.post("/{project_slug}/containers/start-all")
+async def start_all_containers(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Start all containers in a project using docker-compose up.
+
+    This starts the entire multi-container project as defined in the
+    auto-generated docker-compose.yml file.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+        # Get all containers and connections
+        containers_result = await db.execute(
+            select(Container).where(Container.project_id == project.id)
+        )
+        containers = containers_result.scalars().all()
+
+        if not containers:
+            raise HTTPException(status_code=400, detail="No containers to start")
+
+        connections_result = await db.execute(
+            select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+        )
+        connections = connections_result.scalars().all()
+
+        # Start project using orchestrator
+        orchestrator = get_compose_orchestrator()
+        result = await orchestrator.start_project(
+            project, containers, connections, current_user.id
+        )
+
+        logger.info(f"[COMPOSE] Started all containers for project {project.slug}")
+
+        return {
+            "message": "All containers started successfully",
+            "project_slug": project.slug,
+            "containers": result["containers"],
+            "network": result["network"]
+        }
+
+    except Exception as e:
+        logger.error(f"[COMPOSE] Failed to start containers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to start containers: {str(e)}")
+
+
+@router.post("/{project_slug}/containers/stop-all")
+async def stop_all_containers(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stop all containers in a project using docker-compose down.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+        orchestrator = get_compose_orchestrator()
+        await orchestrator.stop_project(project.slug)
+
+        logger.info(f"[COMPOSE] Stopped all containers for project {project.slug}")
+
+        return {"message": "All containers stopped successfully"}
+
+    except Exception as e:
+        logger.error(f"[COMPOSE] Failed to stop containers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to stop containers: {str(e)}")
+
+
+@router.post("/{project_slug}/containers/{container_id}/start")
+async def start_single_container(
+    project_slug: str,
+    container_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Start a specific container in the project.
+
+    This is used when opening a container's builder - it starts just that
+    container without starting the entire project.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    # Get the container
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    try:
+        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+        # First, ensure docker-compose.yml exists and is up to date
+        containers_result = await db.execute(
+            select(Container).where(Container.project_id == project.id)
+        )
+        all_containers = containers_result.scalars().all()
+
+        connections_result = await db.execute(
+            select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+        )
+        all_connections = connections_result.scalars().all()
+
+        orchestrator = get_compose_orchestrator()
+
+        # Write/update compose file first
+        await orchestrator.write_compose_file(
+            project, all_containers, all_connections, current_user.id
+        )
+
+        # Start just this container
+        await orchestrator.start_container(project.slug, container.name)
+
+        logger.info(f"[COMPOSE] Started container {container.name} in project {project.slug}")
+
+        # Build container URL (use sanitized name to match docker-compose config)
+        service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+        sanitized_container_name = f"{project.slug}-{service_name}"
+        container_url = f"http://{sanitized_container_name}.localhost"
+
+        return {
+            "message": f"Container {container.name} started successfully",
+            "container_id": str(container.id),
+            "container_name": container.name,
+            "url": container_url
+        }
+
+    except Exception as e:
+        logger.error(f"[COMPOSE] Failed to start container {container.name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to start container: {str(e)}")
+
+
+@router.post("/{project_slug}/containers/{container_id}/stop")
+async def stop_single_container(
+    project_slug: str,
+    container_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stop a specific container in the project.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    # Get the container
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    try:
+        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+        orchestrator = get_compose_orchestrator()
+        await orchestrator.stop_container(project.slug, container.name)
+
+        logger.info(f"[COMPOSE] Stopped container {container.name} in project {project.slug}")
+
+        return {
+            "message": f"Container {container.name} stopped successfully",
+            "container_id": str(container.id),
+            "container_name": container.name
+        }
+
+    except Exception as e:
+        logger.error(f"[COMPOSE] Failed to stop container {container.name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to stop container: {str(e)}")
+
+
+@router.get("/{project_slug}/containers/status")
+async def get_containers_status(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get the runtime status of all containers in the project.
+
+    Returns Docker status for each container (running, stopped, etc.)
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+        orchestrator = get_compose_orchestrator()
+        status = await orchestrator.get_project_status(project.slug)
+
+        return status
+
+    except Exception as e:
+        logger.error(f"[COMPOSE] Failed to get container status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
