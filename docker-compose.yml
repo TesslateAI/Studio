@@ -79,6 +79,7 @@ services:
       - ./orchestrator/pyproject.toml:/app/pyproject.toml
       - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver
       - ./orchestrator/users:/app/users
+      - base-cache:/app/base-cache  # Named Docker volume for pre-installed marketplace bases
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
@@ -184,10 +185,11 @@ services:
     labels:
       - "com.tesslate.traefik=main"
       - "traefik.enable=true"
-      # Route test request to verify Traefik can see regional router
-      - "traefik.http.routers.regional-router.rule=Host(`test-regional.localhost`)"
+      # Catch-all route: Route all *.localhost traffic (except studio.localhost) to regional-router
+      # This allows regional-router to hash the project slug and proxy to the correct regional Traefik
+      - "traefik.http.routers.regional-router.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.localhost`) && !Host(`${APP_DOMAIN:-studio.localhost}`)"
       - "traefik.http.routers.regional-router.entrypoints=web"
-      - "traefik.http.routers.regional-router.priority=50"
+      - "traefik.http.routers.regional-router.priority=10"
       - "traefik.http.services.regional-router.loadbalancer.server.port=8080"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
@@ -256,3 +258,5 @@ networks:
 volumes:
   postgres-dev-data:
     name: tesslate-postgres-dev-data
+  base-cache:
+    name: tesslate-base-cache

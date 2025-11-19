@@ -320,8 +320,27 @@ export const ProjectGraphCanvas = () => {
         y: event.clientY - reactFlowBounds.top - 50,
       };
 
+      // Generate temporary ID for optimistic update
+      const tempId = `temp-${Date.now()}`;
+
+      // Optimistically add node to canvas immediately for better UX
+      const optimisticNode: Node = {
+        id: tempId,
+        type: 'containerNode',
+        position,
+        data: {
+          name: base.name,
+          status: 'starting',
+          baseIcon: base.icon,
+          techStack: base.tech_stack || [],
+          onDelete: handleDeleteContainer,
+        },
+      };
+
+      setNodes((nds) => [...nds, optimisticNode]);
+
       try {
-        // Create container in backend
+        // Create container in backend (happens in background)
         const response = await api.post(`/api/projects/${slug}/containers`, {
           project_id: project.id,
           base_id: base.id,
@@ -330,26 +349,30 @@ export const ProjectGraphCanvas = () => {
           position_y: position.y,
         });
 
-        const newContainer = response.data;
+        // API returns { container: {...}, task_id: "...", status_endpoint: "..." }
+        const newContainer = response.data.container;
 
-        // Add to canvas
-        const newNode: Node = {
-          id: newContainer.id,
-          type: 'containerNode',
-          position,
-          data: {
-            name: newContainer.name,
-            status: 'stopped',
-            baseIcon: base.icon,
-            techStack: base.tech_stack || [],
-            onDelete: handleDeleteContainer,
-          },
-        };
-
-        setNodes((nds) => [...nds, newNode]);
+        // Update the temporary node with real ID and data
+        setNodes((nds) =>
+          nds.map((node) =>
+            node.id === tempId
+              ? {
+                  ...node,
+                  id: newContainer.id,
+                  data: {
+                    ...node.data,
+                    name: newContainer.name,
+                    status: 'stopped',
+                  },
+                }
+              : node
+          )
+        );
         toast.success(`Added ${base.name}`);
       } catch (error) {
         console.error('Failed to add container:', error);
+        // Remove the optimistic node on error
+        setNodes((nds) => nds.filter((node) => node.id !== tempId));
         toast.error('Failed to add container');
       }
     },
@@ -428,6 +451,11 @@ export const ProjectGraphCanvas = () => {
 
   const handleNodeDragStop = useCallback(
     async (_event: any, node: Node) => {
+      // Skip API call for temporary nodes (not yet saved to backend)
+      if (typeof node.id === 'string' && node.id.startsWith('temp-')) {
+        return;
+      }
+
       try {
         // Update position in backend
         await api.patch(`/api/projects/${slug}/containers/${node.id}`, {

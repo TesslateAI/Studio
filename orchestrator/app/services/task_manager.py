@@ -210,10 +210,17 @@ class TaskManager:
         **kwargs
     ) -> asyncio.Task:
         """Start a task in the background and return immediately"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[TASK-MANAGER] Creating background task {task_id} for coroutine {coro.__name__}")
+        logger.info(f"[TASK-MANAGER] Args: {args[:3] if len(args) > 3 else args}")  # First 3 args only
+
         async_task = asyncio.create_task(
             self.run_task(task_id, coro, *args, **kwargs)
         )
         self._background_tasks[task_id] = async_task
+
+        logger.info(f"[TASK-MANAGER] Background task {task_id} created and stored")
         return async_task
 
     def subscribe(self, task_id: str, callback: Callable):

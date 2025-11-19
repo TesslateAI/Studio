@@ -537,7 +537,7 @@ export default function Project() {
     },
     {
       icon: <Storefront size={18} />,
-      title: 'Agent Marketplace',
+      title: 'Agents',
       onClick: () => navigate('/marketplace')
     },
     {
@@ -595,16 +595,16 @@ export default function Project() {
         {/* Back Button */}
         {isLeftSidebarExpanded ? (
           <button
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate(`/project/${slug}`)}
             className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
           >
             <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
-            <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
+            <span className="text-sm font-medium text-[var(--text)]">Back to Project</span>
           </button>
         ) : (
-          <Tooltip content="Back to Projects" side="right" delay={200}>
+          <Tooltip content="Back to Project" side="right" delay={200}>
             <button
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(`/project/${slug}`)}
               className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
             >
               <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />

@@ -26,6 +26,7 @@ class Project(Base):
 
     # Multi-container support (monorepo)
     network_name = Column(String, nullable=True)  # Docker network name: tesslate-{slug}
+    volume_name = Column(String, nullable=True)  # Docker volume name for project files
 
     # Deployment tracking (for billing)
     deploy_type = Column(String, default="development")  # development, deployed
@@ -69,6 +70,7 @@ class Container(Base):
     internal_port = Column(Integer, nullable=True)  # Container internal port
     environment_vars = Column(JSON, nullable=True)  # Environment variables
     dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
+    volume_name = Column(String, nullable=True)  # Docker volume name for container files
 
     # React Flow position
     position_x = Column(Float, default=0)

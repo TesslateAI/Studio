@@ -43,62 +43,54 @@ def extract_project_slug(hostname: str) -> str:
     """
     Extract project slug from hostname.
 
+    The container name format from docker_compose_orchestrator.py is:
+      sanitized_container_name = f"{project.slug}-{service_name}"
+
+    Where service_name is the sanitized container.name (e.g., "next-js-15").
+
+    Project slugs follow the pattern: {name}-{random-hash}
     Examples:
-      untitled-project-123-abc-frontend.localhost → untitled-project-123-abc
-      untitled-project-123-abc-frontend.tesslate.com → untitled-project-123-abc
+      fire-hpjvb0-next-js-15.localhost → fire-hpjvb0
+      untitled-project-k3x8n2-frontend.localhost → untitled-project-k3x8n2
+      my-app-abc123-backend.localhost → my-app-abc123
+
+    Strategy: Look for the last short alphanumeric segment (5-8 chars) as the project hash,
+    then everything before it (including that hash) is the project slug.
     """
-    # Remove domain suffix
+    # Remove domain suffix (.localhost, .tesslate.com, etc.)
     parts = hostname.split('.')
-    if len(parts) > 1:
-        # Remove .localhost or .tesslate.com
-        hostname_only = parts[0]
-    else:
-        hostname_only = hostname
+    hostname_only = parts[0] if len(parts) > 1 else hostname
 
-    # Hostname format: {project-slug}-{container-name}
-    # We need to extract the project slug
-    # Container names are sanitized (lowercase, hyphens only)
-    # Project slugs are also sanitized the same way
+    # Split by hyphen
+    segments = hostname_only.split('-')
 
-    # The format is: {project-slug}-{container-name}
-    # We need to find where the project slug ends and container name begins
-    # For now, we'll use a simple heuristic:
-    # Project slugs typically contain a timestamp or UUID-like pattern
+    # Project slug pattern: ends with a short random hash (5-8 chars, alphanumeric)
+    # Search backwards for a segment that looks like a slug hash
+    for i in range(len(segments) - 1, -1, -1):
+        segment = segments[i]
+        # Check if this looks like a project slug hash:
+        # - Length 5-8 characters
+        # - Alphanumeric (lowercase letters + digits)
+        # - Not all digits (to distinguish from ports like "3000")
+        # - Not common container type words
+        common_words = ['frontend', 'backend', 'api', 'web', 'app', 'next', 'nextjs',
+                        'react', 'vite', 'js', 'ts', 'py', 'go', 'node', 'python']
 
-    # Better approach: Look for known container type patterns
-    # Common container suffixes: -nextjs-15, -react-vite, -python-flask, etc.
+        if (5 <= len(segment) <= 8 and
+            segment.isalnum() and
+            not segment.isdigit() and
+            segment.lower() not in common_words and
+            any(c.isalpha() for c in segment) and
+            any(c.isdigit() for c in segment)):
+            # Found the slug hash - project slug is everything up to and including this
+            project_slug = '-'.join(segments[:i + 1])
+            logger.debug(f"Extracted project slug '{project_slug}' from hostname '{hostname}'")
+            return project_slug
 
-    # For MVP: Assume project slug is everything before the last known container type
-    # But we don't have that info here...
-
-    # BEST APPROACH: Project slug format is: {name}-{timestamp}-{hash}
-    # So we look for the pattern: word-numbers-hash
-    # Example: untitled-project-1763393020689-6lep5w
-
-    # Split by hyphen and reconstruct project slug
-    # This is a heuristic - in production you'd want a more robust method
-    parts = hostname_only.split('-')
-
-    # Find the project slug pattern: should have a timestamp (13 digits)
-    project_slug_parts = []
-    found_timestamp = False
-
-    for i, part in enumerate(parts):
-        project_slug_parts.append(part)
-        # Check if this looks like a timestamp (10-13 digits)
-        if part.isdigit() and 10 <= len(part) <= 13:
-            found_timestamp = True
-            # Include the next part (hash) if it exists
-            if i + 1 < len(parts) and len(parts[i + 1]) <= 10:
-                project_slug_parts.append(parts[i + 1])
-            break
-
-    if not found_timestamp:
-        # Fallback: use first 3 parts or all if less
-        project_slug_parts = parts[:min(3, len(parts))]
-
-    project_slug = '-'.join(project_slug_parts)
-    logger.debug(f"Extracted project slug '{project_slug}' from hostname '{hostname}'")
+    # Fallback: if no hash pattern found, take first 2 segments or all if less
+    # This handles simple project names without the hash pattern
+    project_slug = '-'.join(segments[:min(2, len(segments))])
+    logger.debug(f"Extracted project slug '{project_slug}' from hostname '{hostname}' (fallback)")
 
     return project_slug
 

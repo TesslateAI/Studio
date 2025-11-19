@@ -81,40 +81,79 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
             }
         )
     else:
-        # Docker mode: Read from orchestrator's users volume mount
-        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
-        project_dir = get_project_path(user_id, project_id)
-        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
-        full_path = os.path.join("/app", project_dir, file_path)
+        # Docker mode: Read from database (source of truth) or filesystem/volume
+        use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
 
-        if not os.path.exists(full_path):
+        # Strategy 1: Try database first (fastest, always available)
+        try:
+            from ....models import ProjectFile
+            from sqlalchemy import select
+
+            result = await db.execute(
+                select(ProjectFile).where(
+                    ProjectFile.project_id == project_id,
+                    ProjectFile.file_path == file_path
+                )
+            )
+            db_file = result.scalar_one_or_none()
+
+            if db_file and db_file.content:
+                return success_output(
+                    message=f"Read {format_file_size(len(db_file.content))} from '{file_path}' (database)",
+                    file_path=file_path,
+                    content=db_file.content,
+                    details={
+                        "size_bytes": len(db_file.content),
+                        "lines": len(db_file.content.split('\n')),
+                        "source": "database"
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Could not read from database: {e}")
+
+        # Strategy 2: Try filesystem/volume if not in database
+        if use_volumes:
+            # Volume mode: Not implemented yet (files should be in database)
             return error_output(
-                message=f"File '{file_path}' does not exist",
-                suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
+                message=f"File '{file_path}' not found in database",
+                suggestion="File may not be synced yet. Wait for container initialization to complete.",
                 exists=False,
                 file_path=file_path
             )
+        else:
+            # Legacy bind mount mode
+            project_dir = get_project_path(user_id, project_id)
+            full_path = os.path.join("/app", project_dir, file_path)
 
-        try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            if not os.path.exists(full_path):
+                return error_output(
+                    message=f"File '{file_path}' does not exist",
+                    suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
+                    exists=False,
+                    file_path=file_path
+                )
 
-            return success_output(
-                message=f"Read {format_file_size(len(content))} from '{file_path}'",
-                file_path=file_path,
-                content=content,
-                details={
-                    "size_bytes": len(content),
-                    "lines": len(content.split('\n'))
-                }
-            )
-        except Exception as e:
-            return error_output(
-                message=f"Could not read '{file_path}': {str(e)}",
-                suggestion="Check if the file has read permissions or is a binary file",
-                file_path=file_path,
-                details={"error": str(e)}
-            )
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                return success_output(
+                    message=f"Read {format_file_size(len(content))} from '{file_path}' (bind mount)",
+                    file_path=file_path,
+                    content=content,
+                    details={
+                        "size_bytes": len(content),
+                        "lines": len(content.split('\n')),
+                        "source": "bind_mount"
+                    }
+                )
+            except Exception as e:
+                return error_output(
+                    message=f"Could not read '{file_path}': {str(e)}",
+                    suggestion="Check if the file has read permissions or is a binary file",
+                    file_path=file_path,
+                    details={"error": str(e)}
+                )
 
 
 @tool_retry
@@ -187,25 +226,68 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             }
         )
     else:
-        # Docker mode: Write to orchestrator's users volume mount
-        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
-        project_dir = get_project_path(user_id, project_id)
-        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
-        full_path = os.path.join("/app", project_dir, file_path)
-
+        # Docker mode: Write using dual-write pattern
         try:
-            # Create parent directory (with safety check for Windows Docker volumes)
-            parent_dir = os.path.dirname(full_path)
-            if parent_dir:
-                try:
-                    os.makedirs(parent_dir, exist_ok=True)
-                except FileExistsError:
-                    # Handle race condition on Windows Docker volumes - verify it exists
-                    if not os.path.exists(parent_dir):
-                        raise
+            use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
+            db = context.get("db")
 
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            # Step 1: Write to database (source of truth)
+            if db:
+                try:
+                    from ....models import ProjectFile
+                    from sqlalchemy import select
+                    from uuid import UUID
+
+                    result = await db.execute(
+                        select(ProjectFile).where(
+                            ProjectFile.project_id == UUID(project_id),
+                            ProjectFile.file_path == file_path
+                        )
+                    )
+                    existing_file = result.scalar_one_or_none()
+
+                    if existing_file:
+                        existing_file.content = content
+                    else:
+                        new_file = ProjectFile(
+                            project_id=UUID(project_id),
+                            file_path=file_path,
+                            content=content
+                        )
+                        db.add(new_file)
+
+                    await db.commit()
+                    logger.info(f"[AGENT] Saved {file_path} to database")
+                except Exception as e:
+                    logger.warning(f"[AGENT] Failed to save to database: {e}")
+
+            # Step 2: Write to filesystem/volume
+            if use_volumes:
+                # Volume mode: Async write (non-blocking)
+                # TODO: Implement volume write for agent
+                logger.info(f"[AGENT] Skipping volume write (will sync later)")
+            else:
+                # Legacy bind mount mode
+                project_dir = get_project_path(user_id, project_id)
+                full_path = os.path.join("/app", project_dir, file_path)
+
+                try:
+                    # Create parent directory (with safety check for Windows Docker volumes)
+                    parent_dir = os.path.dirname(full_path)
+                    if parent_dir:
+                        try:
+                            os.makedirs(parent_dir, exist_ok=True)
+                        except FileExistsError:
+                            # Handle race condition on Windows Docker volumes - verify it exists
+                            if not os.path.exists(parent_dir):
+                                raise
+
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+
+                    logger.info(f"[AGENT] Wrote {file_path} to bind mount")
+                except Exception as e:
+                    logger.warning(f"[AGENT] Failed to write to bind mount: {e}")
 
             return success_output(
                 message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
@@ -213,7 +295,8 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 preview=preview,
                 details={
                     "size_bytes": len(content),
-                    "line_count": len(lines)
+                    "line_count": len(lines),
+                    "storage": "volume" if use_volumes else "bind_mount"
                 }
             )
         except Exception as e:

@@ -1,6 +1,6 @@
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status, WebSocket, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
@@ -283,7 +283,7 @@ async def _setup_base_project(
         await _setup_template_project(db_project, project_path, settings, db, task)
         return
 
-    task.update_progress(10, 100, f"Cloning marketplace base: {project_data.base_id}")
+    task.update_progress(10, 100, f"Loading marketplace base: {project_data.base_id}")
 
     # Verify purchase
     from ..models import UserPurchasedBase, MarketplaceBase
@@ -311,53 +311,119 @@ async def _setup_base_project(
         logger.info(f"Initialized project settings from base metadata: {base_repo.metadata}")
 
     try:
-        from ..services.git_manager import GitManager
-        from ..services.credential_manager import get_credential_manager
+        from ..services.base_cache_manager import get_base_cache_manager
 
-        credential_manager = get_credential_manager()
-        access_token = await credential_manager.get_access_token(db, user_id)
+        task.update_progress(20, 100, "Copying pre-installed base from cache")
 
-        git_manager = GitManager(user_id, str(db_project.id))
-        await git_manager.clone_repository(
-            repo_url=base_repo.git_repo_url,
-            branch=base_repo.default_branch,
-            auth_token=access_token,
-            direct_to_filesystem=(settings.deployment_mode == "docker")
-        )
+        # Get cached base path
+        base_cache_manager = get_base_cache_manager()
+        cached_base_path = await base_cache_manager.get_base_path(base_repo.slug)
+        use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
 
-        task.update_progress(40, 100, "Base cloned successfully")
+        if not os.path.exists(cached_base_path):
+            # Fallback to git clone if base not in cache (shouldn't happen in normal operation)
+            logger.warning(f"Base {base_repo.slug} not found in cache, falling back to git clone")
+            from ..services.git_manager import GitManager
+            from ..services.credential_manager import get_credential_manager
+
+            credential_manager = get_credential_manager()
+            access_token = await credential_manager.get_access_token(db, user_id)
+
+            git_manager = GitManager(user_id, str(db_project.id))
+            await git_manager.clone_repository(
+                repo_url=base_repo.git_repo_url,
+                branch=base_repo.default_branch,
+                auth_token=access_token,
+                direct_to_filesystem=(settings.deployment_mode == "docker" and not use_volumes)
+            )
+        else:
+            if use_volumes:
+                # NEW: Volume-based storage
+                from ..services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
+
+                # Create project volume
+                volume_name = f"{db_project.slug}-project"
+                await volume_manager.create_project_volume(
+                    volume_name,
+                    labels={
+                        'com.tesslate.project': db_project.slug,
+                        'com.tesslate.user': str(user_id)
+                    }
+                )
+
+                # Update project with volume name
+                db_project.volume_name = volume_name
+                await db.commit()
+
+                # Copy from base cache to volume (volume→volume, fast!)
+                await volume_manager.copy_base_to_volume(
+                    base_repo.slug,
+                    volume_name,
+                    exclude_patterns=['.git', '__pycache__', '*.pyc']
+                )
+
+                logger.info(f"Copied base {base_repo.slug} from cache to volume {volume_name}")
+            else:
+                # LEGACY: Bind mount storage
+                # Create parent directory if it doesn't exist
+                os.makedirs(os.path.dirname(project_path), exist_ok=True)
+
+                # Remove project_path if it exists (cleanup from any previous failed attempts)
+                if os.path.exists(project_path):
+                    shutil.rmtree(project_path)
+
+                # Copy the entire cached base directory tree
+                await asyncio.to_thread(
+                    shutil.copytree,
+                    cached_base_path,
+                    project_path,
+                    ignore=shutil.ignore_patterns('.git'),  # Don't copy .git folder
+                    dirs_exist_ok=False
+                )
+
+                logger.info(f"Copied base {base_repo.slug} from cache to {project_path}")
+
+        task.update_progress(40, 100, "Base loaded successfully")
 
         # Save files if Docker mode
         if settings.deployment_mode == "docker":
-            task.update_progress(65, 100, "Saving base files to database")
-            files_saved = 0
-            walk_results = await walk_directory_async(
-                project_path,
-                exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
-            )
+            if use_volumes:
+                # Volume mode: Files are in volume, skip DB sync for now
+                # TODO: Read files from volume and sync to database
+                task.update_progress(90, 100, "Files ready in volume (DB sync skipped)")
+                logger.info(f"[CREATE] Skipped DB sync for volume (files will sync on first edit)")
+            else:
+                # Bind mount mode: Sync files to database
+                task.update_progress(65, 100, "Saving base files to database")
+                files_saved = 0
+                walk_results = await walk_directory_async(
+                    project_path,
+                    exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
+                )
 
-            for root, dirs, files in walk_results:
-                for file in files:
-                    if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
-                        continue
+                for root, dirs, files in walk_results:
+                    for file in files:
+                        if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+                            continue
 
-                    file_full_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
+                        file_full_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
 
-                    try:
-                        content = await read_file_async(file_full_path)
-                        db_file = ProjectFile(
-                            project_id=db_project.id,
-                            file_path=relative_path,
-                            content=content
-                        )
-                        db.add(db_file)
-                        files_saved += 1
-                    except Exception as e:
-                        logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
+                        try:
+                            content = await read_file_async(file_full_path)
+                            db_file = ProjectFile(
+                                project_id=db_project.id,
+                                file_path=relative_path,
+                                content=content
+                            )
+                            db.add(db_file)
+                            files_saved += 1
+                        except Exception as e:
+                            logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
 
-            await db.commit()
-            task.update_progress(90, 100, f"Saved {files_saved} files to database")
+                await db.commit()
+                task.update_progress(90, 100, f"Saved {files_saved} files to database")
 
         db_project.has_git_repo = True
         db_project.git_remote_url = base_repo.git_repo_url
@@ -1118,38 +1184,47 @@ async def save_project_file(
                 logger.warning(f"[FILE] ⚠️ Failed to write to pod: {k8s_error}")
                 # Continue to save in DB even if pod write fails
         else:
-            # Docker mode: Write to filesystem (volume-mounted to container)
-            try:
-                project_path = os.path.abspath(get_project_path(current_user.id, project_id))
-                os.makedirs(project_path, exist_ok=True)
+            # Docker mode: Write to filesystem or volume
+            use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
 
-                full_file_path = os.path.join(project_path, file_path)
-
-                # Create parent directory (with safety check for Windows Docker volumes)
-                parent_dir = os.path.dirname(full_file_path)
-                if parent_dir:
-                    try:
-                        os.makedirs(parent_dir, exist_ok=True)
-                    except FileExistsError:
-                        # Handle race condition on Windows Docker volumes - verify it exists
-                        if not os.path.exists(parent_dir):
-                            raise
-
-                with open(full_file_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-
-                logger.info(f"[FILE] ✅ Wrote {file_path} to filesystem for user {current_user.id}, project {project_id}")
-
-                # Track activity to keep container alive
+            if use_volumes:
+                # NEW: Volume-based storage
+                # Strategy: Database is source of truth, volumes are runtime cache
+                # Write to volume happens async after DB commit
+                pass  # Will write to volume after DB commit below
+            else:
+                # LEGACY: Bind mount storage
                 try:
-                    from ..dev_server_manager import get_container_manager
-                    container_manager = get_container_manager()
-                    container_manager.track_activity(current_user.id, str(project_id))
-                except Exception as e:
-                    logger.debug(f"Could not track file save activity: {e}")
+                    project_path = os.path.abspath(get_project_path(current_user.id, project_id))
+                    os.makedirs(project_path, exist_ok=True)
 
-            except Exception as docker_error:
-                logger.warning(f"[FILE] ⚠️ Failed to write to filesystem: {docker_error}")
+                    full_file_path = os.path.join(project_path, file_path)
+
+                    # Create parent directory (with safety check for Windows Docker volumes)
+                    parent_dir = os.path.dirname(full_file_path)
+                    if parent_dir:
+                        try:
+                            os.makedirs(parent_dir, exist_ok=True)
+                        except FileExistsError:
+                            # Handle race condition on Windows Docker volumes - verify it exists
+                            if not os.path.exists(parent_dir):
+                                raise
+
+                    with open(full_file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+
+                    logger.info(f"[FILE] ✅ Wrote {file_path} to bind mount for user {current_user.id}, project {project_id}")
+
+                    # Track activity to keep container alive
+                    try:
+                        from ..dev_server_manager import get_container_manager
+                        container_manager = get_container_manager()
+                        container_manager.track_activity(current_user.id, str(project_id))
+                    except Exception as e:
+                        logger.debug(f"Could not track file save activity: {e}")
+
+                except Exception as docker_error:
+                    logger.warning(f"[FILE] ⚠️ Failed to write to bind mount: {docker_error}")
 
         # 2. Update database record (for version history / backup)
         result = await db.execute(
@@ -1178,10 +1253,52 @@ async def save_project_file(
 
         logger.info(f"[FILE] Saved {file_path} to database as backup")
 
+        # Async write to volume (if using volumes)
+        if settings.deployment_mode == "docker" and use_volumes:
+            # Determine which container's volume to write to based on file path
+            # File path format: "packages/{container_name}/src/App.tsx"
+            container_name_from_path = None
+            if file_path.startswith('packages/'):
+                parts = file_path.split('/', 2)
+                if len(parts) >= 2:
+                    container_name_from_path = parts[1]
+
+            if container_name_from_path:
+                # Find container by directory
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.project_id == project_id,
+                        Container.directory == f"packages/{container_name_from_path}"
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+
+                if container and container.volume_name:
+                    # Async write to volume (non-blocking)
+                    try:
+                        from ..services.volume_manager import get_volume_manager
+                        volume_manager = get_volume_manager()
+
+                        # Extract file path relative to container root
+                        # "packages/frontend/src/App.tsx" → "src/App.tsx"
+                        relative_path = '/'.join(file_path.split('/')[2:]) if '/' in file_path else file_path
+
+                        # Schedule async write (fire and forget - don't block response)
+                        asyncio.create_task(
+                            volume_manager.write_file_to_volume(
+                                container.volume_name,
+                                relative_path,
+                                content
+                            )
+                        )
+                        logger.info(f"[FILE] Scheduled async write to volume {container.volume_name}")
+                    except Exception as e:
+                        logger.warning(f"[FILE] Failed to schedule volume write: {e}")
+
         return {
             "message": "File saved successfully",
             "file_path": file_path,
-            "method": "kubernetes_api"
+            "method": "volume" if (settings.deployment_mode == "docker" and use_volumes) else "filesystem"
         }
 
     except HTTPException:
@@ -1365,23 +1482,54 @@ async def _perform_project_deletion(
 
         task.update_progress(70, 100, "Deleting project files...")
 
-        # 4. Delete filesystem directory (Docker mode only - K8s uses PVCs)
+        # 4. Delete volumes or filesystem (Docker mode only - K8s uses PVCs)
         settings = get_settings()
         if settings.deployment_mode == "docker":
-            project_dir = os.path.abspath(get_project_path(user_id, project_id))
-            if os.path.exists(project_dir):
-                try:
-                    # Use async version to avoid blocking
-                    await rmtree_async(project_dir)
-                    logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
-                except PermissionError:
-                    # On Windows, wait a moment and try again
-                    await asyncio.sleep(1)
+            use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
+
+            if use_volumes and project:
+                # Volume mode: Delete Docker volumes
+                from ..services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
+
+                # Delete project volume
+                if project.volume_name:
                     try:
+                        await volume_manager.delete_volume(project.volume_name, force=True)
+                        logger.info(f"[DELETE] Deleted project volume: {project.volume_name}")
+                    except Exception as e:
+                        logger.warning(f"[DELETE] Failed to delete project volume: {e}")
+
+                # Delete all container volumes
+                container_result = await db.execute(
+                    select(Container).where(Container.project_id == project_id)
+                )
+                containers = container_result.scalars().all()
+
+                for container in containers:
+                    if container.volume_name:
+                        try:
+                            await volume_manager.delete_volume(container.volume_name, force=True)
+                            logger.info(f"[DELETE] Deleted container volume: {container.volume_name}")
+                        except Exception as e:
+                            logger.warning(f"[DELETE] Failed to delete container volume {container.volume_name}: {e}")
+
+            else:
+                # Bind mount mode: Delete filesystem directory
+                project_dir = os.path.abspath(get_project_path(user_id, project_id))
+                if os.path.exists(project_dir):
+                    try:
+                        # Use async version to avoid blocking
                         await rmtree_async(project_dir)
                         logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
-                    except PermissionError as e:
-                        logger.warning(f"[DELETE] Could not delete project directory: {e}")
+                    except PermissionError:
+                        # On Windows, wait a moment and try again
+                        await asyncio.sleep(1)
+                        try:
+                            await rmtree_async(project_dir)
+                            logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
+                        except PermissionError as e:
+                            logger.warning(f"[DELETE] Could not delete project directory: {e}")
 
         task.update_progress(100, 100, "Project deleted successfully")
         logger.info(f"[DELETE] Successfully deleted project {project_id}")
@@ -3008,24 +3156,33 @@ async def get_project_containers(
     return containers
 
 
-@router.post("/{project_slug}/containers", response_model=ContainerSchema)
+@router.post("/{project_slug}/containers")
 async def add_container_to_project(
     project_slug: str,
     container_data: ContainerCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Add a base as a container to the project.
-    This clones the base's git repo into a subdirectory and sets up the container.
+
+    This is a **NON-BLOCKING** operation. The container record is created immediately,
+    but file copying happens in the background.
 
     Flow:
     1. User drags base from sidebar onto canvas
-    2. Frontend calls this endpoint with base_id and position
-    3. Backend clones base repo into project/packages/{base_name}
-    4. Creates Container record
-    5. Regenerates docker-compose.yml with all containers
-    6. Returns container data for React Flow node
+    2. Backend creates Container record immediately
+    3. Backend starts background task to copy base files
+    4. Frontend receives container data + task_id
+    5. Frontend polls task status and shows progress
+    6. Background task copies files, syncs to DB, updates docker-compose
+
+    Returns:
+        {
+            "container": Container object,
+            "task_id": UUID for tracking background initialization
+        }
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
@@ -3093,132 +3250,47 @@ async def add_container_to_project(
 
         logger.info(f"[CONTAINER] Created container {new_container.id} for project {project.id}")
 
-        # Regenerate docker-compose.yml for the project
-        try:
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+        # Create background task for container initialization
+        logger.info(f"[CONTAINER] About to create background task for container {new_container.id}")
+        task_manager = get_task_manager()
+        logger.info(f"[CONTAINER] Got task_manager: {task_manager}")
 
-            # Get all containers and connections for this project
-            containers_result = await db.execute(
-                select(Container).where(Container.project_id == project.id)
-            )
-            all_containers = containers_result.scalars().all()
+        task = task_manager.create_task(
+            user_id=current_user.id,
+            task_type="container_initialization",
+            metadata={
+                "container_id": str(new_container.id),
+                "project_id": str(project.id),
+                "container_name": container_name,
+                "base_name": base_name
+            }
+        )
 
-            connections_result = await db.execute(
-                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-            )
-            all_connections = connections_result.scalars().all()
+        # Start background task (non-blocking!) using FastAPI's BackgroundTasks
+        # This ensures the task executes even after the response is sent
+        from ..services.container_initializer import initialize_container_async
 
-            # Update docker-compose.yml
-            orchestrator = get_compose_orchestrator()
-            await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id
-            )
+        logger.info(f"[CONTAINER] Adding task to FastAPI background_tasks")
 
-            logger.info(f"[CONTAINER] Updated docker-compose.yml for project {project.id}")
-        except Exception as e:
-            logger.warning(f"[CONTAINER] Failed to update docker-compose.yml: {e}")
+        background_tasks.add_task(
+            task_manager.run_task,
+            task_id=task.id,
+            coro=initialize_container_async,
+            container_id=new_container.id,
+            project_id=project.id,
+            user_id=current_user.id,
+            base_slug=base_name,
+            git_repo_url=git_repo_url or ""
+        )
 
-        # Clone base repository and save files to database
-        if git_repo_url:
-            try:
-                from ..services.git_manager import GitManager
-                from ..utils.async_fileio import walk_directory_async, read_file_async
-                from ..config import get_settings
+        logger.info(f"[CONTAINER] Started background initialization task {task.id} for container {new_container.id}")
 
-                settings = get_settings()
-
-                # Clone the base repository into the container directory
-                project_dir = os.path.join("/app/users", str(current_user.id), str(project.id))
-                container_path = os.path.join(project_dir, container_directory)
-
-                # Ensure container directory exists
-                os.makedirs(container_path, exist_ok=True)
-
-                logger.info(f"[CONTAINER] Cloning base repo {git_repo_url} into {container_path}")
-
-                # Clone the repository
-                git_manager = GitManager(current_user.id, str(project.id))
-                import subprocess
-                clone_result = subprocess.run(
-                    ["git", "clone", git_repo_url, container_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-
-                if clone_result.returncode != 0:
-                    logger.error(f"[CONTAINER] Git clone failed: {clone_result.stderr}")
-                    raise Exception(f"Failed to clone repository: {clone_result.stderr}")
-
-                logger.info(f"[CONTAINER] Successfully cloned base repo")
-
-                # Fix permissions for user 1000 (container user) - SECURITY: Prevents need for root in container
-                logger.info(f"[CONTAINER] Setting permissions for container user (1000:1000)")
-                chown_result = subprocess.run(
-                    ["chown", "-R", "1000:1000", container_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if chown_result.returncode != 0:
-                    logger.warning(f"[CONTAINER] Failed to set permissions: {chown_result.stderr}")
-                else:
-                    logger.info(f"[CONTAINER] Permissions set successfully")
-
-                # Save files to database with container directory prefix
-                if settings.deployment_mode == "docker":
-                    files_saved = 0
-                    walk_results = await walk_directory_async(
-                        container_path,
-                        exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', 'venv']
-                    )
-
-                    for root, dirs, files in walk_results:
-                        for file in files:
-                            if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
-                                continue
-
-                            file_full_path = os.path.join(root, file)
-                            # Make path relative to project root (including container directory)
-                            relative_to_project = os.path.relpath(file_full_path, project_dir).replace('\\', '/')
-
-                            try:
-                                content = await read_file_async(file_full_path)
-
-                                # Check if file already exists
-                                existing_file_result = await db.execute(
-                                    select(ProjectFile).where(
-                                        ProjectFile.project_id == project.id,
-                                        ProjectFile.file_path == relative_to_project
-                                    )
-                                )
-                                existing_file = existing_file_result.scalar_one_or_none()
-
-                                if existing_file:
-                                    # Update existing file
-                                    existing_file.content = content
-                                else:
-                                    # Create new file
-                                    db_file = ProjectFile(
-                                        project_id=project.id,
-                                        file_path=relative_to_project,
-                                        content=content
-                                    )
-                                    db.add(db_file)
-
-                                files_saved += 1
-                            except Exception as e:
-                                logger.warning(f"[CONTAINER] Could not read file {relative_to_project}: {e}")
-
-                    await db.commit()
-                    logger.info(f"[CONTAINER] Saved {files_saved} files from base to database")
-
-            except Exception as e:
-                logger.error(f"[CONTAINER] Failed to clone base repository: {e}", exc_info=True)
-                # Don't fail the entire operation if git clone fails
-                # The container record is still created
-
-        return new_container
+        # Return immediately with container + task ID (non-blocking!)
+        return {
+            "container": new_container,
+            "task_id": task.id,
+            "status_endpoint": f"/api/tasks/{task.id}/status"
+        }
 
     except HTTPException:
         raise
@@ -3288,14 +3360,47 @@ async def delete_container(
         raise HTTPException(status_code=404, detail="Container not found")
 
     try:
-        # Delete container directory
-        # TODO: Implement file deletion from project directory
+        # Step 1: Stop and remove Docker container (if running)
+        import docker as docker_lib
+        from ..services.volume_manager import get_volume_manager
 
-        # Delete container from database (connections will cascade)
+        try:
+            docker_client = docker_lib.from_env()
+
+            # Get container name (same sanitization as in docker_compose_orchestrator)
+            service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+            service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+            container_name = f"{project.slug}-{service_name}"
+
+            # Stop and remove container
+            try:
+                docker_container = docker_client.containers.get(container_name)
+                logger.info(f"[CONTAINER] Stopping container {container_name}")
+                docker_container.stop(timeout=5)
+                docker_container.remove(force=True)
+                logger.info(f"[CONTAINER] ✅ Removed Docker container {container_name}")
+            except docker_lib.errors.NotFound:
+                logger.info(f"[CONTAINER] Docker container {container_name} not found (already deleted)")
+            except Exception as e:
+                logger.warning(f"[CONTAINER] Failed to remove Docker container: {e}")
+        except Exception as e:
+            logger.warning(f"[CONTAINER] Failed to connect to Docker: {e}")
+
+        # Step 2: Delete volume (if using volumes)
+        use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
+        if use_volumes and container.volume_name:
+            try:
+                volume_manager = get_volume_manager()
+                await volume_manager.delete_volume(container.volume_name, force=True)
+                logger.info(f"[CONTAINER] ✅ Deleted volume {container.volume_name}")
+            except Exception as e:
+                logger.warning(f"[CONTAINER] Failed to delete volume: {e}")
+
+        # Step 3: Delete container from database (connections will cascade)
         await db.delete(container)
         await db.commit()
 
-        logger.info(f"[CONTAINER] Deleted container {container_id} from project {project.id}")
+        logger.info(f"[CONTAINER] ✅ Deleted container {container_id} from project {project.id}")
 
         # Regenerate docker-compose.yml
         try:

@@ -92,6 +92,9 @@ orchestrator/backend/users/
 orchestrator/template/node_modules/
 orchestrator/backend/template/node_modules/
 
+# Base cache (pre-installed marketplace bases)
+base-cache/
+
 # Traefik
 traefik/acme.json
 traefik/dynamic/*
@@ -157,3 +160,6 @@ k8s/.env
 # pnpm-lock.yaml
 # uv.lockbackups/
 nul
+
+# Code Analysis Output
+analysis-output/
