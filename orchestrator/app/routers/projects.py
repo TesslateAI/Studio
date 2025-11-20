@@ -3187,53 +3187,75 @@ async def add_container_to_project(
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     try:
-        # Get base information
-        if container_data.base_id == "builtin":
-            base_name = "main"
-            base_icon = "📦"
-            git_repo_url = None  # Built-in template, already in project
+        # Handle service containers differently from base containers
+        if container_data.container_type == "service":
+            # Service container (Postgres, Redis, etc.)
+            from ..services.service_definitions import get_service
+
+            if not container_data.service_slug:
+                raise HTTPException(status_code=400, detail="service_slug required for service containers")
+
+            service_def = get_service(container_data.service_slug)
+            if not service_def:
+                raise HTTPException(status_code=404, detail=f"Service '{container_data.service_slug}' not found")
+
+            # Use service definition for container config
+            container_name = container_data.name or service_def.name
+            container_directory = f"services/{container_data.service_slug}"  # Services don't need a real directory
+            service_name = container_data.service_slug  # Use slug directly for service containers
+            docker_container_name = f"{project.slug}-{service_name}"
+            internal_port = service_def.internal_port
+            base_name = None  # Services don't have bases
+            git_repo_url = None
+
         else:
-            base_result = await db.execute(
-                select(MarketplaceBase).where(MarketplaceBase.id == container_data.base_id)
-            )
-            base = base_result.scalar_one_or_none()
+            # Base container (marketplace base or builtin)
+            if container_data.base_id == "builtin":
+                base_name = "main"
+                base_icon = "📦"
+                git_repo_url = None  # Built-in template, already in project
+            else:
+                base_result = await db.execute(
+                    select(MarketplaceBase).where(MarketplaceBase.id == container_data.base_id)
+                )
+                base = base_result.scalar_one_or_none()
 
-            if not base:
-                raise HTTPException(status_code=404, detail="Base not found")
+                if not base:
+                    raise HTTPException(status_code=404, detail="Base not found")
 
-            base_name = base.slug
-            base_icon = base.icon
-            git_repo_url = base.git_repo_url
+                base_name = base.slug
+                base_icon = base.icon
+                git_repo_url = base.git_repo_url
 
-        # Determine container directory and name
-        container_name = container_data.name or base_name
-        container_directory = f"packages/{container_name}"
+            # Determine container directory and name for base containers
+            container_name = container_data.name or base_name
+            container_directory = f"packages/{container_name}"
 
-        # Sanitize the Docker container name to match what Docker actually creates
-        # Docker normalizes names: lowercase, replace spaces/underscores/dots with hyphens, alphanumeric only
-        service_name = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
-        docker_container_name = f"{project.slug}-{service_name}"
+            # Sanitize the Docker container name to match what Docker actually creates
+            # Docker normalizes names: lowercase, replace spaces/underscores/dots with hyphens, alphanumeric only
+            service_name = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+            service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+            docker_container_name = f"{project.slug}-{service_name}"
 
-        # Auto-detect internal port based on framework
-        internal_port = 5173  # Default to Vite
-        if base_name:
-            base_lower = base_name.lower()
-            if 'next' in base_lower:
-                internal_port = 3000  # Next.js
-            elif 'fastapi' in base_lower or 'python' in base_lower:
-                internal_port = 8000  # FastAPI/Python
-            elif 'go' in base_lower:
-                internal_port = 8080  # Go
-            elif 'vite' in base_lower or 'react' in base_lower:
-                internal_port = 5173  # Vite/React
+            # Auto-detect internal port based on framework
+            internal_port = 5173  # Default to Vite
+            if base_name:
+                base_lower = base_name.lower()
+                if 'next' in base_lower:
+                    internal_port = 3000  # Next.js
+                elif 'fastapi' in base_lower or 'python' in base_lower:
+                    internal_port = 8000  # FastAPI/Python
+                elif 'go' in base_lower:
+                    internal_port = 8080  # Go
+                elif 'vite' in base_lower or 'react' in base_lower:
+                    internal_port = 5173  # Vite/React
 
-        logger.info(f"[CONTAINER] Auto-detected port {internal_port} for base {base_name}")
+            logger.info(f"[CONTAINER] Auto-detected port {internal_port} for base {base_name}")
 
         # Create Container record
         new_container = Container(
             project_id=project.id,
-            base_id=None if container_data.base_id == "builtin" else container_data.base_id,
+            base_id=None if (container_data.container_type == "service" or container_data.base_id == "builtin") else container_data.base_id,
             name=container_name,
             directory=container_directory,
             container_name=docker_container_name,
@@ -3241,6 +3263,8 @@ async def add_container_to_project(
             position_y=container_data.position_y,
             port=None,  # Will be auto-assigned
             internal_port=internal_port,  # Set framework-specific port
+            container_type=container_data.container_type,
+            service_slug=container_data.service_slug,
             status="stopped"
         )
 
@@ -3248,49 +3272,80 @@ async def add_container_to_project(
         await db.commit()
         await db.refresh(new_container)
 
-        logger.info(f"[CONTAINER] Created container {new_container.id} for project {project.id}")
+        logger.info(f"[CONTAINER] Created {container_data.container_type} container {new_container.id} for project {project.id}")
 
-        # Create background task for container initialization
-        logger.info(f"[CONTAINER] About to create background task for container {new_container.id}")
-        task_manager = get_task_manager()
-        logger.info(f"[CONTAINER] Got task_manager: {task_manager}")
+        # Only run initialization for base containers (not services)
+        if container_data.container_type == "base":
+            # Create background task for container initialization
+            logger.info(f"[CONTAINER] About to create background task for container {new_container.id}")
+            task_manager = get_task_manager()
+            logger.info(f"[CONTAINER] Got task_manager: {task_manager}")
 
-        task = task_manager.create_task(
-            user_id=current_user.id,
-            task_type="container_initialization",
-            metadata={
-                "container_id": str(new_container.id),
-                "project_id": str(project.id),
-                "container_name": container_name,
-                "base_name": base_name
+            task = task_manager.create_task(
+                user_id=current_user.id,
+                task_type="container_initialization",
+                metadata={
+                    "container_id": str(new_container.id),
+                    "project_id": str(project.id),
+                    "container_name": container_name,
+                    "base_name": base_name
+                }
+            )
+
+            # Start background task (non-blocking!) using FastAPI's BackgroundTasks
+            # This ensures the task executes even after the response is sent
+            from ..services.container_initializer import initialize_container_async
+
+            logger.info(f"[CONTAINER] Adding task to FastAPI background_tasks")
+
+            background_tasks.add_task(
+                task_manager.run_task,
+                task_id=task.id,
+                coro=initialize_container_async,
+                container_id=new_container.id,
+                project_id=project.id,
+                user_id=current_user.id,
+                base_slug=base_name,
+                git_repo_url=git_repo_url or ""
+            )
+
+            logger.info(f"[CONTAINER] Started background initialization task {task.id} for container {new_container.id}")
+
+            # Return immediately with container + task ID (non-blocking!)
+            return {
+                "container": new_container,
+                "task_id": task.id,
+                "status_endpoint": f"/api/tasks/{task.id}/status"
             }
-        )
+        else:
+            # Service containers don't need initialization
+            # Just regenerate docker-compose and return
+            logger.info(f"[CONTAINER] Service container created, regenerating docker-compose")
 
-        # Start background task (non-blocking!) using FastAPI's BackgroundTasks
-        # This ensures the task executes even after the response is sent
-        from ..services.container_initializer import initialize_container_async
+            # Get all containers and connections
+            containers_result = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            all_containers = containers_result.scalars().all()
 
-        logger.info(f"[CONTAINER] Adding task to FastAPI background_tasks")
+            from ..models import ContainerConnection
+            connections_result = await db.execute(
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+            )
+            all_connections = connections_result.scalars().all()
 
-        background_tasks.add_task(
-            task_manager.run_task,
-            task_id=task.id,
-            coro=initialize_container_async,
-            container_id=new_container.id,
-            project_id=project.id,
-            user_id=current_user.id,
-            base_slug=base_name,
-            git_repo_url=git_repo_url or ""
-        )
+            # Regenerate docker-compose.yml
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+            orchestrator = get_compose_orchestrator()
+            await orchestrator.write_compose_file(
+                project, all_containers, all_connections, current_user.id
+            )
 
-        logger.info(f"[CONTAINER] Started background initialization task {task.id} for container {new_container.id}")
-
-        # Return immediately with container + task ID (non-blocking!)
-        return {
-            "container": new_container,
-            "task_id": task.id,
-            "status_endpoint": f"/api/tasks/{task.id}/status"
-        }
+            return {
+                "container": new_container,
+                "task_id": None,  # No task for service containers
+                "status_endpoint": None
+            }
 
     except HTTPException:
         raise
@@ -3298,6 +3353,151 @@ async def add_container_to_project(
         await db.rollback()
         logger.error(f"[CONTAINER] Failed to add container: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to add container: {str(e)}")
+
+
+# Container Connection Endpoints (must come before {container_id} routes!)
+
+@router.get("/{project_slug}/containers/connections", response_model=List[ContainerConnectionSchema])
+async def get_container_connections(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all connections between containers in the project.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    result = await db.execute(
+        select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+    )
+    connections = result.scalars().all()
+
+    return connections
+
+
+@router.post("/{project_slug}/containers/connections", response_model=ContainerConnectionSchema)
+async def create_container_connection(
+    project_slug: str,
+    connection_data: ContainerConnectionCreate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a connection between two containers (React Flow edge).
+    This represents a dependency or network connection.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        # Verify both containers exist and belong to this project
+        source = await db.get(Container, connection_data.source_container_id)
+        target = await db.get(Container, connection_data.target_container_id)
+
+        if not source or source.project_id != project.id:
+            raise HTTPException(status_code=404, detail="Source container not found")
+        if not target or target.project_id != project.id:
+            raise HTTPException(status_code=404, detail="Target container not found")
+
+        # Create connection
+        new_connection = ContainerConnection(
+            project_id=project.id,
+            source_container_id=connection_data.source_container_id,
+            target_container_id=connection_data.target_container_id,
+            connection_type=connection_data.connection_type,
+            label=connection_data.label
+        )
+
+        db.add(new_connection)
+        await db.commit()
+        await db.refresh(new_connection)
+
+        logger.info(f"[CONTAINER] Created connection {new_connection.id} in project {project.id}")
+
+        # Regenerate docker-compose.yml with updated depends_on
+        try:
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+            containers_result = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            all_containers = containers_result.scalars().all()
+
+            connections_result = await db.execute(
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+            )
+            all_connections = connections_result.scalars().all()
+
+            orchestrator = get_compose_orchestrator()
+            await orchestrator.write_compose_file(
+                project, all_containers, all_connections, current_user.id
+            )
+
+            logger.info(f"[CONTAINER] Updated docker-compose.yml with new connection")
+        except Exception as e:
+            logger.warning(f"[CONTAINER] Failed to update docker-compose.yml: {e}")
+
+        return new_connection
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to create connection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create connection: {str(e)}")
+
+
+@router.delete("/{project_slug}/containers/connections/{connection_id}")
+async def delete_container_connection(
+    project_slug: str,
+    connection_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a connection between containers.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    connection = await db.get(ContainerConnection, connection_id)
+    if not connection or connection.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    try:
+        await db.delete(connection)
+        await db.commit()
+
+        logger.info(f"[CONTAINER] Deleted connection {connection_id} from project {project.id}")
+
+        # TODO: Update docker-compose.yml
+
+        return {"message": "Connection deleted successfully"}
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to delete connection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete connection: {str(e)}")
+
+
+# Container-specific endpoints (parameterized routes come after specific ones)
+
+@router.get("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
+async def get_container(
+    project_slug: str,
+    container_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a single container's details including environment variables.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    return container
 
 
 @router.patch("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
@@ -3433,128 +3633,6 @@ async def delete_container(
         await db.rollback()
         logger.error(f"[CONTAINER] Failed to delete container: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete container: {str(e)}")
-
-
-@router.get("/{project_slug}/containers/connections", response_model=List[ContainerConnectionSchema])
-async def get_container_connections(
-    project_slug: str,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Get all connections between containers in the project.
-    """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
-
-    result = await db.execute(
-        select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-    )
-    connections = result.scalars().all()
-
-    return connections
-
-
-@router.post("/{project_slug}/containers/connections", response_model=ContainerConnectionSchema)
-async def create_container_connection(
-    project_slug: str,
-    connection_data: ContainerConnectionCreate,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Create a connection between two containers (React Flow edge).
-    This represents a dependency or network connection.
-    """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
-
-    try:
-        # Verify both containers exist and belong to this project
-        source = await db.get(Container, connection_data.source_container_id)
-        target = await db.get(Container, connection_data.target_container_id)
-
-        if not source or source.project_id != project.id:
-            raise HTTPException(status_code=404, detail="Source container not found")
-        if not target or target.project_id != project.id:
-            raise HTTPException(status_code=404, detail="Target container not found")
-
-        # Create connection
-        new_connection = ContainerConnection(
-            project_id=project.id,
-            source_container_id=connection_data.source_container_id,
-            target_container_id=connection_data.target_container_id,
-            connection_type=connection_data.connection_type,
-            label=connection_data.label
-        )
-
-        db.add(new_connection)
-        await db.commit()
-        await db.refresh(new_connection)
-
-        logger.info(f"[CONTAINER] Created connection {new_connection.id} in project {project.id}")
-
-        # Regenerate docker-compose.yml with updated depends_on
-        try:
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
-
-            containers_result = await db.execute(
-                select(Container).where(Container.project_id == project.id)
-            )
-            all_containers = containers_result.scalars().all()
-
-            connections_result = await db.execute(
-                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-            )
-            all_connections = connections_result.scalars().all()
-
-            orchestrator = get_compose_orchestrator()
-            await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id
-            )
-
-            logger.info(f"[CONTAINER] Updated docker-compose.yml with new connection")
-        except Exception as e:
-            logger.warning(f"[CONTAINER] Failed to update docker-compose.yml: {e}")
-
-        return new_connection
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"[CONTAINER] Failed to create connection: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to create connection: {str(e)}")
-
-
-@router.delete("/{project_slug}/containers/connections/{connection_id}")
-async def delete_container_connection(
-    project_slug: str,
-    connection_id: UUID,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Delete a connection between containers.
-    """
-    project = await get_project_by_slug(db, project_slug, current_user.id)
-
-    connection = await db.get(ContainerConnection, connection_id)
-    if not connection or connection.project_id != project.id:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
-    try:
-        await db.delete(connection)
-        await db.commit()
-
-        logger.info(f"[CONTAINER] Deleted connection {connection_id} from project {project.id}")
-
-        # TODO: Update docker-compose.yml
-
-        return {"message": "Connection deleted successfully"}
-
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"[CONTAINER] Failed to delete connection: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to delete connection: {str(e)}")
 
 
 # ============================================================================

@@ -1,0 +1,153 @@
+import { useState, useEffect } from 'react';
+import { MagnifyingGlass, Package, Plus } from '@phosphor-icons/react';
+import api from '../lib/api';
+
+interface MarketplaceItem {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  icon: string;
+  tech_stack: string[];
+  category: string;
+  type?: 'base' | 'service';
+}
+
+interface MarketplaceSidebarProps {
+  onSelectItem?: (item: MarketplaceItem) => void;
+}
+
+export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) => {
+  const [items, setItems] = useState<MarketplaceItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMarketplaceItems();
+  }, []);
+
+  const fetchMarketplaceItems = async () => {
+    try {
+      // Fetch all marketplace items (bases, services, workflows)
+      const response = await api.get('/api/marketplace/my-items');
+      setItems(response.data.items || []);
+    } catch (error) {
+      console.error('Failed to fetch marketplace items:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredItems = items.filter(item =>
+    item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.tech_stack?.some(tech => tech.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const onDragStart = (event: React.DragEvent, item: MarketplaceItem) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/reactflow', 'containerNode');
+    event.dataTransfer.setData('base', JSON.stringify(item));
+  };
+
+  return (
+    <div className="w-full md:w-80 h-full bg-[var(--surface)] border-r border-[var(--sidebar-border)] flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-3 md:px-4 py-3 md:py-4 border-b border-[var(--sidebar-border)] flex-shrink-0">
+        <h2 className="text-base md:text-lg font-semibold text-[var(--text)] mb-2 md:mb-3">Marketplace</h2>
+        <div className="relative">
+          <MagnifyingGlass
+            size={18}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text)]/40"
+          />
+          <input
+            type="text"
+            placeholder="Search components..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-1.5 md:py-2 border border-[var(--border-color)] bg-[var(--bg)] text-[var(--text)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)] text-sm placeholder:text-[var(--text)]/40"
+          />
+        </div>
+      </div>
+
+      {/* Component list */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-8 md:py-12">
+            <div className="animate-spin rounded-full h-6 w-6 md:h-8 md:w-8 border-b-2 border-[var(--primary)]"></div>
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 md:py-12 px-3 md:px-4 text-center">
+            <Package size={40} className="text-[var(--text)]/20 mb-2 md:mb-3" />
+            <p className="text-xs md:text-sm text-[var(--text)]/60 mb-2">
+              {searchQuery ? 'No components found' : 'No components in your library'}
+            </p>
+            <a
+              href="/marketplace"
+              className="text-xs md:text-sm text-[var(--primary)] hover:text-[var(--primary-hover)] font-medium"
+            >
+              Browse Marketplace →
+            </a>
+          </div>
+        ) : (
+          <div className="p-2 md:p-3 space-y-2">
+            {filteredItems.map((item) => (
+              <div
+                key={item.id}
+                draggable
+                onDragStart={(e) => onDragStart(e, item)}
+                onClick={() => onSelectItem?.(item)}
+                className="group cursor-move bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 md:p-3 hover:border-[var(--primary)] hover:shadow-md transition-all overflow-hidden"
+              >
+                <div className="flex items-start gap-2 md:gap-3 min-w-0">
+                  <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center bg-[var(--primary)]/10 rounded-lg">
+                    <span className="text-xl md:text-2xl">{item.icon}</span>
+                  </div>
+
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <h3 className="font-medium text-sm md:text-base text-[var(--text)] truncate group-hover:text-[var(--primary)] transition-colors">
+                      {item.name}
+                    </h3>
+                    <p className="text-xs text-[var(--text)]/60 line-clamp-2 mt-0.5 md:mt-1 break-words">
+                      {item.description}
+                    </p>
+
+                    {item.tech_stack && item.tech_stack.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5 md:mt-2">
+                        {item.tech_stack.slice(0, 2).map((tech, index) => (
+                          <span
+                            key={index}
+                            className="px-1.5 md:px-2 py-0.5 text-xs font-medium bg-[var(--sidebar-hover)] text-[var(--text)] rounded truncate max-w-[80px]"
+                            title={tech}
+                          >
+                            {tech}
+                          </span>
+                        ))}
+                        {item.tech_stack.length > 2 && (
+                          <span className="px-1.5 md:px-2 py-0.5 text-xs font-medium bg-[var(--sidebar-hover)] text-[var(--text)]/70 rounded flex-shrink-0">
+                            +{item.tech_stack.length - 2}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block">
+                    <Plus size={18} className="text-[var(--primary)]" weight="bold" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer hint */}
+      <div className="px-3 md:px-4 py-2 md:py-3 border-t border-[var(--sidebar-border)] bg-[var(--sidebar-hover)] flex-shrink-0">
+        <p className="text-xs text-[var(--text)]/60 text-center break-words">
+          Drag and drop components onto the canvas to add them to your project
+        </p>
+      </div>
+    </div>
+  );
+};

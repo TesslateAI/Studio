@@ -148,7 +148,8 @@ class DockerComposeOrchestrator:
                     'external': True
                 }
             },
-            'services': {}
+            'services': {},
+            'volumes': {}  # Initialize volumes dict for service containers
         }
 
         # Build dependency map from connections
@@ -171,6 +172,81 @@ class DockerComposeOrchestrator:
             # Remove any remaining invalid characters
             service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
 
+            # Handle service containers differently from base containers
+            if container.container_type == "service":
+                # Service container (Postgres, Redis, etc.)
+                from ..services.service_definitions import get_service
+
+                service_def = get_service(container.service_slug)
+                if not service_def:
+                    logger.error(f"[COMPOSE] Service '{container.service_slug}' not found, skipping")
+                    continue
+
+                # Build service configuration from service definition
+                sanitized_container_name = f"{project.slug}-{service_name}"
+
+                # Create volume for service data persistence
+                service_volume_name = f"{project.slug}-{container.service_slug}-data"
+
+                # Build volume mounts from service definition
+                volume_mounts = []
+                for volume_path in service_def.volumes:
+                    volume_mounts.append(f"{service_volume_name}:{volume_path}")
+
+                # Build environment from service definition
+                environment = service_def.environment_vars.copy()
+
+                # Add Traefik labels only if service has HTTP port (databases usually don't)
+                labels = {
+                    'com.tesslate.project': project.slug,
+                    'com.tesslate.container': container.name,
+                    'com.tesslate.user': str(user_id),
+                    'com.tesslate.service': container.service_slug,
+                }
+
+                # Only add Traefik routing for HTTP services (not databases)
+                if service_def.category in ["proxy", "storage", "search"]:
+                    labels.update({
+                        'traefik.enable': 'true',
+                        f'traefik.http.routers.{sanitized_container_name}.rule':
+                            f'Host(`{sanitized_container_name}.localhost`)',
+                        f'traefik.http.services.{sanitized_container_name}.loadbalancer.server.port':
+                            str(service_def.internal_port),
+                    })
+                else:
+                    labels['traefik.enable'] = 'false'
+
+                # Build service definition for service container
+                service_config = {
+                    'image': service_def.docker_image,
+                    'container_name': sanitized_container_name,
+                    'networks': [network_name],  # Services only need project network
+                    'volumes': volume_mounts,
+                    'environment': environment,
+                    'labels': labels,
+                    'restart': 'unless-stopped',
+                }
+
+                # Add command if specified
+                if service_def.command:
+                    service_config['command'] = service_def.command
+
+                # Add health check if specified
+                if service_def.health_check:
+                    service_config['healthcheck'] = service_def.health_check
+
+                compose_config['services'][service_name] = service_config
+                logger.info(f"[COMPOSE] Added service container: {container.service_slug}")
+
+                # Declare service volume
+                if service_volume_name not in compose_config['volumes']:
+                    compose_config['volumes'][service_volume_name] = {
+                        'name': service_volume_name,
+                    }
+
+                continue  # Skip the base container logic below
+
+            # Base container logic (original code)
             # Use tesslate-devserver which has Node.js, Python, Go pre-installed
             # Working directory is set to /app below, not /template (where Vite template lives)
             base_image = "tesslate-devserver:latest"
@@ -325,10 +401,10 @@ class DockerComposeOrchestrator:
             # Add to services (use sanitized service name)
             compose_config['services'][service_name] = service_config
 
-        # Add volumes section if using Docker volumes
+        # Add project-level volume if using Docker volumes
         if self.use_volumes:
-            # Declare project-level volume (shared by all containers)
-            compose_config['volumes'] = {}
+            # Declare project-level volume (shared by all base containers)
+            # Don't overwrite volumes dict - service volumes may already be added
             if project.volume_name:
                 compose_config['volumes'][project.volume_name] = {
                     'name': project.volume_name,

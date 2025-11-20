@@ -105,9 +105,11 @@ class ContainerBase(BaseModel):
 
 class ContainerCreate(ContainerBase):
     project_id: UUID
-    base_id: Union[UUID, str]  # UUID for marketplace bases, 'builtin' for built-in
+    base_id: Union[UUID, str, None] = None  # UUID for marketplace bases, 'builtin' for built-in, None for services
     position_x: float = 0
     position_y: float = 0
+    container_type: str = "base"  # 'base' or 'service'
+    service_slug: Optional[str] = None  # For service containers: 'postgres', 'redis', etc.
 
 class ContainerUpdate(BaseModel):
     name: Optional[str] = None
@@ -125,6 +127,8 @@ class Container(ContainerBase):
     port: Optional[int] = None
     internal_port: Optional[int] = None
     environment_vars: Optional[Dict[str, Any]] = None
+    container_type: str = "base"
+    service_slug: Optional[str] = None
     position_x: float
     position_y: float
     status: str

@@ -8,7 +8,10 @@ interface ContainerNodeData extends Record<string, unknown> {
   status: 'stopped' | 'starting' | 'running' | 'failed';
   port?: number;
   techStack?: string[];
+  containerType?: 'base' | 'service';
   onDelete?: (id: string) => void;
+  onClick?: (id: string) => void;
+  onDoubleClick?: (id: string) => void;
 }
 
 type ContainerNodeProps = Node<ContainerNodeData> & { id: string; data: ContainerNodeData };
@@ -38,7 +41,16 @@ export const ContainerNode = memo(({ data, id }: ContainerNodeProps) => {
       />
 
       {/* Node content */}
-      <div className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-lg shadow-lg min-w-[200px] hover:border-[var(--primary)] transition-colors">
+      <div
+        onClick={() => data.onClick?.(id)}
+        onDoubleClick={() => {
+          // Only allow double-click navigation for base containers, not services
+          if (data.containerType === 'base' && data.onDoubleClick) {
+            data.onDoubleClick(id);
+          }
+        }}
+        className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-lg shadow-lg min-w-[200px] hover:border-[var(--primary)] transition-colors cursor-pointer"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-gradient-to-r from-[var(--sidebar-hover)] to-[var(--surface)]">
           <div className="flex items-center gap-3">

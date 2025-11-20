@@ -72,6 +72,10 @@ class Container(Base):
     dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
     volume_name = Column(String, nullable=True)  # Docker volume name for container files
 
+    # Container type: 'base' (user app from marketplace base) or 'service' (infra service like postgres)
+    container_type = Column(String, default="base", nullable=False)
+    service_slug = Column(String, nullable=True)  # For service containers: 'postgres', 'redis', etc.
+
     # React Flow position
     position_x = Column(Float, default=0)
     position_y = Column(Float, default=0)

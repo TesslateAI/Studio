@@ -2003,3 +2003,75 @@ async def get_user_bases(
         })
 
     return {"bases": response}
+
+
+@router.get("/my-items")
+async def get_user_marketplace_items(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Get all marketplace items in the user's library.
+    Returns bases, services, and future workflows in a unified format.
+    """
+    from ..services.service_definitions import get_all_services
+    from uuid import uuid4
+
+    # Fetch user's purchased bases
+    result = await db.execute(
+        select(MarketplaceBase, UserPurchasedBase)
+        .join(UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id)
+        .where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.is_active == True
+        )
+        .order_by(UserPurchasedBase.purchase_date.desc())
+    )
+
+    bases_data = result.fetchall()
+
+    # Build unified response
+    items = []
+
+    # Add bases
+    for base, purchase in bases_data:
+        items.append({
+            "id": str(base.id),
+            "name": base.name,
+            "slug": base.slug,
+            "description": base.description,
+            "icon": base.icon,
+            "category": base.category,
+            "tech_stack": base.tech_stack or [],
+            "features": base.features or [],
+            "type": "base",
+            # Base-specific fields
+            "git_repo_url": base.git_repo_url,
+            "default_branch": base.default_branch,
+            "pricing_type": base.pricing_type,
+            "purchase_date": purchase.purchase_date.isoformat(),
+            "purchase_type": purchase.purchase_type
+        })
+
+    # Add all services (available to all users by default)
+    services = get_all_services()
+    for service in services:
+        items.append({
+            "id": f"service-{service.slug}",  # Unique ID for services
+            "name": service.name,
+            "slug": service.slug,
+            "description": service.description,
+            "icon": service.icon,
+            "category": service.category,
+            "tech_stack": [service.docker_image],
+            "features": [],
+            "type": "service",
+            # Service-specific fields
+            "docker_image": service.docker_image,
+            "default_port": service.default_port,
+            "internal_port": service.internal_port,
+            "environment_vars": service.environment_vars,
+            "volumes": service.volumes
+        })
+
+    return {"items": items}

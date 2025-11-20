@@ -33,7 +33,8 @@ import {
 } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
-import { BaseSidebar } from '../components/BaseSidebar';
+import { MarketplaceSidebar } from '../components/MarketplaceSidebar';
+import { ContainerPropertiesPanel } from '../components/ContainerPropertiesPanel';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { Tooltip } from '../components/ui/Tooltip';
 import { MobileWarning } from '../components/MobileWarning';
@@ -98,6 +99,7 @@ export const ProjectGraphCanvas = () => {
     const saved = localStorage.getItem('graphCanvasSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
+  const [selectedContainer, setSelectedContainer] = useState<{id: string, name: string, status: string} | null>(null);
 
   useEffect(() => {
     if (slug) {
@@ -195,7 +197,10 @@ export const ProjectGraphCanvas = () => {
           port: container.port,
           baseIcon: '📦', // TODO: Get from base info
           techStack: [], // TODO: Get from base info
+          containerType: container.container_type || 'base',
           onDelete: handleDeleteContainer,
+          onClick: handleContainerClick,
+          onDoubleClick: handleOpenBuilder,
         },
       }));
 
@@ -311,7 +316,7 @@ export const ProjectGraphCanvas = () => {
       const baseData = event.dataTransfer.getData('base');
       if (!baseData || !reactFlowWrapper.current) return;
 
-      const base = JSON.parse(baseData);
+      const item = JSON.parse(baseData);
       const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
 
       // Calculate position on canvas
@@ -329,25 +334,40 @@ export const ProjectGraphCanvas = () => {
         type: 'containerNode',
         position,
         data: {
-          name: base.name,
+          name: item.name,
           status: 'starting',
-          baseIcon: base.icon,
-          techStack: base.tech_stack || [],
+          baseIcon: item.icon,
+          techStack: item.tech_stack || [],
+          containerType: item.type || 'base',
           onDelete: handleDeleteContainer,
+          onClick: handleContainerClick,
+          onDoubleClick: handleOpenBuilder,
         },
       };
 
       setNodes((nds) => [...nds, optimisticNode]);
 
       try {
-        // Create container in backend (happens in background)
-        const response = await api.post(`/api/projects/${slug}/containers`, {
+        // Build request payload based on item type
+        const payload: any = {
           project_id: project.id,
-          base_id: base.id,
-          name: base.name,
+          name: item.name,
           position_x: position.x,
           position_y: position.y,
-        });
+        };
+
+        // Add type-specific fields
+        if (item.type === 'service') {
+          payload.container_type = 'service';
+          payload.service_slug = item.slug;
+        } else {
+          // Default to base
+          payload.container_type = 'base';
+          payload.base_id = item.id;
+        }
+
+        // Create container in backend (happens in background)
+        const response = await api.post(`/api/projects/${slug}/containers`, payload);
 
         // API returns { container: {...}, task_id: "...", status_endpoint: "..." }
         const newContainer = response.data.container;
@@ -363,12 +383,14 @@ export const ProjectGraphCanvas = () => {
                     ...node.data,
                     name: newContainer.name,
                     status: 'stopped',
+                    containerType: newContainer.container_type || item.type || 'base',
+                    port: newContainer.port,
                   },
                 }
               : node
           )
         );
-        toast.success(`Added ${base.name}`);
+        toast.success(`Added ${item.name}`);
       } catch (error) {
         console.error('Failed to add container:', error);
         // Remove the optimistic node on error
@@ -383,6 +405,18 @@ export const ProjectGraphCanvas = () => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }, []);
+
+  const handleContainerClick = useCallback((containerId: string) => {
+    const containerNode = nodes.find(n => n.id === containerId);
+    if (containerNode) {
+      setSelectedContainer({
+        id: containerId,
+        name: containerNode.data.name,
+        status: containerNode.data.status,
+        port: containerNode.data.port,
+      });
+    }
+  }, [nodes]);
 
   const handleDeleteContainer = useCallback(
     async (containerId: string) => {
@@ -785,8 +819,8 @@ export const ProjectGraphCanvas = () => {
         <div className="flex-1 overflow-hidden bg-[var(--bg)]">
           {/* Graph View */}
           <div className={`w-full h-full ${activeView === 'graph' ? 'flex' : 'hidden'}`}>
-            {/* Left sidebar with bases (only in graph view) */}
-            <BaseSidebar />
+            {/* Left sidebar with marketplace items (only in graph view) */}
+            <MarketplaceSidebar />
 
             {/* React Flow canvas */}
             <div className="flex-1" ref={reactFlowWrapper}>
@@ -799,7 +833,14 @@ export const ProjectGraphCanvas = () => {
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 onNodeDragStop={handleNodeDragStop}
-                onNodeDoubleClick={(_, node) => handleOpenBuilder(node.id)}
+                onNodeClick={(_, node) => handleContainerClick(node.id)}
+                onNodeDoubleClick={(_, node) => {
+                  // Only allow double-click navigation for base containers, not services
+                  const containerType = node.data?.containerType || 'base';
+                  if (containerType === 'base') {
+                    handleOpenBuilder(node.id);
+                  }
+                }}
                 nodeTypes={nodeTypes}
                 defaultViewport={{ x: 0, y: 0, zoom: 0.5 }}
                 fitView
@@ -912,6 +953,29 @@ export const ProjectGraphCanvas = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Container Properties Panel */}
+      {selectedContainer && (
+        <ContainerPropertiesPanel
+          containerId={selectedContainer.id}
+          containerName={selectedContainer.name}
+          containerStatus={selectedContainer.status}
+          projectSlug={slug || ''}
+          port={selectedContainer.port}
+          onClose={() => setSelectedContainer(null)}
+          onStatusChange={(newStatus) => {
+            // Update the node status in the graph
+            setNodes((nds) =>
+              nds.map((node) =>
+                node.id === selectedContainer.id
+                  ? { ...node, data: { ...node.data, status: newStatus } }
+                  : node
+              )
+            );
+            setSelectedContainer({...selectedContainer, status: newStatus});
+          }}
+        />
       )}
 
       {/* Discord Support */}
