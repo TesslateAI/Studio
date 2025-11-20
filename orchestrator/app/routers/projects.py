@@ -3229,7 +3229,20 @@ async def add_container_to_project(
 
             # Determine container directory and name for base containers
             container_name = container_data.name or base_name
-            container_directory = f"packages/{container_name}"
+
+            # Check if this is the first container in the project
+            # First container goes to volume root, subsequent ones go to packages/
+            result_containers = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            existing_containers = result_containers.scalars().all()
+
+            if len(existing_containers) == 0:
+                # First container - files go to volume root
+                container_directory = "."
+            else:
+                # Multi-container project - use packages/{name} for monorepo structure
+                container_directory = f"packages/{container_name}"
 
             # Sanitize the Docker container name to match what Docker actually creates
             # Docker normalizes names: lowercase, replace spaces/underscores/dots with hyphens, alphanumeric only

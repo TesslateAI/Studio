@@ -176,13 +176,26 @@ class NetlifyProvider(BaseDeploymentProvider):
                     return site['id']
 
             # Create new site
-            response = await client.post(
-                f"{self.API_BASE}/sites",
-                headers=self._get_headers(),
-                json={"name": site_name}
-            )
-            response.raise_for_status()
-            return response.json()['id']
+            # Try with the preferred name first, if it fails (422), let Netlify auto-generate
+            try:
+                response = await client.post(
+                    f"{self.API_BASE}/sites",
+                    headers=self._get_headers(),
+                    json={"name": site_name}
+                )
+                response.raise_for_status()
+                return response.json()['id']
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 422:
+                    # Subdomain taken - let Netlify auto-generate a unique one
+                    response = await client.post(
+                        f"{self.API_BASE}/sites",
+                        headers=self._get_headers(),
+                        json={}  # No name = Netlify auto-generates subdomain
+                    )
+                    response.raise_for_status()
+                    return response.json()['id']
+                raise
 
     async def _upload_files(
         self,

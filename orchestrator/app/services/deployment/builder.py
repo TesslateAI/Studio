@@ -8,6 +8,10 @@ for deployment to various providers.
 import logging
 import os
 import asyncio
+import docker
+import tempfile
+import tarfile
+import io
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from uuid import UUID
@@ -35,6 +39,14 @@ class DeploymentBuilder:
     def __init__(self):
         """Initialize the deployment builder."""
         self.container_manager = get_container_manager()
+        self.docker_client = None
+        self.dev_server_image = "tesslate-devserver:latest"
+
+    def _get_docker_client(self):
+        """Get or create Docker client."""
+        if self.docker_client is None:
+            self.docker_client = docker.from_env()
+        return self.docker_client
 
     async def trigger_build(
         self,
@@ -44,7 +56,8 @@ class DeploymentBuilder:
         framework: Optional[str] = None,
         custom_build_command: Optional[str] = None,
         project_settings: Optional[Dict] = None,
-        container_name: Optional[str] = None
+        container_name: Optional[str] = None,
+        volume_name: Optional[str] = None
     ) -> Tuple[bool, str]:
         """
         Trigger a build inside the project container.
@@ -148,7 +161,8 @@ class DeploymentBuilder:
         custom_output_dir: Optional[str] = None,
         project_settings: Optional[Dict] = None,
         collect_source: bool = False,
-        container_directory: Optional[str] = None
+        container_directory: Optional[str] = None,
+        volume_name: Optional[str] = None
     ) -> List[DeploymentFile]:
         """
         Collect files from the project for deployment.
@@ -161,6 +175,7 @@ class DeploymentBuilder:
             project_settings: Project settings dict (for cached framework info)
             collect_source: If True, collect source files; if False, collect built files
             container_directory: Subdirectory within project (for multi-container projects)
+            volume_name: Docker volume name (source of truth for Docker volume-based projects)
 
         Returns:
             List of DeploymentFile objects
@@ -169,11 +184,64 @@ class DeploymentBuilder:
             FileNotFoundError: If build output directory doesn't exist
         """
         try:
+            # Volume-based file collection (source of truth)
+            if volume_name:
+                logger.info(f"Collecting files from Docker volume: {volume_name}")
+
+                if collect_source:
+                    # Collect all source files from volume
+                    files = await self._collect_files_from_volume(
+                        volume_name,
+                        subdirectory=container_directory
+                    )
+                    logger.info(f"Collected {len(files)} source files from volume")
+                    return files
+                else:
+                    # Collect built files from volume
+                    # 1. Detect framework from volume
+                    if not framework:
+                        package_json_content = await self._read_file_from_volume(
+                            volume_name,
+                            "package.json"
+                        )
+                        if package_json_content:
+                            framework, _ = FrameworkDetector.detect_from_package_json(
+                                package_json_content.decode('utf-8')
+                            )
+                            logger.info(f"Auto-detected framework from volume: {framework}")
+                        else:
+                            framework = "vite"
+                            logger.warning("No package.json found in volume, defaulting to vite")
+
+                    # 2. Get output directory
+                    if custom_output_dir:
+                        output_dir = custom_output_dir
+                    elif project_settings and project_settings.get("output_directory"):
+                        output_dir = project_settings["output_directory"]
+                    else:
+                        output_dir = self._get_build_output_dir(framework)
+
+                    # 3. Build subdirectory path for multi-container
+                    if container_directory and container_directory != ".":
+                        output_dir = f"{container_directory}/{output_dir}"
+
+                    # 4. Verify build output exists
+                    if not await self._directory_exists_in_volume(volume_name, output_dir):
+                        raise FileNotFoundError(
+                            f"Build output directory not found in volume {volume_name}: {output_dir}"
+                        )
+
+                    # 5. Collect files
+                    files = await self._collect_files_from_volume(volume_name, subdirectory=output_dir)
+                    logger.info(f"Collected {len(files)} built files from volume")
+                    return files
+
+            # FALLBACK: Original filesystem code for backward compatibility
             # Get project path
             project_path = self._get_project_path(user_id, project_id)
 
             # For multi-container projects, use the container's subdirectory
-            if container_directory:
+            if container_directory and container_directory != ".":
                 project_path = os.path.join(project_path, container_directory)
                 logger.info(f"Multi-container project: using directory {container_directory}")
 
@@ -427,6 +495,149 @@ class DeploymentBuilder:
 
         except Exception as e:
             logger.error(f"Failed to verify build output: {e}", exc_info=True)
+            return False
+
+    async def _collect_files_from_volume(
+        self,
+        volume_name: str,
+        subdirectory: Optional[str] = None
+    ) -> List[DeploymentFile]:
+        """
+        Collect files from a Docker volume using a temporary container.
+
+        This mirrors the pattern used in volume_manager.py for consistency.
+
+        Args:
+            volume_name: Name of the Docker volume
+            subdirectory: Optional subdirectory within the volume to collect from
+
+        Returns:
+            List of DeploymentFile objects
+        """
+        logger.info(f"Collecting files from volume {volume_name}, subdirectory: {subdirectory or '.'}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = f"/volume/{subdirectory}" if subdirectory else "/volume"
+
+            docker_client = await asyncio.to_thread(self._get_docker_client)
+
+            try:
+                # Use docker cp to copy files from volume to local temp directory
+                # This avoids all the tar streaming and encoding issues
+                logger.info(f"[VOLUME] Using docker cp to extract files from {source_path}")
+
+                def copy_from_volume():
+                    # Create a long-lived container with the volume mounted
+                    container = docker_client.containers.create(
+                        image=self.dev_server_image,
+                        command=["sleep", "30"],
+                        volumes={volume_name: {'bind': '/volume', 'mode': 'ro'}},
+                        user='root',
+                        detach=True
+                    )
+                    try:
+                        container.start()
+
+                        # Use docker cp to copy files out
+                        # get_archive returns (data_stream, stat_dict)
+                        bits, stat = container.get_archive(source_path)
+
+                        # Write stream to tar file
+                        tar_bytes = b''.join(bits)
+
+                        return tar_bytes
+                    finally:
+                        container.stop(timeout=1)
+                        container.remove()
+
+                tar_bytes = await asyncio.to_thread(copy_from_volume)
+
+                logger.info(f"[VOLUME] Received {len(tar_bytes)} bytes via docker cp")
+                logger.info(f"[VOLUME] First 10 bytes (hex): {tar_bytes[:10].hex()}")
+
+                # Extract tar to temp directory
+                tar_stream = io.BytesIO(tar_bytes)
+                with tarfile.open(fileobj=tar_stream, mode='r') as tar:
+                    await asyncio.to_thread(tar.extractall, temp_dir)
+
+                # Collect files from temp directory
+                files = await self._collect_files_recursive(temp_dir, ".")
+
+                return files
+
+            except Exception as e:
+                logger.error(f"Failed to copy from volume: {e}", exc_info=True)
+                raise FileNotFoundError(f"Failed to read from volume {volume_name}: {str(e)}")
+
+    async def _read_file_from_volume(
+        self,
+        volume_name: str,
+        file_path: str
+    ) -> Optional[bytes]:
+        """
+        Read a single file from a Docker volume.
+
+        Args:
+            volume_name: Name of the Docker volume
+            file_path: Path to the file within the volume
+
+        Returns:
+            File content as bytes, or None if file doesn't exist
+        """
+        try:
+            docker_client = await asyncio.to_thread(self._get_docker_client)
+
+            result = await asyncio.to_thread(
+                docker_client.containers.run,
+                image=self.dev_server_image,
+                command=["sh", "-c", f"cat /volume/{file_path}"],
+                volumes={volume_name: {'bind': '/volume', 'mode': 'ro'}},
+                user='root',
+                detach=False,
+                remove=True,
+                stdout=True,
+                stderr=True
+            )
+
+            return result
+
+        except docker.errors.ContainerError:
+            # File not found
+            return None
+
+    async def _directory_exists_in_volume(
+        self,
+        volume_name: str,
+        directory_path: str
+    ) -> bool:
+        """
+        Check if a directory exists in a Docker volume.
+
+        Args:
+            volume_name: Name of the Docker volume
+            directory_path: Path to the directory within the volume
+
+        Returns:
+            True if directory exists, False otherwise
+        """
+        try:
+            docker_client = await asyncio.to_thread(self._get_docker_client)
+
+            await asyncio.to_thread(
+                docker_client.containers.run,
+                image=self.dev_server_image,
+                command=["sh", "-c", f"test -d /volume/{directory_path}"],
+                volumes={volume_name: {'bind': '/volume', 'mode': 'ro'}},
+                user='root',
+                detach=False,
+                remove=True,
+                stdout=True,
+                stderr=True
+            )
+
+            return True
+
+        except docker.errors.ContainerError:
             return False
 
 

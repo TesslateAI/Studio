@@ -114,14 +114,18 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     const mainTab = createTab(true);
     return () => {
       // Cleanup all tabs on unmount
-      tabs.forEach(tab => {
-        if (tab.reconnectTimer) {
-          clearTimeout(tab.reconnectTimer);
-        }
-        if (tab.ws) {
-          tab.ws.close();
-        }
-        tab.terminal.dispose();
+      // Use setState callback to get current tabs value, avoiding stale closure
+      setTabs(currentTabs => {
+        currentTabs.forEach(tab => {
+          if (tab.reconnectTimer) {
+            clearTimeout(tab.reconnectTimer);
+          }
+          if (tab.ws) {
+            tab.ws.close();
+          }
+          tab.terminal.dispose();
+        });
+        return []; // Clear tabs array
       });
     };
   }, [projectId]);
@@ -254,22 +258,20 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
         tab.terminal.writeln('\r\n\x1b[31m✗ Connection error\x1b[0m\r\n');
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         tab.ws = null;
         tab.connectionStatus = 'disconnected';
         setTabs(prev => [...prev]); // Trigger re-render for status indicator
 
-        // Attempt to reconnect with exponential backoff
+        // Attempt to reconnect with fixed delay
         const maxAttempts = 10;
-        const baseDelay = 1000; // 1 second
-        const maxDelay = 30000; // 30 seconds
+        const delay = 10000;
 
         if (tab.reconnectAttempts < maxAttempts) {
-          const delay = Math.min(baseDelay * Math.pow(1.5, tab.reconnectAttempts), maxDelay);
           tab.reconnectAttempts++;
 
           tab.terminal.writeln('');
-          tab.terminal.writeln(`\x1b[33m⚠ Connection lost. Reconnecting in ${Math.round(delay / 1000)}s... (${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`);
+          tab.terminal.writeln(`\x1b[33m⚠ Connection lost. Reconnecting in ${delay / 1000}s... (${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`);
 
           tab.connectionStatus = 'connecting';
           setTabs(prev => [...prev]); // Update status
