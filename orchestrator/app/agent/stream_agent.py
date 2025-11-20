@@ -299,8 +299,8 @@ class StreamAgent(AbstractAgent):
             if settings.deployment_mode == "kubernetes":
                 # Kubernetes: Write to pod
                 try:
-                    from ..dev_server_manager import get_container_manager
-                    k8s_manager = get_container_manager()
+                    from ..k8s_client import get_k8s_manager
+                    k8s_manager = get_k8s_manager()
 
                     success = await k8s_manager.write_file_to_pod(
                         user_id=user_id,

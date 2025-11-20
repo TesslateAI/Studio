@@ -727,139 +727,6 @@ async def get_project_files(
     logger.info(f"[FILES] Returning {len(files)} files from database")
     return files
 
-async def _perform_container_startup(
-    project_id: UUID,
-    user_id: UUID,
-    project_slug: str,
-    project_path: str,
-    task: Task
-):
-    """
-    Background task worker for container startup.
-    This runs asynchronously without blocking the API response.
-    """
-    try:
-        task.add_log(f"Starting container for project {project_slug}")
-        task.update_progress(0, 4, "Initializing container...")
-
-        from ..dev_server_manager import get_container_manager
-        container_manager = get_container_manager()
-
-        task.update_progress(1, 4, "Building image and installing dependencies...")
-
-        # The container startup process will:
-        # 1. Build Docker image (if needed)
-        # 2. Start container
-        # 3. Run npm install
-        # 4. Wait for container ready
-        url = await container_manager.start_container(
-            project_path,
-            str(project_id),
-            user_id,
-            project_slug=project_slug
-        )
-
-        task.update_progress(4, 4, "Container ready")
-        task.add_log(f"Container started successfully: {url}")
-
-        return {"url": url, "hostname": url}
-
-    except Exception as e:
-        logger.error(f"[START-CONTAINER] Failed to start container: {e}", exc_info=True)
-        raise
-
-
-@router.post("/{project_slug}/start-dev-container")
-async def start_dev_container(
-    project_slug: str,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Start a development environment for the project.
-    This operation runs in the background and returns immediately with a task ID.
-    """
-    # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
-    project_id = project.id  # For internal operations
-
-    logger.info(f"[START-CONTAINER] Request to start dev container for project {project_slug} (ID: {project_id}), user {current_user.id}")
-
-    # Start dev container (path is for metadata only in K8s mode)
-    project_path = os.path.abspath(get_project_path(current_user.id, project_id))
-
-    # Create background task for container startup
-    task_manager = get_task_manager()
-    task = task_manager.create_task(
-        user_id=current_user.id,
-        task_type="container_startup",
-        metadata={
-            "project_id": str(project_id),
-            "project_slug": project_slug,
-            "project_name": project.name
-        }
-    )
-
-    # Start container in background
-    task_manager.start_background_task(
-        task.id,
-        _perform_container_startup,
-        project_id=project_id,
-        user_id=current_user.id,
-        project_slug=project_slug,
-        project_path=project_path
-    )
-
-    logger.info(f"[START-CONTAINER] Started background container startup for project {project_id} (task_id: {task.id})")
-
-    return {
-        "message": "Container startup initiated",
-        "task_id": task.id,
-        "project_id": str(project_id),
-        "project_slug": project_slug,
-        "status_endpoint": f"/api/tasks/{task.id}/status"
-    }
-
-@router.post("/{project_slug}/restart-dev-container")
-async def restart_dev_container(
-    project_slug: str,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
-    project_id = project.id  # For internal operations
-
-    # Restart dev container
-    project_path = os.path.abspath(get_project_path(current_user.id, project_id))
-    try:
-        from ..dev_server_manager import get_container_manager
-        container_manager = get_container_manager()
-        hostname = await container_manager.restart_container(project_path, str(project_id), current_user.id)
-        return {"url": hostname, "hostname": hostname, "message": "Dev container restarted successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to restart dev container: {str(e)}")
-
-@router.post("/{project_slug}/stop-dev-container")
-async def stop_dev_container(
-    project_slug: str,
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    # Get project and verify ownership
-    project = await get_project_by_slug(db, project_slug, current_user.id)
-    project_id = project.id  # For internal operations
-
-    # Stop dev container
-    try:
-        from ..dev_server_manager import get_container_manager
-        container_manager = get_container_manager()
-        await container_manager.stop_container(str(project_id), current_user.id)
-        return {"message": "Dev container stopped successfully", "project_id": project_id}
-    except Exception as e:
-        # Don't fail if container is already stopped
-        return {"message": "Container stop attempted", "project_id": project_id}
-
 @router.get("/{project_slug}/dev-server-url")
 async def get_dev_server_url(
     project_slug: str,
@@ -899,161 +766,20 @@ async def get_dev_server_url(
                 "message": "Multi-container project. Each container has its own dev server."
             }
 
-        # Legacy single-container project
-        # Auto-restart container if it was stopped by cleanup task
-        from ..dev_server_manager import get_container_manager
-        container_manager = get_container_manager()
-        await container_manager.ensure_container_running(str(project_id), current_user.id, project.slug)
+        # No containers found - this is an error as all projects should have containers
+        logger.error(f"[DEV-URL] Project {project_slug} has no containers. All projects must use multi-container system.")
+        raise HTTPException(
+            status_code=400,
+            detail="Project has no containers. Please add containers to your project using the graph canvas."
+        )
 
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes mode - use K8s-specific health check
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
-            health = await k8s_manager.check_dev_environment_health(current_user.id, str(project_id))
-
-            if health["exists"] and health["ready"]:
-                logger.info(f"[DEV-URL] ✅ Environment exists and is ready: {health['url']}")
-                k8s_manager.track_activity(current_user.id, str(project_id))
-                return {
-                    "url": health["url"],
-                    "status": "ready",
-                    "message": "Development environment is ready"
-                }
-
-            if health["exists"] and not health["ready"]:
-                logger.info(f"[DEV-URL] ⏳ Environment exists but not ready yet")
-                return {
-                    "url": None,
-                    "status": "starting",
-                    "message": health["message"],
-                    "replicas": health.get("replicas"),
-                    "hint": "Please wait a moment and try again"
-                }
-        else:
-            # Docker mode - use Docker-specific status check
-            from ..dev_server_manager import get_container_manager
-            docker_manager = get_container_manager()
-            status = await docker_manager.get_container_status(str(project_id), current_user.id, project.slug)
-
-            if status.get("running"):
-                url = docker_manager.get_container_url(str(project_id), current_user.id)
-
-                # Check Docker health status instead of making HTTP request
-                # (HTTP requests fail from orchestrator container due to DNS resolution)
-                health_status = status.get("health", "unknown")
-
-                if health_status == "healthy":
-                    logger.info(f"[DEV-URL] ✅ Container is running and healthy: {url}")
-                    docker_manager.track_activity(current_user.id, str(project_id))
-                    return {
-                        "url": url,
-                        "status": "ready",
-                        "message": "Development environment is ready"
-                    }
-                else:
-                    logger.info(f"[DEV-URL] ⏳ Container is running but health status is: {health_status}")
-                    # Container exists but not healthy yet - return starting status
-                    return {
-                        "url": None,
-                        "status": "starting",
-                        "message": "Development server is starting, please wait...",
-                        "hint": f"The container is running but health check is {health_status}. Try again in a few seconds."
-                    }
-
-        # Container doesn't exist - create it
-        logger.info(f"[DEV-URL] Container does not exist, creating new environment...")
-        # Use absolute path to ensure files are created in the correct location
-        project_path = os.path.abspath(get_project_path(current_user.id, project_id))
-
-        # In Docker mode, create project directory from database files if it doesn't exist
-        if settings.deployment_mode == "docker" and not os.path.exists(project_path):
-            logger.info(f"[DEV-URL] Creating project directory from database files: {project_path}")
-            # Create parent directory first to avoid Windows bind mount issues
-            user_dir = os.path.abspath(f"users/{current_user.id}")
-
-            # Force create directories using Path (more reliable on Windows Docker volumes)
-            from pathlib import Path
-            try:
-                Path(project_path).mkdir(parents=True, exist_ok=True)
-                logger.info(f"[DEV-URL] Created project directory: {project_path}")
-            except Exception as e:
-                logger.error(f"[DEV-URL] Failed to create project directory: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to create project directory: {str(e)}")
-
-            # Give filesystem a moment to sync (Windows Docker volume issue)
-            await asyncio.sleep(0.1)
-
-            # Verify directory was created
-            if not os.path.exists(project_path):
-                raise FileNotFoundError(f"Failed to create project directory: {project_path}")
-
-            # Get all files from database
-            files_result = await db.execute(
-                select(ProjectFile).where(ProjectFile.project_id == project_id)
-            )
-            project_files = files_result.scalars().all()
-
-            if not project_files:
-                logger.error(f"[DEV-URL] No files found in database for project {project_id}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Project has no files. Please recreate the project."
-                )
-
-            # Write each file to filesystem
-            for db_file in project_files:
-                file_full_path = os.path.join(project_path, db_file.file_path)
-
-                # Create parent directory (with safety check for Windows Docker volumes)
-                parent_dir = os.path.dirname(file_full_path)
-                if parent_dir:
-                    try:
-                        os.makedirs(parent_dir, exist_ok=True)
-                    except FileExistsError:
-                        # Handle race condition on Windows Docker volumes - verify it exists
-                        if not os.path.exists(parent_dir):
-                            raise
-
-                with open(file_full_path, 'w', encoding='utf-8') as f:
-                    f.write(db_file.content)
-
-                logger.debug(f"[DEV-URL] Created file: {db_file.file_path}")
-
-            logger.info(f"[DEV-URL] Created {len(project_files)} files from database")
-
-            # Fix ownership for container access (containers run as uid=1000, gid=1000)
-            # This allows npm install and other write operations inside the container
-            try:
-                import subprocess
-                # Change ownership recursively to 1000:1000 (node user in container)
-                subprocess.run(['chown', '-R', '1000:1000', project_path], check=True, capture_output=True)
-                logger.info(f"[DEV-URL] Fixed ownership of {project_path} to 1000:1000")
-            except Exception as e:
-                logger.warning(f"[DEV-URL] Failed to fix ownership (non-critical): {e}")
-
-        from ..dev_server_manager import get_container_manager
-        container_manager = get_container_manager()
-        url = await container_manager.start_container(project_path, str(project_id), current_user.id, project_slug=project.slug)
-        logger.info(f"[DEV-URL] ✅ Dev container started successfully: {url}")
-
-        return {
-            "url": url,
-            "status": "ready",
-            "message": "Development environment created successfully"
-        }
-
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"[DEV-URL] ❌ Failed to get/create dev environment", exc_info=True)
-
+        logger.error(f"[DEV-URL] ❌ Failed to get dev environment", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail={
-                "error": "Failed to start development environment",
-                "message": str(e),
-                "user_id": str(current_user.id),
-                "project_id": str(project_id),
-                "hint": f"Check Kubernetes pod logs: kubectl logs -l app=dev-environment,user-id={current_user.id},project-id={project_id} -n tesslate-user-environments"
-            }
+            detail=f"Failed to get development environment: {str(e)}"
         )
 
 @router.get("/{project_slug}/container-status")
@@ -1107,21 +833,11 @@ async def get_container_status(
                 "user_id": current_user.id
             }
         else:
-            # Docker mode
-            from ..dev_server_manager import get_container_manager
-            docker_manager = get_container_manager()
-            status = await docker_manager.get_container_status(str(project_id), current_user.id)
-            url = docker_manager.get_container_url(str(project_id), current_user.id)
-
-            return {
-                "status": "ready" if status.get("running") else "stopped",
-                "ready": status.get("running", False),
-                "phase": status.get("status", "Unknown"),
-                "message": "Container is running" if status.get("running") else "Container is not running",
-                "url": url,
-                "project_id": project_id,
-                "user_id": current_user.id
-            }
+            # Docker mode - multi-container projects only
+            raise HTTPException(
+                status_code=400,
+                detail="This endpoint is only for Kubernetes deployments. For Docker, use the multi-container project status endpoints."
+            )
 
     except Exception as e:
         logger.error(f"[STATUS] Failed to get container status: {e}", exc_info=True)
@@ -1214,14 +930,6 @@ async def save_project_file(
                         f.write(content)
 
                     logger.info(f"[FILE] ✅ Wrote {file_path} to bind mount for user {current_user.id}, project {project_id}")
-
-                    # Track activity to keep container alive
-                    try:
-                        from ..dev_server_manager import get_container_manager
-                        container_manager = get_container_manager()
-                        container_manager.track_activity(current_user.id, str(project_id))
-                    except Exception as e:
-                        logger.debug(f"Could not track file save activity: {e}")
 
                 except Exception as docker_error:
                     logger.warning(f"[FILE] ⚠️ Failed to write to bind mount: {docker_error}")
@@ -1357,25 +1065,6 @@ async def get_container_info(
             "git_command_example": f"docker exec {container_name} git status"
         }
 
-@router.get("/containers/all")
-async def get_all_dev_containers(
-    current_user: User = Depends(current_active_user)
-):
-    """Get all running development containers (for admin/debugging)."""
-    try:
-        from ..dev_server_manager import get_container_manager
-        container_manager = get_container_manager()
-        containers = await container_manager.get_all_containers()
-        # Filter to show only containers for current user unless admin
-        user_containers = [c for c in containers if c.get('user_id') == current_user.id]
-        return {
-            "containers": user_containers,
-            "total": len(user_containers),
-            "user_id": current_user.id
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get containers: {str(e)}")
-
 async def _perform_project_deletion(
     project_id: UUID,
     user_id: UUID,
@@ -1384,7 +1073,6 @@ async def _perform_project_deletion(
 ) -> None:
     """Background worker to delete a project"""
     from ..database import get_db
-    from ..dev_server_manager import get_container_manager
     from ..utils.async_fileio import rmtree_async
     from ..services.docker_compose_orchestrator import get_compose_orchestrator
     from ..services.regional_traefik_manager import get_regional_traefik_manager
@@ -1443,13 +1131,6 @@ async def _perform_project_deletion(
                     logger.info(f"[DELETE] Cleaned up networks for project {project.slug}")
                 except Exception as e:
                     logger.warning(f"[DELETE] Error cleaning up networks: {e}")
-
-            # Also try legacy container manager for backward compatibility
-            try:
-                container_manager = get_container_manager()
-                await container_manager.stop_container(str(project_id), user_id)
-            except Exception as e:
-                logger.debug(f"[DELETE] Legacy container manager: {e}")
 
         except Exception as e:
             logger.warning(f"[DELETE] Error stopping containers: {e}")

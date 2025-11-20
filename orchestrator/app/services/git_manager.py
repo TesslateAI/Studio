@@ -11,7 +11,6 @@ from datetime import datetime
 import logging
 
 from ..config import get_settings
-from ..dev_server_manager import get_container_manager
 from ..utils.resource_naming import get_project_path
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,8 @@ class GitManager:
         self.user_id = user_id
         self.project_id = project_id
         self.settings = get_settings()
-        self.container_manager = get_container_manager()
+        # TODO: Update for multi-container system - need to determine which container to run git commands in
+        self.container_manager = None
 
     async def _execute_git_command(
         self,

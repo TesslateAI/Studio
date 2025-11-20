@@ -18,7 +18,7 @@ from uuid import UUID
 
 from .base import DeploymentFile
 from ...services.framework_detector import FrameworkDetector
-from ...dev_server_manager import get_container_manager
+# Legacy container manager removed - multi-container projects only
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class DeploymentBuilder:
 
     def __init__(self):
         """Initialize the deployment builder."""
-        self.container_manager = get_container_manager()
+        self.container_manager = None  # TODO: Update for multi-container system
         self.docker_client = None
         self.dev_server_image = "tesslate-devserver:latest"
 

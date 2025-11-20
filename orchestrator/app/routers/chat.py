@@ -1257,17 +1257,6 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     # Handle heartbeat ping
     if data.get("type") == "ping":
         await websocket.send_json({"type": "pong"})
-
-        # Track activity on heartbeat to keep container alive
-        project_id = data.get("project_id")
-        if project_id:
-            try:
-                from ..dev_server_manager import get_container_manager
-                container_manager = get_container_manager()
-                container_manager.track_activity(user.id, str(project_id))
-            except Exception as e:
-                logger.debug(f"Could not track heartbeat activity: {e}")
-
         return
 
     # Handle approval response (Ask Before Edit mode)
@@ -1291,15 +1280,6 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     project_id = data.get("project_id")
     agent_id = data.get("agent_id")  # Get agent_id from request
     edit_mode = data.get("edit_mode", "ask")  # Get edit_mode from request, default to ask
-
-    # Track activity when user sends a message
-    if project_id:
-        try:
-            from ..dev_server_manager import get_container_manager
-            container_manager = get_container_manager()
-            container_manager.track_activity(user.id, str(project_id))
-        except Exception as e:
-            logger.debug(f"Could not track message activity: {e}")
 
     try:
         # Get or create chat for this user and project
@@ -1760,8 +1740,8 @@ async def save_file(file_path: str, code: str, project_id: UUID, user_id: UUID, 
         if settings.deployment_mode == "kubernetes":
             # Kubernetes: Write to pod via K8s API
             try:
-                from ..dev_server_manager import get_container_manager
-                k8s_manager = get_container_manager()
+                from ..k8s_client import get_k8s_manager
+                k8s_manager = get_k8s_manager()
 
                 success = await k8s_manager.write_file_to_pod(
                     user_id=user_id,

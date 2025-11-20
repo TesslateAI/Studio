@@ -1,0 +1,6987 @@
+{
+  "python": {
+    "files": {
+      "auth.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\auth.py",
+        "lines": 129,
+        "imports": [
+          "datetime",
+          "typing",
+          "jose",
+          "passlib.context",
+          "fastapi",
+          "fastapi.security",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          ".database",
+          ".models",
+          ".config",
+          "sqlalchemy",
+          "bcrypt",
+          "secrets",
+          "logging"
+        ],
+        "raw_imports": [
+          "datetime",
+          "typing",
+          "jose",
+          "passlib.context",
+          "fastapi",
+          "fastapi.security",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          ".database",
+          ".models",
+          ".config",
+          "sqlalchemy",
+          "bcrypt",
+          "secrets",
+          "logging"
+        ]
+      },
+      "config.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\config.py",
+        "lines": 187,
+        "imports": [
+          "pydantic_settings",
+          "functools",
+          "cryptography.fernet"
+        ],
+        "raw_imports": [
+          "pydantic_settings",
+          "functools",
+          "cryptography.fernet"
+        ]
+      },
+      "database.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\database.py",
+        "lines": 33,
+        "imports": [
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy.orm",
+          ".config"
+        ],
+        "raw_imports": [
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy.orm",
+          ".config"
+        ]
+      },
+      "k8s_client.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\k8s_client.py",
+        "lines": 1581,
+        "imports": [
+          "kubernetes",
+          "kubernetes.client.rest",
+          "kubernetes.stream",
+          "typing",
+          "uuid",
+          ".utils.resource_naming",
+          ".config",
+          "os",
+          "logging",
+          "asyncio",
+          "shlex",
+          "json",
+          "react"
+        ],
+        "raw_imports": [
+          "kubernetes",
+          "kubernetes.client.rest",
+          "kubernetes.stream",
+          "typing",
+          "uuid",
+          ".utils.resource_naming",
+          ".config",
+          "os",
+          "logging",
+          "asyncio",
+          "shlex",
+          "json",
+          "react"
+        ]
+      },
+      "k8s_container_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\k8s_container_manager.py",
+        "lines": 454,
+        "imports": [
+          "typing",
+          "uuid",
+          ".config",
+          ".k8s_client",
+          ".base_container_manager",
+          "..k8s_client",
+          "asyncio",
+          "os",
+          "time",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          ".config",
+          ".k8s_client",
+          ".base_container_manager",
+          "..k8s_client",
+          "asyncio",
+          "os",
+          "time",
+          "logging"
+        ]
+      },
+      "main.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\main.py",
+        "lines": 696,
+        "imports": [
+          "fastapi",
+          "fastapi.middleware.cors",
+          "fastapi.staticfiles",
+          "fastapi.responses",
+          "starlette.middleware.base",
+          "starlette.responses",
+          "uvicorn.middleware.proxy_headers",
+          ".database",
+          ".routers",
+          ".config",
+          ".middleware.csrf",
+          ".users",
+          ".schemas_auth",
+          ".oauth",
+          "pathlib",
+          ".models",
+          ".database",
+          "sqlalchemy",
+          ".services.shell_session_manager",
+          ".database",
+          ".dev_server_manager",
+          ".services.shell_session_manager",
+          ".database",
+          ".config",
+          ".services.base_cache_manager",
+          "fastapi",
+          "fastapi.responses",
+          ".oauth",
+          "fastapi_users.router.oauth",
+          ".oauth",
+          "fastapi_users.router.oauth",
+          "fastapi",
+          "fastapi.responses",
+          "httpx_oauth.integrations.fastapi",
+          "fastapi_users.router.oauth",
+          "fastapi_users.jwt",
+          "os",
+          "logging",
+          "re",
+          "json",
+          "asyncio",
+          "asyncio",
+          "asyncio",
+          "asyncio",
+          "jwt"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "fastapi.middleware.cors",
+          "fastapi.staticfiles",
+          "fastapi.responses",
+          "starlette.middleware.base",
+          "starlette.responses",
+          "uvicorn.middleware.proxy_headers",
+          ".database",
+          ".routers",
+          ".config",
+          ".middleware.csrf",
+          ".users",
+          ".schemas_auth",
+          ".oauth",
+          "pathlib",
+          ".models",
+          ".database",
+          "sqlalchemy",
+          ".services.shell_session_manager",
+          ".database",
+          ".dev_server_manager",
+          ".services.shell_session_manager",
+          ".database",
+          ".config",
+          ".services.base_cache_manager",
+          "fastapi",
+          "fastapi.responses",
+          ".oauth",
+          "fastapi_users.router.oauth",
+          ".oauth",
+          "fastapi_users.router.oauth",
+          "fastapi",
+          "fastapi.responses",
+          "httpx_oauth.integrations.fastapi",
+          "fastapi_users.router.oauth",
+          "fastapi_users.jwt",
+          "os",
+          "logging",
+          "re",
+          "json",
+          "asyncio",
+          "asyncio",
+          "asyncio",
+          "asyncio",
+          "jwt"
+        ]
+      },
+      "models.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\models.py",
+        "lines": 782,
+        "imports": [
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.sql",
+          "sqlalchemy.dialects.postgresql",
+          ".database",
+          ".models_kanban",
+          ".models_auth",
+          "uuid"
+        ],
+        "raw_imports": [
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.sql",
+          "sqlalchemy.dialects.postgresql",
+          ".database",
+          ".models_kanban",
+          ".models_auth",
+          "uuid"
+        ]
+      },
+      "models_auth.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\models_auth.py",
+        "lines": 172,
+        "imports": [
+          "datetime",
+          "typing",
+          "fastapi_users.db",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.sql",
+          "sqlalchemy.dialects.postgresql",
+          ".database",
+          "uuid"
+        ],
+        "raw_imports": [
+          "datetime",
+          "typing",
+          "fastapi_users.db",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.sql",
+          "sqlalchemy.dialects.postgresql",
+          ".database",
+          "uuid"
+        ]
+      },
+      "models_kanban.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\models_kanban.py",
+        "lines": 153,
+        "imports": [
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.sql",
+          "sqlalchemy.dialects.postgresql",
+          ".database",
+          "uuid"
+        ],
+        "raw_imports": [
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.sql",
+          "sqlalchemy.dialects.postgresql",
+          ".database",
+          "uuid"
+        ]
+      },
+      "oauth.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\oauth.py",
+        "lines": 179,
+        "imports": [
+          "typing",
+          "httpx_oauth.clients.google",
+          "httpx_oauth.clients.github",
+          "httpx_oauth.exceptions",
+          ".config"
+        ],
+        "raw_imports": [
+          "typing",
+          "httpx_oauth.clients.google",
+          "httpx_oauth.clients.github",
+          "httpx_oauth.exceptions",
+          ".config"
+        ]
+      },
+      "referral_db.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\referral_db.py",
+        "lines": 136,
+        "imports": [
+          "datetime",
+          "pathlib",
+          "sqlite3",
+          "logging"
+        ],
+        "raw_imports": [
+          "datetime",
+          "pathlib",
+          "sqlite3",
+          "logging"
+        ]
+      },
+      "schemas.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\schemas.py",
+        "lines": 627,
+        "imports": [
+          "pydantic",
+          "datetime",
+          "typing",
+          "uuid",
+          "re",
+          "re"
+        ],
+        "raw_imports": [
+          "pydantic",
+          "datetime",
+          "typing",
+          "uuid",
+          "re",
+          "re"
+        ]
+      },
+      "schemas_auth.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\schemas_auth.py",
+        "lines": 82,
+        "imports": [
+          "typing",
+          "fastapi_users",
+          "pydantic",
+          "uuid"
+        ],
+        "raw_imports": [
+          "typing",
+          "fastapi_users",
+          "pydantic",
+          "uuid"
+        ]
+      },
+      "schemas_feedback.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\schemas_feedback.py",
+        "lines": 104,
+        "imports": [
+          "typing",
+          "datetime",
+          "pydantic",
+          "uuid"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "pydantic",
+          "uuid"
+        ]
+      },
+      "users.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\users.py",
+        "lines": 500,
+        "imports": [
+          "typing",
+          "fastapi",
+          "starlette.responses",
+          "fastapi_users",
+          "fastapi_users.authentication",
+          "fastapi_users.db",
+          "fastapi_users_db_sqlalchemy.access_token",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy.exc",
+          "fastapi_users.exceptions",
+          "nanoid",
+          ".config",
+          ".database",
+          ".models_auth",
+          ".schemas_auth",
+          ".services.stripe_service",
+          ".services.litellm_service",
+          ".models",
+          "sqlalchemy",
+          ".services.discord_service",
+          ".referral_db",
+          ".services.ntfy_service",
+          ".services.discord_service",
+          ".services.discord_service",
+          "datetime",
+          "jose",
+          "uuid",
+          "logging",
+          "logging",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "fastapi",
+          "starlette.responses",
+          "fastapi_users",
+          "fastapi_users.authentication",
+          "fastapi_users.db",
+          "fastapi_users_db_sqlalchemy.access_token",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy.exc",
+          "fastapi_users.exceptions",
+          "nanoid",
+          ".config",
+          ".database",
+          ".models_auth",
+          ".schemas_auth",
+          ".services.stripe_service",
+          ".services.litellm_service",
+          ".models",
+          "sqlalchemy",
+          ".services.discord_service",
+          ".referral_db",
+          ".services.ntfy_service",
+          ".services.discord_service",
+          ".services.discord_service",
+          "datetime",
+          "jose",
+          "uuid",
+          "logging",
+          "logging",
+          "logging"
+        ]
+      },
+      "__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\__init__.py",
+        "lines": 0,
+        "imports": [],
+        "raw_imports": []
+      },
+      "agent\\base.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\base.py",
+        "lines": 98,
+        "imports": [
+          "abc",
+          "typing",
+          ".tools.registry",
+          ".prompts"
+        ],
+        "raw_imports": [
+          "abc",
+          "typing",
+          ".tools.registry",
+          ".prompts"
+        ]
+      },
+      "agent\\factory.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\factory.py",
+        "lines": 181,
+        "imports": [
+          "typing",
+          ".base",
+          ".stream_agent",
+          ".iterative_agent",
+          ".react_agent",
+          ".tools.registry",
+          "..models",
+          "my_agents",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          ".base",
+          ".stream_agent",
+          ".iterative_agent",
+          ".react_agent",
+          ".tools.registry",
+          "..models",
+          "my_agents",
+          "logging"
+        ]
+      },
+      "agent\\iterative_agent.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\iterative_agent.py",
+        "lines": 835,
+        "imports": [
+          "typing",
+          "dataclasses",
+          "datetime",
+          "uuid",
+          ".base",
+          ".models",
+          ".parser",
+          ".prompts",
+          ".tools.registry",
+          ".resource_limits",
+          ".tools.approval_manager",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "dataclasses",
+          "datetime",
+          "uuid",
+          ".base",
+          ".models",
+          ".parser",
+          ".prompts",
+          ".tools.registry",
+          ".resource_limits",
+          ".tools.approval_manager",
+          "logging"
+        ]
+      },
+      "agent\\models.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\models.py",
+        "lines": 381,
+        "imports": [
+          "abc",
+          "typing",
+          "uuid",
+          "openai",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "anthropic",
+          "..models",
+          "..config",
+          "..routers.secrets",
+          "logging",
+          "asyncio"
+        ],
+        "raw_imports": [
+          "abc",
+          "typing",
+          "uuid",
+          "openai",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "anthropic",
+          "..models",
+          "..config",
+          "..routers.secrets",
+          "logging",
+          "asyncio"
+        ]
+      },
+      "agent\\parser.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\parser.py",
+        "lines": 375,
+        "imports": [
+          "typing",
+          "dataclasses",
+          "re",
+          "json",
+          "logging",
+          "re"
+        ],
+        "raw_imports": [
+          "typing",
+          "dataclasses",
+          "re",
+          "json",
+          "logging",
+          "re"
+        ]
+      },
+      "agent\\prompts.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\prompts.py",
+        "lines": 279,
+        "imports": [
+          "typing",
+          "uuid",
+          "datetime",
+          ".tools.registry",
+          "..utils.resource_naming",
+          "datetime",
+          "..config",
+          "..config",
+          "platform",
+          "asyncio",
+          "os",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "datetime",
+          ".tools.registry",
+          "..utils.resource_naming",
+          "datetime",
+          "..config",
+          "..config",
+          "platform",
+          "asyncio",
+          "os",
+          "logging"
+        ]
+      },
+      "agent\\react_agent.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\react_agent.py",
+        "lines": 830,
+        "imports": [
+          "typing",
+          "dataclasses",
+          "datetime",
+          "uuid",
+          ".base",
+          ".models",
+          ".parser",
+          ".prompts",
+          ".tools.registry",
+          ".resource_limits",
+          ".tools.approval_manager",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "dataclasses",
+          "datetime",
+          "uuid",
+          ".base",
+          ".models",
+          ".parser",
+          ".prompts",
+          ".tools.registry",
+          ".resource_limits",
+          ".tools.approval_manager",
+          "logging"
+        ]
+      },
+      "agent\\resource_limits.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\resource_limits.py",
+        "lines": 259,
+        "imports": [
+          "dataclasses",
+          "typing",
+          "os",
+          "threading",
+          "logging"
+        ],
+        "raw_imports": [
+          "dataclasses",
+          "typing",
+          "os",
+          "threading",
+          "logging"
+        ]
+      },
+      "agent\\stream_agent.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\stream_agent.py",
+        "lines": 340,
+        "imports": [
+          "typing",
+          "uuid",
+          ".base",
+          "openai",
+          "..utils.resource_naming",
+          "..config",
+          ".models",
+          "..k8s_client",
+          "..config",
+          "..models",
+          "sqlalchemy",
+          "..dev_server_manager",
+          "logging",
+          "re",
+          "asyncio",
+          "os",
+          "aiofiles"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          ".base",
+          "openai",
+          "..utils.resource_naming",
+          "..config",
+          ".models",
+          "..k8s_client",
+          "..config",
+          "..models",
+          "sqlalchemy",
+          "..dev_server_manager",
+          "logging",
+          "re",
+          "asyncio",
+          "os",
+          "aiofiles"
+        ]
+      },
+      "agent\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\__init__.py",
+        "lines": 37,
+        "imports": [
+          ".base",
+          ".stream_agent",
+          ".iterative_agent",
+          ".react_agent",
+          ".factory",
+          ".tools.registry"
+        ],
+        "raw_imports": [
+          ".base",
+          ".stream_agent",
+          ".iterative_agent",
+          ".react_agent",
+          ".factory",
+          ".tools.registry"
+        ]
+      },
+      "agent\\tools\\approval_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\approval_manager.py",
+        "lines": 165,
+        "imports": [
+          "typing",
+          "uuid",
+          "asyncio",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "asyncio",
+          "logging"
+        ]
+      },
+      "agent\\tools\\output_formatter.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\output_formatter.py",
+        "lines": 155,
+        "imports": [
+          "typing",
+          "re"
+        ],
+        "raw_imports": [
+          "typing",
+          "re"
+        ]
+      },
+      "agent\\tools\\registry.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\registry.py",
+        "lines": 321,
+        "imports": [
+          "dataclasses",
+          "typing",
+          "enum",
+          ".approval_manager",
+          ".file_ops",
+          ".shell_ops",
+          ".project_ops",
+          ".planning_ops",
+          ".web_ops",
+          "dataclasses",
+          "logging"
+        ],
+        "raw_imports": [
+          "dataclasses",
+          "typing",
+          "enum",
+          ".approval_manager",
+          ".file_ops",
+          ".shell_ops",
+          ".project_ops",
+          ".planning_ops",
+          ".web_ops",
+          "dataclasses",
+          "logging"
+        ]
+      },
+      "agent\\tools\\retry_config.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\retry_config.py",
+        "lines": 224,
+        "imports": [
+          "tenacity",
+          "typing",
+          "tenacity",
+          "logging"
+        ],
+        "raw_imports": [
+          "tenacity",
+          "typing",
+          "tenacity",
+          "logging"
+        ]
+      },
+      "agent\\tools\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\__init__.py",
+        "lines": 5,
+        "imports": [
+          ".registry"
+        ],
+        "raw_imports": [
+          ".registry"
+        ]
+      },
+      "agent\\tools\\file_ops\\edit.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\file_ops\\edit.py",
+        "lines": 437,
+        "imports": [
+          "typing",
+          "uuid",
+          "..registry",
+          "....config",
+          "..output_formatter",
+          "....utils.resource_naming",
+          "..retry_config",
+          "....utils.code_patching",
+          "....k8s_client",
+          "....k8s_client",
+          "....utils.code_patching",
+          "....k8s_client",
+          "....k8s_client",
+          "logging",
+          "os",
+          "difflib",
+          "difflib"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "..registry",
+          "....config",
+          "..output_formatter",
+          "....utils.resource_naming",
+          "..retry_config",
+          "....utils.code_patching",
+          "....k8s_client",
+          "....k8s_client",
+          "....utils.code_patching",
+          "....k8s_client",
+          "....k8s_client",
+          "logging",
+          "os",
+          "difflib",
+          "difflib"
+        ]
+      },
+      "agent\\tools\\file_ops\\read_write.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\file_ops\\read_write.py",
+        "lines": 359,
+        "imports": [
+          "typing",
+          "uuid",
+          "..registry",
+          "....config",
+          "..output_formatter",
+          "....utils.resource_naming",
+          "..retry_config",
+          "....k8s_client",
+          "....models",
+          "sqlalchemy",
+          "....k8s_client",
+          "....models",
+          "sqlalchemy",
+          "uuid",
+          "logging",
+          "os"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "..registry",
+          "....config",
+          "..output_formatter",
+          "....utils.resource_naming",
+          "..retry_config",
+          "....k8s_client",
+          "....models",
+          "sqlalchemy",
+          "....k8s_client",
+          "....models",
+          "sqlalchemy",
+          "uuid",
+          "logging",
+          "os"
+        ]
+      },
+      "agent\\tools\\file_ops\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\file_ops\\__init__.py",
+        "lines": 22,
+        "imports": [
+          ".read_write",
+          ".edit"
+        ],
+        "raw_imports": [
+          ".read_write",
+          ".edit"
+        ]
+      },
+      "agent\\tools\\planning_ops\\todos.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\planning_ops\\todos.py",
+        "lines": 214,
+        "imports": [
+          "typing",
+          "datetime",
+          "uuid",
+          "..registry",
+          "..output_formatter",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "uuid",
+          "..registry",
+          "..output_formatter",
+          "logging"
+        ]
+      },
+      "agent\\tools\\planning_ops\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\planning_ops\\__init__.py",
+        "lines": 19,
+        "imports": [
+          ".todos"
+        ],
+        "raw_imports": [
+          ".todos"
+        ]
+      },
+      "agent\\tools\\project_ops\\metadata.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\project_ops\\metadata.py",
+        "lines": 77,
+        "imports": [
+          "typing",
+          "uuid",
+          "sqlalchemy",
+          "..registry",
+          "....models",
+          "..output_formatter",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "sqlalchemy",
+          "..registry",
+          "....models",
+          "..output_formatter",
+          "logging"
+        ]
+      },
+      "agent\\tools\\project_ops\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\project_ops\\__init__.py",
+        "lines": 19,
+        "imports": [
+          ".metadata"
+        ],
+        "raw_imports": [
+          ".metadata"
+        ]
+      },
+      "agent\\tools\\shell_ops\\bash.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\shell_ops\\bash.py",
+        "lines": 133,
+        "imports": [
+          "typing",
+          "uuid",
+          "..registry",
+          ".session",
+          ".execute",
+          "..output_formatter",
+          "..retry_config",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "..registry",
+          ".session",
+          ".execute",
+          "..output_formatter",
+          "..retry_config",
+          "logging"
+        ]
+      },
+      "agent\\tools\\shell_ops\\execute.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\shell_ops\\execute.py",
+        "lines": 103,
+        "imports": [
+          "typing",
+          "..registry",
+          "..output_formatter",
+          "..retry_config",
+          "....services.shell_session_manager",
+          "asyncio",
+          "base64",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "..registry",
+          "..output_formatter",
+          "..retry_config",
+          "....services.shell_session_manager",
+          "asyncio",
+          "base64",
+          "logging"
+        ]
+      },
+      "agent\\tools\\shell_ops\\session.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\shell_ops\\session.py",
+        "lines": 125,
+        "imports": [
+          "typing",
+          "..registry",
+          "..output_formatter",
+          "....services.shell_session_manager",
+          "fastapi",
+          "....services.shell_session_manager",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "..registry",
+          "..output_formatter",
+          "....services.shell_session_manager",
+          "fastapi",
+          "....services.shell_session_manager",
+          "logging"
+        ]
+      },
+      "agent\\tools\\shell_ops\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\shell_ops\\__init__.py",
+        "lines": 25,
+        "imports": [
+          ".session",
+          ".execute",
+          ".bash"
+        ],
+        "raw_imports": [
+          ".session",
+          ".execute",
+          ".bash"
+        ]
+      },
+      "agent\\tools\\web_ops\\fetch.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\web_ops\\fetch.py",
+        "lines": 138,
+        "imports": [
+          "typing",
+          "urllib.parse",
+          "..registry",
+          "..output_formatter",
+          "..retry_config",
+          "logging",
+          "httpx"
+        ],
+        "raw_imports": [
+          "typing",
+          "urllib.parse",
+          "..registry",
+          "..output_formatter",
+          "..retry_config",
+          "logging",
+          "httpx"
+        ]
+      },
+      "agent\\tools\\web_ops\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\agent\\tools\\web_ops\\__init__.py",
+        "lines": 19,
+        "imports": [
+          ".fetch"
+        ],
+        "raw_imports": [
+          ".fetch"
+        ]
+      },
+      "middleware\\csrf.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\middleware\\csrf.py",
+        "lines": 189,
+        "imports": [
+          "typing",
+          "fastapi",
+          "fastapi.responses",
+          "starlette.middleware.base",
+          "itsdangerous",
+          "..config",
+          "secrets"
+        ],
+        "raw_imports": [
+          "typing",
+          "fastapi",
+          "fastapi.responses",
+          "starlette.middleware.base",
+          "itsdangerous",
+          "..config",
+          "secrets"
+        ]
+      },
+      "routers\\admin.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\admin.py",
+        "lines": 1164,
+        "imports": [
+          "typing",
+          "uuid",
+          "datetime",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "..database",
+          "..models",
+          "..services.litellm_service",
+          "..users",
+          "pydantic",
+          "typing",
+          "..services.litellm_service",
+          "..config",
+          "..config",
+          "logging",
+          "re",
+          "os"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "datetime",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "..database",
+          "..models",
+          "..services.litellm_service",
+          "..users",
+          "pydantic",
+          "typing",
+          "..services.litellm_service",
+          "..config",
+          "..config",
+          "logging",
+          "re",
+          "os"
+        ]
+      },
+      "routers\\agent.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\agent.py",
+        "lines": 423,
+        "imports": [
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "..database",
+          "..models",
+          "..schemas",
+          "..services.command_validator",
+          "..services.agent_audit",
+          "..users",
+          "..config",
+          "..k8s_client",
+          "..dev_server_manager",
+          "..dev_server_manager",
+          "..utils.async_subprocess",
+          "logging",
+          "time",
+          "subprocess"
+        ],
+        "raw_imports": [
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "..database",
+          "..models",
+          "..schemas",
+          "..services.command_validator",
+          "..services.agent_audit",
+          "..users",
+          "..config",
+          "..k8s_client",
+          "..dev_server_manager",
+          "..dev_server_manager",
+          "..utils.async_subprocess",
+          "logging",
+          "time",
+          "subprocess"
+        ]
+      },
+      "routers\\agents.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\agents.py",
+        "lines": 107,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..database",
+          "..models",
+          "..users",
+          "..agent.tools.registry"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..database",
+          "..models",
+          "..users",
+          "..agent.tools.registry"
+        ]
+      },
+      "routers\\auth.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\auth.py",
+        "lines": 222,
+        "imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "..database",
+          "..models",
+          "..users",
+          "..utils.resource_naming",
+          "uuid",
+          "uuid",
+          "sqlalchemy",
+          "..models",
+          "uuid",
+          "logging"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "..database",
+          "..models",
+          "..users",
+          "..utils.resource_naming",
+          "uuid",
+          "uuid",
+          "sqlalchemy",
+          "..models",
+          "uuid",
+          "logging"
+        ]
+      },
+      "routers\\billing.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\billing.py",
+        "lines": 702,
+        "imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "datetime",
+          "pydantic",
+          "uuid",
+          "..database",
+          "..users",
+          "..models",
+          "..models_auth",
+          "..services.stripe_service",
+          "..services.usage_service",
+          "..config",
+          "datetime",
+          "dateutil.relativedelta",
+          "stripe",
+          "traceback"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "datetime",
+          "pydantic",
+          "uuid",
+          "..database",
+          "..users",
+          "..models",
+          "..models_auth",
+          "..services.stripe_service",
+          "..services.usage_service",
+          "..config",
+          "datetime",
+          "dateutil.relativedelta",
+          "stripe",
+          "traceback"
+        ]
+      },
+      "routers\\chat.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\chat.py",
+        "lines": 1823,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..database",
+          "..models",
+          "..schemas",
+          "..config",
+          "..utils.resource_naming",
+          "openai",
+          "..agent",
+          "..agent.models",
+          "..agent.iterative_agent",
+          "..users",
+          "..models",
+          "..services.git_manager",
+          "..k8s_client",
+          "..agent.tools.approval_manager",
+          "sqlalchemy",
+          "..schemas",
+          "..agent.tools.approval_manager",
+          "fastapi.responses",
+          "..agent.factory",
+          "..agent.models",
+          "..config",
+          "uuid",
+          "..dev_server_manager",
+          "..agent.tools.approval_manager",
+          "..dev_server_manager",
+          "..dev_server_manager",
+          "json",
+          "os",
+          "aiofiles",
+          "re",
+          "asyncio",
+          "logging",
+          "jwt",
+          "traceback",
+          "json",
+          "traceback",
+          "traceback"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..database",
+          "..models",
+          "..schemas",
+          "..config",
+          "..utils.resource_naming",
+          "openai",
+          "..agent",
+          "..agent.models",
+          "..agent.iterative_agent",
+          "..users",
+          "..models",
+          "..services.git_manager",
+          "..k8s_client",
+          "..agent.tools.approval_manager",
+          "sqlalchemy",
+          "..schemas",
+          "..agent.tools.approval_manager",
+          "fastapi.responses",
+          "..agent.factory",
+          "..agent.models",
+          "..config",
+          "uuid",
+          "..dev_server_manager",
+          "..agent.tools.approval_manager",
+          "..dev_server_manager",
+          "..dev_server_manager",
+          "json",
+          "os",
+          "aiofiles",
+          "re",
+          "asyncio",
+          "logging",
+          "jwt",
+          "traceback",
+          "json",
+          "traceback",
+          "traceback"
+        ]
+      },
+      "routers\\deployments.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\deployments.py",
+        "lines": 957,
+        "imports": [
+          "typing",
+          "uuid",
+          "datetime",
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..users",
+          "..services.deployment_encryption",
+          "..services.deployment.manager",
+          "..services.deployment.base",
+          "..services.deployment.builder",
+          "..services.framework_detector",
+          "..utils.async_subprocess",
+          "package.json",
+          "..dev_server_manager",
+          "logging",
+          "json",
+          "os"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "datetime",
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..users",
+          "..services.deployment_encryption",
+          "..services.deployment.manager",
+          "..services.deployment.base",
+          "..services.deployment.builder",
+          "..services.framework_detector",
+          "..utils.async_subprocess",
+          "package.json",
+          "..dev_server_manager",
+          "logging",
+          "json",
+          "os"
+        ]
+      },
+      "routers\\deployment_credentials.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\deployment_credentials.py",
+        "lines": 519,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..users",
+          "..services.deployment_encryption",
+          "..services.deployment.manager",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..users",
+          "..services.deployment_encryption",
+          "..services.deployment.manager",
+          "logging"
+        ]
+      },
+      "routers\\deployment_oauth.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\deployment_oauth.py",
+        "lines": 447,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..database",
+          "..models",
+          "..auth",
+          "..services.deployment_encryption",
+          "..config",
+          "..users",
+          "sqlalchemy",
+          "sqlalchemy",
+          "logging",
+          "secrets",
+          "httpx"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..database",
+          "..models",
+          "..auth",
+          "..services.deployment_encryption",
+          "..config",
+          "..users",
+          "sqlalchemy",
+          "sqlalchemy",
+          "logging",
+          "secrets",
+          "httpx"
+        ]
+      },
+      "routers\\feedback.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\feedback.py",
+        "lines": 400,
+        "imports": [
+          "typing",
+          "datetime",
+          "fastapi",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.ext.asyncio",
+          "..database",
+          "..models",
+          "..models_auth",
+          "..schemas_feedback",
+          "..users",
+          "uuid"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "fastapi",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "sqlalchemy.ext.asyncio",
+          "..database",
+          "..models",
+          "..models_auth",
+          "..schemas_feedback",
+          "..users",
+          "uuid"
+        ]
+      },
+      "routers\\git.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\git.py",
+        "lines": 607,
+        "imports": [
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "..database",
+          "..models",
+          "..schemas",
+          "..services.git_manager",
+          "..services.credential_manager",
+          "..services.github_client",
+          "..users",
+          "datetime",
+          "datetime",
+          "logging"
+        ],
+        "raw_imports": [
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "..database",
+          "..models",
+          "..schemas",
+          "..services.git_manager",
+          "..services.credential_manager",
+          "..services.github_client",
+          "..users",
+          "datetime",
+          "datetime",
+          "logging"
+        ]
+      },
+      "routers\\github.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\github.py",
+        "lines": 475,
+        "imports": [
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "datetime",
+          "..database",
+          "..models",
+          "..schemas",
+          "..services.credential_manager",
+          "..services.github_client",
+          "..services.github_oauth",
+          "..users",
+          "httpx",
+          "logging"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "typing",
+          "datetime",
+          "..database",
+          "..models",
+          "..schemas",
+          "..services.credential_manager",
+          "..services.github_client",
+          "..services.github_oauth",
+          "..users",
+          "httpx",
+          "logging"
+        ]
+      },
+      "routers\\kanban.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\kanban.py",
+        "lines": 757,
+        "imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "typing",
+          "datetime",
+          "..database",
+          "..models",
+          "..models_kanban",
+          "..users",
+          "pydantic",
+          "uuid"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "typing",
+          "datetime",
+          "..database",
+          "..models",
+          "..models_kanban",
+          "..users",
+          "pydantic",
+          "uuid"
+        ]
+      },
+      "routers\\marketplace.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\marketplace.py",
+        "lines": 2077,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "datetime",
+          "..database",
+          "..models",
+          "..schemas",
+          "..config",
+          "..users",
+          "..services.litellm_service",
+          "..models",
+          "..models",
+          "..models",
+          "..services.stripe_service",
+          "..services.stripe_service",
+          "..services.stripe_service",
+          "datetime",
+          "..services.stripe_service",
+          "..services.stripe_service",
+          "name",
+          "..services.service_definitions",
+          "uuid",
+          "logging",
+          "stripe",
+          "stripe",
+          "stripe",
+          "stripe",
+          "re"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm",
+          "datetime",
+          "..database",
+          "..models",
+          "..schemas",
+          "..config",
+          "..users",
+          "..services.litellm_service",
+          "..models",
+          "..models",
+          "..models",
+          "..services.stripe_service",
+          "..services.stripe_service",
+          "..services.stripe_service",
+          "datetime",
+          "..services.stripe_service",
+          "..services.stripe_service",
+          "name",
+          "..services.service_definitions",
+          "uuid",
+          "logging",
+          "stripe",
+          "stripe",
+          "stripe",
+          "stripe",
+          "re"
+        ]
+      },
+      "routers\\projects.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\projects.py",
+        "lines": 3693,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm.attributes",
+          "..database",
+          "..models",
+          "..schemas",
+          "..config",
+          "..utils.slug_generator",
+          "..utils.resource_naming",
+          "..users",
+          "..services.task_manager",
+          "..utils.async_fileio",
+          "pathlib",
+          "uuid",
+          "..database",
+          "sqlalchemy",
+          "..services.credential_manager",
+          "..services.git_manager",
+          "..services.github_client",
+          "..services.project_patcher",
+          "..models",
+          "..models",
+          "sqlalchemy",
+          "..services.base_cache_manager",
+          "..services.git_manager",
+          "..services.credential_manager",
+          "..services.volume_manager",
+          "..config",
+          "..k8s_client",
+          "..k8s_client",
+          "..k8s_client",
+          "datetime",
+          "..services.volume_manager",
+          "..utils.resource_naming",
+          "..utils.resource_naming",
+          "..database",
+          "..utils.async_fileio",
+          "..services.docker_compose_orchestrator",
+          "..services.regional_traefik_manager",
+          "..services.volume_manager",
+          "..services.task_manager",
+          "..config",
+          "PIL",
+          "..utils.async_fileio",
+          "..k8s_client",
+          "..k8s_client",
+          "..users",
+          "..database",
+          "..k8s_client",
+          "fastapi.responses",
+          "..k8s_client",
+          "..k8s_client",
+          "..k8s_client",
+          "..config",
+          "..config",
+          "..services.stripe_service",
+          "..config",
+          "fastapi",
+          "..utils.resource_naming",
+          "fastapi",
+          "..services.shell_session_manager",
+          "..services.pty_broker",
+          "..services.service_definitions",
+          "..services.container_initializer",
+          "..models",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "..services.volume_manager",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "..database",
+          "..services.docker_compose_orchestrator",
+          "..services.task_manager",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "os",
+          "shutil",
+          "asyncio",
+          "logging",
+          "re",
+          "mimetypes",
+          "subprocess",
+          "httpx",
+          "re",
+          "docker",
+          "asyncio",
+          "json",
+          "docker",
+          "asyncio"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "fastapi.responses",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "sqlalchemy.orm.attributes",
+          "..database",
+          "..models",
+          "..schemas",
+          "..config",
+          "..utils.slug_generator",
+          "..utils.resource_naming",
+          "..users",
+          "..services.task_manager",
+          "..utils.async_fileio",
+          "pathlib",
+          "uuid",
+          "..database",
+          "sqlalchemy",
+          "..services.credential_manager",
+          "..services.git_manager",
+          "..services.github_client",
+          "..services.project_patcher",
+          "..models",
+          "..models",
+          "sqlalchemy",
+          "..services.base_cache_manager",
+          "..services.git_manager",
+          "..services.credential_manager",
+          "..services.volume_manager",
+          "..config",
+          "..k8s_client",
+          "..k8s_client",
+          "..k8s_client",
+          "datetime",
+          "..services.volume_manager",
+          "..utils.resource_naming",
+          "..utils.resource_naming",
+          "..database",
+          "..utils.async_fileio",
+          "..services.docker_compose_orchestrator",
+          "..services.regional_traefik_manager",
+          "..services.volume_manager",
+          "..services.task_manager",
+          "..config",
+          "PIL",
+          "..utils.async_fileio",
+          "..k8s_client",
+          "..k8s_client",
+          "..users",
+          "..database",
+          "..k8s_client",
+          "fastapi.responses",
+          "..k8s_client",
+          "..k8s_client",
+          "..k8s_client",
+          "..config",
+          "..config",
+          "..services.stripe_service",
+          "..config",
+          "fastapi",
+          "..utils.resource_naming",
+          "fastapi",
+          "..services.shell_session_manager",
+          "..services.pty_broker",
+          "..services.service_definitions",
+          "..services.container_initializer",
+          "..models",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "..services.volume_manager",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "..database",
+          "..services.docker_compose_orchestrator",
+          "..services.task_manager",
+          "..services.docker_compose_orchestrator",
+          "..services.docker_compose_orchestrator",
+          "os",
+          "shutil",
+          "asyncio",
+          "logging",
+          "re",
+          "mimetypes",
+          "subprocess",
+          "httpx",
+          "re",
+          "docker",
+          "asyncio",
+          "json",
+          "docker",
+          "asyncio"
+        ]
+      },
+      "routers\\referrals.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\referrals.py",
+        "lines": 46,
+        "imports": [
+          "fastapi",
+          "fastapi.responses",
+          "..database",
+          "..users",
+          "sqlalchemy.ext.asyncio",
+          "..referral_db",
+          "..services.discord_service",
+          "..services.ntfy_service",
+          "..referral_db",
+          "logging"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "fastapi.responses",
+          "..database",
+          "..users",
+          "sqlalchemy.ext.asyncio",
+          "..referral_db",
+          "..services.discord_service",
+          "..services.ntfy_service",
+          "..referral_db",
+          "logging"
+        ]
+      },
+      "routers\\secrets.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\secrets.py",
+        "lines": 293,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "datetime",
+          "..database",
+          "..models",
+          "..users",
+          "base64",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "datetime",
+          "..database",
+          "..models",
+          "..users",
+          "base64",
+          "logging"
+        ]
+      },
+      "routers\\shell.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\shell.py",
+        "lines": 244,
+        "imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..services.shell_session_manager",
+          "..users",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..services.shell_session_manager",
+          "..users",
+          "logging"
+        ]
+      },
+      "routers\\tasks.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\tasks.py",
+        "lines": 245,
+        "imports": [
+          "fastapi",
+          "typing",
+          "..models",
+          "..users",
+          "..services.task_manager",
+          "..auth",
+          "..database",
+          "asyncio",
+          "json"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "typing",
+          "..models",
+          "..users",
+          "..services.task_manager",
+          "..auth",
+          "..database",
+          "asyncio",
+          "json"
+        ]
+      },
+      "routers\\users.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\users.py",
+        "lines": 57,
+        "imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..users",
+          "logging"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "pydantic",
+          "..database",
+          "..models",
+          "..users",
+          "logging"
+        ]
+      },
+      "routers\\webhooks.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\webhooks.py",
+        "lines": 52,
+        "imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "..database",
+          "..services.stripe_service",
+          "logging"
+        ],
+        "raw_imports": [
+          "fastapi",
+          "sqlalchemy.ext.asyncio",
+          "..database",
+          "..services.stripe_service",
+          "logging"
+        ]
+      },
+      "routers\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\routers\\__init__.py",
+        "lines": 0,
+        "imports": [],
+        "raw_imports": []
+      },
+      "services\\agent_audit.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\agent_audit.py",
+        "lines": 288,
+        "imports": [
+          "uuid",
+          "typing",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "datetime",
+          "..models",
+          "logging"
+        ],
+        "raw_imports": [
+          "uuid",
+          "typing",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "datetime",
+          "..models",
+          "logging"
+        ]
+      },
+      "services\\base_cache_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\base_cache_manager.py",
+        "lines": 300,
+        "imports": [
+          "pathlib",
+          "typing",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..database",
+          "os",
+          "asyncio",
+          "logging",
+          "shutil",
+          "docker"
+        ],
+        "raw_imports": [
+          "pathlib",
+          "typing",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..database",
+          "os",
+          "asyncio",
+          "logging",
+          "shutil",
+          "docker"
+        ]
+      },
+      "services\\base_config_parser.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\base_config_parser.py",
+        "lines": 418,
+        "imports": [
+          "typing",
+          "pathlib",
+          "re",
+          "logging",
+          "asyncio",
+          "docker",
+          "docker"
+        ],
+        "raw_imports": [
+          "typing",
+          "pathlib",
+          "re",
+          "logging",
+          "asyncio",
+          "docker",
+          "docker"
+        ]
+      },
+      "services\\command_validator.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\command_validator.py",
+        "lines": 291,
+        "imports": [
+          "typing",
+          "enum",
+          "re",
+          "shlex",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "enum",
+          "re",
+          "shlex",
+          "logging"
+        ]
+      },
+      "services\\container_initializer.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\container_initializer.py",
+        "lines": 264,
+        "imports": [
+          "pathlib",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..services.volume_manager",
+          "..services.base_cache_manager",
+          "..services.docker_compose_orchestrator",
+          "..utils.async_fileio",
+          "..config",
+          "..database",
+          "sqlalchemy",
+          "..models",
+          "..models",
+          "os",
+          "asyncio",
+          "logging",
+          "subprocess",
+          "shutil"
+        ],
+        "raw_imports": [
+          "pathlib",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..services.volume_manager",
+          "..services.base_cache_manager",
+          "..services.docker_compose_orchestrator",
+          "..utils.async_fileio",
+          "..config",
+          "..database",
+          "sqlalchemy",
+          "..models",
+          "..models",
+          "os",
+          "asyncio",
+          "logging",
+          "subprocess",
+          "shutil"
+        ]
+      },
+      "services\\credential_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\credential_manager.py",
+        "lines": 255,
+        "imports": [
+          "uuid",
+          "cryptography.fernet",
+          "datetime",
+          "typing",
+          "sqlalchemy",
+          "sqlalchemy.ext.asyncio",
+          "..models",
+          "..config",
+          "base64",
+          "hashlib"
+        ],
+        "raw_imports": [
+          "uuid",
+          "cryptography.fernet",
+          "datetime",
+          "typing",
+          "sqlalchemy",
+          "sqlalchemy.ext.asyncio",
+          "..models",
+          "..config",
+          "base64",
+          "hashlib"
+        ]
+      },
+      "services\\deployment_encryption.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment_encryption.py",
+        "lines": 215,
+        "imports": [
+          "typing",
+          "cryptography.fernet",
+          "..config",
+          "logging",
+          "base64",
+          "hashlib"
+        ],
+        "raw_imports": [
+          "typing",
+          "cryptography.fernet",
+          "..config",
+          "logging",
+          "base64",
+          "hashlib"
+        ]
+      },
+      "services\\discord_service.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\discord_service.py",
+        "lines": 140,
+        "imports": [
+          "typing",
+          "datetime",
+          "aiohttp",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "aiohttp",
+          "logging"
+        ]
+      },
+      "services\\docker_compose_orchestrator.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\docker_compose_orchestrator.py",
+        "lines": 803,
+        "imports": [
+          "typing",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          ".regional_traefik_manager",
+          "..services.service_definitions",
+          "..services.base_config_parser",
+          "os",
+          "yaml",
+          "asyncio",
+          "logging",
+          "json",
+          "socket",
+          "subprocess",
+          "json"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          ".regional_traefik_manager",
+          "..services.service_definitions",
+          "..services.base_config_parser",
+          "os",
+          "yaml",
+          "asyncio",
+          "logging",
+          "json",
+          "socket",
+          "subprocess",
+          "json"
+        ]
+      },
+      "services\\framework_detector.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\framework_detector.py",
+        "lines": 252,
+        "imports": [
+          "typing",
+          "pathlib",
+          "json",
+          "logging",
+          "react"
+        ],
+        "raw_imports": [
+          "typing",
+          "pathlib",
+          "json",
+          "logging",
+          "react"
+        ]
+      },
+      "services\\github_client.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\github_client.py",
+        "lines": 280,
+        "imports": [
+          "typing",
+          "datetime",
+          "httpx",
+          "re"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "httpx",
+          "re"
+        ]
+      },
+      "services\\github_oauth.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\github_oauth.py",
+        "lines": 228,
+        "imports": [
+          "typing",
+          "datetime",
+          "urllib.parse",
+          "sqlalchemy.ext.asyncio",
+          "..config",
+          ".credential_manager",
+          "secrets",
+          "httpx",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "urllib.parse",
+          "sqlalchemy.ext.asyncio",
+          "..config",
+          ".credential_manager",
+          "secrets",
+          "httpx",
+          "logging"
+        ]
+      },
+      "services\\git_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\git_manager.py",
+        "lines": 699,
+        "imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "..config",
+          "..dev_server_manager",
+          "..utils.resource_naming",
+          "..k8s_client",
+          "..docker_container_manager",
+          "..k8s_client",
+          "..docker_container_manager",
+          "shlex",
+          "json",
+          "re",
+          "logging",
+          "asyncio",
+          "os"
+        ],
+        "raw_imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "..config",
+          "..dev_server_manager",
+          "..utils.resource_naming",
+          "..k8s_client",
+          "..docker_container_manager",
+          "..k8s_client",
+          "..docker_container_manager",
+          "shlex",
+          "json",
+          "re",
+          "logging",
+          "asyncio",
+          "os"
+        ]
+      },
+      "services\\litellm_service.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\litellm_service.py",
+        "lines": 445,
+        "imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "..config",
+          "aiohttp",
+          "uuid",
+          "logging",
+          "os"
+        ],
+        "raw_imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "..config",
+          "aiohttp",
+          "uuid",
+          "logging",
+          "os"
+        ]
+      },
+      "services\\ntfy_service.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\ntfy_service.py",
+        "lines": 60,
+        "imports": [
+          "aiohttp",
+          "logging"
+        ],
+        "raw_imports": [
+          "aiohttp",
+          "logging"
+        ]
+      },
+      "services\\project_patcher.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\project_patcher.py",
+        "lines": 385,
+        "imports": [
+          "typing",
+          "pathlib",
+          ".framework_detector",
+          "json",
+          "os",
+          "re",
+          "logging",
+          "react"
+        ],
+        "raw_imports": [
+          "typing",
+          "pathlib",
+          ".framework_detector",
+          "json",
+          "os",
+          "re",
+          "logging",
+          "react"
+        ]
+      },
+      "services\\pty_broker.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\pty_broker.py",
+        "lines": 448,
+        "imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "abc",
+          "..config",
+          "kubernetes",
+          "kubernetes.stream",
+          "..config",
+          "..config",
+          "asyncio",
+          "uuid",
+          "logging",
+          "docker"
+        ],
+        "raw_imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "abc",
+          "..config",
+          "kubernetes",
+          "kubernetes.stream",
+          "..config",
+          "..config",
+          "asyncio",
+          "uuid",
+          "logging",
+          "docker"
+        ]
+      },
+      "services\\regional_traefik_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\regional_traefik_manager.py",
+        "lines": 386,
+        "imports": [
+          "typing",
+          "pathlib",
+          "asyncio",
+          "logging",
+          "os",
+          "yaml",
+          "hashlib"
+        ],
+        "raw_imports": [
+          "typing",
+          "pathlib",
+          "asyncio",
+          "logging",
+          "os",
+          "yaml",
+          "hashlib"
+        ]
+      },
+      "services\\service_definitions.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\service_definitions.py",
+        "lines": 242,
+        "imports": [
+          "typing",
+          "dataclasses"
+        ],
+        "raw_imports": [
+          "typing",
+          "dataclasses"
+        ]
+      },
+      "services\\shell_session_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\shell_session_manager.py",
+        "lines": 493,
+        "imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..services.pty_broker",
+          "..config",
+          "..utils.resource_naming",
+          "fastapi",
+          "..dev_server_manager",
+          "..utils.async_subprocess",
+          "..dev_server_manager",
+          "asyncio",
+          "logging",
+          "base64"
+        ],
+        "raw_imports": [
+          "uuid",
+          "typing",
+          "datetime",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..services.pty_broker",
+          "..config",
+          "..utils.resource_naming",
+          "fastapi",
+          "..dev_server_manager",
+          "..utils.async_subprocess",
+          "..dev_server_manager",
+          "asyncio",
+          "logging",
+          "base64"
+        ]
+      },
+      "services\\startup_generator.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\startup_generator.py",
+        "lines": 101,
+        "imports": [
+          "typing",
+          ".tesslate_parser",
+          ".tesslate_parser",
+          "os",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          ".tesslate_parser",
+          ".tesslate_parser",
+          "os",
+          "logging"
+        ]
+      },
+      "services\\stripe_service.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\stripe_service.py",
+        "lines": 971,
+        "imports": [
+          "typing",
+          "datetime",
+          "decimal",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..config",
+          "logging",
+          "stripe"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "decimal",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..config",
+          "logging",
+          "stripe"
+        ]
+      },
+      "services\\task_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\task_manager.py",
+        "lines": 276,
+        "imports": [
+          "uuid",
+          "datetime",
+          "typing",
+          "enum",
+          "dataclasses",
+          "collections",
+          "datetime",
+          "asyncio",
+          "uuid",
+          "logging"
+        ],
+        "raw_imports": [
+          "uuid",
+          "datetime",
+          "typing",
+          "enum",
+          "dataclasses",
+          "collections",
+          "datetime",
+          "asyncio",
+          "uuid",
+          "logging"
+        ]
+      },
+      "services\\tesslate_parser.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\tesslate_parser.py",
+        "lines": 229,
+        "imports": [
+          "typing",
+          "dataclasses",
+          "re",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "dataclasses",
+          "re",
+          "logging"
+        ]
+      },
+      "services\\tmux_session_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\tmux_session_manager.py",
+        "lines": 613,
+        "imports": [
+          "typing",
+          "datetime",
+          "abc",
+          "..config",
+          "asyncio",
+          "logging",
+          "subprocess"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "abc",
+          "..config",
+          "asyncio",
+          "logging",
+          "subprocess"
+        ]
+      },
+      "services\\traefik_config_generator.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\traefik_config_generator.py",
+        "lines": 11,
+        "imports": [],
+        "raw_imports": []
+      },
+      "services\\usage_service.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\usage_service.py",
+        "lines": 500,
+        "imports": [
+          "typing",
+          "datetime",
+          "decimal",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..config",
+          ".litellm_service",
+          ".stripe_service",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "datetime",
+          "decimal",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "..config",
+          ".litellm_service",
+          ".stripe_service",
+          "logging"
+        ]
+      },
+      "services\\volume_manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\volume_manager.py",
+        "lines": 442,
+        "imports": [
+          "pathlib",
+          "typing",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "os",
+          "asyncio",
+          "logging",
+          "docker",
+          "shutil"
+        ],
+        "raw_imports": [
+          "pathlib",
+          "typing",
+          "uuid",
+          "sqlalchemy.ext.asyncio",
+          "sqlalchemy",
+          "..models",
+          "os",
+          "asyncio",
+          "logging",
+          "docker",
+          "shutil"
+        ]
+      },
+      "services\\deployment\\base.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\base.py",
+        "lines": 275,
+        "imports": [
+          "abc",
+          "typing",
+          "pydantic",
+          "pathlib",
+          "asyncio",
+          "os",
+          "re"
+        ],
+        "raw_imports": [
+          "abc",
+          "typing",
+          "pydantic",
+          "pathlib",
+          "asyncio",
+          "os",
+          "re"
+        ]
+      },
+      "services\\deployment\\builder.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\builder.py",
+        "lines": 661,
+        "imports": [
+          "typing",
+          "pathlib",
+          "uuid",
+          ".base",
+          "...services.framework_detector",
+          "...dev_server_manager",
+          "...utils.async_subprocess",
+          "...config",
+          "logging",
+          "os",
+          "asyncio",
+          "docker",
+          "tempfile",
+          "tarfile",
+          "io"
+        ],
+        "raw_imports": [
+          "typing",
+          "pathlib",
+          "uuid",
+          ".base",
+          "...services.framework_detector",
+          "...dev_server_manager",
+          "...utils.async_subprocess",
+          "...config",
+          "logging",
+          "os",
+          "asyncio",
+          "docker",
+          "tempfile",
+          "tarfile",
+          "io"
+        ]
+      },
+      "services\\deployment\\manager.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\manager.py",
+        "lines": 179,
+        "imports": [
+          "typing",
+          ".base",
+          ".providers.cloudflare",
+          ".providers.vercel",
+          ".providers.netlify"
+        ],
+        "raw_imports": [
+          "typing",
+          ".base",
+          ".providers.cloudflare",
+          ".providers.vercel",
+          ".providers.netlify"
+        ]
+      },
+      "services\\deployment\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\__init__.py",
+        "lines": 13,
+        "imports": [
+          ".base",
+          ".manager"
+        ],
+        "raw_imports": [
+          ".base",
+          ".manager"
+        ]
+      },
+      "services\\deployment\\providers\\cloudflare.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\providers\\cloudflare.py",
+        "lines": 444,
+        "imports": [
+          "typing",
+          "..base",
+          "httpx",
+          "hashlib",
+          "base64",
+          "json"
+        ],
+        "raw_imports": [
+          "typing",
+          "..base",
+          "httpx",
+          "hashlib",
+          "base64",
+          "json"
+        ]
+      },
+      "services\\deployment\\providers\\netlify.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\providers\\netlify.py",
+        "lines": 432,
+        "imports": [
+          "typing",
+          "..base",
+          "httpx",
+          "asyncio",
+          "hashlib",
+          "mimetypes"
+        ],
+        "raw_imports": [
+          "typing",
+          "..base",
+          "httpx",
+          "asyncio",
+          "hashlib",
+          "mimetypes"
+        ]
+      },
+      "services\\deployment\\providers\\vercel.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\providers\\vercel.py",
+        "lines": 426,
+        "imports": [
+          "typing",
+          "..base",
+          "httpx",
+          "asyncio",
+          "base64"
+        ],
+        "raw_imports": [
+          "typing",
+          "..base",
+          "httpx",
+          "asyncio",
+          "base64"
+        ]
+      },
+      "services\\deployment\\providers\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\services\\deployment\\providers\\__init__.py",
+        "lines": 11,
+        "imports": [
+          ".cloudflare",
+          ".vercel",
+          ".netlify"
+        ],
+        "raw_imports": [
+          ".cloudflare",
+          ".vercel",
+          ".netlify"
+        ]
+      },
+      "utils\\async_fileio.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\utils\\async_fileio.py",
+        "lines": 275,
+        "imports": [
+          "typing",
+          "pathlib",
+          "asyncio",
+          "os",
+          "shutil"
+        ],
+        "raw_imports": [
+          "typing",
+          "pathlib",
+          "asyncio",
+          "os",
+          "shutil"
+        ]
+      },
+      "utils\\async_subprocess.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\utils\\async_subprocess.py",
+        "lines": 231,
+        "imports": [
+          "typing",
+          "dataclasses",
+          "asyncio",
+          "shutil"
+        ],
+        "raw_imports": [
+          "typing",
+          "dataclasses",
+          "asyncio",
+          "shutil"
+        ]
+      },
+      "utils\\code_patching.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\utils\\code_patching.py",
+        "lines": 335,
+        "imports": [
+          "typing",
+          "dataclasses",
+          "difflib",
+          "re",
+          "logging"
+        ],
+        "raw_imports": [
+          "typing",
+          "dataclasses",
+          "difflib",
+          "re",
+          "logging"
+        ]
+      },
+      "utils\\resource_naming.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\utils\\resource_naming.py",
+        "lines": 225,
+        "imports": [
+          "typing",
+          "uuid"
+        ],
+        "raw_imports": [
+          "typing",
+          "uuid"
+        ]
+      },
+      "utils\\slug_generator.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\utils\\slug_generator.py",
+        "lines": 159,
+        "imports": [
+          "typing",
+          "nanoid",
+          "re"
+        ],
+        "raw_imports": [
+          "typing",
+          "nanoid",
+          "re"
+        ]
+      },
+      "utils\\__init__.py": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\orchestrator\\app\\utils\\__init__.py",
+        "lines": 23,
+        "imports": [
+          ".code_patching"
+        ],
+        "raw_imports": [
+          ".code_patching"
+        ]
+      }
+    },
+    "dependencies": {
+      "auth.py": [
+        "datetime",
+        "typing",
+        "jose",
+        "passlib.context",
+        "fastapi",
+        "fastapi.security",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        ".database",
+        ".models",
+        ".config",
+        "sqlalchemy",
+        "bcrypt",
+        "secrets",
+        "logging"
+      ],
+      "config.py": [
+        "pydantic_settings",
+        "functools",
+        "cryptography.fernet"
+      ],
+      "database.py": [
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy.orm",
+        ".config"
+      ],
+      "k8s_client.py": [
+        "kubernetes",
+        "kubernetes.client.rest",
+        "kubernetes.stream",
+        "typing",
+        "uuid",
+        ".utils.resource_naming",
+        ".config",
+        "os",
+        "logging",
+        "asyncio",
+        "shlex",
+        "json",
+        "react"
+      ],
+      "k8s_container_manager.py": [
+        "typing",
+        "uuid",
+        ".config",
+        ".k8s_client",
+        ".base_container_manager",
+        "..k8s_client",
+        "asyncio",
+        "os",
+        "time",
+        "logging"
+      ],
+      "main.py": [
+        "fastapi",
+        "fastapi.middleware.cors",
+        "fastapi.staticfiles",
+        "fastapi.responses",
+        "starlette.middleware.base",
+        "starlette.responses",
+        "uvicorn.middleware.proxy_headers",
+        ".database",
+        ".routers",
+        ".config",
+        ".middleware.csrf",
+        ".users",
+        ".schemas_auth",
+        ".oauth",
+        "pathlib",
+        ".models",
+        ".database",
+        "sqlalchemy",
+        ".services.shell_session_manager",
+        ".database",
+        ".dev_server_manager",
+        ".services.shell_session_manager",
+        ".database",
+        ".config",
+        ".services.base_cache_manager",
+        "fastapi",
+        "fastapi.responses",
+        ".oauth",
+        "fastapi_users.router.oauth",
+        ".oauth",
+        "fastapi_users.router.oauth",
+        "fastapi",
+        "fastapi.responses",
+        "httpx_oauth.integrations.fastapi",
+        "fastapi_users.router.oauth",
+        "fastapi_users.jwt",
+        "os",
+        "logging",
+        "re",
+        "json",
+        "asyncio",
+        "asyncio",
+        "asyncio",
+        "asyncio",
+        "jwt"
+      ],
+      "models.py": [
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "sqlalchemy.sql",
+        "sqlalchemy.dialects.postgresql",
+        ".database",
+        ".models_kanban",
+        ".models_auth",
+        "uuid"
+      ],
+      "models_auth.py": [
+        "datetime",
+        "typing",
+        "fastapi_users.db",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "sqlalchemy.sql",
+        "sqlalchemy.dialects.postgresql",
+        ".database",
+        "uuid"
+      ],
+      "models_kanban.py": [
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "sqlalchemy.sql",
+        "sqlalchemy.dialects.postgresql",
+        ".database",
+        "uuid"
+      ],
+      "oauth.py": [
+        "typing",
+        "httpx_oauth.clients.google",
+        "httpx_oauth.clients.github",
+        "httpx_oauth.exceptions",
+        ".config"
+      ],
+      "referral_db.py": [
+        "datetime",
+        "pathlib",
+        "sqlite3",
+        "logging"
+      ],
+      "schemas.py": [
+        "pydantic",
+        "datetime",
+        "typing",
+        "uuid",
+        "re",
+        "re"
+      ],
+      "schemas_auth.py": [
+        "typing",
+        "fastapi_users",
+        "pydantic",
+        "uuid"
+      ],
+      "schemas_feedback.py": [
+        "typing",
+        "datetime",
+        "pydantic",
+        "uuid"
+      ],
+      "users.py": [
+        "typing",
+        "fastapi",
+        "starlette.responses",
+        "fastapi_users",
+        "fastapi_users.authentication",
+        "fastapi_users.db",
+        "fastapi_users_db_sqlalchemy.access_token",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy.exc",
+        "fastapi_users.exceptions",
+        "nanoid",
+        ".config",
+        ".database",
+        ".models_auth",
+        ".schemas_auth",
+        ".services.stripe_service",
+        ".services.litellm_service",
+        ".models",
+        "sqlalchemy",
+        ".services.discord_service",
+        ".referral_db",
+        ".services.ntfy_service",
+        ".services.discord_service",
+        ".services.discord_service",
+        "datetime",
+        "jose",
+        "uuid",
+        "logging",
+        "logging",
+        "logging"
+      ],
+      "agent\\base.py": [
+        "abc",
+        "typing",
+        ".tools.registry",
+        ".prompts"
+      ],
+      "agent\\factory.py": [
+        "typing",
+        ".base",
+        ".stream_agent",
+        ".iterative_agent",
+        ".react_agent",
+        ".tools.registry",
+        "..models",
+        "my_agents",
+        "logging"
+      ],
+      "agent\\iterative_agent.py": [
+        "typing",
+        "dataclasses",
+        "datetime",
+        "uuid",
+        ".base",
+        ".models",
+        ".parser",
+        ".prompts",
+        ".tools.registry",
+        ".resource_limits",
+        ".tools.approval_manager",
+        "logging"
+      ],
+      "agent\\models.py": [
+        "abc",
+        "typing",
+        "uuid",
+        "openai",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "anthropic",
+        "..models",
+        "..config",
+        "..routers.secrets",
+        "logging",
+        "asyncio"
+      ],
+      "agent\\parser.py": [
+        "typing",
+        "dataclasses",
+        "re",
+        "json",
+        "logging",
+        "re"
+      ],
+      "agent\\prompts.py": [
+        "typing",
+        "uuid",
+        "datetime",
+        ".tools.registry",
+        "..utils.resource_naming",
+        "datetime",
+        "..config",
+        "..config",
+        "platform",
+        "asyncio",
+        "os",
+        "logging"
+      ],
+      "agent\\react_agent.py": [
+        "typing",
+        "dataclasses",
+        "datetime",
+        "uuid",
+        ".base",
+        ".models",
+        ".parser",
+        ".prompts",
+        ".tools.registry",
+        ".resource_limits",
+        ".tools.approval_manager",
+        "logging"
+      ],
+      "agent\\resource_limits.py": [
+        "dataclasses",
+        "typing",
+        "os",
+        "threading",
+        "logging"
+      ],
+      "agent\\stream_agent.py": [
+        "typing",
+        "uuid",
+        ".base",
+        "openai",
+        "..utils.resource_naming",
+        "..config",
+        ".models",
+        "..k8s_client",
+        "..config",
+        "..models",
+        "sqlalchemy",
+        "..dev_server_manager",
+        "logging",
+        "re",
+        "asyncio",
+        "os",
+        "aiofiles"
+      ],
+      "agent\\__init__.py": [
+        ".base",
+        ".stream_agent",
+        ".iterative_agent",
+        ".react_agent",
+        ".factory",
+        ".tools.registry"
+      ],
+      "agent\\tools\\approval_manager.py": [
+        "typing",
+        "uuid",
+        "asyncio",
+        "logging"
+      ],
+      "agent\\tools\\output_formatter.py": [
+        "typing",
+        "re"
+      ],
+      "agent\\tools\\registry.py": [
+        "dataclasses",
+        "typing",
+        "enum",
+        ".approval_manager",
+        ".file_ops",
+        ".shell_ops",
+        ".project_ops",
+        ".planning_ops",
+        ".web_ops",
+        "dataclasses",
+        "logging"
+      ],
+      "agent\\tools\\retry_config.py": [
+        "tenacity",
+        "typing",
+        "tenacity",
+        "logging"
+      ],
+      "agent\\tools\\__init__.py": [
+        ".registry"
+      ],
+      "agent\\tools\\file_ops\\edit.py": [
+        "typing",
+        "uuid",
+        "..registry",
+        "....config",
+        "..output_formatter",
+        "....utils.resource_naming",
+        "..retry_config",
+        "....utils.code_patching",
+        "....k8s_client",
+        "....k8s_client",
+        "....utils.code_patching",
+        "....k8s_client",
+        "....k8s_client",
+        "logging",
+        "os",
+        "difflib",
+        "difflib"
+      ],
+      "agent\\tools\\file_ops\\read_write.py": [
+        "typing",
+        "uuid",
+        "..registry",
+        "....config",
+        "..output_formatter",
+        "....utils.resource_naming",
+        "..retry_config",
+        "....k8s_client",
+        "....models",
+        "sqlalchemy",
+        "....k8s_client",
+        "....models",
+        "sqlalchemy",
+        "uuid",
+        "logging",
+        "os"
+      ],
+      "agent\\tools\\file_ops\\__init__.py": [
+        ".read_write",
+        ".edit"
+      ],
+      "agent\\tools\\planning_ops\\todos.py": [
+        "typing",
+        "datetime",
+        "uuid",
+        "..registry",
+        "..output_formatter",
+        "logging"
+      ],
+      "agent\\tools\\planning_ops\\__init__.py": [
+        ".todos"
+      ],
+      "agent\\tools\\project_ops\\metadata.py": [
+        "typing",
+        "uuid",
+        "sqlalchemy",
+        "..registry",
+        "....models",
+        "..output_formatter",
+        "logging"
+      ],
+      "agent\\tools\\project_ops\\__init__.py": [
+        ".metadata"
+      ],
+      "agent\\tools\\shell_ops\\bash.py": [
+        "typing",
+        "uuid",
+        "..registry",
+        ".session",
+        ".execute",
+        "..output_formatter",
+        "..retry_config",
+        "logging"
+      ],
+      "agent\\tools\\shell_ops\\execute.py": [
+        "typing",
+        "..registry",
+        "..output_formatter",
+        "..retry_config",
+        "....services.shell_session_manager",
+        "asyncio",
+        "base64",
+        "logging"
+      ],
+      "agent\\tools\\shell_ops\\session.py": [
+        "typing",
+        "..registry",
+        "..output_formatter",
+        "....services.shell_session_manager",
+        "fastapi",
+        "....services.shell_session_manager",
+        "logging"
+      ],
+      "agent\\tools\\shell_ops\\__init__.py": [
+        ".session",
+        ".execute",
+        ".bash"
+      ],
+      "agent\\tools\\web_ops\\fetch.py": [
+        "typing",
+        "urllib.parse",
+        "..registry",
+        "..output_formatter",
+        "..retry_config",
+        "logging",
+        "httpx"
+      ],
+      "agent\\tools\\web_ops\\__init__.py": [
+        ".fetch"
+      ],
+      "middleware\\csrf.py": [
+        "typing",
+        "fastapi",
+        "fastapi.responses",
+        "starlette.middleware.base",
+        "itsdangerous",
+        "..config",
+        "secrets"
+      ],
+      "routers\\admin.py": [
+        "typing",
+        "uuid",
+        "datetime",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "..database",
+        "..models",
+        "..services.litellm_service",
+        "..users",
+        "pydantic",
+        "typing",
+        "..services.litellm_service",
+        "..config",
+        "..config",
+        "logging",
+        "re",
+        "os"
+      ],
+      "routers\\agent.py": [
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "typing",
+        "..database",
+        "..models",
+        "..schemas",
+        "..services.command_validator",
+        "..services.agent_audit",
+        "..users",
+        "..config",
+        "..k8s_client",
+        "..dev_server_manager",
+        "..dev_server_manager",
+        "..utils.async_subprocess",
+        "logging",
+        "time",
+        "subprocess"
+      ],
+      "routers\\agents.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..database",
+        "..models",
+        "..users",
+        "..agent.tools.registry"
+      ],
+      "routers\\auth.py": [
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "..database",
+        "..models",
+        "..users",
+        "..utils.resource_naming",
+        "uuid",
+        "uuid",
+        "sqlalchemy",
+        "..models",
+        "uuid",
+        "logging"
+      ],
+      "routers\\billing.py": [
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "typing",
+        "datetime",
+        "pydantic",
+        "uuid",
+        "..database",
+        "..users",
+        "..models",
+        "..models_auth",
+        "..services.stripe_service",
+        "..services.usage_service",
+        "..config",
+        "datetime",
+        "dateutil.relativedelta",
+        "stripe",
+        "traceback"
+      ],
+      "routers\\chat.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..database",
+        "..models",
+        "..schemas",
+        "..config",
+        "..utils.resource_naming",
+        "openai",
+        "..agent",
+        "..agent.models",
+        "..agent.iterative_agent",
+        "..users",
+        "..models",
+        "..services.git_manager",
+        "..k8s_client",
+        "..agent.tools.approval_manager",
+        "sqlalchemy",
+        "..schemas",
+        "..agent.tools.approval_manager",
+        "fastapi.responses",
+        "..agent.factory",
+        "..agent.models",
+        "..config",
+        "uuid",
+        "..dev_server_manager",
+        "..agent.tools.approval_manager",
+        "..dev_server_manager",
+        "..dev_server_manager",
+        "json",
+        "os",
+        "aiofiles",
+        "re",
+        "asyncio",
+        "logging",
+        "jwt",
+        "traceback",
+        "json",
+        "traceback",
+        "traceback"
+      ],
+      "routers\\deployments.py": [
+        "typing",
+        "uuid",
+        "datetime",
+        "fastapi",
+        "fastapi.responses",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "pydantic",
+        "..database",
+        "..models",
+        "..users",
+        "..services.deployment_encryption",
+        "..services.deployment.manager",
+        "..services.deployment.base",
+        "..services.deployment.builder",
+        "..services.framework_detector",
+        "..utils.async_subprocess",
+        "package.json",
+        "..dev_server_manager",
+        "logging",
+        "json",
+        "os"
+      ],
+      "routers\\deployment_credentials.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "pydantic",
+        "..database",
+        "..models",
+        "..users",
+        "..services.deployment_encryption",
+        "..services.deployment.manager",
+        "logging"
+      ],
+      "routers\\deployment_oauth.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "fastapi.responses",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..database",
+        "..models",
+        "..auth",
+        "..services.deployment_encryption",
+        "..config",
+        "..users",
+        "sqlalchemy",
+        "sqlalchemy",
+        "logging",
+        "secrets",
+        "httpx"
+      ],
+      "routers\\feedback.py": [
+        "typing",
+        "datetime",
+        "fastapi",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "sqlalchemy.ext.asyncio",
+        "..database",
+        "..models",
+        "..models_auth",
+        "..schemas_feedback",
+        "..users",
+        "uuid"
+      ],
+      "routers\\git.py": [
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "typing",
+        "..database",
+        "..models",
+        "..schemas",
+        "..services.git_manager",
+        "..services.credential_manager",
+        "..services.github_client",
+        "..users",
+        "datetime",
+        "datetime",
+        "logging"
+      ],
+      "routers\\github.py": [
+        "fastapi",
+        "fastapi.responses",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "typing",
+        "datetime",
+        "..database",
+        "..models",
+        "..schemas",
+        "..services.credential_manager",
+        "..services.github_client",
+        "..services.github_oauth",
+        "..users",
+        "httpx",
+        "logging"
+      ],
+      "routers\\kanban.py": [
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "typing",
+        "datetime",
+        "..database",
+        "..models",
+        "..models_kanban",
+        "..users",
+        "pydantic",
+        "uuid"
+      ],
+      "routers\\marketplace.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "sqlalchemy.orm",
+        "datetime",
+        "..database",
+        "..models",
+        "..schemas",
+        "..config",
+        "..users",
+        "..services.litellm_service",
+        "..models",
+        "..models",
+        "..models",
+        "..services.stripe_service",
+        "..services.stripe_service",
+        "..services.stripe_service",
+        "datetime",
+        "..services.stripe_service",
+        "..services.stripe_service",
+        "name",
+        "..services.service_definitions",
+        "uuid",
+        "logging",
+        "stripe",
+        "stripe",
+        "stripe",
+        "stripe",
+        "re"
+      ],
+      "routers\\projects.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "fastapi.responses",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "sqlalchemy.orm.attributes",
+        "..database",
+        "..models",
+        "..schemas",
+        "..config",
+        "..utils.slug_generator",
+        "..utils.resource_naming",
+        "..users",
+        "..services.task_manager",
+        "..utils.async_fileio",
+        "pathlib",
+        "uuid",
+        "..database",
+        "sqlalchemy",
+        "..services.credential_manager",
+        "..services.git_manager",
+        "..services.github_client",
+        "..services.project_patcher",
+        "..models",
+        "..models",
+        "sqlalchemy",
+        "..services.base_cache_manager",
+        "..services.git_manager",
+        "..services.credential_manager",
+        "..services.volume_manager",
+        "..config",
+        "..k8s_client",
+        "..k8s_client",
+        "..k8s_client",
+        "datetime",
+        "..services.volume_manager",
+        "..utils.resource_naming",
+        "..utils.resource_naming",
+        "..database",
+        "..utils.async_fileio",
+        "..services.docker_compose_orchestrator",
+        "..services.regional_traefik_manager",
+        "..services.volume_manager",
+        "..services.task_manager",
+        "..config",
+        "PIL",
+        "..utils.async_fileio",
+        "..k8s_client",
+        "..k8s_client",
+        "..users",
+        "..database",
+        "..k8s_client",
+        "fastapi.responses",
+        "..k8s_client",
+        "..k8s_client",
+        "..k8s_client",
+        "..config",
+        "..config",
+        "..services.stripe_service",
+        "..config",
+        "fastapi",
+        "..utils.resource_naming",
+        "fastapi",
+        "..services.shell_session_manager",
+        "..services.pty_broker",
+        "..services.service_definitions",
+        "..services.container_initializer",
+        "..models",
+        "..services.docker_compose_orchestrator",
+        "..services.docker_compose_orchestrator",
+        "..services.volume_manager",
+        "..services.docker_compose_orchestrator",
+        "..services.docker_compose_orchestrator",
+        "..services.docker_compose_orchestrator",
+        "..database",
+        "..services.docker_compose_orchestrator",
+        "..services.task_manager",
+        "..services.docker_compose_orchestrator",
+        "..services.docker_compose_orchestrator",
+        "os",
+        "shutil",
+        "asyncio",
+        "logging",
+        "re",
+        "mimetypes",
+        "subprocess",
+        "httpx",
+        "re",
+        "docker",
+        "asyncio",
+        "json",
+        "docker",
+        "asyncio"
+      ],
+      "routers\\referrals.py": [
+        "fastapi",
+        "fastapi.responses",
+        "..database",
+        "..users",
+        "sqlalchemy.ext.asyncio",
+        "..referral_db",
+        "..services.discord_service",
+        "..services.ntfy_service",
+        "..referral_db",
+        "logging"
+      ],
+      "routers\\secrets.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "datetime",
+        "..database",
+        "..models",
+        "..users",
+        "base64",
+        "logging"
+      ],
+      "routers\\shell.py": [
+        "typing",
+        "uuid",
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "pydantic",
+        "..database",
+        "..models",
+        "..services.shell_session_manager",
+        "..users",
+        "logging"
+      ],
+      "routers\\tasks.py": [
+        "fastapi",
+        "typing",
+        "..models",
+        "..users",
+        "..services.task_manager",
+        "..auth",
+        "..database",
+        "asyncio",
+        "json"
+      ],
+      "routers\\users.py": [
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "pydantic",
+        "..database",
+        "..models",
+        "..users",
+        "logging"
+      ],
+      "routers\\webhooks.py": [
+        "fastapi",
+        "sqlalchemy.ext.asyncio",
+        "..database",
+        "..services.stripe_service",
+        "logging"
+      ],
+      "services\\agent_audit.py": [
+        "uuid",
+        "typing",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "datetime",
+        "..models",
+        "logging"
+      ],
+      "services\\base_cache_manager.py": [
+        "pathlib",
+        "typing",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..models",
+        "..database",
+        "os",
+        "asyncio",
+        "logging",
+        "shutil",
+        "docker"
+      ],
+      "services\\base_config_parser.py": [
+        "typing",
+        "pathlib",
+        "re",
+        "logging",
+        "asyncio",
+        "docker",
+        "docker"
+      ],
+      "services\\command_validator.py": [
+        "typing",
+        "enum",
+        "re",
+        "shlex",
+        "logging"
+      ],
+      "services\\container_initializer.py": [
+        "pathlib",
+        "uuid",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..models",
+        "..services.volume_manager",
+        "..services.base_cache_manager",
+        "..services.docker_compose_orchestrator",
+        "..utils.async_fileio",
+        "..config",
+        "..database",
+        "sqlalchemy",
+        "..models",
+        "..models",
+        "os",
+        "asyncio",
+        "logging",
+        "subprocess",
+        "shutil"
+      ],
+      "services\\credential_manager.py": [
+        "uuid",
+        "cryptography.fernet",
+        "datetime",
+        "typing",
+        "sqlalchemy",
+        "sqlalchemy.ext.asyncio",
+        "..models",
+        "..config",
+        "base64",
+        "hashlib"
+      ],
+      "services\\deployment_encryption.py": [
+        "typing",
+        "cryptography.fernet",
+        "..config",
+        "logging",
+        "base64",
+        "hashlib"
+      ],
+      "services\\discord_service.py": [
+        "typing",
+        "datetime",
+        "aiohttp",
+        "logging"
+      ],
+      "services\\docker_compose_orchestrator.py": [
+        "typing",
+        "uuid",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        ".regional_traefik_manager",
+        "..services.service_definitions",
+        "..services.base_config_parser",
+        "os",
+        "yaml",
+        "asyncio",
+        "logging",
+        "json",
+        "socket",
+        "subprocess",
+        "json"
+      ],
+      "services\\framework_detector.py": [
+        "typing",
+        "pathlib",
+        "json",
+        "logging",
+        "react"
+      ],
+      "services\\github_client.py": [
+        "typing",
+        "datetime",
+        "httpx",
+        "re"
+      ],
+      "services\\github_oauth.py": [
+        "typing",
+        "datetime",
+        "urllib.parse",
+        "sqlalchemy.ext.asyncio",
+        "..config",
+        ".credential_manager",
+        "secrets",
+        "httpx",
+        "logging"
+      ],
+      "services\\git_manager.py": [
+        "uuid",
+        "typing",
+        "datetime",
+        "..config",
+        "..dev_server_manager",
+        "..utils.resource_naming",
+        "..k8s_client",
+        "..docker_container_manager",
+        "..k8s_client",
+        "..docker_container_manager",
+        "shlex",
+        "json",
+        "re",
+        "logging",
+        "asyncio",
+        "os"
+      ],
+      "services\\litellm_service.py": [
+        "uuid",
+        "typing",
+        "datetime",
+        "..config",
+        "aiohttp",
+        "uuid",
+        "logging",
+        "os"
+      ],
+      "services\\ntfy_service.py": [
+        "aiohttp",
+        "logging"
+      ],
+      "services\\project_patcher.py": [
+        "typing",
+        "pathlib",
+        ".framework_detector",
+        "json",
+        "os",
+        "re",
+        "logging",
+        "react"
+      ],
+      "services\\pty_broker.py": [
+        "uuid",
+        "typing",
+        "datetime",
+        "abc",
+        "..config",
+        "kubernetes",
+        "kubernetes.stream",
+        "..config",
+        "..config",
+        "asyncio",
+        "uuid",
+        "logging",
+        "docker"
+      ],
+      "services\\regional_traefik_manager.py": [
+        "typing",
+        "pathlib",
+        "asyncio",
+        "logging",
+        "os",
+        "yaml",
+        "hashlib"
+      ],
+      "services\\service_definitions.py": [
+        "typing",
+        "dataclasses"
+      ],
+      "services\\shell_session_manager.py": [
+        "uuid",
+        "typing",
+        "datetime",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..models",
+        "..services.pty_broker",
+        "..config",
+        "..utils.resource_naming",
+        "fastapi",
+        "..dev_server_manager",
+        "..utils.async_subprocess",
+        "..dev_server_manager",
+        "asyncio",
+        "logging",
+        "base64"
+      ],
+      "services\\startup_generator.py": [
+        "typing",
+        ".tesslate_parser",
+        ".tesslate_parser",
+        "os",
+        "logging"
+      ],
+      "services\\stripe_service.py": [
+        "typing",
+        "datetime",
+        "decimal",
+        "uuid",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..models",
+        "..config",
+        "logging",
+        "stripe"
+      ],
+      "services\\task_manager.py": [
+        "uuid",
+        "datetime",
+        "typing",
+        "enum",
+        "dataclasses",
+        "collections",
+        "datetime",
+        "asyncio",
+        "uuid",
+        "logging"
+      ],
+      "services\\tesslate_parser.py": [
+        "typing",
+        "dataclasses",
+        "re",
+        "logging"
+      ],
+      "services\\tmux_session_manager.py": [
+        "typing",
+        "datetime",
+        "abc",
+        "..config",
+        "asyncio",
+        "logging",
+        "subprocess"
+      ],
+      "services\\usage_service.py": [
+        "typing",
+        "datetime",
+        "decimal",
+        "uuid",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..models",
+        "..config",
+        ".litellm_service",
+        ".stripe_service",
+        "logging"
+      ],
+      "services\\volume_manager.py": [
+        "pathlib",
+        "typing",
+        "uuid",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy",
+        "..models",
+        "os",
+        "asyncio",
+        "logging",
+        "docker",
+        "shutil"
+      ],
+      "services\\deployment\\base.py": [
+        "abc",
+        "typing",
+        "pydantic",
+        "pathlib",
+        "asyncio",
+        "os",
+        "re"
+      ],
+      "services\\deployment\\builder.py": [
+        "typing",
+        "pathlib",
+        "uuid",
+        ".base",
+        "...services.framework_detector",
+        "...dev_server_manager",
+        "...utils.async_subprocess",
+        "...config",
+        "logging",
+        "os",
+        "asyncio",
+        "docker",
+        "tempfile",
+        "tarfile",
+        "io"
+      ],
+      "services\\deployment\\manager.py": [
+        "typing",
+        ".base",
+        ".providers.cloudflare",
+        ".providers.vercel",
+        ".providers.netlify"
+      ],
+      "services\\deployment\\__init__.py": [
+        ".base",
+        ".manager"
+      ],
+      "services\\deployment\\providers\\cloudflare.py": [
+        "typing",
+        "..base",
+        "httpx",
+        "hashlib",
+        "base64",
+        "json"
+      ],
+      "services\\deployment\\providers\\netlify.py": [
+        "typing",
+        "..base",
+        "httpx",
+        "asyncio",
+        "hashlib",
+        "mimetypes"
+      ],
+      "services\\deployment\\providers\\vercel.py": [
+        "typing",
+        "..base",
+        "httpx",
+        "asyncio",
+        "base64"
+      ],
+      "services\\deployment\\providers\\__init__.py": [
+        ".cloudflare",
+        ".vercel",
+        ".netlify"
+      ],
+      "utils\\async_fileio.py": [
+        "typing",
+        "pathlib",
+        "asyncio",
+        "os",
+        "shutil"
+      ],
+      "utils\\async_subprocess.py": [
+        "typing",
+        "dataclasses",
+        "asyncio",
+        "shutil"
+      ],
+      "utils\\code_patching.py": [
+        "typing",
+        "dataclasses",
+        "difflib",
+        "re",
+        "logging"
+      ],
+      "utils\\resource_naming.py": [
+        "typing",
+        "uuid"
+      ],
+      "utils\\slug_generator.py": [
+        "typing",
+        "nanoid",
+        "re"
+      ],
+      "utils\\__init__.py": [
+        ".code_patching"
+      ]
+    }
+  },
+  "typescript": {
+    "files": {
+      "App.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\App.tsx",
+        "lines": 397,
+        "imports": [
+          "react-router-dom",
+          "react-hot-toast",
+          "react-hot-toast",
+          "react",
+          "./theme",
+          "./components/Layout",
+          "./components/DashboardLayout",
+          "./pages/Landing",
+          "./pages/NewLandingPage",
+          "./pages/Login",
+          "./pages/Register",
+          "./pages/Dashboard",
+          "./pages/Project",
+          "./pages/ProjectGraphCanvas",
+          "./pages/Marketplace",
+          "./pages/Library",
+          "./pages/Feedback",
+          "./pages/AdminDashboard",
+          "./pages/AuthCallback",
+          "./pages/OAuthLoginCallback",
+          "./pages/Logout",
+          "./pages/Referrals",
+          "./pages/AccountSettings",
+          "./components/Walkthrough",
+          "./hooks/useReferralTracking",
+          "./hooks/useTaskNotifications",
+          "axios",
+          "./components/billing/SubscriptionPlans",
+          "./components/billing/BillingDashboard",
+          "./components/billing/UsageDashboard",
+          "./components/billing/TransactionHistory",
+          "./pages/MarketplaceSuccess"
+        ],
+        "raw_imports": [
+          "react-router-dom",
+          "react-hot-toast",
+          "react-hot-toast",
+          "react",
+          "./theme",
+          "./components/Layout",
+          "./components/DashboardLayout",
+          "./pages/Landing",
+          "./pages/NewLandingPage",
+          "./pages/Login",
+          "./pages/Register",
+          "./pages/Dashboard",
+          "./pages/Project",
+          "./pages/ProjectGraphCanvas",
+          "./pages/Marketplace",
+          "./pages/Library",
+          "./pages/Feedback",
+          "./pages/AdminDashboard",
+          "./pages/AuthCallback",
+          "./pages/OAuthLoginCallback",
+          "./pages/Logout",
+          "./pages/Referrals",
+          "./pages/AccountSettings",
+          "./components/Walkthrough",
+          "./hooks/useReferralTracking",
+          "./hooks/useTaskNotifications",
+          "axios",
+          "./components/billing/SubscriptionPlans",
+          "./components/billing/BillingDashboard",
+          "./components/billing/UsageDashboard",
+          "./components/billing/TransactionHistory",
+          "./pages/MarketplaceSuccess"
+        ]
+      },
+      "main.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\main.tsx",
+        "lines": 49,
+        "imports": [
+          "react-dom/client",
+          "posthog-js/react",
+          "./App.tsx",
+          "./theme/variables.css",
+          "./index.css"
+        ],
+        "raw_imports": [
+          "react-dom/client",
+          "posthog-js/react",
+          "./App.tsx",
+          "./theme/variables.css",
+          "./index.css"
+        ]
+      },
+      "vite-env.d.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\vite-env.d.ts",
+        "lines": 11,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\AgentDebugPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\AgentDebugPanel.tsx",
+        "lines": 362,
+        "imports": [
+          "react",
+          "lucide-react"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react"
+        ]
+      },
+      "components\\AgentMessage.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\AgentMessage.tsx",
+        "lines": 113,
+        "imports": [
+          "react",
+          "lucide-react",
+          "react-markdown",
+          "remark-gfm",
+          "./AgentStep",
+          "../types/agent"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react",
+          "react-markdown",
+          "remark-gfm",
+          "./AgentStep",
+          "../types/agent"
+        ]
+      },
+      "components\\AgentStep.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\AgentStep.tsx",
+        "lines": 77,
+        "imports": [
+          "react",
+          "lucide-react",
+          "./ToolCallDisplay",
+          "./AgentDebugPanel",
+          "../types/agent"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react",
+          "./ToolCallDisplay",
+          "./AgentDebugPanel",
+          "../types/agent"
+        ]
+      },
+      "components\\BrowserPreview.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\BrowserPreview.tsx",
+        "lines": 182,
+        "imports": [
+          "react",
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\CodeEditor.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\CodeEditor.tsx",
+        "lines": 306,
+        "imports": [
+          "react",
+          "lucide-react",
+          "@monaco-editor/react",
+          "../theme/ThemeContext"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react",
+          "@monaco-editor/react",
+          "../theme/ThemeContext"
+        ]
+      },
+      "components\\ContainerNode.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ContainerNode.tsx",
+        "lines": 114,
+        "imports": [
+          "react",
+          "@xyflow/react",
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "react",
+          "@xyflow/react",
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\ContainerPropertiesPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ContainerPropertiesPanel.tsx",
+        "lines": 280,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../lib/api",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../lib/api",
+          "react-hot-toast"
+        ]
+      },
+      "components\\DashboardLayout.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\DashboardLayout.tsx",
+        "lines": 89,
+        "imports": [
+          "react-router-dom",
+          "./ui",
+          "./ui",
+          "./MobileWarning",
+          "./DiscordSupport",
+          "framer-motion",
+          "react"
+        ],
+        "raw_imports": [
+          "react-router-dom",
+          "./ui",
+          "./ui",
+          "./MobileWarning",
+          "./DiscordSupport",
+          "framer-motion",
+          "react"
+        ]
+      },
+      "components\\DeploymentsDropdown.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\DeploymentsDropdown.tsx",
+        "lines": 291,
+        "imports": [
+          "react",
+          "../lib/api",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "../lib/api",
+          "react-hot-toast"
+        ]
+      },
+      "components\\DiscordSupport.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\DiscordSupport.tsx",
+        "lines": 39,
+        "imports": [
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\DottedSurface.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\DottedSurface.tsx",
+        "lines": 184,
+        "imports": [
+          "../lib/utils",
+          "react",
+          "three"
+        ],
+        "raw_imports": [
+          "../lib/utils",
+          "react",
+          "three"
+        ]
+      },
+      "components\\ImageUpload.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ImageUpload.tsx",
+        "lines": 176,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "react-hot-toast"
+        ]
+      },
+      "components\\Layout.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\Layout.tsx",
+        "lines": 58,
+        "imports": [
+          "react",
+          "react-router-dom"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom"
+        ]
+      },
+      "components\\MarketplaceSidebar.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\MarketplaceSidebar.tsx",
+        "lines": 153,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../lib/api"
+        ]
+      },
+      "components\\MiniAsteroids.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\MiniAsteroids.tsx",
+        "lines": 1010,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\MobileWarning.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\MobileWarning.tsx",
+        "lines": 69,
+        "imports": [
+          "react",
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\Preloader.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\Preloader.tsx",
+        "lines": 110,
+        "imports": [
+          "react",
+          "gsap"
+        ],
+        "raw_imports": [
+          "react",
+          "gsap"
+        ]
+      },
+      "components\\PreloaderExample.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\PreloaderExample.tsx",
+        "lines": 68,
+        "imports": [
+          "react",
+          "./Preloader",
+          "./components/Preloader"
+        ],
+        "raw_imports": [
+          "react",
+          "./Preloader",
+          "./components/Preloader"
+        ]
+      },
+      "components\\Preview.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\Preview.tsx",
+        "lines": 487,
+        "imports": [
+          "react",
+          "lucide-react",
+          "../lib/api",
+          "./PulsingGridSpinner",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react",
+          "../lib/api",
+          "./PulsingGridSpinner",
+          "react-hot-toast"
+        ]
+      },
+      "components\\PulsingGridSpinner.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\PulsingGridSpinner.tsx",
+        "lines": 223,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ToolCallDisplay.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ToolCallDisplay.tsx",
+        "lines": 321,
+        "imports": [
+          "react",
+          "../types/agent"
+        ],
+        "raw_imports": [
+          "react",
+          "../types/agent"
+        ]
+      },
+      "components\\ToolManagement.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ToolManagement.tsx",
+        "lines": 547,
+        "imports": [
+          "react",
+          "lucide-react",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react",
+          "react-hot-toast"
+        ]
+      },
+      "components\\Walkthrough.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\Walkthrough.tsx",
+        "lines": 525,
+        "imports": [
+          "react",
+          "framer-motion",
+          "@phosphor-icons/react",
+          "react-router-dom"
+        ],
+        "raw_imports": [
+          "react",
+          "framer-motion",
+          "@phosphor-icons/react",
+          "react-router-dom"
+        ]
+      },
+      "components\\billing\\AgentPurchaseButton.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\AgentPurchaseButton.tsx",
+        "lines": 191,
+        "imports": [
+          "react",
+          "../../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "../../lib/api"
+        ]
+      },
+      "components\\billing\\BillingDashboard.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\BillingDashboard.tsx",
+        "lines": 355,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "lucide-react",
+          "../../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "lucide-react",
+          "../../lib/api"
+        ]
+      },
+      "components\\billing\\CreditsPurchaseModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\CreditsPurchaseModal.tsx",
+        "lines": 263,
+        "imports": [
+          "react",
+          "../../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "../../lib/api"
+        ]
+      },
+      "components\\billing\\DeployButton.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\DeployButton.tsx",
+        "lines": 268,
+        "imports": [
+          "react",
+          "../../lib/api",
+          "./UpgradeModal",
+          "../../types/billing"
+        ],
+        "raw_imports": [
+          "react",
+          "../../lib/api",
+          "./UpgradeModal",
+          "../../types/billing"
+        ]
+      },
+      "components\\billing\\index.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\index.ts",
+        "lines": 15,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\billing\\ProjectLimitBanner.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\ProjectLimitBanner.tsx",
+        "lines": 192,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api",
+          "../../types/billing"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api",
+          "../../types/billing"
+        ]
+      },
+      "components\\billing\\SubscriptionPlans.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\SubscriptionPlans.tsx",
+        "lines": 343,
+        "imports": [
+          "react",
+          "../../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "../../lib/api"
+        ]
+      },
+      "components\\billing\\SubscriptionStatus.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\SubscriptionStatus.tsx",
+        "lines": 175,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api"
+        ]
+      },
+      "components\\billing\\TransactionHistory.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\TransactionHistory.tsx",
+        "lines": 265,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "lucide-react",
+          "../../lib/api",
+          "../../types/billing"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "lucide-react",
+          "../../lib/api",
+          "../../types/billing"
+        ]
+      },
+      "components\\billing\\UpgradeModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\UpgradeModal.tsx",
+        "lines": 244,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api",
+          "../../types/billing"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api",
+          "../../types/billing"
+        ]
+      },
+      "components\\billing\\UsageDashboard.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\billing\\UsageDashboard.tsx",
+        "lines": 346,
+        "imports": [
+          "react",
+          "../../lib/api",
+          "../../types/billing"
+        ],
+        "raw_imports": [
+          "react",
+          "../../lib/api",
+          "../../types/billing"
+        ]
+      },
+      "components\\chat\\AgentSelector.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\AgentSelector.tsx",
+        "lines": 156,
+        "imports": [
+          "react",
+          "react-router-dom"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom"
+        ]
+      },
+      "components\\chat\\ApprovalRequestCard.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\ApprovalRequestCard.tsx",
+        "lines": 65,
+        "imports": [
+          "lucide-react"
+        ],
+        "raw_imports": [
+          "lucide-react"
+        ]
+      },
+      "components\\chat\\ChatContainer.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\ChatContainer.tsx",
+        "lines": 1145,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "lucide-react",
+          "@phosphor-icons/react",
+          "./ChatMessage",
+          "./ChatInput",
+          "./EditModeStatus",
+          "./ApprovalRequestCard",
+          "../../lib/api",
+          "react-hot-toast",
+          "../AgentMessage",
+          "../../types/agent"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "lucide-react",
+          "@phosphor-icons/react",
+          "./ChatMessage",
+          "./ChatInput",
+          "./EditModeStatus",
+          "./ApprovalRequestCard",
+          "../../lib/api",
+          "react-hot-toast",
+          "../AgentMessage",
+          "../../types/agent"
+        ]
+      },
+      "components\\chat\\ChatInput.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\ChatInput.tsx",
+        "lines": 401,
+        "imports": [
+          "react",
+          "./AgentSelector",
+          "./ToolDropdown",
+          "./EditModeStatus",
+          "@phosphor-icons/react",
+          "react-hot-toast",
+          "jszip"
+        ],
+        "raw_imports": [
+          "react",
+          "./AgentSelector",
+          "./ToolDropdown",
+          "./EditModeStatus",
+          "@phosphor-icons/react",
+          "react-hot-toast",
+          "jszip"
+        ]
+      },
+      "components\\chat\\ChatMessage.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\ChatMessage.tsx",
+        "lines": 133,
+        "imports": [
+          "react",
+          "react-markdown",
+          "remark-gfm"
+        ],
+        "raw_imports": [
+          "react",
+          "react-markdown",
+          "remark-gfm"
+        ]
+      },
+      "components\\chat\\EditModeStatus.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\EditModeStatus.tsx",
+        "lines": 66,
+        "imports": [
+          "lucide-react"
+        ],
+        "raw_imports": [
+          "lucide-react"
+        ]
+      },
+      "components\\chat\\index.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\index.ts",
+        "lines": 7,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\chat\\ToolDropdown.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\ToolDropdown.tsx",
+        "lines": 118,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\chat\\TypingIndicator.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\TypingIndicator.tsx",
+        "lines": 22,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\chat\\UsageRibbon.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\chat\\UsageRibbon.tsx",
+        "lines": 36,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\git\\GitHistoryViewer.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\git\\GitHistoryViewer.tsx",
+        "lines": 180,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/git-api",
+          "../../types/git",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/git-api",
+          "../../types/git",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ]
+      },
+      "components\\modals\\ConfirmDialog.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\ConfirmDialog.tsx",
+        "lines": 149,
+        "imports": [
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\modals\\CreateFeedbackModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\CreateFeedbackModal.tsx",
+        "lines": 185,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/api",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/api",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ]
+      },
+      "components\\modals\\CreateProjectModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\CreateProjectModal.tsx",
+        "lines": 153,
+        "imports": [
+          "react",
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\modals\\DeploymentModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\DeploymentModal.tsx",
+        "lines": 554,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../../lib/api",
+          "react-hot-toast"
+        ]
+      },
+      "components\\modals\\FeedbackModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\FeedbackModal.tsx",
+        "lines": 274,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/api",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/api",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ]
+      },
+      "components\\modals\\GitCommitDialog.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\GitCommitDialog.tsx",
+        "lines": 249,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/git-api",
+          "../../types/git",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/git-api",
+          "../../types/git",
+          "react-hot-toast"
+        ]
+      },
+      "components\\modals\\GitHubConnectModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\GitHubConnectModal.tsx",
+        "lines": 155,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/github-api",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/github-api",
+          "../PulsingGridSpinner",
+          "react-hot-toast"
+        ]
+      },
+      "components\\modals\\GitHubImportModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\GitHubImportModal.tsx",
+        "lines": 297,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/github-api",
+          "../../lib/git-api",
+          "../../types/git",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/github-api",
+          "../../lib/git-api",
+          "../../types/git",
+          "react-hot-toast"
+        ]
+      },
+      "components\\modals\\index.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\modals\\index.ts",
+        "lines": 6,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\panels\\ArchitecturePanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\ArchitecturePanel.tsx",
+        "lines": 371,
+        "imports": [
+          "react",
+          "lucide-react",
+          "../../lib/api",
+          "react-hot-toast",
+          "mermaid",
+          "../../theme/ThemeContext"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react",
+          "../../lib/api",
+          "react-hot-toast",
+          "mermaid",
+          "../../theme/ThemeContext"
+        ]
+      },
+      "components\\panels\\AssetsPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\AssetsPanel.tsx",
+        "lines": 669,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/api",
+          "../../types/assets",
+          "../../types/assets",
+          "./assets/DirectoryTree",
+          "./assets/AssetComponents",
+          "./assets/AssetUploadZone",
+          "react-hot-toast",
+          "../modals/ConfirmDialog",
+          "../../utils/fileEvents"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../lib/api",
+          "../../types/assets",
+          "../../types/assets",
+          "./assets/DirectoryTree",
+          "./assets/AssetComponents",
+          "./assets/AssetUploadZone",
+          "react-hot-toast",
+          "../modals/ConfirmDialog",
+          "../../utils/fileEvents"
+        ]
+      },
+      "components\\panels\\DeploymentsPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\DeploymentsPanel.tsx",
+        "lines": 416,
+        "imports": [
+          "react",
+          "../../lib/api",
+          "react-hot-toast",
+          "../modals/DeploymentModal"
+        ],
+        "raw_imports": [
+          "react",
+          "../../lib/api",
+          "react-hot-toast",
+          "../modals/DeploymentModal"
+        ]
+      },
+      "components\\panels\\GitHubPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\GitHubPanel.tsx",
+        "lines": 676,
+        "imports": [
+          "react",
+          "../../lib/github-api",
+          "../../lib/git-api",
+          "../modals",
+          "../git/GitHistoryViewer",
+          "../../types/git",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "../../lib/github-api",
+          "../../lib/git-api",
+          "../modals",
+          "../git/GitHistoryViewer",
+          "../../types/git",
+          "react-hot-toast"
+        ]
+      },
+      "components\\panels\\index.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\index.ts",
+        "lines": 9,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\panels\\KanbanPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\KanbanPanel.tsx",
+        "lines": 718,
+        "imports": [
+          "react",
+          "@hello-pangea/dnd",
+          "../../lib/api",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@hello-pangea/dnd",
+          "../../lib/api",
+          "react-hot-toast"
+        ]
+      },
+      "components\\panels\\MarketplacePanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\MarketplacePanel.tsx",
+        "lines": 167,
+        "imports": [
+          "react",
+          "lucide-react"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react"
+        ]
+      },
+      "components\\panels\\NotesPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\NotesPanel.tsx",
+        "lines": 448,
+        "imports": [
+          "react",
+          "@tiptap/react",
+          "@tiptap/starter-kit",
+          "@tiptap/extension-placeholder",
+          "@tiptap/extension-underline",
+          "@tiptap/extension-text-align",
+          "@tiptap/extension-link",
+          "@tiptap/extension-image",
+          "@tiptap/extension-table",
+          "@tiptap/extension-table-row",
+          "@tiptap/extension-table-cell",
+          "@tiptap/extension-table-header",
+          "@tiptap/extension-task-list",
+          "@tiptap/extension-task-item",
+          "@tiptap/extension-highlight",
+          "@tiptap/extension-code-block-lowlight",
+          "lowlight",
+          "react-hot-toast",
+          "../../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "@tiptap/react",
+          "@tiptap/starter-kit",
+          "@tiptap/extension-placeholder",
+          "@tiptap/extension-underline",
+          "@tiptap/extension-text-align",
+          "@tiptap/extension-link",
+          "@tiptap/extension-image",
+          "@tiptap/extension-table",
+          "@tiptap/extension-table-row",
+          "@tiptap/extension-table-cell",
+          "@tiptap/extension-table-header",
+          "@tiptap/extension-task-list",
+          "@tiptap/extension-task-item",
+          "@tiptap/extension-highlight",
+          "@tiptap/extension-code-block-lowlight",
+          "lowlight",
+          "react-hot-toast",
+          "../../lib/api"
+        ]
+      },
+      "components\\panels\\SettingsPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\SettingsPanel.tsx",
+        "lines": 157,
+        "imports": [
+          "react",
+          "lucide-react",
+          "../../lib/api",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react",
+          "../../lib/api",
+          "react-hot-toast"
+        ]
+      },
+      "components\\panels\\TerminalPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\TerminalPanel.tsx",
+        "lines": 440,
+        "imports": [
+          "react",
+          "@xterm/xterm",
+          "@xterm/addon-fit",
+          "@xterm/addon-web-links",
+          "@xterm/addon-search",
+          "lucide-react",
+          "../../lib/api",
+          "../../theme/ThemeContext",
+          "@xterm/xterm/css/xterm.css"
+        ],
+        "raw_imports": [
+          "react",
+          "@xterm/xterm",
+          "@xterm/addon-fit",
+          "@xterm/addon-web-links",
+          "@xterm/addon-search",
+          "lucide-react",
+          "../../lib/api",
+          "../../theme/ThemeContext",
+          "@xterm/xterm/css/xterm.css"
+        ]
+      },
+      "components\\panels\\assets\\AssetComponents.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\assets\\AssetComponents.tsx",
+        "lines": 239,
+        "imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../../types/assets",
+          "../../../types/assets",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react",
+          "../../../types/assets",
+          "../../../types/assets",
+          "react-hot-toast"
+        ]
+      },
+      "components\\panels\\assets\\AssetUploadZone.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\assets\\AssetUploadZone.tsx",
+        "lines": 288,
+        "imports": [
+          "react",
+          "react",
+          "@phosphor-icons/react",
+          "../../../types/assets"
+        ],
+        "raw_imports": [
+          "react",
+          "react",
+          "@phosphor-icons/react",
+          "../../../types/assets"
+        ]
+      },
+      "components\\panels\\assets\\DirectoryTree.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\panels\\assets\\DirectoryTree.tsx",
+        "lines": 185,
+        "imports": [
+          "react",
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\ui\\AgentTag.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\AgentTag.tsx",
+        "lines": 42,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ui\\Breadcrumbs.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\Breadcrumbs.tsx",
+        "lines": 43,
+        "imports": [
+          "lucide-react",
+          "react-router-dom"
+        ],
+        "raw_imports": [
+          "lucide-react",
+          "react-router-dom"
+        ]
+      },
+      "components\\ui\\button.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\button.tsx",
+        "lines": 56,
+        "imports": [
+          "react",
+          "@radix-ui/react-slot",
+          "class-variance-authority",
+          "@/lib/utils"
+        ],
+        "raw_imports": [
+          "react",
+          "@radix-ui/react-slot",
+          "class-variance-authority",
+          "@/lib/utils"
+        ]
+      },
+      "components\\ui\\Dropdown.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\Dropdown.tsx",
+        "lines": 88,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ui\\FloatingPanel.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\FloatingPanel.tsx",
+        "lines": 393,
+        "imports": [
+          "react",
+          "../../theme/ThemeContext"
+        ],
+        "raw_imports": [
+          "react",
+          "../../theme/ThemeContext"
+        ]
+      },
+      "components\\ui\\FloatingSidebar.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\FloatingSidebar.tsx",
+        "lines": 52,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ui\\GlassContainer.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\GlassContainer.tsx",
+        "lines": 35,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ui\\HelpModal.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\HelpModal.tsx",
+        "lines": 146,
+        "imports": [
+          "react",
+          "lucide-react"
+        ],
+        "raw_imports": [
+          "react",
+          "lucide-react"
+        ]
+      },
+      "components\\ui\\index.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\index.ts",
+        "lines": 16,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\ui\\MarkerPalette.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\MarkerPalette.tsx",
+        "lines": 94,
+        "imports": [
+          "./MarkerPill"
+        ],
+        "raw_imports": [
+          "./MarkerPill"
+        ]
+      },
+      "components\\ui\\MarkerPill.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\MarkerPill.tsx",
+        "lines": 70,
+        "imports": [
+          "lucide-react"
+        ],
+        "raw_imports": [
+          "lucide-react"
+        ]
+      },
+      "components\\ui\\MarketplaceCard.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\MarketplaceCard.tsx",
+        "lines": 81,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ui\\MobileMenu.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\MobileMenu.tsx",
+        "lines": 131,
+        "imports": [
+          "react",
+          "@phosphor-icons/react"
+        ],
+        "raw_imports": [
+          "react",
+          "@phosphor-icons/react"
+        ]
+      },
+      "components\\ui\\NavigationSidebar.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\NavigationSidebar.tsx",
+        "lines": 425,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../../theme/ThemeContext",
+          "./Tooltip",
+          "react-hot-toast",
+          "framer-motion",
+          "../../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../../theme/ThemeContext",
+          "./Tooltip",
+          "react-hot-toast",
+          "framer-motion",
+          "../../lib/api"
+        ]
+      },
+      "components\\ui\\ProjectCard.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\ProjectCard.tsx",
+        "lines": 238,
+        "imports": [
+          "react",
+          "./StatusBadge",
+          "./AgentTag"
+        ],
+        "raw_imports": [
+          "react",
+          "./StatusBadge",
+          "./AgentTag"
+        ]
+      },
+      "components\\ui\\ruixen-moon-chat.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\ruixen-moon-chat.tsx",
+        "lines": 159,
+        "imports": [
+          "react",
+          "@/components/ui/textarea",
+          "@/components/ui/button",
+          "@/lib/utils"
+        ],
+        "raw_imports": [
+          "react",
+          "@/components/ui/textarea",
+          "@/components/ui/button",
+          "@/lib/utils"
+        ]
+      },
+      "components\\ui\\StatusBadge.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\StatusBadge.tsx",
+        "lines": 114,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ui\\Tabs.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\Tabs.tsx",
+        "lines": 51,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "components\\ui\\TaskProgress.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\TaskProgress.tsx",
+        "lines": 126,
+        "imports": [
+          "react",
+          "../../hooks/useTask",
+          "../../services/taskService"
+        ],
+        "raw_imports": [
+          "react",
+          "../../hooks/useTask",
+          "../../services/taskService"
+        ]
+      },
+      "components\\ui\\textarea.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\textarea.tsx",
+        "lines": 24,
+        "imports": [
+          "react",
+          "@/lib/utils"
+        ],
+        "raw_imports": [
+          "react",
+          "@/lib/utils"
+        ]
+      },
+      "components\\ui\\Toast.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\Toast.tsx",
+        "lines": 151,
+        "imports": [
+          "react",
+          "../../services/taskService"
+        ],
+        "raw_imports": [
+          "react",
+          "../../services/taskService"
+        ]
+      },
+      "components\\ui\\ToggleSwitch.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\ToggleSwitch.tsx",
+        "lines": 30,
+        "imports": [],
+        "raw_imports": []
+      },
+      "components\\ui\\Tooltip.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\components\\ui\\Tooltip.tsx",
+        "lines": 156,
+        "imports": [
+          "react",
+          "react-dom",
+          "framer-motion"
+        ],
+        "raw_imports": [
+          "react",
+          "react-dom",
+          "framer-motion"
+        ]
+      },
+      "hooks\\useReferralTracking.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\hooks\\useReferralTracking.ts",
+        "lines": 28,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "axios"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "axios"
+        ]
+      },
+      "hooks\\useTask.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\hooks\\useTask.ts",
+        "lines": 161,
+        "imports": [
+          "react",
+          "../services/taskService",
+          "../services/taskService"
+        ],
+        "raw_imports": [
+          "react",
+          "../services/taskService",
+          "../services/taskService"
+        ]
+      },
+      "hooks\\useTaskNotifications.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\hooks\\useTaskNotifications.ts",
+        "lines": 77,
+        "imports": [
+          "react",
+          "react-hot-toast",
+          "../services/taskService",
+          "../services/taskService",
+          "./useTask"
+        ],
+        "raw_imports": [
+          "react",
+          "react-hot-toast",
+          "../services/taskService",
+          "../services/taskService",
+          "./useTask"
+        ]
+      },
+      "lib\\api.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\lib\\api.ts",
+        "lines": 1180,
+        "imports": [
+          "axios",
+          "../types/agent"
+        ],
+        "raw_imports": [
+          "axios",
+          "../types/agent"
+        ]
+      },
+      "lib\\git-api.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\lib\\git-api.ts",
+        "lines": 158,
+        "imports": [
+          "./api"
+        ],
+        "raw_imports": [
+          "./api"
+        ]
+      },
+      "lib\\github-api.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\lib\\github-api.ts",
+        "lines": 84,
+        "imports": [
+          "./api"
+        ],
+        "raw_imports": [
+          "./api"
+        ]
+      },
+      "lib\\utils.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\lib\\utils.ts",
+        "lines": 6,
+        "imports": [
+          "clsx",
+          "tailwind-merge"
+        ],
+        "raw_imports": [
+          "clsx",
+          "tailwind-merge"
+        ]
+      },
+      "pages\\AccountSettings.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\AccountSettings.tsx",
+        "lines": 474,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\AdminDashboard.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\AdminDashboard.tsx",
+        "lines": 1399,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "react-hot-toast",
+          "../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "react-hot-toast",
+          "../lib/api"
+        ]
+      },
+      "pages\\AuthCallback.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\AuthCallback.tsx",
+        "lines": 173,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../lib/github-api",
+          "../components/PulsingGridSpinner",
+          "@phosphor-icons/react",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../lib/github-api",
+          "../components/PulsingGridSpinner",
+          "@phosphor-icons/react",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Dashboard.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Dashboard.tsx",
+        "lines": 546,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "../components/ui",
+          "../components/modals",
+          "../components/PulsingGridSpinner",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "../components/ui",
+          "../components/modals",
+          "../components/PulsingGridSpinner",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Feedback.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Feedback.tsx",
+        "lines": 363,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "../components/ui",
+          "../components/PulsingGridSpinner",
+          "../components/modals/CreateFeedbackModal",
+          "../components/modals/FeedbackModal",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "../components/ui",
+          "../components/PulsingGridSpinner",
+          "../components/modals/CreateFeedbackModal",
+          "../components/modals/FeedbackModal",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Landing.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Landing.tsx",
+        "lines": 1347,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "react-hot-toast",
+          "../theme/ThemeContext"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "react-hot-toast",
+          "../theme/ThemeContext"
+        ]
+      },
+      "pages\\Library.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Library.tsx",
+        "lines": 2488,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "../components/ui",
+          "../components/modals",
+          "../components/ui/MarkerPalette",
+          "../components/ToolManagement",
+          "../components/ImageUpload",
+          "../lib/api",
+          "react-hot-toast",
+          "../theme/ThemeContext"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "../components/ui",
+          "../components/modals",
+          "../components/ui/MarkerPalette",
+          "../components/ToolManagement",
+          "../components/ImageUpload",
+          "../lib/api",
+          "react-hot-toast",
+          "../theme/ThemeContext"
+        ]
+      },
+      "pages\\Login.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Login.tsx",
+        "lines": 280,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../components/PulsingGridSpinner",
+          "../components/MiniAsteroids",
+          "../components/Preloader",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../components/PulsingGridSpinner",
+          "../components/MiniAsteroids",
+          "../components/Preloader",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Logout.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Logout.tsx",
+        "lines": 30,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Marketplace.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Marketplace.tsx",
+        "lines": 700,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "../components/ui",
+          "../lib/api",
+          "react-hot-toast",
+          "../theme/ThemeContext"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "../components/ui",
+          "../lib/api",
+          "react-hot-toast",
+          "../theme/ThemeContext"
+        ]
+      },
+      "pages\\MarketplaceSuccess.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\MarketplaceSuccess.tsx",
+        "lines": 117,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "@phosphor-icons/react",
+          "../lib/api"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "@phosphor-icons/react",
+          "../lib/api"
+        ]
+      },
+      "pages\\NewLandingPage.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\NewLandingPage.tsx",
+        "lines": 1669,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "react-hot-toast",
+          "../lib/utils"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "react-hot-toast",
+          "../lib/utils"
+        ]
+      },
+      "pages\\OAuthLoginCallback.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\OAuthLoginCallback.tsx",
+        "lines": 129,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "@phosphor-icons/react",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../components/PulsingGridSpinner",
+          "@phosphor-icons/react",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Project.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Project.tsx",
+        "lines": 971,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../components/ui/FloatingPanel",
+          "../components/ui/MobileMenu",
+          "../components/ui/Tooltip",
+          "../components/ui/Breadcrumbs",
+          "../components/chat/ChatContainer",
+          "../components/PulsingGridSpinner",
+          "../components/MobileWarning",
+          "../components/BrowserPreview",
+          "../components/DiscordSupport",
+          "../components/DeploymentsDropdown",
+          "../components/modals/DeploymentModal",
+          "../components/CodeEditor",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "react-hot-toast",
+          "../utils/fileEvents",
+          "framer-motion"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../components/ui/FloatingPanel",
+          "../components/ui/MobileMenu",
+          "../components/ui/Tooltip",
+          "../components/ui/Breadcrumbs",
+          "../components/chat/ChatContainer",
+          "../components/PulsingGridSpinner",
+          "../components/MobileWarning",
+          "../components/BrowserPreview",
+          "../components/DiscordSupport",
+          "../components/DeploymentsDropdown",
+          "../components/modals/DeploymentModal",
+          "../components/CodeEditor",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "react-hot-toast",
+          "../utils/fileEvents",
+          "framer-motion"
+        ]
+      },
+      "pages\\ProjectGraphCanvas.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\ProjectGraphCanvas.tsx",
+        "lines": 985,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "framer-motion",
+          "../components/ContainerNode",
+          "../components/MarketplaceSidebar",
+          "../components/ContainerPropertiesPanel",
+          "../components/ui/Breadcrumbs",
+          "../components/ui/Tooltip",
+          "../components/MobileWarning",
+          "../components/ui/MobileMenu",
+          "../components/chat/ChatContainer",
+          "../components/ui/FloatingPanel",
+          "../components/panels",
+          "../components/DiscordSupport",
+          "../components/CodeEditor",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "../utils/fileEvents",
+          "react-hot-toast",
+          "@xyflow/react/dist/style.css"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "framer-motion",
+          "../components/ContainerNode",
+          "../components/MarketplaceSidebar",
+          "../components/ContainerPropertiesPanel",
+          "../components/ui/Breadcrumbs",
+          "../components/ui/Tooltip",
+          "../components/MobileWarning",
+          "../components/ui/MobileMenu",
+          "../components/chat/ChatContainer",
+          "../components/ui/FloatingPanel",
+          "../components/panels",
+          "../components/DiscordSupport",
+          "../components/CodeEditor",
+          "../lib/api",
+          "../theme/ThemeContext",
+          "../utils/fileEvents",
+          "react-hot-toast",
+          "@xyflow/react/dist/style.css"
+        ]
+      },
+      "pages\\ProjectOverview.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\ProjectOverview.tsx",
+        "lines": 272,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../components/ui",
+          "../components/ui/Tabs",
+          "../theme/ThemeContext",
+          "../lib/api",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../components/ui",
+          "../components/ui/Tabs",
+          "../theme/ThemeContext",
+          "../lib/api",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Referrals.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Referrals.tsx",
+        "lines": 127,
+        "imports": [
+          "react",
+          "axios"
+        ],
+        "raw_imports": [
+          "react",
+          "axios"
+        ]
+      },
+      "pages\\Register.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Register.tsx",
+        "lines": 311,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../components/PulsingGridSpinner",
+          "../components/MiniAsteroids",
+          "react-hot-toast"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../lib/api",
+          "../components/PulsingGridSpinner",
+          "../components/MiniAsteroids",
+          "react-hot-toast"
+        ]
+      },
+      "pages\\Settings.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\pages\\Settings.tsx",
+        "lines": 555,
+        "imports": [
+          "react",
+          "react-router-dom",
+          "../theme/ThemeContext",
+          "../lib/api",
+          "react-hot-toast",
+          "../components/PulsingGridSpinner"
+        ],
+        "raw_imports": [
+          "react",
+          "react-router-dom",
+          "../theme/ThemeContext",
+          "../lib/api",
+          "react-hot-toast",
+          "../components/PulsingGridSpinner"
+        ]
+      },
+      "services\\taskService.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\services\\taskService.ts",
+        "lines": 320,
+        "imports": [],
+        "raw_imports": []
+      },
+      "theme\\fonts.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\theme\\fonts.ts",
+        "lines": 6,
+        "imports": [],
+        "raw_imports": []
+      },
+      "theme\\index.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\theme\\index.ts",
+        "lines": 3,
+        "imports": [],
+        "raw_imports": []
+      },
+      "theme\\ThemeContext.tsx": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\theme\\ThemeContext.tsx",
+        "lines": 43,
+        "imports": [
+          "react"
+        ],
+        "raw_imports": [
+          "react"
+        ]
+      },
+      "types\\agent.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\types\\agent.ts",
+        "lines": 119,
+        "imports": [],
+        "raw_imports": []
+      },
+      "types\\assets.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\types\\assets.ts",
+        "lines": 170,
+        "imports": [],
+        "raw_imports": []
+      },
+      "types\\billing.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\types\\billing.ts",
+        "lines": 215,
+        "imports": [],
+        "raw_imports": []
+      },
+      "types\\git.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\types\\git.ts",
+        "lines": 208,
+        "imports": [],
+        "raw_imports": []
+      },
+      "utils\\fileEvents.ts": {
+        "path": "c:\\Users\\smirxs\\Documents\\Programming\\Tesslate-Studio\\app\\src\\utils\\fileEvents.ts",
+        "lines": 43,
+        "imports": [],
+        "raw_imports": []
+      }
+    },
+    "dependencies": {
+      "App.tsx": [
+        "react-router-dom",
+        "react-hot-toast",
+        "react-hot-toast",
+        "react",
+        "./theme",
+        "./components/Layout",
+        "./components/DashboardLayout",
+        "./pages/Landing",
+        "./pages/NewLandingPage",
+        "./pages/Login",
+        "./pages/Register",
+        "./pages/Dashboard",
+        "./pages/Project",
+        "./pages/ProjectGraphCanvas",
+        "./pages/Marketplace",
+        "./pages/Library",
+        "./pages/Feedback",
+        "./pages/AdminDashboard",
+        "./pages/AuthCallback",
+        "./pages/OAuthLoginCallback",
+        "./pages/Logout",
+        "./pages/Referrals",
+        "./pages/AccountSettings",
+        "./components/Walkthrough",
+        "./hooks/useReferralTracking",
+        "./hooks/useTaskNotifications",
+        "axios",
+        "./components/billing/SubscriptionPlans",
+        "./components/billing/BillingDashboard",
+        "./components/billing/UsageDashboard",
+        "./components/billing/TransactionHistory",
+        "./pages/MarketplaceSuccess"
+      ],
+      "main.tsx": [
+        "react-dom/client",
+        "posthog-js/react",
+        "./App.tsx",
+        "./theme/variables.css",
+        "./index.css"
+      ],
+      "components\\AgentDebugPanel.tsx": [
+        "react",
+        "lucide-react"
+      ],
+      "components\\AgentMessage.tsx": [
+        "react",
+        "lucide-react",
+        "react-markdown",
+        "remark-gfm",
+        "./AgentStep",
+        "../types/agent"
+      ],
+      "components\\AgentStep.tsx": [
+        "react",
+        "lucide-react",
+        "./ToolCallDisplay",
+        "./AgentDebugPanel",
+        "../types/agent"
+      ],
+      "components\\BrowserPreview.tsx": [
+        "react",
+        "@phosphor-icons/react"
+      ],
+      "components\\CodeEditor.tsx": [
+        "react",
+        "lucide-react",
+        "@monaco-editor/react",
+        "../theme/ThemeContext"
+      ],
+      "components\\ContainerNode.tsx": [
+        "react",
+        "@xyflow/react",
+        "@phosphor-icons/react"
+      ],
+      "components\\ContainerPropertiesPanel.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../lib/api",
+        "react-hot-toast"
+      ],
+      "components\\DashboardLayout.tsx": [
+        "react-router-dom",
+        "./ui",
+        "./ui",
+        "./MobileWarning",
+        "./DiscordSupport",
+        "framer-motion",
+        "react"
+      ],
+      "components\\DeploymentsDropdown.tsx": [
+        "react",
+        "../lib/api",
+        "react-hot-toast"
+      ],
+      "components\\DiscordSupport.tsx": [
+        "@phosphor-icons/react"
+      ],
+      "components\\DottedSurface.tsx": [
+        "../lib/utils",
+        "react",
+        "three"
+      ],
+      "components\\ImageUpload.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "react-hot-toast"
+      ],
+      "components\\Layout.tsx": [
+        "react",
+        "react-router-dom"
+      ],
+      "components\\MarketplaceSidebar.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../lib/api"
+      ],
+      "components\\MiniAsteroids.tsx": [
+        "react"
+      ],
+      "components\\MobileWarning.tsx": [
+        "react",
+        "@phosphor-icons/react"
+      ],
+      "components\\Preloader.tsx": [
+        "react",
+        "gsap"
+      ],
+      "components\\PreloaderExample.tsx": [
+        "react",
+        "./Preloader",
+        "./components/Preloader"
+      ],
+      "components\\Preview.tsx": [
+        "react",
+        "lucide-react",
+        "../lib/api",
+        "./PulsingGridSpinner",
+        "react-hot-toast"
+      ],
+      "components\\PulsingGridSpinner.tsx": [
+        "react"
+      ],
+      "components\\ToolCallDisplay.tsx": [
+        "react",
+        "../types/agent"
+      ],
+      "components\\ToolManagement.tsx": [
+        "react",
+        "lucide-react",
+        "react-hot-toast"
+      ],
+      "components\\Walkthrough.tsx": [
+        "react",
+        "framer-motion",
+        "@phosphor-icons/react",
+        "react-router-dom"
+      ],
+      "components\\billing\\AgentPurchaseButton.tsx": [
+        "react",
+        "../../lib/api"
+      ],
+      "components\\billing\\BillingDashboard.tsx": [
+        "react",
+        "react-router-dom",
+        "lucide-react",
+        "../../lib/api"
+      ],
+      "components\\billing\\CreditsPurchaseModal.tsx": [
+        "react",
+        "../../lib/api"
+      ],
+      "components\\billing\\DeployButton.tsx": [
+        "react",
+        "../../lib/api",
+        "./UpgradeModal",
+        "../../types/billing"
+      ],
+      "components\\billing\\ProjectLimitBanner.tsx": [
+        "react",
+        "react-router-dom",
+        "../../lib/api",
+        "../../types/billing"
+      ],
+      "components\\billing\\SubscriptionPlans.tsx": [
+        "react",
+        "../../lib/api"
+      ],
+      "components\\billing\\SubscriptionStatus.tsx": [
+        "react",
+        "react-router-dom",
+        "../../lib/api"
+      ],
+      "components\\billing\\TransactionHistory.tsx": [
+        "react",
+        "react-router-dom",
+        "lucide-react",
+        "../../lib/api",
+        "../../types/billing"
+      ],
+      "components\\billing\\UpgradeModal.tsx": [
+        "react",
+        "react-router-dom",
+        "../../lib/api",
+        "../../types/billing"
+      ],
+      "components\\billing\\UsageDashboard.tsx": [
+        "react",
+        "../../lib/api",
+        "../../types/billing"
+      ],
+      "components\\chat\\AgentSelector.tsx": [
+        "react",
+        "react-router-dom"
+      ],
+      "components\\chat\\ApprovalRequestCard.tsx": [
+        "lucide-react"
+      ],
+      "components\\chat\\ChatContainer.tsx": [
+        "react",
+        "react-router-dom",
+        "lucide-react",
+        "@phosphor-icons/react",
+        "./ChatMessage",
+        "./ChatInput",
+        "./EditModeStatus",
+        "./ApprovalRequestCard",
+        "../../lib/api",
+        "react-hot-toast",
+        "../AgentMessage",
+        "../../types/agent"
+      ],
+      "components\\chat\\ChatInput.tsx": [
+        "react",
+        "./AgentSelector",
+        "./ToolDropdown",
+        "./EditModeStatus",
+        "@phosphor-icons/react",
+        "react-hot-toast",
+        "jszip"
+      ],
+      "components\\chat\\ChatMessage.tsx": [
+        "react",
+        "react-markdown",
+        "remark-gfm"
+      ],
+      "components\\chat\\EditModeStatus.tsx": [
+        "lucide-react"
+      ],
+      "components\\chat\\ToolDropdown.tsx": [
+        "react"
+      ],
+      "components\\git\\GitHistoryViewer.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../lib/git-api",
+        "../../types/git",
+        "../PulsingGridSpinner",
+        "react-hot-toast"
+      ],
+      "components\\modals\\ConfirmDialog.tsx": [
+        "@phosphor-icons/react"
+      ],
+      "components\\modals\\CreateFeedbackModal.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../lib/api",
+        "../PulsingGridSpinner",
+        "react-hot-toast"
+      ],
+      "components\\modals\\CreateProjectModal.tsx": [
+        "react",
+        "@phosphor-icons/react"
+      ],
+      "components\\modals\\DeploymentModal.tsx": [
+        "react",
+        "react-router-dom",
+        "../../lib/api",
+        "react-hot-toast"
+      ],
+      "components\\modals\\FeedbackModal.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../lib/api",
+        "../PulsingGridSpinner",
+        "react-hot-toast"
+      ],
+      "components\\modals\\GitCommitDialog.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../lib/git-api",
+        "../../types/git",
+        "react-hot-toast"
+      ],
+      "components\\modals\\GitHubConnectModal.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../lib/github-api",
+        "../PulsingGridSpinner",
+        "react-hot-toast"
+      ],
+      "components\\modals\\GitHubImportModal.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../lib/github-api",
+        "../../lib/git-api",
+        "../../types/git",
+        "react-hot-toast"
+      ],
+      "components\\panels\\ArchitecturePanel.tsx": [
+        "react",
+        "lucide-react",
+        "../../lib/api",
+        "react-hot-toast",
+        "mermaid",
+        "../../theme/ThemeContext"
+      ],
+      "components\\panels\\AssetsPanel.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../lib/api",
+        "../../types/assets",
+        "../../types/assets",
+        "./assets/DirectoryTree",
+        "./assets/AssetComponents",
+        "./assets/AssetUploadZone",
+        "react-hot-toast",
+        "../modals/ConfirmDialog",
+        "../../utils/fileEvents"
+      ],
+      "components\\panels\\DeploymentsPanel.tsx": [
+        "react",
+        "../../lib/api",
+        "react-hot-toast",
+        "../modals/DeploymentModal"
+      ],
+      "components\\panels\\GitHubPanel.tsx": [
+        "react",
+        "../../lib/github-api",
+        "../../lib/git-api",
+        "../modals",
+        "../git/GitHistoryViewer",
+        "../../types/git",
+        "react-hot-toast"
+      ],
+      "components\\panels\\KanbanPanel.tsx": [
+        "react",
+        "@hello-pangea/dnd",
+        "../../lib/api",
+        "react-hot-toast"
+      ],
+      "components\\panels\\MarketplacePanel.tsx": [
+        "react",
+        "lucide-react"
+      ],
+      "components\\panels\\NotesPanel.tsx": [
+        "react",
+        "@tiptap/react",
+        "@tiptap/starter-kit",
+        "@tiptap/extension-placeholder",
+        "@tiptap/extension-underline",
+        "@tiptap/extension-text-align",
+        "@tiptap/extension-link",
+        "@tiptap/extension-image",
+        "@tiptap/extension-table",
+        "@tiptap/extension-table-row",
+        "@tiptap/extension-table-cell",
+        "@tiptap/extension-table-header",
+        "@tiptap/extension-task-list",
+        "@tiptap/extension-task-item",
+        "@tiptap/extension-highlight",
+        "@tiptap/extension-code-block-lowlight",
+        "lowlight",
+        "react-hot-toast",
+        "../../lib/api"
+      ],
+      "components\\panels\\SettingsPanel.tsx": [
+        "react",
+        "lucide-react",
+        "../../lib/api",
+        "react-hot-toast"
+      ],
+      "components\\panels\\TerminalPanel.tsx": [
+        "react",
+        "@xterm/xterm",
+        "@xterm/addon-fit",
+        "@xterm/addon-web-links",
+        "@xterm/addon-search",
+        "lucide-react",
+        "../../lib/api",
+        "../../theme/ThemeContext",
+        "@xterm/xterm/css/xterm.css"
+      ],
+      "components\\panels\\assets\\AssetComponents.tsx": [
+        "react",
+        "@phosphor-icons/react",
+        "../../../types/assets",
+        "../../../types/assets",
+        "react-hot-toast"
+      ],
+      "components\\panels\\assets\\AssetUploadZone.tsx": [
+        "react",
+        "react",
+        "@phosphor-icons/react",
+        "../../../types/assets"
+      ],
+      "components\\panels\\assets\\DirectoryTree.tsx": [
+        "react",
+        "@phosphor-icons/react"
+      ],
+      "components\\ui\\AgentTag.tsx": [
+        "react"
+      ],
+      "components\\ui\\Breadcrumbs.tsx": [
+        "lucide-react",
+        "react-router-dom"
+      ],
+      "components\\ui\\button.tsx": [
+        "react",
+        "@radix-ui/react-slot",
+        "class-variance-authority",
+        "@/lib/utils"
+      ],
+      "components\\ui\\Dropdown.tsx": [
+        "react"
+      ],
+      "components\\ui\\FloatingPanel.tsx": [
+        "react",
+        "../../theme/ThemeContext"
+      ],
+      "components\\ui\\FloatingSidebar.tsx": [
+        "react"
+      ],
+      "components\\ui\\GlassContainer.tsx": [
+        "react"
+      ],
+      "components\\ui\\HelpModal.tsx": [
+        "react",
+        "lucide-react"
+      ],
+      "components\\ui\\MarkerPalette.tsx": [
+        "./MarkerPill"
+      ],
+      "components\\ui\\MarkerPill.tsx": [
+        "lucide-react"
+      ],
+      "components\\ui\\MarketplaceCard.tsx": [
+        "react"
+      ],
+      "components\\ui\\MobileMenu.tsx": [
+        "react",
+        "@phosphor-icons/react"
+      ],
+      "components\\ui\\NavigationSidebar.tsx": [
+        "react",
+        "react-router-dom",
+        "../../theme/ThemeContext",
+        "./Tooltip",
+        "react-hot-toast",
+        "framer-motion",
+        "../../lib/api"
+      ],
+      "components\\ui\\ProjectCard.tsx": [
+        "react",
+        "./StatusBadge",
+        "./AgentTag"
+      ],
+      "components\\ui\\ruixen-moon-chat.tsx": [
+        "react",
+        "@/components/ui/textarea",
+        "@/components/ui/button",
+        "@/lib/utils"
+      ],
+      "components\\ui\\StatusBadge.tsx": [
+        "react"
+      ],
+      "components\\ui\\Tabs.tsx": [
+        "react"
+      ],
+      "components\\ui\\TaskProgress.tsx": [
+        "react",
+        "../../hooks/useTask",
+        "../../services/taskService"
+      ],
+      "components\\ui\\textarea.tsx": [
+        "react",
+        "@/lib/utils"
+      ],
+      "components\\ui\\Toast.tsx": [
+        "react",
+        "../../services/taskService"
+      ],
+      "components\\ui\\Tooltip.tsx": [
+        "react",
+        "react-dom",
+        "framer-motion"
+      ],
+      "hooks\\useReferralTracking.ts": [
+        "react",
+        "react-router-dom",
+        "axios"
+      ],
+      "hooks\\useTask.ts": [
+        "react",
+        "../services/taskService",
+        "../services/taskService"
+      ],
+      "hooks\\useTaskNotifications.ts": [
+        "react",
+        "react-hot-toast",
+        "../services/taskService",
+        "../services/taskService",
+        "./useTask"
+      ],
+      "lib\\api.ts": [
+        "axios",
+        "../types/agent"
+      ],
+      "lib\\git-api.ts": [
+        "./api"
+      ],
+      "lib\\github-api.ts": [
+        "./api"
+      ],
+      "lib\\utils.ts": [
+        "clsx",
+        "tailwind-merge"
+      ],
+      "pages\\AccountSettings.tsx": [
+        "react",
+        "react-router-dom",
+        "../lib/api",
+        "react-hot-toast"
+      ],
+      "pages\\AdminDashboard.tsx": [
+        "react",
+        "react-router-dom",
+        "../components/PulsingGridSpinner",
+        "react-hot-toast",
+        "../lib/api"
+      ],
+      "pages\\AuthCallback.tsx": [
+        "react",
+        "react-router-dom",
+        "../lib/github-api",
+        "../components/PulsingGridSpinner",
+        "@phosphor-icons/react",
+        "react-hot-toast"
+      ],
+      "pages\\Dashboard.tsx": [
+        "react",
+        "react-router-dom",
+        "../lib/api",
+        "../theme/ThemeContext",
+        "../components/ui",
+        "../components/modals",
+        "../components/PulsingGridSpinner",
+        "react-hot-toast"
+      ],
+      "pages\\Feedback.tsx": [
+        "react",
+        "react-router-dom",
+        "../lib/api",
+        "../theme/ThemeContext",
+        "../components/ui",
+        "../components/PulsingGridSpinner",
+        "../components/modals/CreateFeedbackModal",
+        "../components/modals/FeedbackModal",
+        "react-hot-toast"
+      ],
+      "pages\\Landing.tsx": [
+        "react",
+        "react-router-dom",
+        "react-hot-toast",
+        "../theme/ThemeContext"
+      ],
+      "pages\\Library.tsx": [
+        "react",
+        "react-router-dom",
+        "../components/PulsingGridSpinner",
+        "../components/ui",
+        "../components/modals",
+        "../components/ui/MarkerPalette",
+        "../components/ToolManagement",
+        "../components/ImageUpload",
+        "../lib/api",
+        "react-hot-toast",
+        "../theme/ThemeContext"
+      ],
+      "pages\\Login.tsx": [
+        "react",
+        "react-router-dom",
+        "../lib/api",
+        "../components/PulsingGridSpinner",
+        "../components/MiniAsteroids",
+        "../components/Preloader",
+        "react-hot-toast"
+      ],
+      "pages\\Logout.tsx": [
+        "react",
+        "react-router-dom",
+        "react-hot-toast"
+      ],
+      "pages\\Marketplace.tsx": [
+        "react",
+        "react-router-dom",
+        "../components/PulsingGridSpinner",
+        "../components/ui",
+        "../lib/api",
+        "react-hot-toast",
+        "../theme/ThemeContext"
+      ],
+      "pages\\MarketplaceSuccess.tsx": [
+        "react",
+        "react-router-dom",
+        "@phosphor-icons/react",
+        "../lib/api"
+      ],
+      "pages\\NewLandingPage.tsx": [
+        "react",
+        "react-router-dom",
+        "react-hot-toast",
+        "../lib/utils"
+      ],
+      "pages\\OAuthLoginCallback.tsx": [
+        "react",
+        "react-router-dom",
+        "../components/PulsingGridSpinner",
+        "@phosphor-icons/react",
+        "react-hot-toast"
+      ],
+      "pages\\Project.tsx": [
+        "react",
+        "react-router-dom",
+        "../components/ui/FloatingPanel",
+        "../components/ui/MobileMenu",
+        "../components/ui/Tooltip",
+        "../components/ui/Breadcrumbs",
+        "../components/chat/ChatContainer",
+        "../components/PulsingGridSpinner",
+        "../components/MobileWarning",
+        "../components/BrowserPreview",
+        "../components/DiscordSupport",
+        "../components/DeploymentsDropdown",
+        "../components/modals/DeploymentModal",
+        "../components/CodeEditor",
+        "../lib/api",
+        "../theme/ThemeContext",
+        "react-hot-toast",
+        "../utils/fileEvents",
+        "framer-motion"
+      ],
+      "pages\\ProjectGraphCanvas.tsx": [
+        "react",
+        "react-router-dom",
+        "framer-motion",
+        "../components/ContainerNode",
+        "../components/MarketplaceSidebar",
+        "../components/ContainerPropertiesPanel",
+        "../components/ui/Breadcrumbs",
+        "../components/ui/Tooltip",
+        "../components/MobileWarning",
+        "../components/ui/MobileMenu",
+        "../components/chat/ChatContainer",
+        "../components/ui/FloatingPanel",
+        "../components/panels",
+        "../components/DiscordSupport",
+        "../components/CodeEditor",
+        "../lib/api",
+        "../theme/ThemeContext",
+        "../utils/fileEvents",
+        "react-hot-toast",
+        "@xyflow/react/dist/style.css"
+      ],
+      "pages\\ProjectOverview.tsx": [
+        "react",
+        "react-router-dom",
+        "../components/ui",
+        "../components/ui/Tabs",
+        "../theme/ThemeContext",
+        "../lib/api",
+        "react-hot-toast"
+      ],
+      "pages\\Referrals.tsx": [
+        "react",
+        "axios"
+      ],
+      "pages\\Register.tsx": [
+        "react",
+        "react-router-dom",
+        "../lib/api",
+        "../components/PulsingGridSpinner",
+        "../components/MiniAsteroids",
+        "react-hot-toast"
+      ],
+      "pages\\Settings.tsx": [
+        "react",
+        "react-router-dom",
+        "../theme/ThemeContext",
+        "../lib/api",
+        "react-hot-toast",
+        "../components/PulsingGridSpinner"
+      ],
+      "theme\\ThemeContext.tsx": [
+        "react"
+      ]
+    }
+  }
+}
