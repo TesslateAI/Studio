@@ -355,35 +355,25 @@ class ShellSessionManager:
             # K8s pod name format
             return get_container_name(user_id, project_id, mode="kubernetes")
         else:
-            # Docker container name format - use slug from container manager
-            from ..dev_server_manager import get_container_manager
-            manager = get_container_manager()
-            project_key = f"user-{user_id}-project-{project_id}"
-            container_info = manager.containers.get(project_key)
-
-            if container_info:
-                return container_info["container_name"]
-            else:
-                # Fallback: try to find container by labels
-                from ..utils.async_subprocess import run_async
-                result = await run_async(
-                    ["docker", "ps", "--filter", f"label=com.tesslate.devserver.project_id={project_id}",
-                     "--filter", f"label=com.tesslate.devserver.user_id={user_id}", "--format", "{{.Names}}"],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip().split('\n')[0]
-                else:
-                    # Last resort fallback (should not happen in production)
-                    return get_container_name(user_id, project_id, mode="docker")
+            # Docker multi-container mode - TODO: determine which container to use for shell
+            # For now, raise error as shell sessions need updating for multi-container
+            raise NotImplementedError(
+                "Shell sessions not yet implemented for multi-container Docker projects. "
+                "Please use Kubernetes mode or update shell_session_manager for multi-container support."
+            )
 
     async def _is_container_running(self, user_id: UUID, project_id: str, project_slug: str = None) -> bool:
         """Check if container/pod is running."""
-        from ..dev_server_manager import get_container_manager
-
-        manager = get_container_manager()
-        status = await manager.get_container_status(str(project_id), user_id, project_slug)
-        return status.get("running", False)
+        if settings.deployment_mode == "kubernetes":
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+            status = await k8s_manager.get_container_status(str(project_id), user_id, project_slug)
+            return status.get("running", False)
+        else:
+            # Docker multi-container mode - TODO: implement container status check
+            raise NotImplementedError(
+                "Container status check not yet implemented for multi-container Docker projects."
+            )
 
     async def _get_user_active_sessions(
         self,

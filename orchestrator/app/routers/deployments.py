@@ -373,51 +373,17 @@ async def deploy_project(
             deployment.logs.append(f"Container {build_container_name} is running")
             await db.commit()
         else:
-            # Single-container project - use legacy container management
-            from ..dev_server_manager import get_container_manager
-            container_manager = get_container_manager()
-
-            deployment.logs.append("Ensuring development container is running")
+            # No containers found - all projects must use multi-container system
+            error_msg = "Project has no containers. Please add containers to your project using the graph canvas."
+            logger.error(f"Deployment failed: {error_msg}")
+            deployment.status = "failed"
+            deployment.error = error_msg
+            deployment.completed_at = datetime.utcnow()
             await db.commit()
-
-            try:
-                status_info = await container_manager.get_container_status(
-                    project_id=str(project.id),
-                    user_id=current_user.id
-                )
-
-                is_running = status_info.get("running", False) if isinstance(status_info, dict) else False
-
-                if not is_running:
-                    deployment.logs.append("Creating/starting development container")
-                    await db.commit()
-
-                    # Get project path
-                    project_path = builder._get_project_path(str(current_user.id), str(project.id))
-
-                    # Start the container (this will create it if it doesn't exist)
-                    url = await container_manager.start_container(
-                        project_path=project_path,
-                        project_id=str(project.id),
-                        user_id=current_user.id,
-                        project_slug=project.slug
-                    )
-                    deployment.logs.append(f"Development container started: {url}")
-                    await db.commit()
-                else:
-                    deployment.logs.append("Development container already running")
-                    await db.commit()
-            except Exception as e:
-                error_msg = f"Failed to start container: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                deployment.status = "failed"
-                deployment.error = error_msg
-                deployment.completed_at = datetime.utcnow()
-                await db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=error_msg
-                )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
 
         # 8. Run build (skip if source mode - provider will build)
         use_source_deployment = (deployment_mode == "source")

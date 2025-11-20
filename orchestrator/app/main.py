@@ -213,39 +213,18 @@ async def shell_session_cleanup_loop():
 
 
 async def container_cleanup_loop():
-    """Background task to clean up idle project containers."""
+    """
+    Background task to clean up idle project containers.
+
+    NOTE: Legacy single-container cleanup disabled. Multi-container projects
+    are managed via docker-compose and don't need this cleanup task.
+    """
     import asyncio
-    from .dev_server_manager import get_container_manager
+    logger.info("Container cleanup task disabled - legacy single-container system removed")
 
-    logger.info("Container cleanup task started - two-tier cleanup system:")
-    logger.info(f"  Tier 1: Pause containers idle for {settings.container_cleanup_tier1_idle_minutes}+ minutes")
-    logger.info(f"  Tier 2: Remove containers paused for {settings.container_cleanup_tier2_paused_hours}+ hours")
-
-    error_count = 0
-    max_consecutive_errors = 5
-
+    # Keep the task alive but do nothing
     while True:
-        try:
-            container_manager = get_container_manager()
-            # Two-tier cleanup: pause idle containers, remove long-paused ones
-            cleaned = await container_manager.cleanup_idle_environments(idle_timeout_minutes=settings.container_cleanup_tier1_idle_minutes)
-            if cleaned:
-                logger.info(f"Cleanup processed {len(cleaned)} containers: {', '.join(cleaned)}")
-
-            # Reset error count on success
-            error_count = 0
-
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Container cleanup error ({error_count}/{max_consecutive_errors}): {e}", exc_info=True)
-
-            # If too many consecutive errors, use exponential backoff
-            if error_count >= max_consecutive_errors:
-                backoff_time = min(300, 30 * (2 ** (error_count - max_consecutive_errors)))
-                logger.warning(f"Too many cleanup errors, backing off for {backoff_time}s")
-                await asyncio.sleep(backoff_time)
-                continue
-
+        await asyncio.sleep(3600)  # Sleep for 1 hour
         # Run cleanup at configured interval
         await asyncio.sleep(settings.container_cleanup_interval_minutes * 60)
 

@@ -69,14 +69,10 @@ class GitManager:
                     timeout=timeout
                 )
             else:
-                # Docker mode
-                from ..docker_container_manager import DockerContainerManager
-                docker_manager: DockerContainerManager = self.container_manager
-                output = await docker_manager.execute_command_in_container(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=command,
-                    timeout=timeout
+                # Docker mode - TODO: Update for multi-container projects
+                raise NotImplementedError(
+                    "Git operations not yet implemented for multi-container Docker projects. "
+                    "Please use Kubernetes mode or update git_manager for multi-container support."
                 )
 
             return output.strip()
@@ -229,13 +225,9 @@ class GitManager:
                     timeout=60
                 )
             else:
-                from ..docker_container_manager import DockerContainerManager
-                docker_manager: DockerContainerManager = self.container_manager
-                await docker_manager.execute_command_in_container(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=move_command,
-                    timeout=60
+                # Docker mode - TODO: Update for multi-container projects
+                raise NotImplementedError(
+                    "Git operations not yet implemented for multi-container Docker projects."
                 )
 
             logger.info(f"[GIT] Repository files moved to project directory")
