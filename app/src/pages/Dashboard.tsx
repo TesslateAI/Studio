@@ -98,11 +98,11 @@ export default function Dashboard() {
     const creatingToast = toast.loading('Creating project...');
 
     try {
-      // Create empty project (no base)
+      // Create empty project (containers with marketplace bases are added later in ProjectGraphCanvas)
       const response = await projectsApi.create(
         projectName,
         '',
-        'base',
+        'template',  // Empty project - no base needed at project level
         undefined,
         'main',
         undefined

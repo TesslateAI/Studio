@@ -1,6 +1,13 @@
 # RBAC Configuration for Development Environment Management
-# Grants the backend service the minimal required permissions to manage
+# Grants the backend service the permissions required to manage
 # Kubernetes resources for user development environments across all namespaces
+#
+# This includes:
+# - Namespace-per-project isolation (create/delete namespaces)
+# - NetworkPolicy creation for project isolation
+# - PVC management for project storage
+# - Deployment/Service/Ingress for dev containers
+# - Pod exec for file operations and shell sessions
 
 ---
 # Service Account for the backend pods
@@ -22,54 +29,53 @@ metadata:
     app: tesslate-backend
     component: rbac
 rules:
-# Namespace permissions - for discovery and validation (read-only)
+# ====== NAMESPACE MANAGEMENT (for namespace-per-project isolation) ======
 - apiGroups: [""]
   resources: ["namespaces"]
-  verbs: ["get", "list"]
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
-# Deployment permissions - for managing dev environment containers
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
-
-# Service permissions - for creating internal services
+# ====== CORE RESOURCES (pods, services, PVCs, secrets, configmaps) ======
 - apiGroups: [""]
-  resources: ["services"]
-  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
+  resources:
+    - pods
+    - pods/log
+    - pods/exec
+    - services
+    - persistentvolumeclaims
+    - secrets
+    - configmaps
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
-# Ingress permissions - for creating external access routes
+# ====== APP RESOURCES (deployments, replicasets, statefulsets) ======
+- apiGroups: ["apps"]
+  resources:
+    - deployments
+    - replicasets
+    - statefulsets
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+
+# ====== NETWORKING (ingresses, networkpolicies) ======
 - apiGroups: ["networking.k8s.io"]
-  resources: ["ingresses"]
-  verbs: ["create", "get", "list", "patch", "delete", "watch", "update"]
+  resources:
+    - ingresses
+    - networkpolicies
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
-# Pod permissions - for status checking and monitoring (read-only)
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
+# ====== BATCH RESOURCES (for future build pipeline/jobs) ======
+- apiGroups: ["batch"]
+  resources:
+    - jobs
+    - cronjobs
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
 
-# Pod exec - for executing commands in pods (required for file operations)
-- apiGroups: [""]
-  resources: ["pods/exec"]
-  verbs: ["create", "get"]
-
-# Pod logs - for debugging (read-only)
-- apiGroups: [""]
-  resources: ["pods/log"]
-  verbs: ["get", "list"]
-
-# ReplicaSet permissions - for deployment status checking (read-only)
-- apiGroups: ["apps"]
-  resources: ["replicasets"]
-  verbs: ["get", "list", "watch"]
-
-# Event permissions - for troubleshooting and monitoring (read-only)
+# ====== EVENTS (for troubleshooting and monitoring) ======
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]
 
 ---
 # ClusterRoleBinding - grants cluster-wide permissions to the backend service account
-# This allows the backend to manage resources in any namespace
+# This allows the backend to manage resources in any namespace (required for namespace-per-project)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

@@ -23,6 +23,9 @@ async def shell_open_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     user_id = context["user_id"]
     db = context["db"]
 
+    # Get container info for multi-container projects
+    container_name = context.get("container_name")
+
     session_manager = get_shell_session_manager()
 
     try:
@@ -31,6 +34,7 @@ async def shell_open_executor(params: Dict[str, Any], context: Dict[str, Any]) -
             project_id=project_id,
             db=db,
             command=command,
+            container_name_hint=container_name,
         )
 
         session_id = session_info["session_id"]

@@ -22,7 +22,7 @@ spec:
       - name: docr-secret
       containers:
       - name: frontend
-        image: registry.digitalocean.com/finetune/tesslate-frontend:latest
+        image: registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-frontend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 80

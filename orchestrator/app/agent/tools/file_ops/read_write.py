@@ -67,10 +67,17 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
         # Kubernetes mode: Read from pod
         from ....k8s_client import get_k8s_manager
         k8s_manager = get_k8s_manager()
+
+        # Get container info for multi-container projects
+        container_name = context.get("container_name")
+        project_slug = context.get("project_slug")
+
         content = await k8s_manager.read_file_from_pod(
             user_id=user_id,
             project_id=project_id,
-            file_path=file_path
+            file_path=file_path,
+            container_name=container_name,
+            project_slug=project_slug
         )
 
         if content is None:
@@ -231,11 +238,18 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         # Kubernetes mode: Write to pod
         from ....k8s_client import get_k8s_manager
         k8s_manager = get_k8s_manager()
+
+        # Get container info for multi-container projects
+        container_name = context.get("container_name")
+        project_slug = context.get("project_slug")
+
         success = await k8s_manager.write_file_to_pod(
             user_id=user_id,
             project_id=project_id,
             file_path=file_path,
-            content=content
+            content=content,
+            container_name=container_name,
+            project_slug=project_slug
         )
 
         if not success:

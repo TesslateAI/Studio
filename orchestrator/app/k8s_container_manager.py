@@ -5,13 +5,12 @@ from typing import Dict, Optional, List, Any
 from uuid import UUID
 from .config import get_settings
 from .k8s_client import get_k8s_manager
-from .base_container_manager import BaseContainerManager
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class KubernetesContainerManager(BaseContainerManager):
+class KubernetesContainerManager:
     """
     Kubernetes-native development environment manager for multi-user, multi-project environments.
     - Uses Kubernetes Deployments, Services, and Ingresses for isolation
@@ -333,19 +332,119 @@ class KubernetesContainerManager(BaseContainerManager):
 
     async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> List[str]:
         """
-        Two-tier cleanup system for idle K8s environments:
+        Cleanup idle K8s environments based on storage mode:
+
+        S3 Storage Mode (hibernation):
+        - Delete idle environments after configured minutes (triggers S3 upload via preStop hook)
+        - No scaling to 0 (environments are fully hibernated to S3)
+
+        Persistent PVC Mode (two-tier):
         - Tier 1 (5 minutes idle): Scale to 0 replicas (pause)
         - Tier 2 (24 hours paused): Fully delete deployment/service/ingress
 
         Args:
-            idle_timeout_minutes: Minutes of inactivity before scaling to 0 (default: 5 for tier 1)
+            idle_timeout_minutes: Minutes of inactivity before action (default: 30 for S3 mode, 5 for persistent mode)
 
         Returns:
             List of project keys that were scaled down or removed
         """
-        logger.info("[CLEANUP] Two-tier cleanup starting...")
-        logger.info(f"[CLEANUP] Tier 1: Scale to 0 replicas after {idle_timeout_minutes} minutes idle")
-        logger.info("[CLEANUP] Tier 2: Delete resources after 24 hours at 0 replicas")
+        settings = get_settings()
+
+        # S3 Storage Mode: Simple hibernation (delete after idle timeout)
+        if settings.k8s_use_s3_storage:
+            return await self._cleanup_s3_mode(idle_timeout_minutes)
+
+        # Persistent PVC Mode: Two-tier cleanup (scale to 0, then delete)
+        return await self._cleanup_persistent_mode(idle_timeout_minutes)
+
+    async def _cleanup_s3_mode(self, idle_timeout_minutes: int) -> List[str]:
+        """
+        S3 storage mode cleanup: Delete idle environments (triggers hibernation to S3).
+
+        Args:
+            idle_timeout_minutes: Minutes of inactivity before hibernation
+
+        Returns:
+            List of project keys that were hibernated
+        """
+        logger.info("[CLEANUP:S3] S3 Mode cleanup starting...")
+        logger.info(f"[CLEANUP:S3] Hibernate after {idle_timeout_minutes} minutes idle")
+
+        hibernated = []
+        current_time = time.time()
+        idle_timeout_seconds = idle_timeout_minutes * 60
+
+        try:
+            # Get all running environments from Kubernetes
+            k8s_environments = await get_k8s_manager().list_dev_environments()
+
+            for k8s_env in k8s_environments:
+                user_id = k8s_env["user_id"]
+                project_id = k8s_env["project_id"]
+                project_key = self._get_project_key(user_id, project_id)
+
+                # Check last activity time
+                last_activity = self.activity_tracker.get(project_key, 0)
+                idle_time = current_time - last_activity if last_activity > 0 else float('inf')
+                idle_minutes = idle_time / 60
+
+                # If no activity tracked yet, use a conservative estimate
+                if last_activity == 0:
+                    creation_time = k8s_env.get("creation_time")
+                    if creation_time:
+                        idle_time = current_time - creation_time
+                        idle_minutes = idle_time / 60
+
+                # Check if environment should be hibernated
+                if idle_time > idle_timeout_seconds:
+                    logger.info(
+                        f"[CLEANUP:S3] Hibernating {project_key} "
+                        f"(idle for {idle_minutes:.1f} minutes)"
+                    )
+
+                    try:
+                        # Delete environment (triggers preStop hook → S3 upload)
+                        await self.stop_container(project_id, user_id)
+
+                        # Remove from active environments
+                        self.environments.pop(project_key, None)
+                        self.activity_tracker.pop(project_key, None)
+
+                        hibernated.append(project_key)
+
+                        # TODO: Update DB status to 'hibernated' (requires database migration)
+                        # await db.execute(
+                        #     update(Project)
+                        #     .where(Project.id == project_id)
+                        #     .values(status="hibernated", hibernated_at=datetime.utcnow())
+                        # )
+
+                        logger.info(f"[CLEANUP:S3] ✅ Hibernated {project_key}")
+
+                    except Exception as e:
+                        logger.error(f"[CLEANUP:S3] ❌ Failed to hibernate {project_key}: {e}")
+                else:
+                    logger.debug(f"[CLEANUP:S3] {project_key} is active (idle for {idle_minutes:.1f} minutes)")
+
+        except Exception as e:
+            logger.error(f"[CLEANUP:S3] ❌ Unexpected error during cleanup: {e}")
+
+        logger.info(f"[CLEANUP:S3] ✅ Cleanup completed: Hibernated {len(hibernated)} environments")
+        return hibernated
+
+    async def _cleanup_persistent_mode(self, idle_timeout_minutes: int) -> List[str]:
+        """
+        Persistent PVC mode cleanup: Two-tier system (scale to 0, then delete).
+
+        Args:
+            idle_timeout_minutes: Minutes of inactivity before scaling to 0
+
+        Returns:
+            List of project keys that were scaled down or removed
+        """
+        logger.info("[CLEANUP:PERSISTENT] Persistent mode cleanup starting...")
+        logger.info(f"[CLEANUP:PERSISTENT] Tier 1: Scale to 0 replicas after {idle_timeout_minutes} minutes idle")
+        logger.info("[CLEANUP:PERSISTENT] Tier 2: Delete resources after 24 hours at 0 replicas")
 
         scaled_down = []
         removed = []

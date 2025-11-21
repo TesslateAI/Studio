@@ -216,7 +216,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket connection error: {e}")
     finally:
-        if 'user' in locals():
+        if 'user' in locals() and user is not None:
             manager.disconnect(websocket, user.id)
 
 

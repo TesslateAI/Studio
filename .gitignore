@@ -144,6 +144,8 @@ registry.crt
 **/docr-secret.yaml
 k8s/manifests/**/secrets.yaml
 k8s/manifests/security/app-secrets.yaml
+k8s/manifests/security/s3-credentials.yaml
+k8s/manifests/secrets/s3-credentials.yaml
 k8s/manifests/database/postgres-secret.yaml
 k8s/.env
 

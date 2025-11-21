@@ -16,15 +16,15 @@ import json
 from typing import Dict, Optional, Any, List
 from uuid import UUID
 from .utils.resource_naming import get_container_name, get_project_path
+from .k8s_client_helpers import (
+    create_s3_init_container_manifest,
+    create_dehydration_lifecycle_hook,
+    create_dynamic_pvc_manifest,
+    create_deployment_manifest_s3
+)
+from .config import get_settings
 
 logger = logging.getLogger(__name__)
-
-# Configuration constants
-# Custom dev server image with pre-installed dependencies for fast startup
-DEV_CONTAINER_IMAGE = "registry.digitalocean.com/finetune/tesslate-dev-server:latest"
-IMAGE_PULL_SECRET = "docr-secret"  # Required for private DigitalOcean registry
-DEFAULT_NAMESPACE = "tesslate"
-USER_ENVIRONMENTS_NAMESPACE = "tesslate-user-environments"
 
 
 class KubernetesManager:
@@ -37,6 +37,9 @@ class KubernetesManager:
 
     def __init__(self):
         """Initialize Kubernetes client with in-cluster or kubeconfig."""
+        # Load settings first
+        self.settings = get_settings()
+
         try:
             # Try in-cluster config first (for production)
             config.load_incluster_config()
@@ -54,40 +57,264 @@ class KubernetesManager:
         self.apps_v1 = client.AppsV1Api()
         self.core_v1 = client.CoreV1Api()
         self.networking_v1 = client.NetworkingV1Api()
-        self.namespace = os.getenv("KUBERNETES_NAMESPACE", DEFAULT_NAMESPACE)
-        self.user_namespace = USER_ENVIRONMENTS_NAMESPACE
+
+        # Use centralized config for namespaces
+        self.namespace = os.getenv("KUBERNETES_NAMESPACE", self.settings.k8s_default_namespace)
+        self.user_namespace = self.settings.k8s_user_environments_namespace
 
         logger.info(f"Kubernetes client initialized - Main namespace: {self.namespace}, User environments: {self.user_namespace}")
 
-    def _generate_resource_names(self, user_id: UUID, project_id: str, project_slug: str = None) -> Dict[str, str]:
+    async def _create_namespace_if_not_exists(self, namespace: str, project_id: str, user_id: UUID) -> None:
         """
-        Generate consistent resource names for a user's project.
+        Create a Kubernetes namespace if it doesn't exist.
+
+        Args:
+            namespace: Namespace name
+            project_id: Project ID (for labels)
+            user_id: User ID (for labels)
+        """
+        try:
+            await asyncio.to_thread(
+                self.core_v1.read_namespace,
+                name=namespace
+            )
+            logger.debug(f"[K8S] Namespace {namespace} already exists")
+        except ApiException as e:
+            if e.status == 404:
+                # Namespace doesn't exist, create it
+                namespace_manifest = client.V1Namespace(
+                    metadata=client.V1ObjectMeta(
+                        name=namespace,
+                        labels={
+                            "app": "tesslate",
+                            "managed-by": "tesslate-backend",
+                            "project-id": project_id,
+                            "user-id": str(user_id)
+                        }
+                    )
+                )
+                await asyncio.to_thread(
+                    self.core_v1.create_namespace,
+                    body=namespace_manifest
+                )
+                logger.info(f"[K8S] ✅ Created namespace: {namespace}")
+            else:
+                raise
+
+    async def _create_network_policy(self, namespace: str, project_id: str) -> None:
+        """
+        Create NetworkPolicy for project isolation.
+
+        This policy:
+        - Allows all traffic within the namespace (pod-to-pod)
+        - Allows ingress from nginx-ingress namespace
+        - Allows egress to internet (for npm install, etc.)
+        - Denies cross-namespace traffic by default
+
+        Args:
+            namespace: Project namespace
+            project_id: Project ID (for labels)
+        """
+        from .config import get_settings
+        settings = get_settings()
+
+        if not settings.k8s_enable_network_policies:
+            logger.debug(f"[K8S] NetworkPolicy creation disabled, skipping")
+            return
+
+        policy_name = "project-isolation"
+
+        # Check if policy already exists
+        try:
+            await asyncio.to_thread(
+                self.networking_v1.read_namespaced_network_policy,
+                name=policy_name,
+                namespace=namespace
+            )
+            logger.debug(f"[K8S] NetworkPolicy {policy_name} already exists in {namespace}")
+            return
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+        # Create NetworkPolicy manifest
+        network_policy = client.V1NetworkPolicy(
+            metadata=client.V1ObjectMeta(
+                name=policy_name,
+                namespace=namespace,
+                labels={
+                    "app": "tesslate",
+                    "managed-by": "tesslate-backend",
+                    "project-id": project_id
+                }
+            ),
+            spec=client.V1NetworkPolicySpec(
+                # Apply to all pods in this namespace
+                pod_selector=client.V1LabelSelector(match_labels={}),
+                policy_types=["Ingress", "Egress"],
+                ingress=[
+                    # Allow traffic from pods in the SAME namespace
+                    client.V1NetworkPolicyIngressRule(
+                        _from=[
+                            client.V1NetworkPolicyPeer(
+                                pod_selector=client.V1LabelSelector(match_labels={})
+                            )
+                        ]
+                    ),
+                    # Allow traffic from ingress-nginx namespace
+                    client.V1NetworkPolicyIngressRule(
+                        _from=[
+                            client.V1NetworkPolicyPeer(
+                                namespace_selector=client.V1LabelSelector(
+                                    match_labels={
+                                        "kubernetes.io/metadata.name": "ingress-nginx"
+                                    }
+                                )
+                            )
+                        ]
+                    )
+                ],
+                egress=[
+                    # Allow traffic to pods in the SAME namespace
+                    client.V1NetworkPolicyEgressRule(
+                        to=[
+                            client.V1NetworkPolicyPeer(
+                                pod_selector=client.V1LabelSelector(match_labels={})
+                            )
+                        ]
+                    ),
+                    # Allow DNS queries (kube-system namespace, port 53)
+                    client.V1NetworkPolicyEgressRule(
+                        to=[
+                            client.V1NetworkPolicyPeer(
+                                namespace_selector=client.V1LabelSelector(
+                                    match_labels={
+                                        "kubernetes.io/metadata.name": "kube-system"
+                                    }
+                                )
+                            )
+                        ],
+                        ports=[
+                            client.V1NetworkPolicyPort(port=53, protocol="UDP"),
+                            client.V1NetworkPolicyPort(port=53, protocol="TCP")
+                        ]
+                    ),
+                    # Allow all egress to internet (for npm install, pip install, etc.)
+                    # This allows CIDR 0.0.0.0/0 but NOT other namespaces
+                    client.V1NetworkPolicyEgressRule(
+                        to=[
+                            # Allow all external IPs
+                            client.V1NetworkPolicyPeer(
+                                ip_block=client.V1IPBlock(
+                                    cidr="0.0.0.0/0",
+                                    _except=[
+                                        # Block RFC1918 private networks (internal cluster traffic)
+                                        "10.0.0.0/8",
+                                        "172.16.0.0/12",
+                                        "192.168.0.0/16"
+                                    ]
+                                )
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
+
+        await asyncio.to_thread(
+            self.networking_v1.create_namespaced_network_policy,
+            namespace=namespace,
+            body=network_policy
+        )
+        logger.info(f"[K8S] ✅ Created NetworkPolicy: {policy_name} in {namespace}")
+
+    def _get_project_namespace(self, project_id: str) -> str:
+        """
+        Get the namespace name for a project.
+
+        Args:
+            project_id: Project ID (UUID as string)
+
+        Returns:
+            Namespace name (e.g., "proj-123e4567-e89b-12d3-a456-426614174000")
+        """
+        from .config import get_settings
+        settings = get_settings()
+
+        if settings.k8s_namespace_per_project:
+            # Namespace-per-project mode: proj-{uuid}
+            # K8s namespace names must be DNS-1123 compliant (lowercase, alphanumeric, hyphens)
+            return f"proj-{project_id}"
+        else:
+            # Legacy mode: shared namespace
+            return self.user_namespace
+
+    def _generate_resource_names(self, user_id: UUID, project_id: str, project_slug: str = None, container_name: str = None) -> Dict[str, str]:
+        """
+        Generate consistent resource names for a user's project/container.
+
+        Kubernetes naming constraints:
+        - Labels: max 63 chars, alphanumeric + '-' + '_' + '.'
+        - Names: max 253 chars, DNS-1123 compliant (lowercase alphanumeric + '-')
 
         Args:
             user_id: User ID (for internal resource naming)
             project_id: Project ID (for internal resource naming)
             project_slug: Project slug for hostname (e.g., "my-app-k3x8n2")
+            container_name: Container name for multi-container projects (optional)
 
         Returns:
-            Dictionary with namespace, deployment, service, ingress, and hostname
+            Dictionary with namespace, deployment, service, ingress, hostname, and safe_container_name
         """
         from .config import get_settings
         settings = get_settings()
 
-        # Internal resource names still use IDs for uniqueness
-        base_name = get_container_name(user_id, project_id, mode="kubernetes")
+        # Determine namespace (project-specific or shared)
+        namespace = self._get_project_namespace(project_id)
+
+        # Use shortened UUIDs to keep names under 63 chars
+        user_short = str(user_id)[:8]
+        project_short = str(project_id)[:8]
+
+        # Internal resource names - use shortened IDs to stay under 63 char limit
+        if container_name:
+            # Sanitize container name for DNS compliance (lowercase, alphanumeric + hyphens only)
+            safe_container = container_name.lower()
+            # Replace common separators with hyphens
+            safe_container = safe_container.replace('_', '-').replace(' ', '-').replace('.', '-')
+            # Remove any non-alphanumeric characters except hyphens
+            safe_container = ''.join(c for c in safe_container if c.isalnum() or c == '-')
+            # Remove consecutive hyphens and trim
+            while '--' in safe_container:
+                safe_container = safe_container.replace('--', '-')
+            safe_container = safe_container.strip('-')
+            # Truncate if still too long (leave room for prefix: "dev-{8}-{8}-" = 22 chars)
+            max_container_len = 63 - 22
+            safe_container = safe_container[:max_container_len]
+
+            # Format: dev-{user8}-{proj8}-{container}
+            base_name = f"dev-{user_short}-{project_short}-{safe_container}"
+        else:
+            # Single container: use project-based name
+            base_name = f"dev-{user_short}-{project_short}"
 
         # Hostname uses project slug for clean URLs (fallback to ID-based for backwards compat)
         if not project_slug:
-            project_slug = f"{user_id}-{project_id}"
-        hostname = f"{project_slug}.{settings.app_domain}"
+            project_slug = f"{user_short}-{project_short}"
+
+        # For multi-container, append container name to hostname
+        if container_name:
+            hostname = f"{project_slug}-{safe_container}.{settings.app_domain}"
+        else:
+            hostname = f"{project_slug}.{settings.app_domain}"
 
         return {
-            "namespace": self.user_namespace,
+            "namespace": namespace,
             "deployment": base_name,
-            "service": f"{base_name}-service",
-            "ingress": f"{base_name}-ingress",
-            "hostname": hostname
+            "service": f"{base_name}-svc",
+            "ingress": f"{base_name}-ing",
+            "hostname": hostname,
+            "safe_container_name": safe_container if container_name else base_name
         }
 
     def _create_deployment_manifest(
@@ -149,13 +376,13 @@ class KubernetesManager:
                         ),
                         # Include image pull secrets for private registry access
                         image_pull_secrets=[
-                            client.V1LocalObjectReference(name=IMAGE_PULL_SECRET)
-                        ] if IMAGE_PULL_SECRET else None,
+                            client.V1LocalObjectReference(name=self.settings.k8s_image_pull_secret)
+                        ] if self.settings.k8s_image_pull_secret else None,
                         # No init container needed - template is baked into dev server image
                         containers=[
                             client.V1Container(
                                 name="dev-server",
-                                image=DEV_CONTAINER_IMAGE,
+                                image=self.settings.k8s_devserver_image,
                                 ports=[client.V1ContainerPort(container_port=5173)],
                                 working_dir="/app",
                                 command=["/bin/sh"],
@@ -292,7 +519,7 @@ VITECONFIG
                             client.V1Volume(
                                 name="projects-storage",
                                 persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
-                                    claim_name="tesslate-projects-pvc"
+                                    claim_name=self.settings.k8s_projects_pvc_name
                                 )
                             )
                         ]
@@ -334,13 +561,16 @@ VITECONFIG
         namespace: str
     ) -> client.V1Ingress:
         """Create an ingress manifest for dev environment with NGINX external authentication."""
+        # Get base URL from centralized config
+        app_base_url = self.settings.get_app_base_url
+
         return client.V1Ingress(
             metadata=client.V1ObjectMeta(
                 name=ingress_name,
                 annotations={
                     # ===== AUTHENTICATION & AUTHORIZATION =====
                     # External authentication via backend API to verify user ownership
-                    "nginx.ingress.kubernetes.io/auth-url": "https://studio-test.tesslate.com/api/auth/verify-access",
+                    "nginx.ingress.kubernetes.io/auth-url": f"{app_base_url}/api/auth/verify-access",
                     "nginx.ingress.kubernetes.io/auth-method": "GET",
                     "nginx.ingress.kubernetes.io/auth-response-headers": "X-User-ID",
 
@@ -374,9 +604,9 @@ VITECONFIG
                     "nginx.ingress.kubernetes.io/auth-cache-key": "$http_authorization",
                     "nginx.ingress.kubernetes.io/auth-cache-duration": "200 202 5m",
 
-                    # SSL configuration
+                    # SSL configuration (ssl-redirect=false to avoid loops with Cloudflare Flexible SSL)
                     "cert-manager.io/cluster-issuer": "letsencrypt-prod",
-                    "nginx.ingress.kubernetes.io/ssl-redirect": "true",
+                    "nginx.ingress.kubernetes.io/ssl-redirect": "false",
 
                     # Rate limiting to prevent abuse
                     "nginx.ingress.kubernetes.io/limit-rps": "20",
@@ -394,7 +624,7 @@ VITECONFIG
 
                     # CORS headers to allow iframe embedding from main app
                     "nginx.ingress.kubernetes.io/enable-cors": "true",
-                    "nginx.ingress.kubernetes.io/cors-allow-origin": "https://studio-test.tesslate.com",
+                    "nginx.ingress.kubernetes.io/cors-allow-origin": app_base_url,
                     "nginx.ingress.kubernetes.io/cors-allow-credentials": "true",
                     "nginx.ingress.kubernetes.io/cors-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
                     "nginx.ingress.kubernetes.io/cors-allow-headers": "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization",
@@ -402,18 +632,18 @@ VITECONFIG
                     # Security headers
                     "nginx.ingress.kubernetes.io/server-snippet": f"""
                         add_header X-Content-Type-Options "nosniff" always;
-                        add_header X-Frame-Options "ALLOW-FROM https://studio-test.tesslate.com" always;
+                        add_header X-Frame-Options "ALLOW-FROM {app_base_url}" always;
                         add_header X-XSS-Protection "1; mode=block" always;
                         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
                     """
                 }
             ),
             spec=client.V1IngressSpec(
-                ingress_class_name="nginx",
+                ingress_class_name=self.settings.k8s_ingress_class,
                 tls=[
                     client.V1IngressTLS(
                         hosts=[hostname],
-                        secret_name="tesslate-wildcard-tls"
+                        secret_name=self.settings.k8s_wildcard_tls_secret
                     )
                 ],
                 rules=[
@@ -460,23 +690,68 @@ VITECONFIG
         Raises:
             RuntimeError: If Kubernetes resource creation fails
         """
+        settings = get_settings()
         names = self._generate_resource_names(user_id, project_id, project_slug)
         namespace = names["namespace"]
 
         logger.info(f"[K8S] Creating dev environment for user {user_id}, project {project_id}")
         logger.info(f"[K8S] Namespace: {namespace}")
         logger.info(f"[K8S] Hostname: {names['hostname']}")
+        logger.info(f"[K8S] S3 Storage Mode: {settings.k8s_use_s3_storage}")
 
         try:
+            # Phase 1: Create namespace and NetworkPolicy (if using namespace-per-project mode)
+            if settings.k8s_namespace_per_project:
+                logger.info(f"[K8S] Creating project namespace: {namespace}")
+                await self._create_namespace_if_not_exists(namespace, project_id, user_id)
+                await self._create_network_policy(namespace, project_id)
+
             # Clean up any existing resources first
             logger.info(f"[K8S] Cleaning up any existing resources...")
             await self.delete_dev_environment(user_id, project_id)
 
-            # Create Deployment
-            logger.info(f"[K8S] Creating Deployment: {names['deployment']}")
-            deployment = self._create_deployment_manifest(
-                names["deployment"], user_id, project_id, project_path
-            )
+            # S3 Storage Mode: Create dynamic PVC and deployment with S3 init containers
+            if settings.k8s_use_s3_storage:
+                pvc_name = f"pvc-{user_id}-{project_id}"
+                logger.info(f"[K8S] S3 Mode: Creating dynamic PVC: {pvc_name}")
+
+                # Create PVC
+                pvc = create_dynamic_pvc_manifest(
+                    pvc_name=pvc_name,
+                    namespace=namespace,
+                    storage_class=settings.k8s_pvc_storage_class,
+                    size=settings.k8s_pvc_size,
+                    user_id=user_id,
+                    project_id=UUID(project_id)
+                )
+
+                await asyncio.to_thread(
+                    self.core_v1.create_namespaced_persistent_volume_claim,
+                    namespace=namespace,
+                    body=pvc
+                )
+                logger.info(f"[K8S] ✅ Created PVC: {pvc_name}")
+
+                # Create deployment with S3 init containers and lifecycle hooks
+                logger.info(f"[K8S] S3 Mode: Creating Deployment with init containers: {names['deployment']}")
+                deployment = create_deployment_manifest_s3(
+                    deployment_name=names["deployment"],
+                    user_id=user_id,
+                    project_id=UUID(project_id),
+                    pvc_name=pvc_name,
+                    s3_bucket=settings.s3_bucket_name,
+                    s3_endpoint=settings.s3_endpoint_url,
+                    s3_region=settings.s3_region,
+                    dev_image=self.settings.k8s_devserver_image,
+                    image_pull_secret=self.settings.k8s_image_pull_secret
+                )
+            else:
+                # Persistent PVC Mode (V2): Use existing shared PVC
+                logger.info(f"[K8S] Persistent Mode: Creating Deployment: {names['deployment']}")
+                deployment = self._create_deployment_manifest(
+                    names["deployment"], user_id, project_id, project_path
+                )
+
             await asyncio.to_thread(
                 self.apps_v1.create_namespaced_deployment,
                 namespace=namespace,
@@ -551,10 +826,17 @@ VITECONFIG
         """
         Delete all Kubernetes resources for a development environment.
 
+        In S3 storage mode, this will:
+        1. Delete Ingress and Service
+        2. Delete Deployment (triggers preStop hook for S3 upload)
+        3. Wait for dehydration to complete (terminationGracePeriodSeconds)
+        4. Delete PVC
+
         Args:
             user_id: Unique identifier for the user
             project_id: Unique identifier for the project
         """
+        settings = get_settings()
         names = self._generate_resource_names(user_id, project_id)
         namespace = names["namespace"]
         cleanup_errors = []
@@ -585,7 +867,7 @@ VITECONFIG
             if e.status != 404:
                 cleanup_errors.append(f"Service {names['service']}: {e}")
 
-        # Delete Deployment
+        # Delete Deployment (in S3 mode, this triggers preStop hook for dehydration)
         try:
             await asyncio.to_thread(
                 self.apps_v1.delete_namespaced_deployment,
@@ -597,21 +879,129 @@ VITECONFIG
             if e.status != 404:
                 cleanup_errors.append(f"Deployment {names['deployment']}: {e}")
 
+        # S3 Storage Mode: Wait for dehydration, then delete PVC
+        if settings.k8s_use_s3_storage:
+            pvc_name = f"pvc-{user_id}-{project_id}"
+
+            # Wait for preStop hook to complete (uploads to S3)
+            # The preStop hook has a timeout defined in the deployment manifest
+            # We add a buffer to ensure the upload completes
+            dehydration_wait_time = settings.k8s_dehydration_timeout_seconds + 10  # Add 10s buffer
+            logger.info(f"[K8S] S3 Mode: Waiting {dehydration_wait_time}s for dehydration to complete...")
+            await asyncio.sleep(dehydration_wait_time)
+
+            # Delete PVC
+            try:
+                await asyncio.to_thread(
+                    self.core_v1.delete_namespaced_persistent_volume_claim,
+                    name=pvc_name,
+                    namespace=namespace
+                )
+                logger.info(f"[K8S] S3 Mode: ✅ Deleted PVC: {pvc_name}")
+            except ApiException as e:
+                if e.status == 404:
+                    logger.debug(f"[K8S] S3 Mode: PVC not found (already deleted): {pvc_name}")
+                else:
+                    cleanup_errors.append(f"PVC {pvc_name}: {e}")
+                    logger.error(f"[K8S] S3 Mode: ❌ Failed to delete PVC {pvc_name}: {e}")
+
+        # In namespace-per-project mode, optionally delete the entire namespace
+        # This will cascade delete all resources and clean up NetworkPolicies
+        if settings.k8s_namespace_per_project:
+            try:
+                # Check if there are any other resources in the namespace
+                # If namespace only has our resources, we can safely delete it
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace
+                )
+
+                # If no pods remain, delete the namespace
+                if not pods.items:
+                    logger.info(f"[K8S] Namespace {namespace} is empty, deleting...")
+                    await asyncio.to_thread(
+                        self.core_v1.delete_namespace,
+                        name=namespace
+                    )
+                    logger.info(f"[K8S] ✅ Deleted namespace: {namespace}")
+                else:
+                    logger.info(f"[K8S] Namespace {namespace} still has {len(pods.items)} pods, preserving namespace")
+            except ApiException as e:
+                if e.status == 404:
+                    logger.debug(f"[K8S] Namespace {namespace} already deleted")
+                else:
+                    cleanup_errors.append(f"Namespace {namespace}: {e}")
+                    logger.warning(f"[K8S] Failed to delete namespace {namespace}: {e}")
+
         if cleanup_errors:
             logger.warning(f"Cleanup warnings for user {user_id}, project {project_id}: {cleanup_errors}")
 
-    async def get_dev_environment_status(self, user_id: UUID, project_id: str) -> Dict[str, Any]:
+    async def scale_deployment(
+        self,
+        user_id: UUID,
+        project_id: str,
+        replicas: int
+    ) -> None:
+        """
+        Scale a deployment to a specific number of replicas.
+
+        Args:
+            user_id: Unique identifier for the user
+            project_id: Unique identifier for the project
+            replicas: Target number of replicas (0 to pause, 1 to resume)
+        """
+        names = self._generate_resource_names(user_id, project_id)
+        namespace = names["namespace"]
+
+        try:
+            # Get current deployment
+            deployment = await asyncio.to_thread(
+                self.apps_v1.read_namespaced_deployment,
+                name=names["deployment"],
+                namespace=namespace
+            )
+
+            # Update replicas
+            deployment.spec.replicas = replicas
+
+            # Patch the deployment
+            await asyncio.to_thread(
+                self.apps_v1.patch_namespaced_deployment,
+                name=names["deployment"],
+                namespace=namespace,
+                body=deployment
+            )
+
+            action = "paused" if replicas == 0 else "resumed"
+            logger.info(f"[SCALE] Deployment {names['deployment']} {action} (replicas: {replicas})")
+
+        except ApiException as e:
+            if e.status != 404:
+                logger.error(f"[SCALE] Failed to scale deployment {names['deployment']}: {e}")
+                raise RuntimeError(f"Failed to scale deployment: {e.reason}") from e
+            else:
+                logger.warning(f"[SCALE] Deployment {names['deployment']} not found, cannot scale")
+
+    async def get_dev_environment_status(
+        self,
+        user_id: UUID,
+        project_id: str,
+        container_name: Optional[str] = None,
+        project_slug: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Get the status of a development environment.
 
         Args:
             user_id: Unique identifier for the user
             project_id: Unique identifier for the project
+            container_name: Container name for multi-container projects (e.g., "Next.js 15")
+            project_slug: Project slug for hostname generation
 
         Returns:
             Dict containing environment status information
         """
-        names = self._generate_resource_names(user_id, project_id)
+        names = self._generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
 
         try:
@@ -844,7 +1234,9 @@ VITECONFIG
         self,
         user_id: UUID,
         project_id: str,
-        file_path: str
+        file_path: str,
+        container_name: Optional[str] = None,
+        project_slug: Optional[str] = None
     ) -> Optional[str]:
         """
         Read a file from a dev container pod via Kubernetes API.
@@ -853,6 +1245,8 @@ VITECONFIG
             user_id: User ID
             project_id: Project ID
             file_path: Relative path within project (e.g., "src/App.jsx")
+            container_name: Container name for multi-container projects (e.g., "Next.js 15")
+            project_slug: Project slug for hostname generation
 
         Returns:
             File content as string, or None if file doesn't exist
@@ -860,7 +1254,7 @@ VITECONFIG
         Raises:
             RuntimeError: If pod is not found or read fails
         """
-        names = self._generate_resource_names(user_id, project_id)
+        names = self._generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
 
         try:
@@ -872,11 +1266,11 @@ VITECONFIG
             )
 
             if not pods.items:
-                logger.error(f"[READ] No pod found for deployment {names['deployment']}")
+                logger.error(f"[READ] No pod found for deployment {names['deployment']} in namespace {namespace}")
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             pod_name = pods.items[0].metadata.name
-            container_name = "dev-server"
+            k8s_container = "dev-server"  # K8s container name inside the pod
 
             # Secure path - prevent directory traversal
             safe_path = file_path.replace("..", "").strip("/")
@@ -888,7 +1282,7 @@ VITECONFIG
                 self._exec_in_pod,
                 pod_name,
                 namespace,
-                container_name,
+                k8s_container,
                 check_cmd,
                 timeout=10
             )
@@ -903,7 +1297,7 @@ VITECONFIG
                 self._exec_in_pod,
                 pod_name,
                 namespace,
-                container_name,
+                k8s_container,
                 read_cmd,
                 timeout=30
             )
@@ -922,7 +1316,9 @@ VITECONFIG
         user_id: UUID,
         project_id: str,
         file_path: str,
-        content: str
+        content: str,
+        container_name: Optional[str] = None,
+        project_slug: Optional[str] = None
     ) -> bool:
         """
         Write a file directly to a dev container pod via Kubernetes API.
@@ -935,6 +1331,8 @@ VITECONFIG
             project_id: Project ID
             file_path: Relative path within project (e.g., "src/App.jsx")
             content: File content to write
+            container_name: Container name for multi-container projects (e.g., "Next.js 15")
+            project_slug: Project slug for hostname generation
 
         Returns:
             True if successful
@@ -942,7 +1340,7 @@ VITECONFIG
         Raises:
             RuntimeError: If pod is not found or write fails
         """
-        names = self._generate_resource_names(user_id, project_id)
+        names = self._generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
 
         try:
@@ -954,11 +1352,11 @@ VITECONFIG
             )
 
             if not pods.items:
-                logger.error(f"[WRITE] No pod found for deployment {names['deployment']}")
+                logger.error(f"[WRITE] No pod found for deployment {names['deployment']} in namespace {namespace}")
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             pod_name = pods.items[0].metadata.name
-            container_name = "dev-server"
+            k8s_container = "dev-server"  # K8s container name inside the pod
 
             # Secure path - prevent directory traversal
             safe_path = file_path.replace("..", "").strip("/")
@@ -972,7 +1370,7 @@ VITECONFIG
                     self._exec_in_pod,
                     pod_name,
                     namespace,
-                    container_name,
+                    k8s_container,
                     mkdir_cmd,
                     timeout=10
                 )
@@ -989,7 +1387,7 @@ VITECONFIG
                 self._exec_in_pod,
                 pod_name,
                 namespace,
-                container_name,
+                k8s_container,
                 write_cmd,
                 timeout=60  # Longer timeout for large files
             )
@@ -1007,7 +1405,9 @@ VITECONFIG
         self,
         user_id: UUID,
         project_id: str,
-        file_path: str
+        file_path: str,
+        container_name: Optional[str] = None,
+        project_slug: Optional[str] = None
     ) -> bool:
         """
         Delete a file from a dev container pod via Kubernetes API.
@@ -1016,6 +1416,8 @@ VITECONFIG
             user_id: User ID
             project_id: Project ID
             file_path: Relative path within project (e.g., "src/OldComponent.jsx")
+            container_name: Container name for multi-container projects (e.g., "Next.js 15")
+            project_slug: Project slug for hostname generation
 
         Returns:
             True if successful (or file didn't exist)
@@ -1023,7 +1425,7 @@ VITECONFIG
         Raises:
             RuntimeError: If pod is not found or delete fails
         """
-        names = self._generate_resource_names(user_id, project_id)
+        names = self._generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
 
         try:
@@ -1035,11 +1437,11 @@ VITECONFIG
             )
 
             if not pods.items:
-                logger.error(f"[DELETE] No pod found for deployment {names['deployment']}")
+                logger.error(f"[DELETE] No pod found for deployment {names['deployment']} in namespace {namespace}")
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             pod_name = pods.items[0].metadata.name
-            container_name = "dev-server"
+            k8s_container = "dev-server"  # K8s container name inside the pod
 
             # Secure path - prevent directory traversal
             safe_path = file_path.replace("..", "").strip("/")
@@ -1051,7 +1453,7 @@ VITECONFIG
                 self._exec_in_pod,
                 pod_name,
                 namespace,
-                container_name,
+                k8s_container,
                 delete_cmd,
                 timeout=10
             )
@@ -1070,7 +1472,9 @@ VITECONFIG
         user_id: UUID,
         project_id: str,
         command: List[str],
-        timeout: int = 120
+        timeout: int = 120,
+        container_name: Optional[str] = None,
+        project_slug: Optional[str] = None
     ) -> str:
         """
         Execute an arbitrary command in a dev container pod.
@@ -1084,6 +1488,8 @@ VITECONFIG
                      If first element is /bin/sh or /bin/bash, uses command as-is (pre-sanitized)
                      Otherwise, wraps in shell with proper working directory
             timeout: Command timeout in seconds
+            container_name: Container name for multi-container projects (e.g., "Next.js 15")
+            project_slug: Project slug for hostname generation
 
         Returns:
             Command output (stdout + stderr)
@@ -1091,7 +1497,7 @@ VITECONFIG
         Raises:
             RuntimeError: If pod is not found or command fails
         """
-        names = self._generate_resource_names(user_id, project_id)
+        names = self._generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
 
         try:
@@ -1103,7 +1509,7 @@ VITECONFIG
             )
 
             if not pods.items:
-                logger.error(f"[EXEC] No pod found for deployment {names['deployment']}")
+                logger.error(f"[EXEC] No pod found for deployment {names['deployment']} in namespace {namespace}")
                 raise RuntimeError(
                     f"Development environment not found for user {user_id}, project {project_id}. "
                     f"Please start the development server first."
@@ -1111,7 +1517,7 @@ VITECONFIG
 
             pod_name = pods.items[0].metadata.name
             pod_phase = pods.items[0].status.phase
-            container_name = "dev-server"
+            k8s_container = "dev-server"  # K8s container name inside the pod
 
             # Check pod is in running state
             if pod_phase != "Running":
@@ -1138,7 +1544,7 @@ VITECONFIG
                     self._exec_in_pod,
                     pod_name,
                     namespace,
-                    container_name,
+                    k8s_container,
                     full_command,
                     timeout=timeout
                 )

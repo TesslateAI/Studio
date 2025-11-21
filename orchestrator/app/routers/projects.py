@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.orm import selectinload
 from ..database import get_db
 from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset, Container, ContainerConnection, MarketplaceBase, DeploymentCredential
 import json
@@ -315,7 +316,7 @@ async def _setup_base_project(
 
     try:
         from ..services.base_cache_manager import get_base_cache_manager
-        from ..services.volume_manager import get_volume_manager
+        import tempfile
 
         task.update_progress(20, 100, "Copying pre-installed base from cache")
 
@@ -324,39 +325,142 @@ async def _setup_base_project(
         cached_base_path = await base_cache_manager.get_base_path(base_repo.slug)
         volume_manager = get_volume_manager()
 
+        # Track if we're using a temp clone directory (for K8s mode without local cache)
+        temp_clone_dir = None
+
         if not os.path.exists(cached_base_path):
-            # Fallback to git clone if base not in cache (shouldn't happen in normal operation)
+            # Base not in local cache - need to git clone
             logger.warning(f"Base {base_repo.slug} not found in cache, falling back to git clone")
-            from ..services.git_manager import GitManager
-            from ..services.credential_manager import get_credential_manager
 
-            credential_manager = get_credential_manager()
-            access_token = await credential_manager.get_access_token(db, user_id)
+            if settings.deployment_mode == "kubernetes":
+                # K8s mode: Clone to temp directory on backend pod, save to DB
+                task.update_progress(25, 100, "Cloning base repository...")
 
-            git_manager = GitManager(user_id, str(db_project.id))
-            await git_manager.clone_repository(
-                repo_url=base_repo.git_repo_url,
-                branch=base_repo.default_branch,
-                auth_token=access_token,
-                direct_to_filesystem=False  # Clone to temp, then copy to shared volume
-            )
-        else:
-            # Copy from base cache to shared projects volume
-            # Uses direct filesystem copy at /projects/{project-slug}/
-            await volume_manager.copy_base_to_project(
-                base_repo.slug,
-                db_project.slug,
-                exclude_patterns=['.git', '__pycache__', '*.pyc']
-            )
+                # Create temp directory for cloning
+                temp_clone_dir = tempfile.mkdtemp(prefix=f"base-clone-{base_repo.slug}-")
+                logger.info(f"[K8S] Cloning base {base_repo.slug} to temp directory: {temp_clone_dir}")
+
+                # Build clone command
+                clone_url = base_repo.git_repo_url
+                clone_cmd = ["git", "clone", "--depth=1"]
+                if base_repo.default_branch:
+                    clone_cmd.extend(["--branch", base_repo.default_branch])
+                clone_cmd.extend([clone_url, temp_clone_dir])
+
+                # Execute git clone
+                process = await asyncio.create_subprocess_exec(
+                    *clone_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+
+                if process.returncode != 0:
+                    error_msg = stderr.decode() if stderr else "Unknown error"
+                    raise RuntimeError(f"Git clone failed: {error_msg}")
+
+                logger.info(f"[K8S] Successfully cloned base {base_repo.slug}")
+
+                # Use temp clone dir as the source for file saving
+                cached_base_path = temp_clone_dir
+            else:
+                # Docker mode: Use existing git_manager logic
+                from ..services.git_manager import GitManager
+                from ..services.credential_manager import get_credential_manager
+
+                credential_manager = get_credential_manager()
+                access_token = await credential_manager.get_access_token(db, user_id)
+
+                git_manager = GitManager(user_id, str(db_project.id))
+                await git_manager.clone_repository(
+                    repo_url=base_repo.git_repo_url,
+                    branch=base_repo.default_branch,
+                    auth_token=access_token,
+                    direct_to_filesystem=(not use_volumes)
+                )
+
+        # Only do volume operations in Docker mode with local cache
+        if settings.deployment_mode == "docker" and os.path.exists(cached_base_path) and not temp_clone_dir:
+            if use_volumes:
+                # NEW: Volume-based storage
+                from ..services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
 
             logger.info(f"Copied base {base_repo.slug} to shared volume /projects/{db_project.slug}")
 
         task.update_progress(40, 100, "Base loaded successfully")
 
-        # Files are now in shared volume at /projects/{project-slug}/
-        # DB sync is optional - shared volume is the source of truth
-        task.update_progress(90, 100, "Files ready in shared volume")
-        logger.info(f"[CREATE] Files ready in shared volume /projects/{db_project.slug}")
+        # Save files to database (needed for K8s mode and as source of truth)
+        if settings.deployment_mode == "kubernetes":
+            # K8s mode: Save base files to database (will sync to PVC on container start)
+            task.update_progress(50, 100, "Saving base files to database")
+            files_saved = 0
+            walk_results = await walk_directory_async(
+                cached_base_path,
+                exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', 'venv']
+            )
+
+            for root, dirs, files in walk_results:
+                for file in files:
+                    if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+                        continue
+
+                    file_full_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_full_path, cached_base_path).replace('\\', '/')
+
+                    try:
+                        content = await read_file_async(file_full_path)
+                        db_file = ProjectFile(
+                            project_id=db_project.id,
+                            file_path=relative_path,
+                            content=content
+                        )
+                        db.add(db_file)
+                        files_saved += 1
+                    except Exception as e:
+                        logger.warning(f"[CREATE] Could not read base file {relative_path}: {e}")
+
+            await db.commit()
+            task.update_progress(90, 100, f"Saved {files_saved} base files to database")
+            logger.info(f"[CREATE] Saved {files_saved} base files to database for K8s mode")
+
+        elif settings.deployment_mode == "docker":
+            if use_volumes:
+                # Volume mode: Files are in volume, skip DB sync for now
+                # TODO: Read files from volume and sync to database
+                task.update_progress(90, 100, "Files ready in volume (DB sync skipped)")
+                logger.info(f"[CREATE] Skipped DB sync for volume (files will sync on first edit)")
+            else:
+                # Bind mount mode: Sync files to database
+                task.update_progress(65, 100, "Saving base files to database")
+                files_saved = 0
+                walk_results = await walk_directory_async(
+                    project_path,
+                    exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
+                )
+
+                for root, dirs, files in walk_results:
+                    for file in files:
+                        if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+                            continue
+
+                        file_full_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
+
+                        try:
+                            content = await read_file_async(file_full_path)
+                            db_file = ProjectFile(
+                                project_id=db_project.id,
+                                file_path=relative_path,
+                                content=content
+                            )
+                            db.add(db_file)
+                            files_saved += 1
+                        except Exception as e:
+                            logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
+
+                await db.commit()
+                task.update_progress(90, 100, f"Saved {files_saved} files to database")
 
         db_project.has_git_repo = True
         db_project.git_remote_url = base_repo.git_repo_url
@@ -367,6 +471,15 @@ async def _setup_base_project(
         # Fallback to template
         task.update_progress(40, 100, "Base clone failed, using fallback template")
         await _setup_template_project(db_project, project_path, settings, db, task)
+
+    finally:
+        # Clean up temp clone directory if created
+        if temp_clone_dir and os.path.exists(temp_clone_dir):
+            try:
+                shutil.rmtree(temp_clone_dir)
+                logger.info(f"[K8S] Cleaned up temp clone directory: {temp_clone_dir}")
+            except Exception as cleanup_error:
+                logger.warning(f"[K8S] Failed to cleanup temp directory: {cleanup_error}")
 
 
 async def _setup_template_project(
@@ -1099,6 +1212,40 @@ async def _perform_project_deletion(
                 logger.info(f"[DELETE] Deleted project directory: /projects/{project.slug}")
             except Exception as e:
                 logger.warning(f"[DELETE] Failed to delete project directory: {e}")
+
+        else:
+            # Kubernetes mode: Delete K8s resources and S3 archive
+            logger.info(f"[DELETE] Kubernetes mode: Cleaning up K8s resources and S3...")
+
+            # 4a. Delete Kubernetes namespace and resources
+            try:
+                from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
+                k8s_orchestrator = get_kubernetes_orchestrator()
+
+                await k8s_orchestrator.stop_project(
+                    project_slug=project_slug,
+                    project_id=project_id,
+                    user_id=user_id
+                )
+                logger.info(f"[DELETE] Deleted K8s namespace and resources for project {project_slug}")
+            except Exception as e:
+                logger.warning(f"[DELETE] Error deleting K8s resources: {e}")
+
+            task.update_progress(85, 100, "Deleting S3 archive...")
+
+            # 4b. Delete S3 archive (permanent storage)
+            if settings.k8s_use_s3_storage:
+                try:
+                    from ..services.s3_manager import get_s3_manager
+                    s3_manager = get_s3_manager()
+
+                    success, error = await s3_manager.delete_project(user_id, project_id)
+                    if success:
+                        logger.info(f"[DELETE] Deleted S3 archive for project {project_id}")
+                    else:
+                        logger.warning(f"[DELETE] Failed to delete S3 archive: {error}")
+                except Exception as e:
+                    logger.warning(f"[DELETE] Error deleting S3 archive: {e}")
 
         task.update_progress(100, 100, "Project deleted successfully")
         logger.info(f"[DELETE] Successfully deleted project {project_id}")
@@ -2988,6 +3135,7 @@ async def add_container_to_project(
             logger.info(f"[CONTAINER] Service container created, regenerating docker-compose")
 
             # Get all containers and connections
+            # Use selectinload to eagerly load the base relationship
             containers_result = await db.execute(
                 select(Container)
                 .where(Container.project_id == project.id)
@@ -3085,6 +3233,7 @@ async def create_container_connection(
         try:
             from ..services.docker_compose_orchestrator import get_compose_orchestrator
 
+            # Use selectinload to eagerly load the base relationship
             containers_result = await db.execute(
                 select(Container)
                 .where(Container.project_id == project.id)
@@ -3427,6 +3576,7 @@ async def delete_container(
             from ..services.docker_compose_orchestrator import get_compose_orchestrator
 
             # Get remaining containers and connections
+            # Use selectinload to eagerly load the base relationship
             containers_result = await db.execute(
                 select(Container)
                 .where(Container.project_id == project.id)
@@ -3468,17 +3618,19 @@ async def start_all_containers(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Start all containers in a project using docker-compose up.
+    Start all containers in a project.
 
-    This starts the entire multi-container project as defined in the
-    auto-generated docker-compose.yml file.
+    In Docker mode: Uses docker-compose up to start containers.
+    In Kubernetes mode: Creates namespace, deployments, and services.
     """
+    from ..config import get_settings
+    settings = get_settings()
+
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     try:
-        from ..services.docker_compose_orchestrator import get_compose_orchestrator
-
         # Get all containers and connections
+        # Use selectinload to eagerly load the base relationship to avoid lazy loading errors
         containers_result = await db.execute(
             select(Container)
             .where(Container.project_id == project.id)
@@ -3494,23 +3646,46 @@ async def start_all_containers(
         )
         connections = connections_result.scalars().all()
 
-        # Start project using orchestrator
-        orchestrator = get_compose_orchestrator()
-        result = await orchestrator.start_project(
-            project, containers, connections, current_user.id
-        )
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes mode
+            from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
 
-        logger.info(f"[COMPOSE] Started all containers for project {project.slug}")
+            orchestrator = get_kubernetes_orchestrator()
+            result = await orchestrator.start_project(
+                project, containers, connections, current_user.id, db
+            )
 
-        return {
-            "message": "All containers started successfully",
-            "project_slug": project.slug,
-            "containers": result["containers"],
-            "network": result["network"]
-        }
+            logger.info(f"[K8S] Started all containers for project {project.slug}")
+
+            return {
+                "message": "All containers started successfully",
+                "project_slug": project.slug,
+                "containers": result.get("containers", {}),
+                "namespace": result.get("namespace"),
+                "deployment_mode": "kubernetes"
+            }
+
+        else:
+            # Docker mode
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+            orchestrator = get_compose_orchestrator()
+            result = await orchestrator.start_project(
+                project, containers, connections, current_user.id
+            )
+
+            logger.info(f"[COMPOSE] Started all containers for project {project.slug}")
+
+            return {
+                "message": "All containers started successfully",
+                "project_slug": project.slug,
+                "containers": result["containers"],
+                "network": result["network"],
+                "deployment_mode": "docker"
+            }
 
     except Exception as e:
-        logger.error(f"[COMPOSE] Failed to start containers: {e}", exc_info=True)
+        logger.error(f"[ORCHESTRATOR] Failed to start containers: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to start containers: {str(e)}")
 
 
@@ -3521,22 +3696,47 @@ async def stop_all_containers(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Stop all containers in a project using docker-compose down.
+    Stop all containers in a project.
+
+    In Docker mode: Uses docker-compose down.
+    In Kubernetes mode: Deletes the project namespace.
     """
+    from ..config import get_settings
+    settings = get_settings()
+
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     try:
-        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes mode
+            from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
 
-        orchestrator = get_compose_orchestrator()
-        await orchestrator.stop_project(project.slug)
+            orchestrator = get_kubernetes_orchestrator()
+            await orchestrator.stop_project(project.slug, project.id, current_user.id)
 
-        logger.info(f"[COMPOSE] Stopped all containers for project {project.slug}")
+            logger.info(f"[K8S] Stopped all containers for project {project.slug}")
 
-        return {"message": "All containers stopped successfully"}
+            return {
+                "message": "All containers stopped successfully",
+                "deployment_mode": "kubernetes"
+            }
+
+        else:
+            # Docker mode
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+            orchestrator = get_compose_orchestrator()
+            await orchestrator.stop_project(project.slug)
+
+            logger.info(f"[COMPOSE] Stopped all containers for project {project.slug}")
+
+            return {
+                "message": "All containers stopped successfully",
+                "deployment_mode": "docker"
+            }
 
     except Exception as e:
-        logger.error(f"[COMPOSE] Failed to stop containers: {e}", exc_info=True)
+        logger.error(f"[ORCHESTRATOR] Failed to stop containers: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to stop containers: {str(e)}")
 
 
@@ -3550,7 +3750,8 @@ async def _start_container_background_task(
     Background task worker for starting a container with progress tracking.
 
     This function runs asynchronously and updates task progress throughout
-    the container startup process.
+    the container startup process. It automatically detects the deployment
+    mode (Docker or Kubernetes) and uses the appropriate orchestrator.
 
     Security:
     - User authorization verified before task creation
@@ -3559,10 +3760,10 @@ async def _start_container_background_task(
 
     Progress Stages:
     - 10%: Validating project and container
-    - 25%: Generating docker-compose configuration
-    - 40%: Writing compose file to disk
-    - 55%: Starting container via docker compose
-    - 70%: Connecting regional Traefik routing
+    - 25%: Loading project configuration
+    - 40%: Generating configuration
+    - 55%: Starting container
+    - 70%: Configuring network routing
     - 85%: Waiting for container health check
     - 100%: Container ready
 
@@ -3579,8 +3780,9 @@ async def _start_container_background_task(
         RuntimeError: If container start fails at any stage
     """
     from ..database import get_db
-    from ..services.docker_compose_orchestrator import get_compose_orchestrator
+    from ..config import get_settings
 
+    settings = get_settings()
     db_gen = get_db()
     db = await db_gen.__anext__()
 
@@ -3623,10 +3825,12 @@ async def _start_container_background_task(
             }
 
         task.add_log(f"Starting container '{container.name}' in project '{project.slug}'")
+        task.add_log(f"Deployment mode: {settings.deployment_mode}")
 
         # Stage 2: Fetch all containers and connections (25%)
         task.update_progress(25, 100, "Loading project configuration")
 
+        # Use selectinload to eagerly load the base relationship
         containers_result = await db.execute(
             select(Container)
             .where(Container.project_id == project.id)
@@ -3641,43 +3845,81 @@ async def _start_container_background_task(
         all_connections = connections_result.scalars().all()
         task.add_log(f"Found {len(all_connections)} container connections")
 
-        # orchestrator already initialized above when checking if container is running
+        # Choose orchestrator based on deployment mode
+        if settings.deployment_mode == "kubernetes":
+            # Kubernetes mode: Use K8s orchestrator
+            from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
 
-        # Stage 3: Write compose file (40%)
-        task.update_progress(40, 100, "Generating docker-compose configuration")
-        await orchestrator.write_compose_file(
-            project, all_containers, all_connections, user_id
-        )
-        task.add_log("Docker compose file generated successfully")
+            task.update_progress(40, 100, "Preparing Kubernetes deployment")
+            task.add_log("Using Kubernetes orchestrator")
 
-        # Stage 4: Start container (55%)
-        task.update_progress(55, 100, f"Starting container '{container.name}'")
-        await orchestrator.start_container(project.slug, container.name)
-        task.add_log(f"Container '{container.name}' started via docker compose")
+            orchestrator = get_kubernetes_orchestrator()
 
-        # Stage 5: Regional Traefik routing (70%)
-        task.update_progress(70, 100, "Configuring network routing")
-        task.add_log("Regional Traefik routing configured")
+            # Stage 4: Start container in K8s (55%)
+            task.update_progress(55, 100, f"Creating Kubernetes resources for '{container.name}'")
 
-        # Stage 6: Wait for container health (85%)
-        task.update_progress(85, 100, "Waiting for container to be ready")
+            result = await orchestrator.start_container(
+                project=project,
+                container=container,
+                all_containers=all_containers,
+                connections=all_connections,
+                user_id=user_id,
+                db=db
+            )
 
-        # Build container URL
-        service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
-        sanitized_container_name = f"{project.slug}-{service_name}"
-        container_url = f"http://{sanitized_container_name}.localhost"
+            task.add_log(f"Container '{container.name}' deployed to Kubernetes")
 
-        # Give container a moment to fully initialize
-        import asyncio
-        await asyncio.sleep(2)
-        task.add_log("Container health check passed")
+            # Stage 5: Network routing (70%)
+            task.update_progress(70, 100, "Configuring ingress routing")
+            task.add_log("Kubernetes ingress configured")
+
+            # Stage 6: Wait for readiness (85%)
+            task.update_progress(85, 100, "Waiting for pod to be ready")
+            task.add_log("Pod readiness check completed")
+
+            container_url = result.get("url", f"https://{result.get('hostname', 'unknown')}")
+
+        else:
+            # Docker mode: Use Docker Compose orchestrator
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+            orchestrator = get_compose_orchestrator()
+
+            # Stage 3: Write compose file (40%)
+            task.update_progress(40, 100, "Generating docker-compose configuration")
+            await orchestrator.write_compose_file(
+                project, all_containers, all_connections, user_id
+            )
+            task.add_log("Docker compose file generated successfully")
+
+            # Stage 4: Start container (55%)
+            task.update_progress(55, 100, f"Starting container '{container.name}'")
+            await orchestrator.start_container(project.slug, container.name)
+            task.add_log(f"Container '{container.name}' started via docker compose")
+
+            # Stage 5: Regional Traefik routing (70%)
+            task.update_progress(70, 100, "Configuring network routing")
+            task.add_log("Regional Traefik routing configured")
+
+            # Stage 6: Wait for container health (85%)
+            task.update_progress(85, 100, "Waiting for container to be ready")
+
+            # Build container URL
+            service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+            service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+            sanitized_container_name = f"{project.slug}-{service_name}"
+            container_url = f"http://{sanitized_container_name}.localhost"
+
+            # Give container a moment to fully initialize
+            import asyncio
+            await asyncio.sleep(2)
+            task.add_log("Container health check passed")
 
         # Stage 7: Complete (100%)
         task.update_progress(100, 100, "Container ready")
         task.add_log(f"Container accessible at {container_url}")
 
-        logger.info(f"[COMPOSE] Successfully started container {container.name} in project {project.slug}")
+        logger.info(f"[ORCHESTRATOR] Successfully started container {container.name} in project {project.slug} ({settings.deployment_mode} mode)")
 
         return {
             "container_id": str(container.id),
@@ -3689,7 +3931,7 @@ async def _start_container_background_task(
     except Exception as e:
         error_msg = f"Failed to start container: {str(e)}"
         task.add_log(f"ERROR: {error_msg}")
-        logger.error(f"[COMPOSE] Container start failed: {e}", exc_info=True)
+        logger.error(f"[ORCHESTRATOR] Container start failed: {e}", exc_info=True)
         raise RuntimeError(error_msg)
     finally:
         await db_gen.aclose()

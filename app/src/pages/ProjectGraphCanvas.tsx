@@ -1343,6 +1343,7 @@ export const ProjectGraphCanvas = () => {
           projectFiles={files}
           projectName={project?.name}
           sidebarExpanded={isLeftSidebarExpanded}
+          containerId={selectedContainer?.id}
         />
       ) : (
         <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">

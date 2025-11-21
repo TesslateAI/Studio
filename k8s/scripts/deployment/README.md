@@ -33,7 +33,7 @@ Builds and pushes your application images to DigitalOcean Container Registry.
 **What it does:**
 - Builds backend (orchestrator) and frontend Docker images
 - Logs into DigitalOcean Container Registry
-- Tags and pushes images to `registry.digitalocean.com/finetune/`
+- Tags and pushes images to `registry.digitalocean.com/tesslate-container-registry-nyc3/`
 - Creates production-ready images:
   - `tesslate-backend:latest` (FastAPI orchestrator)
   - `test:production` (Production frontend with nginx)
@@ -80,7 +80,7 @@ Before running these scripts, ensure you have:
 3. **Docker installed** and running locally
 4. **DigitalOcean Container Registry access**:
    - DOCR token configured: `DOCR_TOKEN=<your_token>`
-   - Registry: `registry.digitalocean.com/finetune/`
+   - Registry: `registry.digitalocean.com/tesslate-container-registry-nyc3/`
 5. **API keys** for AI services (OpenAI, Anthropic)
 
 ## 🔧 Usage Examples
@@ -151,7 +151,7 @@ kubectl get svc -n ingress-nginx ingress-nginx-controller
 - Check status: `kubectl get ingress -n tesslate`
 
 **Frontend white screen:**
-- Check if using production image: `registry.digitalocean.com/finetune/test:production`
+- Check if using production image: `registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-frontend:latest`
 - Verify service port configuration matches container port
 
 ## 🔒 Security Features

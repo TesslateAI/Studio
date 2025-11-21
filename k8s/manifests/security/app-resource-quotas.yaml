@@ -167,7 +167,7 @@ spec:
 
           containers:
           - name: cleanup
-            image: registry.digitalocean.com/finetune/tesslate-backend:latest
+            image: registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-backend:latest
             command: ["python", "-c"]
             args:
             - |

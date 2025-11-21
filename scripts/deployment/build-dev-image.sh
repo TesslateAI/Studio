@@ -62,8 +62,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Image names
+# Note: Registry URL should match config.py k8s_registry_url setting
 LOCAL_IMAGE="tesslate-devserver:latest"
-REMOTE_IMAGE="registry.digitalocean.com/finetune/tesslate-dev-server:latest"
+REMOTE_IMAGE="registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest"
 
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}Building Tesslate Dev Server Image${NC}"

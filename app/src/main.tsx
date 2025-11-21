@@ -34,16 +34,30 @@ console.log(
   'color: #a855f7; font-size: 12px; font-style: italic;'
 );
 
+// PostHog configuration - only enable if API key is configured
+const posthogApiKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY
+const posthogHost = import.meta.env.VITE_PUBLIC_POSTHOG_HOST
+
 const options = {
-  api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
-  defaults: '2025-05-24',
+  api_host: posthogHost || 'https://app.posthog.com',
+  // Disable autocapture and other features when no key is configured
+  autocapture: !!posthogApiKey,
+  capture_pageview: !!posthogApiKey,
+  capture_pageleave: !!posthogApiKey,
+  disable_session_recording: !posthogApiKey,
 } as const
 
+// Render app - PostHogProvider handles missing apiKey gracefully
+// but we suppress the console warning by providing a dummy key when not configured
 createRoot(document.getElementById('root')!).render(
-  <PostHogProvider
-    apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_KEY}
-    options={options}
-  >
+  posthogApiKey ? (
+    <PostHogProvider
+      apiKey={posthogApiKey}
+      options={options}
+    >
+      <App />
+    </PostHogProvider>
+  ) : (
     <App />
-  </PostHogProvider>
+  )
 )

@@ -16,6 +16,8 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     # CORS is handled by backend FastAPI middleware to avoid conflicts
+    # Rewrite rules to strip /api prefix for backend routes
+    nginx.ingress.kubernetes.io/use-regex: "true"
     # SSL and ACME configuration
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
@@ -24,11 +26,11 @@ spec:
   tls:
   - secretName: tesslate-tls
   - hosts:
-    - studio-test.tesslate.com
+    - your-domain.com
     secretName: tesslate-domain-tls
   rules:
-  # Domain-based rule for studio-test.tesslate.com
-  - host: studio-test.tesslate.com
+  # Domain-based rule for your-domain.com
+  - host: your-domain.com
     http:
       paths:
       - path: /api
@@ -94,7 +96,7 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-  - studio-test.tesslate.com
+  - your-domain.com
 ---
 # Self-signed certificate for IP access (fallback)
 apiVersion: cert-manager.io/v1
@@ -120,7 +122,7 @@ spec:
   selfSigned: {}
 ---
 # Wildcard SSL Certificate for Development Environments
-# This certificate covers *.studio-test.tesslate.com for all user environments
+# This certificate covers *.your-domain.com for all user environments
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -135,5 +137,5 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-  - "*.studio-test.tesslate.com"
-  - "studio-test.tesslate.com"  # Include the base domain as well
+  - "*.your-domain.com"
+  - "your-domain.com"  # Include the base domain as well

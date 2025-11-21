@@ -6,25 +6,25 @@ metadata:
   name: letsencrypt-prod
 spec:
   acme:
-    email: admin@tesslate.studio
+    email: manav@tesslate.com
     privateKeySecretRef:
       name: letsencrypt-prod
     server: https://acme-v02.api.letsencrypt.org/directory
     solvers:
-    # HTTP-01 solver for regular domains (studio-test.tesslate.com, etc.)
+    # HTTP-01 solver for regular domains
     - http01:
         ingress:
           class: nginx
       selector:
         dnsNames:
-        - 'studio-test.tesslate.com'
-    # DNS-01 solver for wildcard domains (*.studio-test.tesslate.com)
-    # Requires Cloudflare API token stored in cloudflare-api-token secret
-    - dns01:
-        cloudflare:
-          apiTokenSecretRef:
-            name: cloudflare-api-token
-            key: api-token
-      selector:
-        dnsNames:
-        - '*.studio-test.tesslate.com'
+        - 'your-domain.com'
+    # DNS-01 solver for wildcard domains (if using Cloudflare)
+    # Uncomment if you want cert-manager to use Cloudflare API
+    # - dns01:
+    #     cloudflare:
+    #       apiTokenSecretRef:
+    #         name: cloudflare-api-token
+    #         key: api-token
+    #   selector:
+    #     dnsNames:
+    #     - '*.your-domain.com'

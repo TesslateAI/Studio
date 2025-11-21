@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Test the new multi-user container management system.
+Test the multi-user container management system.
+
+NOTE: This test is for Kubernetes deployment mode.
+For Docker mode testing, use the docker-compose orchestrator tests.
 """
 
 import sys
@@ -9,12 +12,14 @@ import time
 import asyncio
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
-# Add the backend to Python path
-backend_path = Path(__file__).parent.parent / "builder" / "backend"
-sys.path.insert(0, str(backend_path))
+# Add the orchestrator to Python path
+orchestrator_path = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(orchestrator_path))
 
-from app.dev_server_manager import DevContainerManager
+from app.config import get_settings
+from app.k8s_container_manager import KubernetesContainerManager as DevContainerManager
 
 class MultiUserContainerTest:
     def __init__(self):

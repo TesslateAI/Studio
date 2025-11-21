@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
-from ..models import User, Chat, Message, Project, ProjectFile, MarketplaceAgent, UserPurchasedAgent
+from ..models import User, Chat, Message, Project, ProjectFile, MarketplaceAgent, UserPurchasedAgent, Container
 from ..schemas import (
     Chat as ChatSchema, Message as MessageSchema, MessageCreate,
     AgentChatRequest, AgentChatResponse, AgentStepResponse
@@ -649,14 +649,16 @@ async def agent_chat(
         # Fetch chat history for context
         chat_history = await _get_chat_history(chat.id, db, limit=10)
 
-        # Get container directory for file operations
+        # Fetch container info for multi-container project support
         # If container_id is provided, agent is scoped to that container (files at root)
-        # If not, agent is at project level (sees all container directories)
+        # If not, agent defaults to first container but at project level
+        container_id = None
+        container_name = None
         container_directory = None
+
         if request.container_id:
             logger.info(f"[AGENT-CHAT] Looking up container_id: {request.container_id} for project: {request.project_id}")
             try:
-                from ..models import Container
                 from uuid import UUID
                 # Convert string to UUID if needed
                 container_uuid = UUID(str(request.container_id)) if not isinstance(request.container_id, UUID) else request.container_id
@@ -667,16 +669,29 @@ async def agent_chat(
                     )
                 )
                 container = container_result.scalar_one_or_none()
-                logger.info(f"[AGENT-CHAT] Container lookup result: {container}")
-                if container and container.directory and container.directory != '.':
-                    container_directory = container.directory
-                    logger.info(f"[AGENT-CHAT] Container-scoped agent, directory: {container_directory}")
+                if container:
+                    container_id = container.id
+                    container_name = container.name
+                    # Set container directory for scoped file operations
+                    if container.directory and container.directory != '.':
+                        container_directory = container.directory
+                        logger.info(f"[AGENT-CHAT] Container-scoped agent: {container_name} ({container_id}), directory: {container_directory}")
+                    else:
+                        logger.info(f"[AGENT-CHAT] Using specified container: {container_name} ({container_id})")
                 else:
-                    logger.warning(f"[AGENT-CHAT] Container found but no directory: {container}")
+                    logger.warning(f"[AGENT-CHAT] Container not found: {request.container_id}")
             except Exception as e:
-                logger.warning(f"[AGENT-CHAT] Could not get container directory: {e}", exc_info=True)
+                logger.warning(f"[AGENT-CHAT] Could not get container: {e}", exc_info=True)
         else:
-            logger.info(f"[AGENT-CHAT] Project-level agent (no container_id)")
+            # Default to first container in project
+            container_result = await db.execute(
+                select(Container).where(Container.project_id == request.project_id).limit(1)
+            )
+            container = container_result.scalar_one_or_none()
+            if container:
+                container_id = container.id
+                container_name = container.name
+                logger.info(f"[AGENT-CHAT] Using default container: {container_name} ({container_id})")
 
         # Prepare context for tool execution
         context = {
@@ -687,7 +702,10 @@ async def agent_chat(
             "chat_id": chat.id,
             "db": db,
             "chat_history": chat_history,
-            "edit_mode": request.edit_mode
+            "edit_mode": request.edit_mode,
+            # Multi-container support
+            "container_id": container_id,
+            "container_name": container_name,
         }
 
         # Get project context
@@ -964,6 +982,24 @@ async def agent_chat_stream(
                 yield f"data: {json.dumps(error_event)}\n\n"
                 return
 
+            # Fetch container info for multi-container project support
+            container_id = None
+            container_name = None
+            project_slug = project.slug
+
+            if request.container_id:
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.id == request.container_id,
+                        Container.project_id == request.project_id
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+                if container:
+                    container_id = container.id
+                    container_name = container.name
+                    logger.info(f"[SSE-AGENT] Using container: {container_name} (id: {container_id})")
+
             # Get or create chat for message history persistence
             chat_result = await db.execute(
                 select(Chat).where(
@@ -1119,7 +1155,10 @@ async def agent_chat_stream(
                 "db": db,
                 "chat_history": chat_history,
                 "project_context": project_context,
-                "edit_mode": request.edit_mode
+                "edit_mode": request.edit_mode,
+                "container_id": container_id,
+                "container_name": container_name,
+                "project_slug": project_slug
             }
 
             # Accumulate results for database persistence

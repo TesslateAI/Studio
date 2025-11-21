@@ -65,6 +65,7 @@ interface ChatContainerProps {
   projectName?: string;
   className?: string;
   sidebarExpanded?: boolean;
+  containerId?: string;  // Container ID for multi-container projects
 }
 
 export function ChatContainer({
@@ -77,7 +78,8 @@ export function ChatContainer({
   projectFiles = [],
   projectName = 'project',
   className = '',
-  sidebarExpanded = true
+  sidebarExpanded = true,
+  containerId
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -601,6 +603,7 @@ export function ChatContainer({
           container_id: containerId,  // Container ID for scoped file access
           message,
           agent_id: currentAgent.backendId?.toString(),
+          container_id: containerId,
           max_iterations: 20,
           edit_mode: editMode,
         },

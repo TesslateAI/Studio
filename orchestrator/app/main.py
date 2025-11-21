@@ -358,10 +358,14 @@ async def startup():
     asyncio.create_task(container_cleanup_loop())
     asyncio.create_task(stats_flush_loop())
 
-    # Initialize base cache (async - doesn't block startup)
-    from .services.base_cache_manager import get_base_cache_manager
-    base_cache_manager = get_base_cache_manager()
-    asyncio.create_task(base_cache_manager.initialize_cache())
+    # Initialize base cache (Docker mode only - async - doesn't block startup)
+    if settings.deployment_mode == "docker":
+        from .services.base_cache_manager import get_base_cache_manager
+        base_cache_manager = get_base_cache_manager()
+        asyncio.create_task(base_cache_manager.initialize_cache())
+        logger.info("Base cache manager initialized for Docker mode")
+    else:
+        logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods

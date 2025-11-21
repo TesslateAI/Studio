@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Comprehensive test of the Docker container development system.
-Tests base image build, container start/stop, preview functionality, and hot reload.
+Comprehensive test of the container development system.
+Tests container start/stop, preview functionality, and hot reload.
+
+NOTE: This test now supports Kubernetes deployment mode.
+Some Docker-specific tests (base image build) are skipped in K8s mode.
 """
 
 import sys
@@ -11,12 +14,14 @@ import asyncio
 import subprocess
 import requests
 from pathlib import Path
+from uuid import uuid4
 
-# Add the backend to Python path so we can import the dev container manager
-backend_path = Path(__file__).parent.parent / "builder" / "backend"
-sys.path.insert(0, str(backend_path))
+# Add the orchestrator to Python path
+orchestrator_path = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(orchestrator_path))
 
-from app.dev_server_manager import DevContainerManager
+from app.config import get_settings
+from app.k8s_container_manager import KubernetesContainerManager as DevContainerManager
 
 class ContainerSystemTest:
     def __init__(self):

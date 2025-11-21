@@ -23,7 +23,7 @@ spec:
       - name: docr-secret
       containers:
       - name: backend
-        image: registry.digitalocean.com/finetune/tesslate-backend:latest
+        image: registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-backend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -53,11 +53,36 @@ spec:
             secretKeyRef:
               name: tesslate-app-secrets
               key: SECRET_KEY
-        - name: OPENAI_API_KEY
+        - name: LITELLM_API_BASE
           valueFrom:
             secretKeyRef:
               name: tesslate-app-secrets
-              key: OPENAI_API_KEY
+              key: LITELLM_API_BASE
+        - name: LITELLM_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_MASTER_KEY
+        - name: LITELLM_DEFAULT_MODELS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_DEFAULT_MODELS
+        - name: LITELLM_TEAM_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_TEAM_ID
+        - name: LITELLM_EMAIL_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_EMAIL_DOMAIN
+        - name: LITELLM_INITIAL_BUDGET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_INITIAL_BUDGET
         - name: ALGORITHM
           valueFrom:
             configMapKeyRef:
@@ -68,16 +93,6 @@ spec:
             configMapKeyRef:
               name: backend-config
               key: ACCESS_TOKEN_EXPIRE_MINUTES
-        - name: OPENAI_API_BASE
-          valueFrom:
-            secretKeyRef:
-              name: tesslate-app-secrets
-              key: OPENAI_API_BASE
-        - name: OPENAI_MODEL
-          valueFrom:
-            secretKeyRef:
-              name: tesslate-app-secrets
-              key: OPENAI_MODEL
         - name: DEV_SERVER_BASE_URL
           valueFrom:
             configMapKeyRef:
@@ -102,6 +117,178 @@ spec:
             secretKeyRef:
               name: tesslate-app-secrets
               key: ALLOWED_HOSTS
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GOOGLE_CLIENT_ID
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GOOGLE_CLIENT_SECRET
+        - name: GOOGLE_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GOOGLE_OAUTH_REDIRECT_URI
+        - name: GITHUB_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GITHUB_CLIENT_ID
+        - name: GITHUB_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GITHUB_CLIENT_SECRET
+        - name: GITHUB_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GITHUB_OAUTH_REDIRECT_URI
+        # S3/DigitalOcean Spaces Configuration (for S3-backed ephemeral storage)
+        - name: K8S_USE_S3_STORAGE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_USE_S3_STORAGE
+              optional: true
+        - name: S3_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: S3_ACCESS_KEY_ID
+              optional: true
+        - name: S3_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: S3_SECRET_ACCESS_KEY
+              optional: true
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: S3_BUCKET_NAME
+              optional: true
+        - name: S3_ENDPOINT_URL
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: S3_ENDPOINT_URL
+              optional: true
+        - name: S3_REGION
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: S3_REGION
+              optional: true
+        # Kubernetes Multi-Container Architecture Settings
+        - name: K8S_NAMESPACE_PER_PROJECT
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_NAMESPACE_PER_PROJECT
+              optional: true
+        - name: K8S_ENABLE_NETWORK_POLICIES
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_ENABLE_NETWORK_POLICIES
+              optional: true
+        - name: K8S_RWX_STORAGE_CLASS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_RWX_STORAGE_CLASS
+              optional: true
+        - name: K8S_DEVSERVER_IMAGE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_DEVSERVER_IMAGE
+              optional: true
+        - name: K8S_IMAGE_PULL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_IMAGE_PULL_SECRET
+              optional: true
+        - name: K8S_WILDCARD_TLS_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_WILDCARD_TLS_SECRET
+              optional: true
+        - name: K8S_DEFAULT_NAMESPACE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_DEFAULT_NAMESPACE
+              optional: true
+        - name: K8S_USER_ENVIRONMENTS_NAMESPACE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_USER_ENVIRONMENTS_NAMESPACE
+              optional: true
+        - name: K8S_PROJECTS_PVC_NAME
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_PROJECTS_PVC_NAME
+              optional: true
+        - name: K8S_INGRESS_CLASS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_INGRESS_CLASS
+              optional: true
+        - name: K8S_PVC_STORAGE_CLASS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_PVC_STORAGE_CLASS
+              optional: true
+        - name: K8S_PVC_SIZE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: K8S_PVC_SIZE
+              optional: true
+        # Application domain for dev environment URLs
+        - name: APP_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: APP_DOMAIN
+              optional: true
+        - name: APP_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: APP_BASE_URL
+              optional: true
+        # Cookie settings for cross-subdomain auth
+        - name: COOKIE_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: COOKIE_DOMAIN
+              optional: true
+        - name: COOKIE_SECURE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: COOKIE_SECURE
+              optional: true
+        - name: COOKIE_SAMESITE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: COOKIE_SAMESITE
+              optional: true
         resources:
           requests:
             memory: "512Mi"

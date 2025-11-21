@@ -34,6 +34,12 @@ class Project(Base):
     deployed_at = Column(DateTime(timezone=True), nullable=True)  # When deployed
     stripe_payment_intent = Column(String, nullable=True)  # For paid deploys
 
+    # Hibernation/Environment status (S3-backed storage mode)
+    environment_status = Column(String(20), default="active", nullable=False)  # active, hibernated, starting, stopping
+    last_activity = Column(DateTime(timezone=True), nullable=True)  # Last user activity timestamp
+    hibernated_at = Column(DateTime(timezone=True), nullable=True)  # When environment was hibernated
+    s3_archive_size_bytes = Column(Integer, nullable=True)  # Size of S3 archive (for billing/monitoring)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

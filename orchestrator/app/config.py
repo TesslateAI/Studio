@@ -168,6 +168,58 @@ class Settings(BaseSettings):
     # Billing settings
     usage_invoice_day: int = 1  # Day of month to generate usage invoices (1-28)
 
+    # S3/Object Storage Configuration (DigitalOcean Spaces)
+    # Used for Kubernetes ephemeral architecture (hibernation/hydration)
+    # Feature flag: enable S3-backed storage for Kubernetes mode
+    k8s_use_s3_storage: bool = False  # Default: False (use persistent PVCs). Set True to enable hibernation model
+
+    # S3-compatible storage settings (DigitalOcean Spaces)
+    s3_access_key_id: str = ""  # Spaces Access Key
+    s3_secret_access_key: str = ""  # Spaces Secret Key
+    s3_bucket_name: str = "tesslate-projects"  # Bucket name for project storage
+    s3_endpoint_url: str = ""  # e.g., "https://nyc3.digitaloceanspaces.com"
+    s3_region: str = "us-east-1"  # Region (for signature calculation)
+
+    # S3 storage paths
+    s3_projects_prefix: str = "projects"  # Base path: projects/{user_id}/{project_id}/
+
+    # Hibernation/Hydration settings (S3-backed storage mode)
+    k8s_hibernation_idle_minutes: int = 30  # Hibernate pods after X minutes of inactivity
+    k8s_hydration_timeout_seconds: int = 300  # Max time to wait for project hydration from S3
+    k8s_dehydration_timeout_seconds: int = 120  # Max time to wait for project dehydration to S3
+
+    # Dynamic PVC settings (S3-backed storage mode)
+    k8s_pvc_storage_class: str = "do-block-storage"  # StorageClass for dynamic PVCs
+    k8s_pvc_size: str = "5Gi"  # Default PVC size per project
+    k8s_pvc_access_mode: str = "ReadWriteOnce"  # Access mode for PVCs
+
+    # Kubernetes Multi-Container Architecture Settings
+    # Storage class for shared source code (must support ReadWriteMany for multi-container)
+    k8s_rwx_storage_class: str = "do-block-storage"  # Storage class for project source (DO only supports RWO)
+    k8s_ingress_class: str = "nginx"  # Ingress controller class name
+    k8s_namespace_per_project: bool = True  # Enable namespace-per-project isolation (recommended)
+    k8s_enable_network_policies: bool = True  # Enable NetworkPolicy creation for isolation
+
+    # Dev server image for Kubernetes deployments
+    # Should include full registry path for private registries
+    k8s_devserver_image: str = "registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest"
+
+    # Kubernetes Registry & Secrets Configuration
+    # Registry URL (without trailing slash) - used for pulling images
+    k8s_registry_url: str = "registry.digitalocean.com/tesslate-container-registry-nyc3"
+    # Name of the image pull secret (must exist in cluster/namespace)
+    k8s_image_pull_secret: str = "tesslate-container-registry-nyc3"
+    # Name of the wildcard TLS secret for ingress
+    k8s_wildcard_tls_secret: str = "tesslate-wildcard-tls"
+
+    # Kubernetes Namespace Configuration
+    # Main application namespace (backend, frontend, database)
+    k8s_default_namespace: str = "tesslate"
+    # Namespace for user development environments (when not using per-project namespaces)
+    k8s_user_environments_namespace: str = "tesslate-user-environments"
+    # Name of the shared projects PVC (when using shared PVC mode)
+    k8s_projects_pvc_name: str = "tesslate-projects-pvc"
+
     # Container Cleanup Configuration
     # Two-tier cleanup system for idle dev containers
     container_cleanup_interval_minutes: int = 2  # How often to run cleanup (default: every 2 minutes)

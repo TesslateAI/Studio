@@ -275,30 +275,104 @@ class DockerPTYBroker(BasePTYBroker):
 
 
 class KubernetesPTYBroker(BasePTYBroker):
-    """PTY broker for Kubernetes pods."""
+    """PTY broker for Kubernetes pods with dynamic namespace support."""
 
     def __init__(self):
         from kubernetes import client, config
-        config.load_kube_config()
+        try:
+            # Try in-cluster config first (for production)
+            config.load_incluster_config()
+            logger.info("KubernetesPTYBroker: Loaded in-cluster Kubernetes configuration")
+        except config.ConfigException:
+            try:
+                # Fall back to kubeconfig (for development)
+                config.load_kube_config()
+                logger.info("KubernetesPTYBroker: Loaded kubeconfig for development")
+            except config.ConfigException as e:
+                logger.error(f"KubernetesPTYBroker: Failed to load Kubernetes config: {e}")
+                raise RuntimeError("Cannot load Kubernetes configuration") from e
+
         self.core_v1 = client.CoreV1Api()
         self.sessions: Dict[str, PTYSession] = {}
+
+    def _get_namespace_for_project(self, project_id: str) -> str:
+        """
+        Get the namespace for a project.
+
+        Args:
+            project_id: Project ID (UUID as string)
+
+        Returns:
+            Namespace name
+        """
+        from ..config import get_settings
+        settings = get_settings()
+
+        if settings.k8s_namespace_per_project:
+            # Namespace-per-project mode
+            return f"proj-{project_id}"
+        else:
+            # Legacy mode: shared namespace
+            return "tesslate-user-environments"
 
     async def create_session(
         self,
         user_id: UUID,
         project_id: str,
-        pod_name: str,
+        pod_name: str = None,
         command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
-        namespace: str = "tesslate-user-environments",
+        namespace: str = None,
         container: str = "dev-server",
     ) -> PTYSession:
-        """Create K8s exec with PTY and start output buffering."""
+        """
+        Create K8s exec with PTY and start output buffering.
 
+        Args:
+            user_id: User ID
+            project_id: Project ID (used to determine namespace if not provided)
+            pod_name: Pod name (optional - will be looked up if not provided)
+            command: Shell command
+            rows: Terminal rows
+            cols: Terminal columns
+            namespace: Namespace (optional - will be determined from project_id if not provided)
+            container: Container name within pod
+
+        Returns:
+            PTYSession object
+        """
         from kubernetes.stream import stream
+        from kubernetes.client.rest import ApiException
 
         session_id = str(uuid.uuid4())
+
+        # Determine namespace if not provided
+        if not namespace:
+            namespace = self._get_namespace_for_project(project_id)
+            logger.info(f"[PTY] Auto-detected namespace for project {project_id}: {namespace}")
+
+        # Look up pod name if not provided (find first pod in deployment)
+        if not pod_name:
+            try:
+                from ..k8s_client import get_k8s_manager
+                k8s_manager = get_k8s_manager()
+                names = k8s_manager._generate_resource_names(user_id, project_id)
+
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace,
+                    label_selector=f"app={names['deployment']}"
+                )
+
+                if not pods.items:
+                    raise RuntimeError(f"No pod found for project {project_id} in namespace {namespace}")
+
+                pod_name = pods.items[0].metadata.name
+                logger.info(f"[PTY] Auto-detected pod name: {pod_name}")
+            except Exception as e:
+                logger.error(f"[PTY] Failed to lookup pod for project {project_id}: {e}")
+                raise RuntimeError(f"Failed to find pod for project: {str(e)}") from e
 
         # Run command directly - pods already start in /app
         # Agent can use 'cd' commands if they need to change directories

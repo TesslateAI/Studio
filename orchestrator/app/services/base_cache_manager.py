@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class BaseCacheManager:
-    """Manages pre-installed marketplace base cache."""
+    """Manages pre-installed marketplace base cache (Docker mode only)."""
 
     def __init__(self, cache_dir: str = "/app/base-cache"):
         self.cache_dir = Path(cache_dir)

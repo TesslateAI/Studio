@@ -59,8 +59,9 @@ exit /b 0
 :end_parse_args
 
 REM Image names
+REM Note: Registry URL should match config.py k8s_registry_url setting
 set LOCAL_IMAGE=tesslate-devserver:latest
-set REMOTE_IMAGE=registry.digitalocean.com/finetune/tesslate-dev-server:latest
+set REMOTE_IMAGE=registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest
 
 echo ============================================
 echo Building Tesslate Dev Server Image

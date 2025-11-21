@@ -1,0 +1,49 @@
+# StorageClass for Dynamic PVC Provisioning
+#
+# This StorageClass is used for ephemeral project storage in the S3-backed architecture.
+# Each project gets its own dynamically provisioned PVC that is created when
+# the project starts and deleted when it's hibernated (after dehydration to S3).
+#
+# Key Features:
+# - Uses DigitalOcean Block Storage (fast NVMe SSDs)
+# - Automatic PVC deletion when project is deleted (reclaimPolicy: Delete)
+# - Volume expansion allowed for growing projects
+# - Immediate binding (provisioned when PVC is created)
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: do-block-storage-fast
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"  # Not default (explicit selection)
+    description: "Fast DigitalOcean block storage for ephemeral project volumes"
+provisioner: dobs.csi.digitalocean.com  # DigitalOcean Block Storage CSI driver
+parameters:
+  # Volume type: ssd (NVMe) for fast performance
+  type: pd-ssd
+  # File system type
+  fstype: ext4
+reclaimPolicy: Delete  # CRITICAL: Delete PVs when PVCs are deleted (no orphaned volumes)
+allowVolumeExpansion: true  # Allow projects to grow if needed
+volumeBindingMode: Immediate  # Provision immediately when PVC is created
+mountOptions:
+  - discard  # Enable TRIM for SSD performance
+
+---
+# Alternative: Standard storage class (cheaper but slower)
+# Use this for non-critical projects to save costs
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: do-block-storage-standard
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Standard DigitalOcean block storage (cheaper, slower)"
+provisioner: dobs.csi.digitalocean.com
+parameters:
+  type: pd-standard  # Standard HDD (cheaper)
+  fstype: ext4
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

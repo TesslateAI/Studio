@@ -25,7 +25,7 @@ spec:
             - name: docr-secret
           containers:
           - name: cleanup
-            image: registry.digitalocean.com/finetune/tesslate-backend:latest
+            image: registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-backend:latest
             imagePullPolicy: Always
             command: ["python", "-c"]
             args:
@@ -34,23 +34,32 @@ spec:
                 import sys
                 sys.path.append('/app')
 
-                from app.dev_server_manager import dev_container_manager
+                from app.k8s_container_manager import KubernetesContainerManager
+                from app.config import get_settings
                 import logging
 
                 logging.basicConfig(level=logging.INFO)
                 logger = logging.getLogger(__name__)
 
                 async def cleanup_idle_environments():
-                    """Clean up idle development environments (30 min timeout)."""
+                    """Clean up idle development environments using two-tier cleanup."""
                     try:
+                        settings = get_settings()
                         logger.info("Starting idle environment cleanup...")
+                        logger.info(f"Storage mode: {'S3-backed (hibernation)' if settings.k8s_use_s3_storage else 'Persistent PVC (two-tier)'}")
 
-                        # Cleanup environments idle for more than 30 minutes
-                        cleaned = await dev_container_manager.cleanup_idle_environments(
-                            idle_timeout_minutes=30
+                        # Initialize the Kubernetes container manager
+                        container_manager = KubernetesContainerManager()
+
+                        # Use configured cleanup intervals from settings
+                        idle_timeout = settings.container_cleanup_tier1_idle_minutes
+
+                        # Run cleanup (handles both S3 and persistent modes)
+                        cleaned = await container_manager.cleanup_idle_environments(
+                            idle_timeout_minutes=idle_timeout
                         )
 
-                        logger.info(f"Cleanup completed. Removed {len(cleaned)} idle environments")
+                        logger.info(f"Cleanup completed. Processed {len(cleaned)} environments")
 
                         if cleaned:
                             for env in cleaned:
@@ -65,6 +74,80 @@ spec:
             env:
               - name: KUBERNETES_NAMESPACE
                 value: tesslate
+              - name: DEPLOYMENT_MODE
+                value: "kubernetes"
+              - name: DATABASE_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: DATABASE_URL
+              - name: SECRET_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: SECRET_KEY
+              - name: POSTGRES_HOST
+                value: "postgres"
+              - name: POSTGRES_PORT
+                value: "5432"
+              - name: POSTGRES_DB
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_DB
+              - name: POSTGRES_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_USER
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_PASSWORD
+              # Kubernetes configuration
+              - name: K8S_USE_S3_STORAGE
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: K8S_USE_S3_STORAGE
+                    optional: true
+              - name: K8S_NAMESPACE_PER_PROJECT
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: K8S_NAMESPACE_PER_PROJECT
+                    optional: true
+              - name: K8S_DEVSERVER_IMAGE
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: K8S_DEVSERVER_IMAGE
+                    optional: true
+              - name: K8S_IMAGE_PULL_SECRET
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: K8S_IMAGE_PULL_SECRET
+                    optional: true
+              - name: K8S_DEFAULT_NAMESPACE
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: K8S_DEFAULT_NAMESPACE
+                    optional: true
+              - name: CONTAINER_CLEANUP_TIER1_IDLE_MINUTES
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: CONTAINER_CLEANUP_TIER1_IDLE_MINUTES
+                    optional: true
+              - name: APP_DOMAIN
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: APP_DOMAIN
+                    optional: true
             resources:
               requests:
                 memory: "128Mi"

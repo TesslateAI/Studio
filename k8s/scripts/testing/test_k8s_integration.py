@@ -17,10 +17,15 @@ import os
 import logging
 
 # Add the orchestrator path to sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'orchestrator'))
+# This script can be run from repository root or k8s/scripts/testing directory
+repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+sys.path.insert(0, os.path.join(repo_root, 'orchestrator'))
 
-from orchestrator.app.k8s_client import k8s_manager
-from orchestrator.app.dev_server_manager import DevContainerManager
+from app.k8s_client import get_k8s_manager
+from app.k8s_container_manager import KubernetesContainerManager as DevContainerManager
+
+# Get k8s_manager instance
+k8s_manager = get_k8s_manager()
 
 # Configure logging
 logging.basicConfig(

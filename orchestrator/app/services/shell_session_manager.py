@@ -50,6 +50,13 @@ class ShellSessionManager:
         """
         Create a new shell session with validation and resource limits.
 
+        Args:
+            user_id: User UUID
+            project_id: Project ID
+            db: Database session
+            command: Shell command to run (default: /bin/sh)
+            container_name_hint: Optional container name for multi-container projects
+
         Returns session metadata including session_id.
         Raises HTTPException on validation failures.
         """
@@ -374,8 +381,12 @@ class ShellSessionManager:
             The Docker container name or K8s pod name
         """
         if settings.deployment_mode == "kubernetes":
-            # K8s pod name format
-            return get_container_name(user_id, project_id, mode="kubernetes")
+            # K8s: Generate deployment name based on container_name_hint for multi-container
+            # The k8s_client._generate_resource_names handles the sanitization
+            from ..k8s_client import get_k8s_manager
+            k8s_manager = get_k8s_manager()
+            names = k8s_manager._generate_resource_names(user_id, project_id, container_name=container_name_hint)
+            return names["deployment"]
         else:
             # Docker multi-container mode
             # Container name format: {project_slug}-{service_name}
@@ -427,8 +438,10 @@ class ShellSessionManager:
         if settings.deployment_mode == "kubernetes":
             from ..k8s_client import get_k8s_manager
             k8s_manager = get_k8s_manager()
-            status = await k8s_manager.get_container_status(str(project_id), user_id, project_slug)
-            return status.get("running", False)
+            # Use get_dev_environment_status which is the correct method on KubernetesManager
+            # For multi-container, we should check the specific container's deployment
+            status = await k8s_manager.get_dev_environment_status(user_id, project_id, container_name=container_name)
+            return status.get("deployment_ready", False)
         else:
             # Docker multi-container mode
             from ..services.docker_compose_orchestrator import get_compose_orchestrator
