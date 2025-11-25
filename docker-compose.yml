@@ -20,7 +20,7 @@ services:
       - "com.tesslate.traefik=main"
       - "traefik.enable=true"
       # Traefik dashboard at /traefik
-      - "traefik.http.routers.traefik.rule=Host(`${APP_DOMAIN:-studio.localhost}`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik.rule=Host(`${APP_DOMAIN:-localhost}`) && PathPrefix(`/traefik`)"
       - "traefik.http.routers.traefik.entrypoints=web,websecure"
       - "traefik.http.routers.traefik.priority=200"
       - "traefik.http.routers.traefik.tls=true"
@@ -101,9 +101,9 @@ services:
       - CONTAINER_CLEANUP_TIER1_IDLE_MINUTES=${CONTAINER_CLEANUP_TIER1_IDLE_MINUTES:-15}
       - CONTAINER_CLEANUP_TIER2_PAUSED_HOURS=${CONTAINER_CLEANUP_TIER2_PAUSED_HOURS:-24}
       - APP_PROTOCOL=${APP_PROTOCOL:-http}
-      - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
-      - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-studio.localhost}}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
+      - CORS_ORIGINS=${CORS_ORIGINS:-${APP_PROTOCOL:-http}://${APP_DOMAIN:-localhost}}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-localhost}}
       - DEV_SERVER_BASE_URL=${DEV_SERVER_BASE_URL:-}
       # OAuth Configuration (optional)
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
@@ -160,7 +160,7 @@ services:
       # API routes - handle both /api and websocket paths
       # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
       # Set in .env - should be empty in production
-      - "traefik.http.routers.orchestrator.rule=(Host(`${APP_DOMAIN:-studio.localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      - "traefik.http.routers.orchestrator.rule=(Host(`${APP_DOMAIN:-localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
       - "traefik.http.routers.orchestrator.entrypoints=web"
       - "traefik.http.routers.orchestrator.priority=100"
       - "traefik.http.routers.orchestrator.service=orchestrator"
@@ -185,9 +185,9 @@ services:
     labels:
       - "com.tesslate.traefik=main"
       - "traefik.enable=true"
-      # Catch-all route: Route all *.localhost traffic (except studio.localhost) to regional-router
+      # Catch-all route: Route all *.localhost traffic (except localhost) to regional-router
       # This allows regional-router to hash the project slug and proxy to the correct regional Traefik
-      - "traefik.http.routers.regional-router.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.localhost`) && !Host(`${APP_DOMAIN:-studio.localhost}`)"
+      - "traefik.http.routers.regional-router.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.localhost`) && !Host(`${APP_DOMAIN:-localhost}`)"
       - "traefik.http.routers.regional-router.entrypoints=web"
       - "traefik.http.routers.regional-router.priority=10"
       - "traefik.http.services.regional-router.loadbalancer.server.port=8080"
@@ -216,10 +216,10 @@ services:
       - ./app/package.json:/app/package.json
     environment:
       - VITE_API_URL=${VITE_API_URL:-}
-      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-studio.localhost}}
+      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-localhost}}
       - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY:-}
       - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-}
-      - APP_DOMAIN=${APP_DOMAIN:-studio.localhost}
+      - APP_DOMAIN=${APP_DOMAIN:-localhost}
       - FRONTEND_PORT=${FRONTEND_PORT:-5173}
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-docker}
       - CHOKIDAR_USEPOLLING=true
@@ -232,7 +232,7 @@ services:
       # Frontend routes - everything except /api, /ws, and /preview
       # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
       # Set in .env - should be empty in production
-      - "traefik.http.routers.app.rule=(Host(`${APP_DOMAIN:-studio.localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
+      - "traefik.http.routers.app.rule=(Host(`${APP_DOMAIN:-localhost}`)${TRAEFIK_ADDITIONAL_HOST_RULE:-}) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/preview`) && !PathPrefix(`/traefik`)"
       - "traefik.http.routers.app.entrypoints=web"
       - "traefik.http.routers.app.priority=10"
       - "traefik.http.routers.app.service=app"

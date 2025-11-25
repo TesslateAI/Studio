@@ -52,7 +52,7 @@ echo To start the application:
 echo   docker-compose up -d
 echo.
 echo Then access at:
-echo   Application: http://studio.localhost
-echo   Traefik Dashboard: http://studio.localhost/traefik (admin:admin)
+echo   Application: http://localhost
+echo   Traefik Dashboard: http://localhost/traefik (admin:admin)
 echo ================================================
 pause

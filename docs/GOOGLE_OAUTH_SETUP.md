@@ -37,7 +37,7 @@ Alternatively, enable the **"Google Identity"** API which is the modern replacem
 - **App logo**: (Optional) Upload your logo
 
 **App Domain:**
-- **Application home page**: `http://studio.localhost` (for local dev) or your production URL
+- **Application home page**: `http://localhost` (for local dev) or your production URL
 - **Application privacy policy link**: (Optional, but recommended for production)
 - **Application terms of service link**: (Optional, but recommended for production)
 
@@ -72,8 +72,8 @@ Alternatively, enable the **"Google Identity"** API which is the modern replacem
 Add these **Authorized JavaScript origins**:
 ```
 http://localhost:5173
-http://studio.localhost
-http://studio.localhost:80
+http://localhost
+http://localhost:80
 ```
 
 For production, also add:
@@ -85,7 +85,7 @@ https://yourdomain.com
 
 Add these **Authorized redirect URIs**:
 ```
-http://studio.localhost/auth/google/callback
+http://localhost/auth/google/callback
 http://localhost:5173/auth/google/callback
 ```
 
@@ -109,13 +109,13 @@ Copy these values and add them to your `.env` file:
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret-here
-GOOGLE_OAUTH_REDIRECT_URI=http://studio.localhost/auth/google/callback
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost/auth/google/callback
 ```
 
 **Important Notes:**
 - Keep your Client Secret secure and never commit it to version control
 - Update the redirect URI to match your production domain when deploying
-- In local development, use `http://studio.localhost` to match your APP_DOMAIN setting
+- In local development, use `http://localhost` to match your APP_DOMAIN setting
 
 ## Step 6: Test the OAuth Flow
 
@@ -124,7 +124,7 @@ GOOGLE_OAUTH_REDIRECT_URI=http://studio.localhost/auth/google/callback
    docker compose restart orchestrator
    ```
 
-2. Open your browser to `http://studio.localhost`
+2. Open your browser to `http://localhost`
 3. Click "Sign in with Google"
 4. You should be redirected to Google's OAuth consent screen
 5. After granting permissions, you'll be redirected back to your app and logged in
@@ -193,8 +193,8 @@ When deploying to production:
 For better security, create separate OAuth clients for different environments:
 
 ### Development OAuth Client:
-- Authorized origins: `http://localhost:5173`, `http://studio.localhost`
-- Redirect URI: `http://studio.localhost/auth/google/callback`
+- Authorized origins: `http://localhost:5173`, `http://localhost`
+- Redirect URI: `http://localhost/auth/google/callback`
 
 ### Production OAuth Client:
 - Authorized origins: `https://yourdomain.com`

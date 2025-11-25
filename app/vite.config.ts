@@ -31,7 +31,7 @@ export default defineConfig({
     },
     hmr: {
       // HMR WebSocket configuration
-      // When behind Traefik (studio.localhost), use the proxied domain
+      // When behind Traefik (localhost), use the proxied domain
       // Otherwise use localhost for direct access
       host: process.env.APP_DOMAIN || 'localhost',
       // Use wss:// for HTTPS, ws:// for HTTP

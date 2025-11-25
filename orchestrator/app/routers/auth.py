@@ -59,7 +59,7 @@ async def verify_dev_environment_access(
 
     try:
         # Extract subdomain from hostname
-        # e.g., "ff-9en0cx.studio.localhost" -> "ff-9en0cx"
+        # e.g., "ff-9en0cx.localhost" -> "ff-9en0cx"
         subdomain = request_host.split('.')[0] if '.' in request_host else request_host
 
         # Try parsing as K8s format first

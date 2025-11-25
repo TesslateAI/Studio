@@ -15,7 +15,7 @@ cp .env.example .env
 # 2. Start all services
 docker compose up -d
 
-# 3. Access at http://studio.localhost
+# 3. Access at http://localhost
 ```
 
 **Local Development (Fast Iteration)**
@@ -64,7 +64,7 @@ Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment 
 **Docker Mode** (Local Development)
 - User projects run as Docker containers
 - Traefik reverse proxy with subdomain routing
-- URLs: `{project-slug}.studio.localhost` (e.g., `my-app-k3x8n2.studio.localhost`)
+- URLs: `{project-slug}.localhost` (e.g., `my-app-k3x8n2.localhost`)
 - Storage: Local file system
 - **Browser:** Chrome or Firefox recommended (auto-resolves `*.localhost`)
 
@@ -94,8 +94,8 @@ Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment 
 │                                        │
 │  ┌────────────────────────────────┐   │
 │  │  User Dev Containers (Dynamic) │   │
-│  │  • my-app-k3x8n2.studio.localhost   │
-│  │  • blog-cms-h7y2k1.studio.localhost │
+│  │  • my-app-k3x8n2.localhost   │
+│  │  • blog-cms-h7y2k1.localhost │
 │  └────────────────────────────────┘   │
 └────────────────────────────────────────┘
 ```
@@ -147,10 +147,10 @@ docker compose up -d --build
 ```
 
 **Access:**
-- Frontend: http://studio.localhost
+- Frontend: http://localhost
 - API: http://api.localhost
 - Traefik Dashboard: http://traefik.localhost:8080
-- User Projects: http://{project-slug}.studio.localhost (subdomain routing)
+- User Projects: http://{project-slug}.localhost (subdomain routing)
 
 **Advantages:**
 - ✅ Single command to start
@@ -188,7 +188,7 @@ npm run dev
 **Access:**
 - Frontend: http://localhost:5173
 - API: http://localhost:8000
-- User Projects: http://{project-slug}.studio.localhost (subdomain routing)
+- User Projects: http://{project-slug}.localhost (subdomain routing)
 
 **Advantages:**
 - ✅ Fastest hot reload
@@ -390,10 +390,10 @@ docker ps | grep tesslate
 
 # 4. View Traefik dashboard for routing rules
 # Open http://localhost:8080
-# Look for Host(`{project-slug}.studio.localhost`) rules
+# Look for Host(`{project-slug}.localhost`) rules
 
 # 5. Test with curl using Host header
-curl -H "Host: test.studio.localhost" http://localhost/
+curl -H "Host: test.localhost" http://localhost/
 ```
 
 ### Kubernetes Issues

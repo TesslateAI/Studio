@@ -167,6 +167,18 @@ class VolumeManager:
 
         logger.info(f"[VOLUME] Copying base {base_slug} to volume {volume_name}")
 
+        # Validate base cache exists and has content before attempting copy
+        cache_path = Path(f"/app/base-cache/{base_slug}")
+        if not cache_path.exists():
+            raise RuntimeError(f"Base cache not found: {cache_path}. Run base cache initialization first.")
+
+        has_package_json = (cache_path / "package.json").exists()
+        has_requirements = (cache_path / "requirements.txt").exists()
+        has_go_mod = (cache_path / "go.mod").exists()
+
+        if not (has_package_json or has_requirements or has_go_mod):
+            raise RuntimeError(f"Base cache {base_slug} is empty/invalid. Missing package.json, requirements.txt, or go.mod.")
+
         try:
             # Build exclude patterns for tar (simpler and more robust than find)
             # tar can handle files, directories, and symlinks correctly

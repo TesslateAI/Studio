@@ -76,10 +76,20 @@ class BaseCacheManager:
         """
         base_path = self.cache_dir / base.slug
 
-        # Check if already cached
+        # Check if already cached with valid content
+        # A valid cache must have at least package.json or requirements.txt
         if base_path.exists():
-            logger.info(f"[BASE-CACHE] ✓ {base.name} already cached at {base_path}")
-            return
+            has_package_json = (base_path / "package.json").exists()
+            has_requirements = (base_path / "requirements.txt").exists()
+            has_go_mod = (base_path / "go.mod").exists()
+
+            if has_package_json or has_requirements or has_go_mod:
+                logger.info(f"[BASE-CACHE] ✓ {base.name} already cached at {base_path}")
+                return
+            else:
+                # Directory exists but is invalid/empty - remove and re-clone
+                logger.warning(f"[BASE-CACHE] ⚠ {base.name} cache is invalid/empty, re-cloning...")
+                shutil.rmtree(base_path, ignore_errors=True)
 
         logger.info(f"[BASE-CACHE] 📦 Caching {base.name}...")
 

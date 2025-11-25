@@ -10,7 +10,7 @@ const getApiUrl = (): string => {
   if (__DEV__) {
     return Platform.OS === 'android'
       ? 'http://10.0.2.2'  // Android emulator -> Traefik on host
-      : 'http://studio.localhost'; // iOS simulator or web -> Traefik
+      : 'http://localhost'; // iOS simulator or web -> Traefik
   }
 
   // For production, use environment variable or default

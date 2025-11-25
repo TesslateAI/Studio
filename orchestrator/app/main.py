@@ -33,8 +33,8 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
     Custom CORS middleware that supports wildcard subdomain patterns.
 
     Validates origins against regex patterns to allow:
-    - Main frontend origins (localhost:3000, studio.localhost, APP_DOMAIN)
-    - User dev environment subdomains (*.studio.localhost, *.{APP_DOMAIN})
+    - Main frontend origins (localhost:3000, localhost, APP_DOMAIN)
+    - User dev environment subdomains (*.localhost, *.{APP_DOMAIN})
 
     The APP_DOMAIN setting controls which production domain to allow.
     """

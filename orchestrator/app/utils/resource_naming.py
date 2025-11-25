@@ -95,21 +95,21 @@ def get_short_container_name(user_id: Union[UUID, str], project_id: Union[UUID, 
     return f"dev-{user_short}-{project_short}"
 
 
-def get_dev_hostname(user_id: Union[UUID, str], project_id: Union[UUID, str], base_domain: str = "studio.localhost") -> str:
+def get_dev_hostname(user_id: Union[UUID, str], project_id: Union[UUID, str], base_domain: str = "localhost") -> str:
     """
     Get development server hostname/URL.
 
     Args:
         user_id: User UUID
         project_id: Project UUID
-        base_domain: Base domain (default: "studio.localhost")
+        base_domain: Base domain (default: "localhost")
 
     Returns:
         Full hostname string
 
     Examples:
         >>> get_dev_hostname(user_id, project_id)
-        "550e8400-e29b-41d4-a716-446655440000-7c9e6679-7425-40de-944b-e07fc1f90ae7.studio.localhost"
+        "550e8400-e29b-41d4-a716-446655440000-7c9e6679-7425-40de-944b-e07fc1f90ae7.localhost"
 
         >>> get_dev_hostname(user_id, project_id, "studio-test.tesslate.com")
         "550e8400-e29b-41d4-a716-446655440000-7c9e6679-7425-40de-944b-e07fc1f90ae7.studio-test.tesslate.com"
@@ -206,7 +206,7 @@ def parse_hostname(hostname: str) -> tuple[str, str]:
     Extract user_id and project_id from a development server hostname.
 
     Args:
-        hostname: Full hostname (e.g., "user-project.studio.localhost")
+        hostname: Full hostname (e.g., "user-project.localhost")
 
     Returns:
         Tuple of (user_id, project_id) as strings
@@ -215,7 +215,7 @@ def parse_hostname(hostname: str) -> tuple[str, str]:
         ValueError: If hostname format is invalid
 
     Example:
-        >>> parse_hostname("550e8400-e29b-41d4-a716-446655440000-7c9e6679-7425-40de-944b-e07fc1f90ae7.studio.localhost")
+        >>> parse_hostname("550e8400-e29b-41d4-a716-446655440000-7c9e6679-7425-40de-944b-e07fc1f90ae7.localhost")
         ("550e8400-e29b-41d4-a716-446655440000", "7c9e6679-7425-40de-944b-e07fc1f90ae7")
     """
     # Extract subdomain (everything before first dot)

@@ -29,7 +29,7 @@ test_endpoint() {
 
 # Get auth token
 echo "Getting auth token..."
-TOKEN=$(curl -s -X POST http://studio.localhost/api/auth/token \
+TOKEN=$(curl -s -X POST http://localhost/api/auth/token \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "username=a&password=aaaaaa" | jq -r '.access_token')
 
@@ -43,26 +43,26 @@ echo ""
 
 # Test public endpoints
 echo "Testing Public Endpoints:"
-test_endpoint "http://studio.localhost" "Frontend App" "no"
+test_endpoint "http://localhost" "Frontend App" "no"
 test_endpoint "http://api.localhost/" "API Root" "no"
 test_endpoint "http://api.localhost/health" "API Health" "no"
 
 echo ""
 echo "Testing Authenticated Endpoints:"
 # Test authenticated endpoints
-test_endpoint "http://studio.localhost/api/projects/" "Projects List" "yes"
-test_endpoint "http://studio.localhost/api/marketplace/agents" "Marketplace Agents" "yes"
-test_endpoint "http://studio.localhost/api/admin/metrics/summary" "Admin Metrics" "yes"
-test_endpoint "http://studio.localhost/api/agents" "Agents List" "yes"
-test_endpoint "http://studio.localhost/api/github/status" "GitHub Status" "yes"
+test_endpoint "http://localhost/api/projects/" "Projects List" "yes"
+test_endpoint "http://localhost/api/marketplace/agents" "Marketplace Agents" "yes"
+test_endpoint "http://localhost/api/admin/metrics/summary" "Admin Metrics" "yes"
+test_endpoint "http://localhost/api/agents" "Agents List" "yes"
+test_endpoint "http://localhost/api/github/status" "GitHub Status" "yes"
 
 echo ""
 echo "Testing Frontend Routes (should all return 200 with HTML):"
-test_endpoint "http://studio.localhost/dashboard" "Dashboard Page" "no"
-test_endpoint "http://studio.localhost/marketplace" "Marketplace Page" "no"
-test_endpoint "http://studio.localhost/admin" "Admin Page" "no"
-test_endpoint "http://studio.localhost/login" "Login Page" "no"
-test_endpoint "http://studio.localhost/register" "Register Page" "no"
+test_endpoint "http://localhost/dashboard" "Dashboard Page" "no"
+test_endpoint "http://localhost/marketplace" "Marketplace Page" "no"
+test_endpoint "http://localhost/admin" "Admin Page" "no"
+test_endpoint "http://localhost/login" "Login Page" "no"
+test_endpoint "http://localhost/register" "Register Page" "no"
 
 echo ""
 echo "========================================="

@@ -54,11 +54,11 @@ class Settings(BaseSettings):
     # Application domain (no protocol, just domain)
     # Used for subdomain routing and CORS wildcard pattern matching
     # Format: "subdomain.domain.com" (no protocol, no wildcards)
-    # Examples: studio.localhost (local), studio-demo.tesslate.com (production)
-    app_domain: str = "studio.localhost"
+    # Examples: localhost (local), studio-demo.tesslate.com (production)
+    app_domain: str = "localhost"
 
     # Application base URL (full URL with protocol)
-    # Format: "https://studio-demo.tesslate.com" or "http://studio.localhost"
+    # Format: "https://studio-demo.tesslate.com" or "http://localhost"
     # Used for OAuth redirects and other absolute URL generation
     app_base_url: str = ""  # Will default to http://app_domain if not set
 

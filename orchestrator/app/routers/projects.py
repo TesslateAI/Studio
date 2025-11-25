@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from ..database import get_db
 from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset, Container, ContainerConnection, MarketplaceBase
@@ -3018,7 +3019,9 @@ async def add_container_to_project(
 
             # Get all containers and connections
             containers_result = await db.execute(
-                select(Container).where(Container.project_id == project.id)
+                select(Container)
+                .where(Container.project_id == project.id)
+                .options(selectinload(Container.base))  # Eagerly load base
             )
             all_containers = containers_result.scalars().all()
 
@@ -3113,7 +3116,9 @@ async def create_container_connection(
             from ..services.docker_compose_orchestrator import get_compose_orchestrator
 
             containers_result = await db.execute(
-                select(Container).where(Container.project_id == project.id)
+                select(Container)
+                .where(Container.project_id == project.id)
+                .options(selectinload(Container.base))  # Eagerly load base
             )
             all_containers = containers_result.scalars().all()
 
@@ -3302,7 +3307,9 @@ async def delete_container(
 
             # Get remaining containers and connections
             containers_result = await db.execute(
-                select(Container).where(Container.project_id == project.id)
+                select(Container)
+                .where(Container.project_id == project.id)
+                .options(selectinload(Container.base))  # Eagerly load base
             )
             remaining_containers = containers_result.scalars().all()
 
@@ -3352,7 +3359,9 @@ async def start_all_containers(
 
         # Get all containers and connections
         containers_result = await db.execute(
-            select(Container).where(Container.project_id == project.id)
+            select(Container)
+            .where(Container.project_id == project.id)
+            .options(selectinload(Container.base))  # Eagerly load base
         )
         containers = containers_result.scalars().all()
 
@@ -3472,7 +3481,9 @@ async def _start_container_background_task(
         task.update_progress(25, 100, "Loading project configuration")
 
         containers_result = await db.execute(
-            select(Container).where(Container.project_id == project.id)
+            select(Container)
+            .where(Container.project_id == project.id)
+            .options(selectinload(Container.base))  # Eagerly load base to avoid lazy loading in async context
         )
         all_containers = containers_result.scalars().all()
         task.add_log(f"Found {len(all_containers)} containers in project")

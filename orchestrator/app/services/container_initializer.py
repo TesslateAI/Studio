@@ -18,6 +18,7 @@ from pathlib import Path
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from ..models import Container, Project, ProjectFile, MarketplaceBase
 from ..services.volume_manager import get_volume_manager
@@ -231,7 +232,9 @@ async def initialize_container_async(
         try:
             # Get all containers and connections
             containers_result = await db.execute(
-                select(Container).where(Container.project_id == project_id)
+                select(Container)
+                .where(Container.project_id == project_id)
+                .options(selectinload(Container.base))  # Eagerly load base
             )
             all_containers = containers_result.scalars().all()
 
