@@ -2012,10 +2012,9 @@ async def get_user_marketplace_items(
 ):
     """
     Get all marketplace items in the user's library.
-    Returns bases, services, and future workflows in a unified format.
+    Returns bases, services (container, external, hybrid), and workflows in a unified format.
     """
-    from ..services.service_definitions import get_all_services
-    from uuid import uuid4
+    from ..services.service_definitions import get_all_services, service_to_dict
 
     # Fetch user's purchased bases
     result = await db.execute(
@@ -2056,6 +2055,7 @@ async def get_user_marketplace_items(
     # Add all services (available to all users by default)
     services = get_all_services()
     for service in services:
+        service_data = service_to_dict(service)
         items.append({
             "id": f"service-{service.slug}",  # Unique ID for services
             "name": service.name,
@@ -2063,15 +2063,168 @@ async def get_user_marketplace_items(
             "description": service.description,
             "icon": service.icon,
             "category": service.category,
-            "tech_stack": [service.docker_image],
-            "features": [],
+            "tech_stack": [service.docker_image] if service.docker_image else [],
+            "features": list(service.outputs.keys()) if service.outputs else [],
             "type": "service",
-            # Service-specific fields
+            # Service type (container, external, hybrid)
+            "service_type": service_data["service_type"],
+            # Container-specific fields
             "docker_image": service.docker_image,
             "default_port": service.default_port,
             "internal_port": service.internal_port,
             "environment_vars": service.environment_vars,
-            "volumes": service.volumes
+            "volumes": service.volumes,
+            # External service fields
+            "credential_fields": service_data["credential_fields"],
+            "auth_type": service_data["auth_type"],
+            "docs_url": service.docs_url,
+            # Connection configuration
+            "connection_template": service.connection_template,
+            "outputs": service.outputs
+        })
+
+    # Add workflows (available to all users)
+    from ..models import WorkflowTemplate
+    workflow_result = await db.execute(
+        select(WorkflowTemplate).where(WorkflowTemplate.is_active == True)
+    )
+    workflows = workflow_result.scalars().all()
+
+    for workflow in workflows:
+        items.append({
+            "id": str(workflow.id),
+            "name": workflow.name,
+            "slug": workflow.slug,
+            "description": workflow.description,
+            "icon": workflow.icon,
+            "category": workflow.category,
+            "tech_stack": workflow.tags or [],
+            "features": workflow.required_credentials or [],
+            "type": "workflow",
+            # Workflow-specific fields
+            "template_definition": workflow.template_definition,
+            "required_credentials": workflow.required_credentials,
+            "preview_image": workflow.preview_image,
+            "pricing_type": workflow.pricing_type,
+            "downloads": workflow.downloads,
+            "is_featured": workflow.is_featured
         })
 
     return {"items": items}
+
+
+# ============================================================================
+# Workflow Template Endpoints
+# ============================================================================
+
+@router.get("/workflows")
+async def list_workflows(
+    category: Optional[str] = None,
+    is_featured: Optional[bool] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all workflow templates with optional filtering."""
+    from ..models import WorkflowTemplate
+
+    query = select(WorkflowTemplate).where(WorkflowTemplate.is_active == True)
+
+    if category:
+        query = query.where(WorkflowTemplate.category == category)
+    if is_featured is not None:
+        query = query.where(WorkflowTemplate.is_featured == is_featured)
+    if search:
+        query = query.where(
+            WorkflowTemplate.name.ilike(f"%{search}%") |
+            WorkflowTemplate.description.ilike(f"%{search}%")
+        )
+
+    query = query.order_by(WorkflowTemplate.downloads.desc())
+
+    result = await db.execute(query)
+    workflows = result.scalars().all()
+
+    return {
+        "workflows": [
+            {
+                "id": str(w.id),
+                "name": w.name,
+                "slug": w.slug,
+                "description": w.description,
+                "icon": w.icon,
+                "category": w.category,
+                "tags": w.tags,
+                "preview_image": w.preview_image,
+                "required_credentials": w.required_credentials,
+                "pricing_type": w.pricing_type,
+                "price": w.price,
+                "downloads": w.downloads,
+                "rating": w.rating,
+                "is_featured": w.is_featured
+            }
+            for w in workflows
+        ]
+    }
+
+
+@router.get("/workflows/{slug}")
+async def get_workflow(
+    slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a workflow template by slug, including full template definition."""
+    from ..models import WorkflowTemplate
+
+    result = await db.execute(
+        select(WorkflowTemplate).where(
+            WorkflowTemplate.slug == slug,
+            WorkflowTemplate.is_active == True
+        )
+    )
+    workflow = result.scalar_one_or_none()
+
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    return {
+        "id": str(workflow.id),
+        "name": workflow.name,
+        "slug": workflow.slug,
+        "description": workflow.description,
+        "long_description": workflow.long_description,
+        "icon": workflow.icon,
+        "category": workflow.category,
+        "tags": workflow.tags,
+        "preview_image": workflow.preview_image,
+        "template_definition": workflow.template_definition,
+        "required_credentials": workflow.required_credentials,
+        "pricing_type": workflow.pricing_type,
+        "price": workflow.price,
+        "downloads": workflow.downloads,
+        "rating": workflow.rating,
+        "reviews_count": workflow.reviews_count,
+        "is_featured": workflow.is_featured
+    }
+
+
+@router.post("/workflows/{slug}/increment-downloads")
+async def increment_workflow_downloads(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """Increment the download count for a workflow template."""
+    from ..models import WorkflowTemplate
+
+    result = await db.execute(
+        select(WorkflowTemplate).where(WorkflowTemplate.slug == slug)
+    )
+    workflow = result.scalar_one_or_none()
+
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    workflow.downloads += 1
+    await db.commit()
+
+    return {"success": True, "downloads": workflow.downloads}

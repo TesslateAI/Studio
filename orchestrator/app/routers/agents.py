@@ -101,7 +101,8 @@ async def get_available_tools(
             "description": tool.description,
             "category": tool.category.value,
             "parameters": tool.parameters,
-            "examples": tool.examples or []
+            "examples": tool.examples or [],
+            "system_prompt": tool.system_prompt or ""
         }
         for tool in tools_list
     ]

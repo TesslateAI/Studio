@@ -241,24 +241,28 @@ export default function Project() {
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [slug]);
+  }, [slug, container]);  // Re-create interval when container changes to use fresh loadFiles
 
   // Refresh files when switching to code view
   useEffect(() => {
     if (activeView === 'code' && slug) {
       loadFiles();
     }
-  }, [activeView, slug]);
+  }, [activeView, slug, container]);  // Include container to use correct filter
 
   const loadProject = async () => {
     if (!slug) return;
     try {
-      const [projectData, filesData] = await Promise.all([
-        projectsApi.get(slug),
-        projectsApi.getFiles(slug),
-      ]);
+      const projectData = await projectsApi.get(slug);
       setProject(projectData);
-      setFiles(filesData);
+
+      // Only load files here if NOT viewing a specific container
+      // When viewing a container, loadFiles() will be called after container loads
+      // to properly filter files for that container's directory
+      if (!containerId) {
+        const filesData = await projectsApi.getFiles(slug);
+        setFiles(filesData);
+      }
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
@@ -271,13 +275,15 @@ export default function Project() {
       const filesData = await projectsApi.getFiles(slug);
 
       // If viewing a specific container, filter files to that container's directory
-      if (containerId && container) {
+      // Each container has its own directory (e.g., next-js-15/, vite-react-fastapi/)
+      if (containerId && container && container.directory) {
         const containerDir = container.directory;
         const filteredFiles = filesData.filter((file: any) =>
           file.file_path.startsWith(containerDir + '/')
         );
         setFiles(filteredFiles);
       } else {
+        // No container selected - show all files
         setFiles(filesData);
       }
     } catch (error) {

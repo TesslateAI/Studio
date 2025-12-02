@@ -16,6 +16,7 @@ Architecture:
 """
 
 import os
+import re
 import yaml
 import asyncio
 import logging
@@ -171,6 +172,8 @@ class DockerComposeOrchestrator:
             service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
             # Remove any remaining invalid characters
             service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+            # Collapse multiple dashes and strip leading/trailing dashes
+            service_name = re.sub(r'-+', '-', service_name).strip('-')
 
             # Handle service containers differently from base containers
             if container.container_type == "service":
@@ -180,6 +183,16 @@ class DockerComposeOrchestrator:
                 service_def = get_service(container.service_slug)
                 if not service_def:
                     logger.error(f"[COMPOSE] Service '{container.service_slug}' not found, skipping")
+                    continue
+
+                # Skip external-only services - they don't run as Docker containers
+                # Also skip services deployed in external mode (user provided cloud credentials)
+                from ..services.service_definitions import ServiceType
+                is_external_only = service_def.service_type == ServiceType.EXTERNAL
+                is_deployed_externally = getattr(container, 'deployment_mode', 'container') == 'external'
+
+                if is_external_only or is_deployed_externally:
+                    logger.info(f"[COMPOSE] Skipping external service '{container.service_slug}' (no container needed)")
                     continue
 
                 # Build service configuration from service definition
@@ -248,20 +261,28 @@ class DockerComposeOrchestrator:
 
             # Base container logic (original code)
             # Use tesslate-devserver which has Node.js, Python, Go pre-installed
-            # Working directory is set to /app below, not /template (where Vite template lives)
             base_image = "tesslate-devserver:latest"
 
-            # Build volume mounts (use project-level volume shared by all containers)
+            # Build volume mounts - use shared projects-data volume with subpath isolation
+            # SECURITY: Each container only sees its own project directory (cannot cd .. to other projects)
             if self.use_volumes:
-                # Use project-level volume (all containers share the same volume)
-                volume_name = project.volume_name or container.volume_name or f"{project.slug}"
-
-                if not project.volume_name:
-                    logger.warning(f"[COMPOSE] Project {project.slug} missing volume_name, using: {volume_name}")
-
+                # SECURE ARCHITECTURE: Shared projects-data volume with subpath
+                # - Uses Docker Compose v2.23.0+ subpath feature
+                # - Mounts ONLY /projects/{project-slug} to the container at /app
+                # - Container cannot escape to other projects (cd .. leads to container root, not other projects)
+                # - Orchestrator still has full access at /projects/{project-slug}
                 volumes = [
-                    f"{volume_name}:/app",
+                    {
+                        'type': 'volume',
+                        'source': 'tesslate-projects-data',
+                        'target': '/app',
+                        'volume': {
+                            'subpath': project.slug
+                        }
+                    }
                 ]
+                # Base working directory is /app (which IS the project root due to subpath)
+                project_work_dir = "/app"
             else:
                 # LEGACY: Use bind mounts (slow on WSL, kept for backward compatibility)
                 project_dir = f"users/{user_id}/{project.id}"
@@ -272,6 +293,7 @@ class DockerComposeOrchestrator:
                 volumes = [
                     f"{host_path}:/app",
                 ]
+                project_work_dir = "/app"  # Legacy mode uses /app
 
             # Build environment variables
             environment = container.environment_vars or {}
@@ -317,12 +339,12 @@ class DockerComposeOrchestrator:
 
             base_config = None
 
-            # Try volume first (supports custom user repos)
-            if container.volume_name:
+            # Try reading from shared projects volume (direct filesystem access)
+            if self.use_volumes:
                 try:
-                    base_config = await get_base_config_from_volume(container.volume_name)
+                    base_config = await get_base_config_from_volume(project.slug)
                 except Exception as e:
-                    logger.debug(f"[COMPOSE] Could not read config from volume: {e}")
+                    logger.debug(f"[COMPOSE] Could not read config from project: {e}")
 
             # Try cache if no volume config (marketplace bases)
             if not base_config and container.base:
@@ -344,26 +366,32 @@ class DockerComposeOrchestrator:
             # Add Traefik labels for routing
             labels = {
                 'traefik.enable': 'true',
+                # CRITICAL: Tell Traefik which network to use for routing
+                # Without this, Traefik may use the wrong network IP (project network instead of regional-traefik-network)
+                'traefik.docker.network': 'tesslate-regional-traefik-network',
                 f'traefik.http.routers.{sanitized_container_name}.rule':
                     f'Host(`{sanitized_container_name}.localhost`)',
                 f'traefik.http.services.{sanitized_container_name}.loadbalancer.server.port':
                     str(container_port),
-                # Traefik will discover on project network (dynamically connected)
                 'com.tesslate.project': project.slug,
                 'com.tesslate.container': container.name,
                 'com.tesslate.user': str(user_id),
             }
 
-            # Determine working directory (for multi-directory projects like vite-react-fastapi)
-            working_dir = '/app'  # Default for single-directory projects
-            if base_config and base_config.structure_type == "multi":
-                # Multi-directory project: detect subdirectory from container name
-                container_name_lower = container.name.lower()
-                if 'frontend' in container_name_lower or 'client' in container_name_lower:
-                    working_dir = '/app/frontend'
-                elif 'backend' in container_name_lower or 'server' in container_name_lower or 'api' in container_name_lower:
-                    working_dir = '/app/backend'
-                logger.info(f"[COMPOSE] Multi-directory project detected, working_dir: {working_dir}")
+            # Determine working directory based on container's directory
+            # Each container has its own directory (e.g., next-js-15/, vite-react-fastapi/)
+            # Volume subpath mounts project.slug to /app, so working_dir is /app/{container.directory}
+            if container.directory and container.directory != '.':
+                working_dir = f"{project_work_dir}/{container.directory}"
+            else:
+                working_dir = project_work_dir
+
+            # NOTE: We do NOT append /frontend or /backend here anymore.
+            # The TESSLATE.md startup command is responsible for navigating to subdirectories.
+            # This avoids issues where container names like "Vite + React + FastAPI"
+            # incorrectly match keywords like "api" and break the startup command.
+
+            logger.info(f"[COMPOSE] Container {container.name} working_dir: {working_dir}")
 
             # Generate command (uses validated custom or safe default)
             startup_command = generate_startup_command(base_config)
@@ -401,16 +429,13 @@ class DockerComposeOrchestrator:
             # Add to services (use sanitized service name)
             compose_config['services'][service_name] = service_config
 
-        # Add project-level volume if using Docker volumes
+        # Add shared projects-data volume as external (created by main docker-compose.yml)
         if self.use_volumes:
-            # Declare project-level volume (shared by all base containers)
-            # Don't overwrite volumes dict - service volumes may already be added
-            if project.volume_name:
-                compose_config['volumes'][project.volume_name] = {
-                    'name': project.volume_name,
-                    # Use local driver (default)
-                    # Future: could use NFS, Ceph, cloud storage drivers
-                }
+            # Declare shared volume as external (already created by main docker-compose.yml)
+            compose_config['volumes']['tesslate-projects-data'] = {
+                'external': True,
+                'name': 'tesslate-projects-data',
+            }
 
         return compose_config
 
@@ -699,6 +724,8 @@ class DockerComposeOrchestrator:
         # Sanitize service name (same logic as in generate_compose_config)
         service_name = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
         service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+        # Collapse multiple dashes and strip leading/trailing dashes
+        service_name = re.sub(r'-+', '-', service_name).strip('-')
 
         logger.info(f"[COMPOSE] Starting container {container_name} (service: {service_name}) in {project_slug}...")
 

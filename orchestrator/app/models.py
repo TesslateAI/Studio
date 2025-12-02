@@ -76,12 +76,17 @@ class Container(Base):
     container_type = Column(String, default="base", nullable=False)
     service_slug = Column(String, nullable=True)  # For service containers: 'postgres', 'redis', etc.
 
+    # External service support (for service_type='external' or 'hybrid')
+    deployment_mode = Column(String, default="container")  # 'container' | 'external' - how this node is deployed
+    external_endpoint = Column(String, nullable=True)  # For external services: the service URL (e.g., "https://xxx.supabase.co")
+    credentials_id = Column(UUID(as_uuid=True), ForeignKey("deployment_credentials.id", ondelete="SET NULL"), nullable=True)  # Link to stored credentials
+
     # React Flow position
     position_x = Column(Float, default=0)
     position_y = Column(Float, default=0)
 
     # Status tracking
-    status = Column(String, default="stopped")  # stopped, starting, running, failed
+    status = Column(String, default="stopped")  # stopped, starting, running, failed, connected (for external)
     last_started_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -90,12 +95,13 @@ class Container(Base):
     # Relationships
     project = relationship("Project", back_populates="containers")
     base = relationship("MarketplaceBase")
+    credentials = relationship("DeploymentCredential", foreign_keys=[credentials_id])
     connections_from = relationship("ContainerConnection", foreign_keys="ContainerConnection.source_container_id", back_populates="source_container", cascade="all, delete-orphan")
     connections_to = relationship("ContainerConnection", foreign_keys="ContainerConnection.target_container_id", back_populates="target_container", cascade="all, delete-orphan")
 
 
 class ContainerConnection(Base):
-    """Connections between containers in the React Flow graph (represents dependencies/networking)."""
+    """Connections between containers in the React Flow graph (represents dependencies/networking/env vars)."""
     __tablename__ = "container_connections"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -103,9 +109,21 @@ class ContainerConnection(Base):
     source_container_id = Column(UUID(as_uuid=True), ForeignKey("containers.id"), nullable=False)
     target_container_id = Column(UUID(as_uuid=True), ForeignKey("containers.id"), nullable=False)
 
-    # Connection metadata
+    # Connection metadata (legacy field for backward compatibility)
     connection_type = Column(String, default="depends_on")  # depends_on, network, custom
-    label = Column(String, nullable=True)  # Optional label for the edge
+
+    # Enhanced connector semantics
+    # Connector types: env_injection, http_api, database, message_queue, websocket, cache, depends_on
+    connector_type = Column(String, default="env_injection")
+
+    # Configuration for the connection (JSON)
+    # For env_injection: {"env_mapping": {"DATABASE_URL": "DATABASE_URL", "REDIS_HOST": "REDIS_HOST"}}
+    # For http_api: {"base_path": "/api", "auth_header": "Authorization"}
+    # For port_mapping: {"source_port": 5432, "target_port": 5432}
+    config = Column(JSON, nullable=True)
+
+    # Optional label for the edge (displayed in UI)
+    label = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -579,6 +597,70 @@ class BaseReview(Base):
     # Relationships
     base = relationship("MarketplaceBase", back_populates="reviews")
     user = relationship("User")
+
+
+class WorkflowTemplate(Base):
+    """Pre-configured workflow templates that users can drag onto their canvas.
+
+    Workflows are pre-connected sets of nodes (bases, services, external services)
+    with configured connections between them. Users can drop an entire workflow
+    onto their project canvas to quickly set up common architectures.
+
+    Example workflows:
+    - Next.js + Supabase Starter
+    - React + FastAPI + PostgreSQL
+    - Full-Stack SaaS with Auth + Payments
+    """
+    __tablename__ = "workflow_templates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    long_description = Column(Text, nullable=True)
+
+    # Visual representation
+    icon = Column(String, default="🔗")  # Emoji or phosphor icon name
+    preview_image = Column(String, nullable=True)  # URL to preview image
+
+    # Categorization
+    category = Column(String, nullable=False)  # fullstack, backend, frontend, data-pipeline, ai-app, etc.
+    tags = Column(JSON, nullable=True)  # ["nextjs", "supabase", "auth", etc.]
+
+    # Template definition (JSON) - defines nodes and connections
+    # Structure:
+    # {
+    #   "nodes": [
+    #     {"template_id": "frontend", "type": "base", "base_slug": "nextjs", "name": "Frontend", "position": {"x": 0, "y": 100}},
+    #     {"template_id": "database", "type": "service", "service_slug": "supabase", "name": "Database", "position": {"x": 300, "y": 100}}
+    #   ],
+    #   "edges": [
+    #     {"source": "frontend", "target": "database", "connector_type": "env_injection", "config": {...}}
+    #   ],
+    #   "required_credentials": ["supabase"]  # Services that need credentials
+    # }
+    template_definition = Column(JSON, nullable=False)
+
+    # Which credentials/services are required
+    required_credentials = Column(JSON, nullable=True)  # ["supabase", "stripe", etc.]
+
+    # Pricing
+    pricing_type = Column(String, default="free")  # free, one_time, monthly
+    price = Column(Integer, default=0)  # In cents
+    stripe_price_id = Column(String, nullable=True)
+    stripe_product_id = Column(String, nullable=True)
+
+    # Stats
+    downloads = Column(Integer, default=0)
+    rating = Column(Float, default=5.0)
+    reviews_count = Column(Integer, default=0)
+
+    # Status
+    is_featured = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class UserAPIKey(Base):

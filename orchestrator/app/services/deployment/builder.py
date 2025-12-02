@@ -499,146 +499,86 @@ class DeploymentBuilder:
 
     async def _collect_files_from_volume(
         self,
-        volume_name: str,
+        project_slug: str,
         subdirectory: Optional[str] = None
     ) -> List[DeploymentFile]:
         """
-        Collect files from a Docker volume using a temporary container.
+        Collect files from the shared projects volume using direct filesystem access.
 
-        This mirrors the pattern used in volume_manager.py for consistency.
+        With the new architecture, orchestrator has direct access to /projects/{slug}/.
 
         Args:
-            volume_name: Name of the Docker volume
-            subdirectory: Optional subdirectory within the volume to collect from
+            project_slug: Project slug (used as volume_name for backwards compatibility)
+            subdirectory: Optional subdirectory within the project to collect from
 
         Returns:
             List of DeploymentFile objects
         """
-        logger.info(f"Collecting files from volume {volume_name}, subdirectory: {subdirectory or '.'}")
+        # Build the path within the shared volume
+        base_path = f"/projects/{project_slug}"
+        if subdirectory and subdirectory != ".":
+            base_path = f"{base_path}/{subdirectory}"
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            source_path = f"/volume/{subdirectory}" if subdirectory else "/volume"
+        logger.info(f"Collecting files from shared volume at {base_path}")
 
-            docker_client = await asyncio.to_thread(self._get_docker_client)
+        if not os.path.exists(base_path):
+            raise FileNotFoundError(f"Project path not found: {base_path}")
 
-            try:
-                # Use docker cp to copy files from volume to local temp directory
-                # This avoids all the tar streaming and encoding issues
-                logger.info(f"[VOLUME] Using docker cp to extract files from {source_path}")
-
-                def copy_from_volume():
-                    # Create a long-lived container with the volume mounted
-                    container = docker_client.containers.create(
-                        image=self.dev_server_image,
-                        command=["sleep", "30"],
-                        volumes={volume_name: {'bind': '/volume', 'mode': 'ro'}},
-                        user='root',
-                        detach=True
-                    )
-                    try:
-                        container.start()
-
-                        # Use docker cp to copy files out
-                        # get_archive returns (data_stream, stat_dict)
-                        bits, stat = container.get_archive(source_path)
-
-                        # Write stream to tar file
-                        tar_bytes = b''.join(bits)
-
-                        return tar_bytes
-                    finally:
-                        container.stop(timeout=1)
-                        container.remove()
-
-                tar_bytes = await asyncio.to_thread(copy_from_volume)
-
-                logger.info(f"[VOLUME] Received {len(tar_bytes)} bytes via docker cp")
-                logger.info(f"[VOLUME] First 10 bytes (hex): {tar_bytes[:10].hex()}")
-
-                # Extract tar to temp directory
-                tar_stream = io.BytesIO(tar_bytes)
-                with tarfile.open(fileobj=tar_stream, mode='r') as tar:
-                    await asyncio.to_thread(tar.extractall, temp_dir)
-
-                # Collect files from temp directory
-                files = await self._collect_files_recursive(temp_dir, ".")
-
-                return files
-
-            except Exception as e:
-                logger.error(f"Failed to copy from volume: {e}", exc_info=True)
-                raise FileNotFoundError(f"Failed to read from volume {volume_name}: {str(e)}")
+        try:
+            files = await self._collect_files_recursive(base_path, ".")
+            logger.info(f"Collected {len(files)} files from {base_path}")
+            return files
+        except Exception as e:
+            logger.error(f"Failed to collect files from {base_path}: {e}", exc_info=True)
+            raise FileNotFoundError(f"Failed to read from {base_path}: {str(e)}")
 
     async def _read_file_from_volume(
         self,
-        volume_name: str,
+        project_slug: str,
         file_path: str
     ) -> Optional[bytes]:
         """
-        Read a single file from a Docker volume.
+        Read a single file from the shared projects volume.
+
+        With the new architecture, orchestrator has direct access to /projects/{slug}/.
 
         Args:
-            volume_name: Name of the Docker volume
-            file_path: Path to the file within the volume
+            project_slug: Project slug (used as volume_name for backwards compatibility)
+            file_path: Path to the file within the project
 
         Returns:
             File content as bytes, or None if file doesn't exist
         """
+        full_path = f"/projects/{project_slug}/{file_path}"
+
         try:
-            docker_client = await asyncio.to_thread(self._get_docker_client)
-
-            result = await asyncio.to_thread(
-                docker_client.containers.run,
-                image=self.dev_server_image,
-                command=["sh", "-c", f"cat /volume/{file_path}"],
-                volumes={volume_name: {'bind': '/volume', 'mode': 'ro'}},
-                user='root',
-                detach=False,
-                remove=True,
-                stdout=True,
-                stderr=True
-            )
-
-            return result
-
-        except docker.errors.ContainerError:
-            # File not found
+            if os.path.exists(full_path):
+                with open(full_path, 'rb') as f:
+                    return f.read()
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to read file {full_path}: {e}")
             return None
 
     async def _directory_exists_in_volume(
         self,
-        volume_name: str,
+        project_slug: str,
         directory_path: str
     ) -> bool:
         """
-        Check if a directory exists in a Docker volume.
+        Check if a directory exists in the shared projects volume.
+
+        With the new architecture, orchestrator has direct access to /projects/{slug}/.
 
         Args:
-            volume_name: Name of the Docker volume
-            directory_path: Path to the directory within the volume
+            project_slug: Project slug (used as volume_name for backwards compatibility)
+            directory_path: Path to the directory within the project
 
         Returns:
             True if directory exists, False otherwise
         """
-        try:
-            docker_client = await asyncio.to_thread(self._get_docker_client)
-
-            await asyncio.to_thread(
-                docker_client.containers.run,
-                image=self.dev_server_image,
-                command=["sh", "-c", f"test -d /volume/{directory_path}"],
-                volumes={volume_name: {'bind': '/volume', 'mode': 'ro'}},
-                user='root',
-                detach=False,
-                remove=True,
-                stdout=True,
-                stderr=True
-            )
-
-            return True
-
-        except docker.errors.ContainerError:
-            return False
+        full_path = f"/projects/{project_slug}/{directory_path}"
+        return os.path.isdir(full_path)
 
 
 # Global singleton instance

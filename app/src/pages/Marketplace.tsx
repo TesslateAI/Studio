@@ -353,8 +353,8 @@ export default function Marketplace() {
               View all <span>→</span>
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {filteredItems.filter(item => item.is_featured).slice(0, 4).map(item => (
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {filteredItems.filter(item => item.is_featured).slice(0, 6).map(item => (
               <ItemCard
                 key={item.id}
                 item={item}
@@ -378,8 +378,8 @@ export default function Marketplace() {
               View all <span>→</span>
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {filteredItems.filter(item => item.source_type === 'open' && !item.is_featured).slice(0, 4).map(item => (
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {filteredItems.filter(item => item.source_type === 'open' && !item.is_featured).slice(0, 6).map(item => (
               <ItemCard
                 key={item.id}
                 item={item}
@@ -483,7 +483,7 @@ function ItemCard({ item, onClick, onPurchase, theme }: {
       </div>
 
       {/* Image - Full Bleed */}
-      <div className="w-full h-40 bg-gradient-to-br from-orange-500/20 to-purple-500/20 rounded-t-2xl flex items-center justify-center p-10">
+      <div className="w-full h-28 bg-gradient-to-br from-orange-500/20 to-purple-500/20 rounded-t-2xl flex items-center justify-center p-6">
         {item.avatar_url ? (
           <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover rounded-lg" />
         ) : (
@@ -492,29 +492,29 @@ function ItemCard({ item, onClick, onPurchase, theme }: {
       </div>
 
       {/* Content */}
-      <div className="p-5">
+      <div className="p-3">
         {/* Name */}
-        <h3 className="font-heading font-bold text-[var(--text)] mb-2 text-lg group-hover:text-[var(--primary)] transition-colors">
+        <h3 className="font-heading font-bold text-[var(--text)] mb-1 text-sm group-hover:text-[var(--primary)] transition-colors">
           {item.name}
         </h3>
 
         {/* Description */}
-        <p className={`text-sm mb-4 line-clamp-2 min-h-[40px] ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
+        <p className={`text-xs mb-2 line-clamp-2 min-h-[32px] ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
           {item.description}
         </p>
 
         {/* Usage Count */}
-        <div className={`flex items-center gap-2 mb-4 text-sm ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-          <Lightning size={14} weight="fill" className="text-orange-400" />
+        <div className={`flex items-center gap-1.5 mb-2 text-xs ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
+          <Lightning size={12} weight="fill" className="text-orange-400" />
           <span className="font-medium">{item.usage_count || 0} uses</span>
         </div>
 
         {/* Tags */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          {item.tags?.slice(0, 3).map((tag, idx) => (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {item.tags?.slice(0, 2).map((tag, idx) => (
             <span
               key={idx}
-              className={`px-2 py-0.5 rounded text-xs ${theme === 'light' ? 'bg-black/10 text-black/60' : 'bg-white/10 text-white/60'}`}
+              className={`px-1.5 py-0.5 rounded text-[10px] ${theme === 'light' ? 'bg-black/10 text-black/60' : 'bg-white/10 text-white/60'}`}
             >
               {tag}
             </span>
@@ -522,17 +522,17 @@ function ItemCard({ item, onClick, onPurchase, theme }: {
         </div>
 
         {/* Actions */}
-        <div className={`flex items-center justify-between pt-4 border-t ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`}>
-          <div className="text-sm font-semibold text-[var(--text)]">
+        <div className={`flex items-center justify-between pt-2 border-t ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`}>
+          <div className="text-xs font-semibold text-[var(--text)]">
             {item.pricing_type === 'free' ? 'Free' : `$${item.price}/mo`}
           </div>
           {item.is_purchased ? (
             <button
               disabled
               onClick={(e) => e.stopPropagation()}
-              className="px-3 py-1.5 bg-green-500/20 text-green-400 rounded-md text-xs flex items-center gap-1.5 font-medium"
+              className="px-2 py-1 bg-green-500/20 text-green-400 rounded text-[10px] flex items-center gap-1 font-medium"
             >
-              <Check size={14} weight="bold" />
+              <Check size={12} weight="bold" />
               Installed
             </button>
           ) : (
@@ -542,7 +542,7 @@ function ItemCard({ item, onClick, onPurchase, theme }: {
                 onPurchase();
               }}
               disabled={!item.is_active}
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-all ${
                 item.is_active
                   ? 'bg-[var(--primary)] hover:bg-orange-600 text-white shadow-lg hover:shadow-xl'
                   : theme === 'light' ? 'bg-black/5 text-black/40' : 'bg-white/5 text-white/40'

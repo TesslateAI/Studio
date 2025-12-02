@@ -1,6 +1,6 @@
 import { MarkerPill } from './MarkerPill';
 
-interface Marker {
+export interface Marker {
   key: string;
   label: string;
   category: 'system' | 'project' | 'tool';
@@ -11,7 +11,7 @@ interface MarkerPaletteProps {
   onInsertMarker: (marker: string) => void;
 }
 
-const AVAILABLE_MARKERS: Marker[] = [
+export const AVAILABLE_MARKERS: Marker[] = [
   // System markers
   { key: 'mode', label: 'Edit Mode', category: 'system', description: 'Current edit mode (allow/ask/plan)' },
   { key: 'mode_instructions', label: 'Mode Instructions', category: 'system', description: 'Detailed instructions for current mode' },
@@ -45,6 +45,7 @@ export function MarkerPalette({ onInsertMarker }: MarkerPaletteProps) {
               marker={marker.key}
               label={marker.label}
               category={marker.category}
+              description={marker.description}
               onClick={() => onInsertMarker(marker.key)}
             />
           ))}
@@ -62,6 +63,7 @@ export function MarkerPalette({ onInsertMarker }: MarkerPaletteProps) {
               marker={marker.key}
               label={marker.label}
               category={marker.category}
+              description={marker.description}
               onClick={() => onInsertMarker(marker.key)}
             />
           ))}
@@ -79,6 +81,7 @@ export function MarkerPalette({ onInsertMarker }: MarkerPaletteProps) {
               marker={marker.key}
               label={marker.label}
               category={marker.category}
+              description={marker.description}
               onClick={() => onInsertMarker(marker.key)}
             />
           ))}

@@ -10,14 +10,12 @@ Retry Strategy:
 """
 
 import logging
-import os
 from typing import Dict, Any, List
 from uuid import UUID
 
 from ..registry import Tool, ToolCategory
 from ....config import get_settings
 from ..output_formatter import success_output, error_output
-from ....utils.resource_naming import get_project_path
 from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
@@ -59,6 +57,8 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    project_slug = context.get("project_slug")
+    container_directory = context.get("container_directory")  # Container subdir for scoped agents
     settings = get_settings()
 
     # Import diff editing utilities
@@ -76,15 +76,14 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             file_path=file_path
         )
     else:
-        # Docker mode: Read from orchestrator's users volume mount
-        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
-        project_dir = get_project_path(user_id, project_id)
-        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
-        full_path = os.path.join("/app", project_dir, file_path)
-
-        if os.path.exists(full_path):
-            with open(full_path, 'r', encoding='utf-8') as f:
-                current_content = f.read()
+        # Docker mode: Read from shared volume using volume_manager
+        if project_slug:
+            try:
+                from ....services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
+                current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+            except Exception as e:
+                logger.debug(f"Could not read from shared volume: {e}")
 
     if current_content is None:
         return error_output(
@@ -122,22 +121,25 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 file_path=file_path
             )
     else:
-        # Docker mode: Write to orchestrator's users volume mount
-        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
-        project_dir = get_project_path(user_id, project_id)
-        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
-        full_path = os.path.join("/app", project_dir, file_path)
-
-        try:
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(result.content)
-        except Exception as e:
-            return error_output(
-                message=f"Could not save patched file '{file_path}': {str(e)}",
-                suggestion="Check if you have write permissions",
-                file_path=file_path,
-                details={"error": str(e)}
-            )
+        # Docker mode: Write to shared volume using volume_manager
+        if project_slug:
+            try:
+                from ....services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
+                success = await volume_manager.write_file(project_slug, file_path, result.content, subdir=container_directory)
+                if not success:
+                    return error_output(
+                        message=f"Could not save patched file '{file_path}'",
+                        suggestion="Check if you have write permissions",
+                        file_path=file_path
+                    )
+            except Exception as e:
+                return error_output(
+                    message=f"Could not save patched file '{file_path}': {str(e)}",
+                    suggestion="Check if you have write permissions",
+                    file_path=file_path,
+                    details={"error": str(e)}
+                )
 
     # Generate a diff preview showing what changed
     def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:
@@ -217,6 +219,8 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    project_slug = context.get("project_slug")
+    container_directory = context.get("container_directory")  # Container subdir for scoped agents
     settings = get_settings()
 
     # Import diff editing utilities
@@ -234,15 +238,14 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             file_path=file_path
         )
     else:
-        # Docker mode: Read from orchestrator's users volume mount
-        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
-        project_dir = get_project_path(user_id, project_id)
-        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
-        full_path = os.path.join("/app", project_dir, file_path)
-
-        if os.path.exists(full_path):
-            with open(full_path, 'r', encoding='utf-8') as f:
-                current_content = f.read()
+        # Docker mode: Read from shared volume using volume_manager
+        if project_slug:
+            try:
+                from ....services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
+                current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+            except Exception as e:
+                logger.debug(f"Could not read from shared volume: {e}")
 
     if current_content is None:
         return error_output(
@@ -305,22 +308,25 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 file_path=file_path
             )
     else:
-        # Docker mode: Write to orchestrator's users volume mount
-        # User project files are stored at /app/users/{user_id}/{project_id}/ in orchestrator
-        project_dir = get_project_path(user_id, project_id)
-        # Construct absolute path: /app/users/{user_id}/{project_id}/{file_path}
-        full_path = os.path.join("/app", project_dir, file_path)
-
-        try:
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-        except Exception as e:
-            return error_output(
-                message=f"Could not save edited file '{file_path}': {str(e)}",
-                suggestion="Check if you have write permissions",
-                file_path=file_path,
-                details={"error": str(e)}
-            )
+        # Docker mode: Write to shared volume using volume_manager
+        if project_slug:
+            try:
+                from ....services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
+                success = await volume_manager.write_file(project_slug, file_path, content, subdir=container_directory)
+                if not success:
+                    return error_output(
+                        message=f"Could not save edited file '{file_path}'",
+                        suggestion="Check if you have write permissions",
+                        file_path=file_path
+                    )
+            except Exception as e:
+                return error_output(
+                    message=f"Could not save edited file '{file_path}': {str(e)}",
+                    suggestion="Check if you have write permissions",
+                    file_path=file_path,
+                    details={"error": str(e)}
+                )
 
     # Generate a diff preview showing what changed
     def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:

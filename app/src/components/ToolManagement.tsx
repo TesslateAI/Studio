@@ -8,11 +8,13 @@ export interface Tool {
   category: string;
   parameters: any;
   examples: string[];
+  system_prompt?: string;
 }
 
 export interface ToolConfig {
   description?: string;
   examples?: string[];
+  system_prompt?: string;
 }
 
 interface ToolManagementProps {
@@ -330,6 +332,9 @@ function ToolItem({
   const [editExamples, setEditExamples] = useState(
     config?.examples || tool.examples || []
   );
+  const [editSystemPrompt, setEditSystemPrompt] = useState(
+    config?.system_prompt || tool.system_prompt || ''
+  );
   const [newExample, setNewExample] = useState('');
 
   const hasCustomConfig = !!config;
@@ -348,6 +353,7 @@ function ToolItem({
     onSaveConfig({
       description: editDescription !== tool.description ? editDescription : undefined,
       examples: JSON.stringify(editExamples) !== JSON.stringify(tool.examples) ? editExamples : undefined,
+      system_prompt: editSystemPrompt !== (tool.system_prompt || '') ? editSystemPrompt : undefined,
     });
   };
 
@@ -402,6 +408,12 @@ function ToolItem({
                     +{(config?.examples || tool.examples).length - 2} more
                   </span>
                 )}
+              </div>
+            )}
+            {(config?.system_prompt || tool.system_prompt) && (
+              <div className="mt-1 text-[10px] text-purple-400/70 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-purple-400/50 rounded-full"></span>
+                Has custom instructions
               </div>
             )}
           </div>
@@ -511,6 +523,23 @@ function ToolItem({
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* System Prompt */}
+          <div>
+            <label className="block text-xs text-[var(--text)]/60 mb-1">
+              System Prompt <span className="text-[var(--text)]/40">(optional - additional instructions for this tool)</span>
+            </label>
+            <textarea
+              value={editSystemPrompt}
+              onChange={(e) => setEditSystemPrompt(e.target.value)}
+              rows={4}
+              placeholder="Add specific instructions for how this tool should behave..."
+              className="w-full px-2 py-1.5 bg-white/5 border border-[var(--text)]/15 rounded text-[var(--text)] text-xs focus:outline-none focus:border-orange-500/50 resize-none font-mono"
+            />
+            <p className="mt-1 text-[10px] text-[var(--text)]/40">
+              This prompt will be included when the agent uses this tool. Use it to customize tool behavior.
+            </p>
           </div>
 
           {/* Actions */}

@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react';
-import { MagnifyingGlass, Package, Plus } from '@phosphor-icons/react';
+import { MagnifyingGlass, Package, Plus, Cloud, Database, HardDrive, FlowArrow, Cube } from '@phosphor-icons/react';
 import api from '../lib/api';
+
+interface CredentialField {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  placeholder: string;
+  help_text: string;
+}
 
 interface MarketplaceItem {
   id: string;
@@ -10,12 +19,67 @@ interface MarketplaceItem {
   icon: string;
   tech_stack: string[];
   category: string;
-  type?: 'base' | 'service';
+  type?: 'base' | 'service' | 'workflow';
+  // Service-specific fields
+  service_type?: 'container' | 'external' | 'hybrid';
+  credential_fields?: CredentialField[];
+  auth_type?: string;
+  docs_url?: string;
+  connection_template?: Record<string, string>;
+  outputs?: Record<string, string>;
 }
 
 interface MarketplaceSidebarProps {
   onSelectItem?: (item: MarketplaceItem) => void;
 }
+
+// Helper to render item type badge
+const ItemTypeBadge = ({ item }: { item: MarketplaceItem }) => {
+  // Determine badge based on item type
+  let badge: { icon: React.ReactNode; label: string; color: string } | null = null;
+
+  if (item.type === 'workflow') {
+    badge = {
+      icon: <FlowArrow size={12} weight="fill" />,
+      label: 'Workflow',
+      color: 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+    };
+  } else if (item.type === 'service' && item.service_type) {
+    const serviceBadges: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
+      container: {
+        icon: <HardDrive size={12} weight="fill" />,
+        label: 'Container',
+        color: 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+      },
+      external: {
+        icon: <Cloud size={12} weight="fill" />,
+        label: 'External',
+        color: 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+      },
+      hybrid: {
+        icon: <Database size={12} weight="fill" />,
+        label: 'Hybrid',
+        color: 'bg-green-500/20 text-green-400 border-green-500/30'
+      }
+    };
+    badge = serviceBadges[item.service_type] || null;
+  } else if (item.type === 'base') {
+    badge = {
+      icon: <Cube size={12} weight="fill" />,
+      label: 'Base',
+      color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
+    };
+  }
+
+  if (!badge) return null;
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border ${badge.color}`}>
+      {badge.icon}
+      {badge.label}
+    </span>
+  );
+};
 
 export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) => {
   const [items, setItems] = useState<MarketplaceItem[]>([]);
@@ -111,6 +175,11 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                     <p className="text-xs text-[var(--text)]/60 line-clamp-2 mt-0.5 md:mt-1 break-words">
                       {item.description}
                     </p>
+
+                    {/* Item type badge */}
+                    <div className="mt-1.5">
+                      <ItemTypeBadge item={item} />
+                    </div>
 
                     {item.tech_stack && item.tech_stack.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1.5 md:mt-2">

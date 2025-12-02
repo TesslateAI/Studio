@@ -26,8 +26,8 @@ class ShellSessionManager:
     """Manages shell sessions with security and resource controls."""
 
     # Configuration
-    MAX_SESSIONS_PER_USER = 5  # Max concurrent shells per user (agents may need more)
-    MAX_SESSIONS_PER_PROJECT = 3  # Max concurrent shells per project
+    MAX_SESSIONS_PER_USER = 100  # Max concurrent shells per user
+    MAX_SESSIONS_PER_PROJECT = 100  # Max concurrent shells per project
     IDLE_TIMEOUT_MINUTES = 30  # Auto-close idle shells after 30 minutes
     MAX_SESSION_DURATION_HOURS = 8  # Force close after 8 hours
     MAX_OUTPUT_BUFFER_SIZE = 10 * 1024 * 1024  # 10MB max buffer per session
@@ -45,6 +45,7 @@ class ShellSessionManager:
         project_id: str,
         db: AsyncSession,
         command: str = "/bin/sh",
+        container_name: Optional[str] = None,  # For multi-container Docker: which container to connect to
     ) -> Dict[str, Any]:
         """
         Create a new shell session with validation and resource limits.
@@ -85,10 +86,14 @@ class ShellSessionManager:
             )
 
         # 4. Get container/pod name based on deployment mode
-        container_name = await self._get_container_name(user_id, project_id)
+        resolved_container_name = await self._get_container_name(
+            user_id, project_id, project.slug, container_name
+        )
 
         # 5. Verify container is running
-        is_running = await self._is_container_running(user_id, project_id, project.slug)
+        is_running = await self._is_container_running(
+            user_id, project_id, project.slug, container_name
+        )
         if not is_running:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -100,7 +105,7 @@ class ShellSessionManager:
             pty_session = await self.pty_broker.create_session(
                 user_id=user_id,
                 project_id=project_id,
-                container_name=container_name,
+                container_name=resolved_container_name,
                 command=command,
             )
         except Exception as e:
@@ -115,7 +120,7 @@ class ShellSessionManager:
             session_id=pty_session.session_id,
             user_id=user_id,
             project_id=project_id,
-            container_name=container_name,
+            container_name=resolved_container_name,
             command=command,
             working_dir=pty_session.cwd,  # Get from PTYSession (already configured for deployment mode)
             status="active",
@@ -133,7 +138,7 @@ class ShellSessionManager:
 
         logger.info(
             f"Created shell session {pty_session.session_id} for user {user_id}, "
-            f"project {project_id}, container {container_name}. "
+            f"project {project_id}, container {resolved_container_name}. "
             f"Total active sessions: {len(self.active_sessions)}"
         )
 
@@ -349,31 +354,104 @@ class ShellSessionManager:
 
     # Helper methods
 
-    async def _get_container_name(self, user_id: UUID, project_id: str) -> str:
-        """Get container/pod name based on deployment mode."""
+    async def _get_container_name(
+        self,
+        user_id: UUID,
+        project_id: str,
+        project_slug: str,
+        container_name: Optional[str] = None
+    ) -> str:
+        """
+        Get container/pod name based on deployment mode.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            project_slug: Project slug
+            container_name: For Docker multi-container: specific container name to connect to
+
+        Returns:
+            The Docker container name or K8s pod name
+        """
         if settings.deployment_mode == "kubernetes":
             # K8s pod name format
             return get_container_name(user_id, project_id, mode="kubernetes")
         else:
-            # Docker multi-container mode - TODO: determine which container to use for shell
-            # For now, raise error as shell sessions need updating for multi-container
-            raise NotImplementedError(
-                "Shell sessions not yet implemented for multi-container Docker projects. "
-                "Please use Kubernetes mode or update shell_session_manager for multi-container support."
-            )
+            # Docker multi-container mode
+            # Container name format: {project_slug}-{service_name}
+            if container_name:
+                # Sanitize the container name to match docker-compose naming
+                sanitized = container_name.lower().replace(' ', '-').replace('_', '-')
+                sanitized = ''.join(c for c in sanitized if c.isalnum() or c == '-')
+                sanitized = sanitized.strip('-')
+                return f"{project_slug}-{sanitized}"
+            else:
+                # Default to the first container in the project
+                # We'll look this up from the docker-compose file
+                from ..services.docker_compose_orchestrator import get_compose_orchestrator
+                orchestrator = get_compose_orchestrator()
+                status = await orchestrator.get_project_status(project_slug)
 
-    async def _is_container_running(self, user_id: UUID, project_id: str, project_slug: str = None) -> bool:
-        """Check if container/pod is running."""
+                if status.get('containers'):
+                    # Get the first running container, or first container if none running
+                    for service_name, info in status['containers'].items():
+                        if info.get('running'):
+                            return info.get('name', f"{project_slug}-{service_name}")
+                    # Fallback to first container
+                    first_service = next(iter(status['containers'].keys()))
+                    return status['containers'][first_service].get('name', f"{project_slug}-{first_service}")
+
+                raise ValueError(
+                    "No containers found for project. Please start the project first."
+                )
+
+    async def _is_container_running(
+        self,
+        user_id: UUID,
+        project_id: str,
+        project_slug: str,
+        container_name: Optional[str] = None
+    ) -> bool:
+        """
+        Check if container/pod is running.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            project_slug: Project slug
+            container_name: For Docker multi-container: specific container name to check
+
+        Returns:
+            True if the container is running
+        """
         if settings.deployment_mode == "kubernetes":
             from ..k8s_client import get_k8s_manager
             k8s_manager = get_k8s_manager()
             status = await k8s_manager.get_container_status(str(project_id), user_id, project_slug)
             return status.get("running", False)
         else:
-            # Docker multi-container mode - TODO: implement container status check
-            raise NotImplementedError(
-                "Container status check not yet implemented for multi-container Docker projects."
-            )
+            # Docker multi-container mode
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+            orchestrator = get_compose_orchestrator()
+            status = await orchestrator.get_project_status(project_slug)
+
+            if status.get('status') == 'not_found':
+                return False
+
+            if container_name:
+                # Check specific container
+                sanitized = container_name.lower().replace(' ', '-').replace('_', '-')
+                sanitized = ''.join(c for c in sanitized if c.isalnum() or c == '-')
+                sanitized = sanitized.strip('-')
+
+                container_info = status.get('containers', {}).get(sanitized)
+                return container_info.get('running', False) if container_info else False
+            else:
+                # Check if any container is running
+                for info in status.get('containers', {}).values():
+                    if info.get('running'):
+                        return True
+                return False
 
     async def _get_user_active_sessions(
         self,

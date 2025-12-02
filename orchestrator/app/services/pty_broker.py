@@ -133,11 +133,21 @@ class DockerPTYBroker(BasePTYBroker):
 
         session_id = str(uuid.uuid4())
 
-        # Run command directly - container already starts in /app
-        # Agent can use 'cd' commands if they need to change directories
+        # Get the container's working directory from its config
+        # This respects the working_dir set in docker-compose
+        try:
+            container = self.client.containers.get(container_name)
+            container_workdir = container.attrs.get('Config', {}).get('WorkingDir', '/app')
+            if not container_workdir:
+                container_workdir = '/app'
+            logger.info(f"Container {container_name} working directory: {container_workdir}")
+        except Exception as e:
+            logger.warning(f"Could not get container working dir, using /app: {e}")
+            container_workdir = '/app'
+
         full_command = ["/bin/sh", "-c", command]
 
-        # Create exec instance with PTY
+        # Create exec instance with PTY, using container's working directory
         exec_id = self.client.api.exec_create(
             container_name,
             cmd=full_command,
@@ -145,6 +155,7 @@ class DockerPTYBroker(BasePTYBroker):
             stdin=True,
             stdout=True,
             stderr=True,
+            workdir=container_workdir,  # Use container's configured working directory
             environment={
                 "TERM": "xterm-256color",
                 "COLORTERM": "truecolor",
@@ -165,18 +176,14 @@ class DockerPTYBroker(BasePTYBroker):
             demux=False,  # Don't separate stdout/stderr with PTY
         )
 
-        # Get configured project path (differs between Docker and K8s)
-        from ..config import get_settings
-        project_path = get_settings().container_project_path
-
-        # Create session object
+        # Create session object with container's actual working directory
         session = PTYSession(
             session_id=session_id,
             user_id=user_id,
             project_id=project_id,
             container_name=container_name,
             command=command,
-            cwd=project_path,  # Both Docker and K8s: /app
+            cwd=container_workdir,  # Use container's configured working directory
             rows=rows,
             cols=cols,
         )

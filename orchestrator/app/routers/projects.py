@@ -1,5 +1,6 @@
 from typing import List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status, WebSocket, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,8 +8,9 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from ..database import get_db
-from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset, Container, ContainerConnection, MarketplaceBase
-from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema, Container as ContainerSchema, ContainerCreate, ContainerUpdate, ContainerConnection as ContainerConnectionSchema, ContainerConnectionCreate
+from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset, Container, ContainerConnection, MarketplaceBase, DeploymentCredential
+import json
+from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema, Container as ContainerSchema, ContainerCreate, ContainerUpdate, ContainerRename, ContainerConnection as ContainerConnectionSchema, ContainerConnectionCreate
 from ..config import get_settings
 from ..utils.slug_generator import generate_project_slug
 from ..utils.resource_naming import get_project_path
@@ -313,13 +315,14 @@ async def _setup_base_project(
 
     try:
         from ..services.base_cache_manager import get_base_cache_manager
+        from ..services.volume_manager import get_volume_manager
 
         task.update_progress(20, 100, "Copying pre-installed base from cache")
 
         # Get cached base path
         base_cache_manager = get_base_cache_manager()
         cached_base_path = await base_cache_manager.get_base_path(base_repo.slug)
-        use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
+        volume_manager = get_volume_manager()
 
         if not os.path.exists(cached_base_path):
             # Fallback to git clone if base not in cache (shouldn't happen in normal operation)
@@ -335,96 +338,25 @@ async def _setup_base_project(
                 repo_url=base_repo.git_repo_url,
                 branch=base_repo.default_branch,
                 auth_token=access_token,
-                direct_to_filesystem=(settings.deployment_mode == "docker" and not use_volumes)
+                direct_to_filesystem=False  # Clone to temp, then copy to shared volume
             )
         else:
-            if use_volumes:
-                # NEW: Volume-based storage
-                from ..services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
+            # Copy from base cache to shared projects volume
+            # Uses direct filesystem copy at /projects/{project-slug}/
+            await volume_manager.copy_base_to_project(
+                base_repo.slug,
+                db_project.slug,
+                exclude_patterns=['.git', '__pycache__', '*.pyc']
+            )
 
-                # Create project volume
-                volume_name = f"{db_project.slug}-project"
-                await volume_manager.create_project_volume(
-                    volume_name,
-                    labels={
-                        'com.tesslate.project': db_project.slug,
-                        'com.tesslate.user': str(user_id)
-                    }
-                )
-
-                # Update project with volume name
-                db_project.volume_name = volume_name
-                await db.commit()
-
-                # Copy from base cache to volume (volume→volume, fast!)
-                await volume_manager.copy_base_to_volume(
-                    base_repo.slug,
-                    volume_name,
-                    exclude_patterns=['.git', '__pycache__', '*.pyc']
-                )
-
-                logger.info(f"Copied base {base_repo.slug} from cache to volume {volume_name}")
-            else:
-                # LEGACY: Bind mount storage
-                # Create parent directory if it doesn't exist
-                os.makedirs(os.path.dirname(project_path), exist_ok=True)
-
-                # Remove project_path if it exists (cleanup from any previous failed attempts)
-                if os.path.exists(project_path):
-                    shutil.rmtree(project_path)
-
-                # Copy the entire cached base directory tree
-                await asyncio.to_thread(
-                    shutil.copytree,
-                    cached_base_path,
-                    project_path,
-                    ignore=shutil.ignore_patterns('.git'),  # Don't copy .git folder
-                    dirs_exist_ok=False
-                )
-
-                logger.info(f"Copied base {base_repo.slug} from cache to {project_path}")
+            logger.info(f"Copied base {base_repo.slug} to shared volume /projects/{db_project.slug}")
 
         task.update_progress(40, 100, "Base loaded successfully")
 
-        # Save files if Docker mode
-        if settings.deployment_mode == "docker":
-            if use_volumes:
-                # Volume mode: Files are in volume, skip DB sync for now
-                # TODO: Read files from volume and sync to database
-                task.update_progress(90, 100, "Files ready in volume (DB sync skipped)")
-                logger.info(f"[CREATE] Skipped DB sync for volume (files will sync on first edit)")
-            else:
-                # Bind mount mode: Sync files to database
-                task.update_progress(65, 100, "Saving base files to database")
-                files_saved = 0
-                walk_results = await walk_directory_async(
-                    project_path,
-                    exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
-                )
-
-                for root, dirs, files in walk_results:
-                    for file in files:
-                        if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
-                            continue
-
-                        file_full_path = os.path.join(root, file)
-                        relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
-
-                        try:
-                            content = await read_file_async(file_full_path)
-                            db_file = ProjectFile(
-                                project_id=db_project.id,
-                                file_path=relative_path,
-                                content=content
-                            )
-                            db.add(db_file)
-                            files_saved += 1
-                        except Exception as e:
-                            logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
-
-                await db.commit()
-                task.update_progress(90, 100, f"Saved {files_saved} files to database")
+        # Files are now in shared volume at /projects/{project-slug}/
+        # DB sync is optional - shared volume is the source of truth
+        task.update_progress(90, 100, "Files ready in shared volume")
+        logger.info(f"[CREATE] Files ready in shared volume /projects/{db_project.slug}")
 
         db_project.has_git_repo = True
         db_project.git_remote_url = base_repo.git_repo_url
@@ -654,21 +586,67 @@ async def get_project_files(
     project_slug: str,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
-    from_pod: bool = False  # Optional query param to force reading from pod
+    from_pod: bool = False,  # Optional query param to force reading from pod
+    from_volume: bool = True,  # Default: Try reading from Docker volume for multi-container projects
+    container_dir: Optional[str] = None  # Container subdirectory (e.g., "frontend") - files shown as root
 ):
     """
-    Get project files from database (default) or from running pod (if from_pod=true).
+    Get project files from Docker volume, database, or running pod.
 
     Strategy:
-    - Default: Return files from database (fast, always available)
-    - If from_pod=true: Try to read from pod, fall back to DB if pod unavailable
+    1. For multi-container projects (Docker): Read from Docker volume
+    2. For K8s projects: If from_pod=true, read from pod
+    3. Fallback: Return files from database
+
+    If container_dir is specified, only files from that subdirectory are returned,
+    with paths relative to that directory (appearing as root-level).
     """
     # Get project and verify ownership
     project = await get_project_by_slug(db, project_slug, current_user.id)
     project_id = project.id  # For internal operations
 
-    # If from_pod requested, try to read from running container (K8s only)
     settings = get_settings()
+
+    # Check if this is a Docker project - use shared projects volume
+    if from_volume and settings.deployment_mode == "docker":
+        try:
+            from ..services.volume_manager import get_volume_manager
+            volume_manager = get_volume_manager()
+
+            subdir_log = f"/{container_dir}" if container_dir else ""
+            logger.info(f"[FILES] Reading files from shared projects volume: /projects/{project.slug}{subdir_log}")
+
+            # Get files with content from shared volume (direct filesystem access)
+            volume_files = await volume_manager.get_files_with_content(
+                project.slug,  # Uses /projects/{slug}/ directory
+                max_files=200,
+                max_file_size=100000,  # 100KB per file
+                subdir=container_dir  # Container subdirectory (files appear as root)
+            )
+
+            if volume_files:
+                # Convert to ProjectFileSchema format
+                files_with_content = []
+                now = datetime.now(timezone.utc)
+                for vf in volume_files:
+                    files_with_content.append(ProjectFileSchema(
+                        id=uuid4(),  # Generate unique ID for each file
+                        project_id=project_id,
+                        file_path=vf['file_path'],
+                        content=vf['content'],
+                        created_at=now,
+                        updated_at=now
+                    ))
+
+                logger.info(f"[FILES] ✅ Read {len(files_with_content)} files from shared volume")
+                return files_with_content
+            else:
+                logger.info(f"[FILES] No files found in volume, falling back to database")
+
+        except Exception as e:
+            logger.warning(f"[FILES] Failed to read from shared volume: {e}, falling back to database")
+
+    # If from_pod requested, try to read from running container (K8s only)
     if from_pod and settings.deployment_mode == "kubernetes":
         try:
             from ..k8s_client import get_k8s_manager
@@ -689,6 +667,7 @@ async def get_project_files(
 
                 # Read content for each file
                 files_with_content = []
+                now = datetime.now(timezone.utc)
                 for pod_file in pod_files:
                     if pod_file["type"] == "file":
                         try:
@@ -700,12 +679,12 @@ async def get_project_files(
 
                             if content is not None:
                                 files_with_content.append(ProjectFileSchema(
-                                    id=0,  # Temporary ID
+                                    id=uuid4(),  # Generate unique ID for each file
                                     project_id=project_id,
                                     file_path=pod_file["path"],
                                     content=content,
-                                    created_at=None,
-                                    updated_at=None
+                                    created_at=now,
+                                    updated_at=now
                                 ))
                         except Exception as e:
                             logger.warning(f"[FILES] Failed to read {pod_file['path']}: {e}")
@@ -901,39 +880,25 @@ async def save_project_file(
                 logger.warning(f"[FILE] ⚠️ Failed to write to pod: {k8s_error}")
                 # Continue to save in DB even if pod write fails
         else:
-            # Docker mode: Write to filesystem or volume
-            use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
+            # Docker mode: Write directly to shared projects volume
+            try:
+                from ..services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
 
-            if use_volumes:
-                # NEW: Volume-based storage
-                # Strategy: Database is source of truth, volumes are runtime cache
-                # Write to volume happens async after DB commit
-                pass  # Will write to volume after DB commit below
-            else:
-                # LEGACY: Bind mount storage
-                try:
-                    project_path = os.path.abspath(get_project_path(current_user.id, project_id))
-                    os.makedirs(project_path, exist_ok=True)
+                # Write file to shared volume at /projects/{project.slug}/{file_path}
+                success = await volume_manager.write_file(
+                    project.slug,
+                    file_path,
+                    content
+                )
 
-                    full_file_path = os.path.join(project_path, file_path)
+                if success:
+                    logger.info(f"[FILE] ✅ Wrote {file_path} to shared volume for project {project.slug}")
+                else:
+                    logger.warning(f"[FILE] ⚠️ Failed to write to shared volume")
 
-                    # Create parent directory (with safety check for Windows Docker volumes)
-                    parent_dir = os.path.dirname(full_file_path)
-                    if parent_dir:
-                        try:
-                            os.makedirs(parent_dir, exist_ok=True)
-                        except FileExistsError:
-                            # Handle race condition on Windows Docker volumes - verify it exists
-                            if not os.path.exists(parent_dir):
-                                raise
-
-                    with open(full_file_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
-
-                    logger.info(f"[FILE] ✅ Wrote {file_path} to bind mount for user {current_user.id}, project {project_id}")
-
-                except Exception as docker_error:
-                    logger.warning(f"[FILE] ⚠️ Failed to write to bind mount: {docker_error}")
+            except Exception as docker_error:
+                logger.warning(f"[FILE] ⚠️ Failed to write to shared volume: {docker_error}")
 
         # 2. Update database record (for version history / backup)
         result = await db.execute(
@@ -962,52 +927,10 @@ async def save_project_file(
 
         logger.info(f"[FILE] Saved {file_path} to database as backup")
 
-        # Async write to volume (if using volumes)
-        if settings.deployment_mode == "docker" and use_volumes:
-            # Determine which container's volume to write to based on file path
-            # File path format: "packages/{container_name}/src/App.tsx"
-            container_name_from_path = None
-            if file_path.startswith('packages/'):
-                parts = file_path.split('/', 2)
-                if len(parts) >= 2:
-                    container_name_from_path = parts[1]
-
-            if container_name_from_path:
-                # Find container by directory
-                container_result = await db.execute(
-                    select(Container).where(
-                        Container.project_id == project_id,
-                        Container.directory == f"packages/{container_name_from_path}"
-                    )
-                )
-                container = container_result.scalar_one_or_none()
-
-                if container and container.volume_name:
-                    # Async write to volume (non-blocking)
-                    try:
-                        from ..services.volume_manager import get_volume_manager
-                        volume_manager = get_volume_manager()
-
-                        # Extract file path relative to container root
-                        # "packages/frontend/src/App.tsx" → "src/App.tsx"
-                        relative_path = '/'.join(file_path.split('/')[2:]) if '/' in file_path else file_path
-
-                        # Schedule async write (fire and forget - don't block response)
-                        asyncio.create_task(
-                            volume_manager.write_file_to_volume(
-                                container.volume_name,
-                                relative_path,
-                                content
-                            )
-                        )
-                        logger.info(f"[FILE] Scheduled async write to volume {container.volume_name}")
-                    except Exception as e:
-                        logger.warning(f"[FILE] Failed to schedule volume write: {e}")
-
         return {
             "message": "File saved successfully",
             "file_path": file_path,
-            "method": "volume" if (settings.deployment_mode == "docker" and use_volumes) else "filesystem"
+            "method": "shared_volume" if settings.deployment_mode == "docker" else "kubernetes_pod"
         }
 
     except HTTPException:
@@ -1164,54 +1087,18 @@ async def _perform_project_deletion(
 
         task.update_progress(70, 100, "Deleting project files...")
 
-        # 4. Delete volumes or filesystem (Docker mode only - K8s uses PVCs)
+        # 4. Delete project files from shared volume (Docker mode only - K8s uses PVCs)
         settings = get_settings()
-        if settings.deployment_mode == "docker":
-            use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
+        if settings.deployment_mode == "docker" and project:
+            from ..services.volume_manager import get_volume_manager
+            volume_manager = get_volume_manager()
 
-            if use_volumes and project:
-                # Volume mode: Delete Docker volumes
-                from ..services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
-
-                # Delete project volume
-                if project.volume_name:
-                    try:
-                        await volume_manager.delete_volume(project.volume_name, force=True)
-                        logger.info(f"[DELETE] Deleted project volume: {project.volume_name}")
-                    except Exception as e:
-                        logger.warning(f"[DELETE] Failed to delete project volume: {e}")
-
-                # Delete all container volumes
-                container_result = await db.execute(
-                    select(Container).where(Container.project_id == project_id)
-                )
-                containers = container_result.scalars().all()
-
-                for container in containers:
-                    if container.volume_name:
-                        try:
-                            await volume_manager.delete_volume(container.volume_name, force=True)
-                            logger.info(f"[DELETE] Deleted container volume: {container.volume_name}")
-                        except Exception as e:
-                            logger.warning(f"[DELETE] Failed to delete container volume {container.volume_name}: {e}")
-
-            else:
-                # Bind mount mode: Delete filesystem directory
-                project_dir = os.path.abspath(get_project_path(user_id, project_id))
-                if os.path.exists(project_dir):
-                    try:
-                        # Use async version to avoid blocking
-                        await rmtree_async(project_dir)
-                        logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
-                    except PermissionError:
-                        # On Windows, wait a moment and try again
-                        await asyncio.sleep(1)
-                        try:
-                            await rmtree_async(project_dir)
-                            logger.info(f"[DELETE] Deleted filesystem directory: {project_dir}")
-                        except PermissionError as e:
-                            logger.warning(f"[DELETE] Could not delete project directory: {e}")
+            # Delete project directory from shared volume
+            try:
+                await volume_manager.delete_project_directory(project.slug)
+                logger.info(f"[DELETE] Deleted project directory: /projects/{project.slug}")
+            except Exception as e:
+                logger.warning(f"[DELETE] Failed to delete project directory: {e}")
 
         task.update_progress(100, 100, "Project deleted successfully")
         logger.info(f"[DELETE] Successfully deleted project {project_id}")
@@ -2871,8 +2758,9 @@ async def add_container_to_project(
     try:
         # Handle service containers differently from base containers
         if container_data.container_type == "service":
-            # Service container (Postgres, Redis, etc.)
-            from ..services.service_definitions import get_service
+            # Service container (Postgres, Redis, etc.) or External service (Supabase, OpenAI, etc.)
+            from ..services.service_definitions import get_service, ServiceType
+            from ..services.deployment_encryption import get_deployment_encryption_service
 
             if not container_data.service_slug:
                 raise HTTPException(status_code=400, detail="service_slug required for service containers")
@@ -2889,48 +2777,118 @@ async def add_container_to_project(
             internal_port = service_def.internal_port
             base_name = None  # Services don't have bases
             git_repo_url = None
+            resolved_base_id = None  # Services don't have a base
+
+            # Handle external services
+            deployment_mode = container_data.deployment_mode or "container"
+            external_endpoint = container_data.external_endpoint
+            credentials_id = None
+
+            # Check if this is an external service that needs credentials stored
+            is_external = (
+                service_def.service_type in (ServiceType.EXTERNAL, ServiceType.HYBRID)
+                and deployment_mode == "external"
+            )
+
+            if is_external and container_data.credentials:
+                # Store credentials using DeploymentCredential model
+                encryption_service = get_deployment_encryption_service()
+                credential = DeploymentCredential(
+                    user_id=current_user.id,
+                    project_id=project.id,
+                    provider=container_data.service_slug,
+                    access_token_encrypted=encryption_service.encrypt(
+                        # Store all credentials as JSON for flexibility
+                        json.dumps(container_data.credentials)
+                    ),
+                    provider_metadata={
+                        "service_type": service_def.service_type.value,
+                        "external_endpoint": external_endpoint,
+                    }
+                )
+                db.add(credential)
+                await db.flush()  # Get the ID without committing
+                credentials_id = credential.id
+                logger.info(f"[CONTAINER] Stored credentials for external service {container_data.service_slug}")
 
         else:
             # Base container (marketplace base or builtin)
+            resolved_base_id = None  # Will hold the actual UUID for the base
+
             if container_data.base_id == "builtin":
                 base_name = "main"
                 base_icon = "📦"
                 git_repo_url = None  # Built-in template, already in project
+                resolved_base_id = None  # Built-in has no base_id
             else:
-                base_result = await db.execute(
-                    select(MarketplaceBase).where(MarketplaceBase.id == container_data.base_id)
-                )
-                base = base_result.scalar_one_or_none()
+                # Try to find base by ID first, then by slug (for workflow templates)
+                base = None
+                base_id_str = str(container_data.base_id) if container_data.base_id else None
+
+                # Check if it looks like a UUID
+                is_uuid = False
+                if base_id_str:
+                    try:
+                        import uuid as uuid_module
+                        uuid_module.UUID(base_id_str)
+                        is_uuid = True
+                    except (ValueError, AttributeError):
+                        is_uuid = False
+
+                if is_uuid:
+                    # Look up by ID
+                    base_result = await db.execute(
+                        select(MarketplaceBase).where(MarketplaceBase.id == container_data.base_id)
+                    )
+                    base = base_result.scalar_one_or_none()
+                else:
+                    # Look up by slug (for workflow templates that use base_slug)
+                    base_result = await db.execute(
+                        select(MarketplaceBase).where(MarketplaceBase.slug == base_id_str)
+                    )
+                    base = base_result.scalar_one_or_none()
 
                 if not base:
-                    raise HTTPException(status_code=404, detail="Base not found")
+                    raise HTTPException(status_code=404, detail=f"Base not found: {container_data.base_id}")
 
                 base_name = base.slug
                 base_icon = base.icon
                 git_repo_url = base.git_repo_url
+                resolved_base_id = base.id  # Use the actual UUID from the database
 
             # Determine container directory and name for base containers
             container_name = container_data.name or base_name
 
-            # Check if this is the first container in the project
-            # First container goes to volume root, subsequent ones go to packages/
-            result_containers = await db.execute(
-                select(Container).where(Container.project_id == project.id)
-            )
-            existing_containers = result_containers.scalars().all()
-
-            if len(existing_containers) == 0:
-                # First container - files go to volume root
-                container_directory = "."
-            else:
-                # Multi-container project - use packages/{name} for monorepo structure
-                container_directory = f"packages/{container_name}"
-
-            # Sanitize the Docker container name to match what Docker actually creates
+            # Sanitize the container name for Docker and directory naming
             # Docker normalizes names: lowercase, replace spaces/underscores/dots with hyphens, alphanumeric only
             service_name = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
             service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+            service_name = service_name.strip('-')  # Remove leading/trailing hyphens
             docker_container_name = f"{project.slug}-{service_name}"
+
+            # Each container gets its own directory using the sanitized name
+            # This creates a clean structure: project-abc123/next-js-15/, project-abc123/vite-react-fastapi/
+            container_directory = service_name
+
+            # Check for duplicate directory names - if exists, append a number suffix
+            existing_containers = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            existing_dirs = set()
+            for existing in existing_containers.scalars().all():
+                if existing.directory:
+                    existing_dirs.add(existing.directory.lower())
+
+            # If directory already exists, find a unique name by appending -2, -3, etc.
+            if container_directory.lower() in existing_dirs:
+                base_dir = container_directory
+                counter = 2
+                while f"{base_dir}-{counter}".lower() in existing_dirs:
+                    counter += 1
+                container_directory = f"{base_dir}-{counter}"
+                container_name = f"{container_name} ({counter})"
+                docker_container_name = f"{project.slug}-{container_directory}"
+                logger.info(f"[CONTAINER] Duplicate detected, using unique name: {container_name} -> {container_directory}")
 
             # Auto-detect internal port based on framework
             internal_port = 5173  # Default to Vite
@@ -2947,10 +2905,18 @@ async def add_container_to_project(
 
             logger.info(f"[CONTAINER] Auto-detected port {internal_port} for base {base_name}")
 
+            # Base containers don't have external service fields
+            deployment_mode = "container"
+            external_endpoint = None
+            credentials_id = None
+
         # Create Container record
+        # For external services, set status to 'connected' since they don't run as containers
+        initial_status = "connected" if deployment_mode == "external" else "stopped"
+
         new_container = Container(
             project_id=project.id,
-            base_id=None if (container_data.container_type == "service" or container_data.base_id == "builtin") else container_data.base_id,
+            base_id=resolved_base_id,
             name=container_name,
             directory=container_directory,
             container_name=docker_container_name,
@@ -2960,7 +2926,11 @@ async def add_container_to_project(
             internal_port=internal_port,  # Set framework-specific port
             container_type=container_data.container_type,
             service_slug=container_data.service_slug,
-            status="stopped"
+            status=initial_status,
+            # External service fields
+            deployment_mode=deployment_mode,
+            external_endpoint=external_endpoint,
+            credentials_id=credentials_id
         )
 
         db.add(new_container)
@@ -3180,6 +3150,32 @@ async def delete_container_connection(
 
 # Container-specific endpoints (parameterized routes come after specific ones)
 
+@router.get("/{project_slug}/containers/status")
+async def get_containers_status(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get the runtime status of all containers in the project.
+
+    Returns Docker status for each container (running, stopped, etc.)
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+        orchestrator = get_compose_orchestrator()
+        status = await orchestrator.get_project_status(project.slug)
+
+        return status
+
+    except Exception as e:
+        logger.error(f"[COMPOSE] Failed to get container status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+
 @router.get("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
 async def get_container(
     project_slug: str,
@@ -3241,6 +3237,139 @@ async def update_container(
         raise HTTPException(status_code=500, detail=f"Failed to update container: {str(e)}")
 
 
+@router.post("/{project_slug}/containers/{container_id}/rename", response_model=ContainerSchema)
+async def rename_container(
+    project_slug: str,
+    container_id: UUID,
+    rename_data: ContainerRename,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Rename a container and its associated folder.
+
+    This operation:
+    1. Validates the new name doesn't conflict with existing containers
+    2. Renames the folder in the shared volume
+    3. Updates the container record (name, directory, container_name)
+    4. Regenerates docker-compose.yml
+    """
+    import re
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    new_name = rename_data.new_name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Container name cannot be empty")
+
+    # If name hasn't changed, return early
+    if new_name == container.name:
+        return container
+
+    try:
+        # Sanitize the new name for Docker and directory naming
+        new_service_name = new_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+        new_service_name = ''.join(c for c in new_service_name if c.isalnum() or c == '-')
+        new_service_name = re.sub(r'-+', '-', new_service_name).strip('-')
+
+        if not new_service_name:
+            raise HTTPException(status_code=400, detail="Container name must contain alphanumeric characters")
+
+        # Check for duplicate directory names in this project
+        existing_containers = await db.execute(
+            select(Container).where(
+                Container.project_id == project.id,
+                Container.id != container_id
+            )
+        )
+        for existing in existing_containers.scalars().all():
+            existing_service = existing.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+            existing_service = ''.join(c for c in existing_service if c.isalnum() or c == '-')
+            existing_service = re.sub(r'-+', '-', existing_service).strip('-')
+
+            if existing_service == new_service_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A container with folder name '{new_service_name}' already exists in this project"
+                )
+
+        old_directory = container.directory
+        new_directory = new_service_name
+        new_docker_container_name = f"{project.slug}-{new_service_name}"
+
+        # Only rename folder for base containers (not service containers)
+        if container.container_type == "base" and old_directory and old_directory != new_directory:
+            # Stop the container if running
+            try:
+                import docker as docker_lib
+                docker_client = docker_lib.from_env()
+                old_docker_name = container.container_name
+                try:
+                    docker_container = docker_client.containers.get(old_docker_name)
+                    logger.info(f"[CONTAINER] Stopping container {old_docker_name} before rename")
+                    docker_container.stop(timeout=5)
+                    docker_container.remove(force=True)
+                except docker_lib.errors.NotFound:
+                    pass  # Container not running
+            except Exception as e:
+                logger.warning(f"[CONTAINER] Could not stop container before rename: {e}")
+
+            # Rename folder in shared volume
+            from ..services.volume_manager import get_volume_manager
+            volume_manager = get_volume_manager()
+
+            try:
+                await volume_manager.rename_directory(project.slug, old_directory, new_directory)
+                logger.info(f"[CONTAINER] Renamed folder from {old_directory} to {new_directory}")
+            except Exception as e:
+                logger.error(f"[CONTAINER] Failed to rename folder: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to rename folder: {str(e)}")
+
+        # Update container record
+        container.name = new_name
+        container.directory = new_directory
+        container.container_name = new_docker_container_name
+
+        await db.commit()
+        await db.refresh(container)
+
+        # Regenerate docker-compose.yml
+        try:
+            containers_result = await db.execute(
+                select(Container)
+                .where(Container.project_id == project.id)
+                .options(selectinload(Container.base))
+            )
+            all_containers = containers_result.scalars().all()
+
+            connections_result = await db.execute(
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+            )
+            all_connections = connections_result.scalars().all()
+
+            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+            orchestrator = get_compose_orchestrator()
+            await orchestrator.write_compose_file(
+                project, all_containers, all_connections, current_user.id
+            )
+            logger.info(f"[CONTAINER] Regenerated docker-compose.yml after rename")
+        except Exception as e:
+            logger.error(f"[CONTAINER] Failed to regenerate docker-compose: {e}")
+
+        logger.info(f"[CONTAINER] ✅ Renamed container {container_id} from '{container.name}' to '{new_name}'")
+        return container
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to rename container: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to rename container: {str(e)}")
+
+
 @router.delete("/{project_slug}/containers/{container_id}")
 async def delete_container(
     project_slug: str,
@@ -3285,17 +3414,9 @@ async def delete_container(
         except Exception as e:
             logger.warning(f"[CONTAINER] Failed to connect to Docker: {e}")
 
-        # Step 2: Delete volume (if using volumes)
-        use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
-        if use_volumes and container.volume_name:
-            try:
-                volume_manager = get_volume_manager()
-                await volume_manager.delete_volume(container.volume_name, force=True)
-                logger.info(f"[CONTAINER] ✅ Deleted volume {container.volume_name}")
-            except Exception as e:
-                logger.warning(f"[CONTAINER] Failed to delete volume: {e}")
-
-        # Step 3: Delete container from database (connections will cascade)
+        # Step 2: Delete container from database (connections will cascade)
+        # Note: With shared volume architecture, there's no per-container volume to delete
+        # Project files stay in /projects/{project-slug}/ and are only deleted with the project
         await db.delete(container)
         await db.commit()
 
@@ -3475,6 +3596,32 @@ async def _start_container_background_task(
         if not container or container.project_id != project.id:
             raise RuntimeError(f"Container not found in project '{project_slug}'")
 
+        # Check if container is already running - skip full startup if so
+        orchestrator = get_compose_orchestrator()
+        status = await orchestrator.get_project_status(project.slug)
+
+        # Sanitize service name to match what's in status
+        import re
+        service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+        service_name = re.sub(r'-+', '-', service_name).strip('-')
+
+        container_info = status.get('containers', {}).get(service_name)
+        if container_info and container_info.get('running'):
+            # Container is already running - return immediately!
+            task.update_progress(100, 100, "Container already running")
+            sanitized_container_name = f"{project.slug}-{service_name}"
+            container_url = f"http://{sanitized_container_name}.localhost"
+            task.add_log(f"Container '{container.name}' is already running at {container_url}")
+            logger.info(f"[COMPOSE] Container {container.name} already running, skipping startup")
+
+            return {
+                "container_id": str(container.id),
+                "container_name": container.name,
+                "url": container_url,
+                "status": "running"
+            }
+
         task.add_log(f"Starting container '{container.name}' in project '{project.slug}'")
 
         # Stage 2: Fetch all containers and connections (25%)
@@ -3494,7 +3641,7 @@ async def _start_container_background_task(
         all_connections = connections_result.scalars().all()
         task.add_log(f"Found {len(all_connections)} container connections")
 
-        orchestrator = get_compose_orchestrator()
+        # orchestrator already initialized above when checking if container is running
 
         # Stage 3: Write compose file (40%)
         task.update_progress(40, 100, "Generating docker-compose configuration")
@@ -3678,27 +3825,143 @@ async def stop_single_container(
         raise HTTPException(status_code=500, detail=f"Failed to stop container: {str(e)}")
 
 
-@router.get("/{project_slug}/containers/status")
-async def get_containers_status(
+@router.post("/{project_slug}/containers/{container_id}/restart", status_code=202)
+async def restart_single_container(
     project_slug: str,
+    container_id: UUID,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get the runtime status of all containers in the project.
+    Restart a specific container in the project (stop + start).
 
-    Returns Docker status for each container (running, stopped, etc.)
+    This endpoint returns immediately with a task ID. The client should poll
+    for status updates.
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    from ..services.task_manager import get_task_manager
+    task_manager = get_task_manager()
+
+    # Create background task
+    task = task_manager.create_task(
+        user_id=current_user.id,
+        task_type="container_restart",
+        metadata={
+            "project_slug": project_slug,
+            "project_id": str(project.id),
+            "container_id": str(container_id),
+            "container_name": container.name
+        }
+    )
+
+    # Start task in background
+    task_manager.start_background_task(
+        task_id=task.id,
+        coro=_restart_container_background_task,
+        project_slug=project_slug,
+        container_id=container_id,
+        user_id=current_user.id
+    )
+
+    logger.info(f"[COMPOSE] Container restart task {task.id} created for container {container.name}")
+
+    return {
+        "task_id": task.id,
+        "message": f"Container restart initiated for '{container.name}'",
+        "container_name": container.name,
+        "status_url": f"/api/tasks/{task.id}/status"
+    }
+
+
+async def _restart_container_background_task(
+    project_slug: str,
+    container_id: UUID,
+    user_id: UUID,
+    task: 'Task'
+) -> dict:
+    """Background task worker for restarting a container."""
+    from ..database import get_db
+    from ..services.docker_compose_orchestrator import get_compose_orchestrator
+
+    db_gen = get_db()
+    db = await db_gen.__anext__()
+
     try:
-        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+        task.update_progress(10, 100, "Validating container")
+
+        project = await get_project_by_slug(db, project_slug, user_id)
+        container = await db.get(Container, container_id)
+
+        if not container or container.project_id != project.id:
+            raise RuntimeError("Container not found")
 
         orchestrator = get_compose_orchestrator()
-        status = await orchestrator.get_project_status(project.slug)
 
-        return status
+        # Stop the container
+        task.update_progress(30, 100, f"Stopping container '{container.name}'")
+        try:
+            await orchestrator.stop_container(project.slug, container.name)
+            task.add_log(f"Container '{container.name}' stopped")
+        except Exception as e:
+            task.add_log(f"Note: Container may not have been running: {e}")
+
+        # Regenerate compose file
+        task.update_progress(50, 100, "Regenerating configuration")
+        containers_result = await db.execute(
+            select(Container)
+            .where(Container.project_id == project.id)
+            .options(selectinload(Container.base))
+        )
+        all_containers = containers_result.scalars().all()
+
+        connections_result = await db.execute(
+            select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+        )
+        all_connections = connections_result.scalars().all()
+
+        await orchestrator.write_compose_file(project, all_containers, all_connections, user_id)
+
+        # Start the container
+        task.update_progress(70, 100, f"Starting container '{container.name}'")
+        await orchestrator.start_container(project.slug, container.name)
+        task.add_log(f"Container '{container.name}' started")
+
+        # Wait for container to be ready
+        task.update_progress(90, 100, "Waiting for container to be ready")
+        import asyncio
+        await asyncio.sleep(2)
+
+        # Build container URL
+        import re
+        service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
+        service_name = re.sub(r'-+', '-', service_name).strip('-')
+        sanitized_container_name = f"{project.slug}-{service_name}"
+        container_url = f"http://{sanitized_container_name}.localhost"
+
+        task.update_progress(100, 100, "Container restarted successfully")
+        logger.info(f"[COMPOSE] Successfully restarted container {container.name}")
+
+        return {
+            "container_id": str(container.id),
+            "container_name": container.name,
+            "url": container_url,
+            "status": "running"
+        }
 
     except Exception as e:
-        logger.error(f"[COMPOSE] Failed to get container status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+        error_msg = f"Failed to restart container: {str(e)}"
+        task.add_log(f"ERROR: {error_msg}")
+        logger.error(f"[COMPOSE] Container restart failed: {e}", exc_info=True)
+        raise RuntimeError(error_msg)
+
+    finally:
+        try:
+            await db_gen.aclose()
+        except Exception:
+            pass

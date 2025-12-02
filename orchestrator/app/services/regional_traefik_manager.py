@@ -8,7 +8,7 @@ the Docker network-per-container limit of ~1000 networks.
 Architecture:
 - Main Traefik: Entry point, routes to regional Traefiks
 - Regional Traefiks: Each joins up to 250 project networks
-- Projects assigned via consistent hashing (project_slug % num_regionals)
+- Sequential fill: regional-0 fills to 250, then regional-1, etc.
 """
 
 import asyncio
@@ -28,18 +28,23 @@ REGIONAL_TRAEFIK_BASE_PORT = 8081  # Base port for regional Traefik dashboards
 class RegionalTraefikManager:
     """
     Manages lifecycle of regional Traefik instances.
+
+    Sequential fill: Fills regional-0 to 250 projects, then regional-1, etc.
     """
 
     def __init__(self):
         self.compose_dir = Path("docker-compose-regional-traefiks")
         self.compose_dir.mkdir(exist_ok=True)
         self.running_regionals: Dict[int, bool] = {}  # regional_index -> is_running
-        logger.info("[REGIONAL-TRAEFIK] Manager initialized")
+        self.project_counts: Dict[int, int] = {}  # regional_index -> project_count
+        self.project_assignments: Dict[str, int] = {}  # project_slug -> regional_index
+        logger.info("[REGIONAL-TRAEFIK] Manager initialized (sequential fill)")
 
     def get_regional_index_for_project(self, project_slug: str) -> int:
         """
         Determine which regional Traefik should handle this project.
-        Uses consistent hashing based on project slug.
+
+        Sequential fill: Assigns to first regional with capacity (< 250 projects)
 
         Args:
             project_slug: Project slug identifier
@@ -47,12 +52,40 @@ class RegionalTraefikManager:
         Returns:
             Regional Traefik index (0-based)
         """
-        # Use deterministic hash (not built-in hash() which has random seed)
-        import hashlib
-        hash_bytes = hashlib.md5(project_slug.encode()).digest()
-        hash_value = int.from_bytes(hash_bytes[:4], byteorder='big')
-        regional_index = hash_value % 100  # Support up to 100 regional Traefiks (25,000 projects)
+        # Check if project already assigned
+        if project_slug in self.project_assignments:
+            return self.project_assignments[project_slug]
+
+        # Find first regional with capacity
+        regional_index = 0
+        while self.project_counts.get(regional_index, 0) >= PROJECTS_PER_REGIONAL:
+            regional_index += 1
+            if regional_index > 100:  # Safety limit
+                logger.error("[REGIONAL-TRAEFIK] Exceeded maximum regional Traefiks (100)")
+                raise RuntimeError("Maximum regional Traefik limit exceeded")
+
+        # Assign project to this regional
+        self.project_assignments[project_slug] = regional_index
+        self.project_counts[regional_index] = self.project_counts.get(regional_index, 0) + 1
+
+        logger.info(f"[REGIONAL-TRAEFIK] Assigned {project_slug} to regional-{regional_index} "
+                   f"({self.project_counts[regional_index]}/{PROJECTS_PER_REGIONAL} projects)")
+
         return regional_index
+
+    def release_project(self, project_slug: str) -> None:
+        """
+        Release a project's regional assignment (called when project is deleted).
+
+        Args:
+            project_slug: Project slug to release
+        """
+        if project_slug in self.project_assignments:
+            regional_index = self.project_assignments[project_slug]
+            del self.project_assignments[project_slug]
+            if regional_index in self.project_counts:
+                self.project_counts[regional_index] = max(0, self.project_counts[regional_index] - 1)
+            logger.info(f"[REGIONAL-TRAEFIK] Released {project_slug} from regional-{regional_index}")
 
     def get_regional_traefik_name(self, regional_index: int) -> str:
         """Get the Docker container name for a regional Traefik."""

@@ -110,6 +110,10 @@ class ContainerCreate(ContainerBase):
     position_y: float = 0
     container_type: str = "base"  # 'base' or 'service'
     service_slug: Optional[str] = None  # For service containers: 'postgres', 'redis', etc.
+    # External service fields
+    deployment_mode: str = "container"  # 'container' or 'external'
+    external_endpoint: Optional[str] = None  # For external services
+    credentials: Optional[Dict[str, str]] = None  # Credentials for external services (will be stored encrypted)
 
 class ContainerUpdate(BaseModel):
     name: Optional[str] = None
@@ -117,6 +121,13 @@ class ContainerUpdate(BaseModel):
     position_y: Optional[float] = None
     port: Optional[int] = None
     environment_vars: Optional[Dict[str, Any]] = None
+    external_endpoint: Optional[str] = None
+    deployment_mode: Optional[str] = None
+
+
+class ContainerRename(BaseModel):
+    """Schema for renaming a container (includes folder rename)."""
+    new_name: str
 
 class Container(ContainerBase):
     id: UUID
@@ -129,6 +140,9 @@ class Container(ContainerBase):
     environment_vars: Optional[Dict[str, Any]] = None
     container_type: str = "base"
     service_slug: Optional[str] = None
+    deployment_mode: str = "container"
+    external_endpoint: Optional[str] = None
+    credentials_id: Optional[UUID] = None
     position_x: float
     position_y: float
     status: str
@@ -144,7 +158,14 @@ class ContainerConnectionCreate(BaseModel):
     project_id: UUID
     source_container_id: UUID
     target_container_id: UUID
-    connection_type: str = "depends_on"
+    connection_type: str = "depends_on"  # Legacy field
+    connector_type: str = "env_injection"  # env_injection, http_api, database, etc.
+    config: Optional[Dict[str, Any]] = None  # Connection configuration
+    label: Optional[str] = None
+
+class ContainerConnectionUpdate(BaseModel):
+    connector_type: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
     label: Optional[str] = None
 
 class ContainerConnection(BaseModel):
@@ -153,7 +174,70 @@ class ContainerConnection(BaseModel):
     source_container_id: UUID
     target_container_id: UUID
     connection_type: str
+    connector_type: str = "env_injection"
+    config: Optional[Dict[str, Any]] = None
     label: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Workflow Template Schemas
+
+class WorkflowTemplateNode(BaseModel):
+    """A node in a workflow template"""
+    template_id: str  # Unique within template (e.g., "frontend", "database")
+    type: str  # "base", "service"
+    base_slug: Optional[str] = None  # For type="base"
+    service_slug: Optional[str] = None  # For type="service"
+    name: str  # Display name
+    position: Dict[str, float]  # {"x": 0, "y": 100}
+
+class WorkflowTemplateEdge(BaseModel):
+    """An edge/connection in a workflow template"""
+    source: str  # template_id of source node
+    target: str  # template_id of target node
+    connector_type: str = "env_injection"
+    config: Optional[Dict[str, Any]] = None
+
+class WorkflowTemplateDefinition(BaseModel):
+    """The full definition of a workflow template"""
+    nodes: List[WorkflowTemplateNode]
+    edges: List[WorkflowTemplateEdge]
+    required_credentials: Optional[List[str]] = None
+
+class WorkflowTemplateCreate(BaseModel):
+    name: str
+    slug: str
+    description: str
+    long_description: Optional[str] = None
+    icon: str = "🔗"
+    category: str
+    tags: Optional[List[str]] = None
+    template_definition: WorkflowTemplateDefinition
+    pricing_type: str = "free"
+    price: int = 0
+
+class WorkflowTemplateResponse(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+    description: str
+    long_description: Optional[str] = None
+    icon: str
+    preview_image: Optional[str] = None
+    category: str
+    tags: Optional[List[str]] = None
+    template_definition: Dict[str, Any]
+    required_credentials: Optional[List[str]] = None
+    pricing_type: str
+    price: float
+    downloads: int
+    rating: float
+    reviews_count: int
+    is_featured: bool
+    is_active: bool
     created_at: datetime
 
     class Config:
@@ -286,6 +370,7 @@ class AgentChatRequest(BaseModel):
     project_id: UUID
     message: str
     agent_id: Optional[UUID] = None  # ID of the agent to use
+    container_id: Optional[UUID] = None  # If set, agent is scoped to this container (files at root)
     max_iterations: Optional[int] = 20
     minimal_prompts: Optional[bool] = False
     edit_mode: Optional[str] = 'ask'  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)

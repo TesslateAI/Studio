@@ -30,8 +30,12 @@ import {
   Gear,
   Article,
   Kanban,
+  Package,
+  X,
+  ArrowsOutSimple,
+  Hand,
 } from '@phosphor-icons/react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
 import { MarketplaceSidebar } from '../components/MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../components/ContainerPropertiesPanel';
@@ -44,13 +48,23 @@ import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../components/panels';
 import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
-import api, { projectsApi, marketplaceApi } from '../lib/api';
+import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
+import api, { projectsApi, marketplaceApi, deploymentCredentialsApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import toast from 'react-hot-toast';
+import { EnvInjectionEdge, HttpApiEdge, DatabaseEdge, CacheEdge, getEdgeType } from '../components/edges';
 
 const nodeTypes: NodeTypes = {
   containerNode: ContainerNode,
+};
+
+// Custom edge types for different connector semantics
+const edgeTypes = {
+  env_injection: EnvInjectionEdge,
+  http_api: HttpApiEdge,
+  database: DatabaseEdge,
+  cache: CacheEdge,
 };
 
 type PanelType = 'github' | 'notes' | 'settings' | null;
@@ -101,6 +115,16 @@ export const ProjectGraphCanvas = () => {
   });
   const [selectedContainer, setSelectedContainer] = useState<{id: string, name: string, status: string} | null>(null);
 
+  // Mobile state
+  const [isMobileComponentsOpen, setIsMobileComponentsOpen] = useState(false);
+
+  // External service credential modal state
+  const [externalServiceModal, setExternalServiceModal] = useState<{
+    isOpen: boolean;
+    item: any | null;
+    position: { x: number; y: number } | null;
+  }>({ isOpen: false, item: null, position: null });
+
   useEffect(() => {
     if (slug) {
       fetchProjectData();
@@ -108,6 +132,59 @@ export const ProjectGraphCanvas = () => {
       loadAgents();
     }
   }, [slug]);
+
+  // Poll for container runtime status to update node statuses
+  useEffect(() => {
+    if (!slug || nodes.length === 0) return;
+
+    const pollContainerStatus = async () => {
+      try {
+        const statusData = await projectsApi.getContainersRuntimeStatus(slug);
+        if (statusData.containers) {
+          // Update nodes with actual Docker status
+          setNodes((currentNodes) =>
+            currentNodes.map((node) => {
+              // Find matching container by service name (sanitized container name)
+              // Must match backend sanitization: lowercase, replace non-alphanumeric with dash, collapse dashes, strip leading/trailing dashes
+              const serviceName = node.data.name?.toLowerCase()
+                .replace(/[^a-z0-9-]/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, ''); // Strip leading/trailing dashes
+              const containerStatus = statusData.containers[serviceName];
+
+              if (containerStatus) {
+                const newStatus = containerStatus.running ? 'running' : 'stopped';
+                if (node.data.status !== newStatus) {
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      status: newStatus,
+                    },
+                  };
+                }
+              }
+              return node;
+            })
+          );
+
+          // Update isRunning state based on overall status
+          setIsRunning(statusData.status === 'running');
+        }
+      } catch (error) {
+        // Silently ignore errors - container might not be started yet
+        console.debug('Container status poll error:', error);
+      }
+    };
+
+    // Initial poll
+    pollContainerStatus();
+
+    // Poll every 5 seconds
+    const interval = setInterval(pollContainerStatus, 5000);
+
+    return () => clearInterval(interval);
+  }, [slug, nodes.length, setNodes]);
 
   useEffect(() => {
     localStorage.setItem('graphCanvasSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
@@ -319,14 +396,228 @@ export const ProjectGraphCanvas = () => {
       const item = JSON.parse(baseData);
       const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
 
-      // Calculate position on canvas
-      const position = {
-        x: event.clientX - reactFlowBounds.left - 100, // Center the node
+      // Calculate position on canvas (base position for dropped item or workflow)
+      const dropPosition = {
+        x: event.clientX - reactFlowBounds.left - 100,
         y: event.clientY - reactFlowBounds.top - 50,
       };
 
+      // Handle workflow drops differently
+      if (item.type === 'workflow' && item.template_definition) {
+        await instantiateWorkflow(item, dropPosition);
+        return;
+      }
+
+      // Check if this is an external service that needs credentials
+      const isExternalService = item.type === 'service' &&
+        (item.service_type === 'external' || item.service_type === 'hybrid') &&
+        item.credential_fields?.length > 0;
+
+      if (isExternalService) {
+        // Show credential modal instead of immediately creating
+        setExternalServiceModal({
+          isOpen: true,
+          item: item,
+          position: dropPosition,
+        });
+        return;
+      }
+
+      // For container services and bases, create immediately
+      await createContainerNode(item, dropPosition);
+    },
+    [slug, project, setNodes]
+  );
+
+  // Instantiate a workflow template (creates multiple nodes and connections)
+  const instantiateWorkflow = useCallback(
+    async (workflow: any, basePosition: { x: number; y: number }) => {
+      const template = workflow.template_definition;
+      if (!template?.nodes || !template?.edges) {
+        toast.error('Invalid workflow template');
+        return;
+      }
+
+      toast.loading(`Creating ${workflow.name}...`, { id: 'workflow-create' });
+
+      // Track temp IDs for cleanup on failure
+      const tempNodeIds: string[] = [];
+      const createdContainerIds: string[] = [];
+
+      try {
+        // Track mapping from template_id to real container_id
+        const templateIdToContainerId: Record<string, string> = {};
+
+        // Create all nodes from the template
+        for (const nodeTemplate of template.nodes) {
+          // Calculate position relative to drop point
+          const nodePosition = {
+            x: basePosition.x + (nodeTemplate.position?.x || 0),
+            y: basePosition.y + (nodeTemplate.position?.y || 0),
+          };
+
+          // Build the item to create based on node type
+          let itemToCreate: any;
+          if (nodeTemplate.type === 'base') {
+            itemToCreate = {
+              type: 'base',
+              name: nodeTemplate.name,
+              slug: nodeTemplate.base_slug,
+              id: nodeTemplate.base_slug, // Will be resolved by backend
+            };
+          } else if (nodeTemplate.type === 'service') {
+            itemToCreate = {
+              type: 'service',
+              name: nodeTemplate.name,
+              slug: nodeTemplate.service_slug,
+              service_type: 'container', // Default to container for now
+            };
+          }
+
+          // Create the container
+          const tempId = `temp-${Date.now()}-${nodeTemplate.template_id}`;
+          tempNodeIds.push(tempId);
+
+          // Add optimistic node
+          const optimisticNode: Node = {
+            id: tempId,
+            type: 'containerNode',
+            position: nodePosition,
+            data: {
+              name: nodeTemplate.name,
+              status: 'starting',
+              baseIcon: '📦',
+              techStack: [],
+              containerType: nodeTemplate.type,
+              onDelete: handleDeleteContainer,
+              onClick: handleContainerClick,
+              onDoubleClick: handleOpenBuilder,
+            },
+          };
+          setNodes((nds) => [...nds, optimisticNode]);
+
+          // Create in backend
+          const payload: any = {
+            project_id: project.id,
+            name: nodeTemplate.name,
+            position_x: nodePosition.x,
+            position_y: nodePosition.y,
+          };
+
+          if (nodeTemplate.type === 'service') {
+            payload.container_type = 'service';
+            payload.service_slug = nodeTemplate.service_slug;
+          } else {
+            payload.container_type = 'base';
+            // For bases, we need to look up the base_id from the slug
+            // For now, use the slug as a marker - backend will handle resolution
+            payload.base_id = nodeTemplate.base_slug;
+          }
+
+          const response = await api.post(`/api/projects/${slug}/containers`, payload);
+          const newContainer = response.data.container;
+
+          // Map template_id to real container_id
+          templateIdToContainerId[nodeTemplate.template_id] = newContainer.id;
+          createdContainerIds.push(newContainer.id);
+
+          // Update the optimistic node with real data
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === tempId
+                ? {
+                    ...node,
+                    id: newContainer.id,
+                    data: {
+                      ...node.data,
+                      name: newContainer.name,
+                      status: 'stopped',
+                      port: newContainer.port,
+                    },
+                  }
+                : node
+            )
+          );
+        }
+
+        // Create all edges/connections from the template
+        for (const edgeTemplate of template.edges) {
+          const sourceId = templateIdToContainerId[edgeTemplate.source];
+          const targetId = templateIdToContainerId[edgeTemplate.target];
+
+          if (!sourceId || !targetId) {
+            console.warn(`Missing container for edge: ${edgeTemplate.source} -> ${edgeTemplate.target}`);
+            continue;
+          }
+
+          // Create connection in backend
+          await api.post(`/api/projects/${slug}/connections`, {
+            project_id: project.id,
+            source_container_id: sourceId,
+            target_container_id: targetId,
+            connector_type: edgeTemplate.connector_type || 'env_injection',
+            config: edgeTemplate.config || null,
+          });
+
+          // Add edge to graph with proper edge type for visual styling
+          const edgeType = getEdgeType(edgeTemplate.connector_type || 'env_injection');
+          const newEdge: Edge = {
+            id: `${sourceId}-${targetId}`,
+            source: sourceId,
+            target: targetId,
+            type: edgeType,
+            animated: edgeTemplate.connector_type === 'http_api',
+            data: {
+              connector_type: edgeTemplate.connector_type,
+              config: edgeTemplate.config,
+            },
+          };
+          setEdges((eds) => [...eds, newEdge]);
+        }
+
+        // Increment download count for the workflow
+        try {
+          await api.post(`/api/marketplace/workflows/${workflow.slug}/increment-downloads`);
+        } catch (e) {
+          // Ignore download tracking errors
+        }
+
+        toast.success(`Created ${workflow.name}!`, { id: 'workflow-create' });
+      } catch (error) {
+        console.error('Failed to instantiate workflow:', error);
+
+        // Clean up optimistic nodes that weren't replaced with real IDs
+        setNodes((nds) => nds.filter((n) => !tempNodeIds.includes(n.id)));
+
+        // Clean up any containers that were successfully created before the error
+        for (const containerId of createdContainerIds) {
+          try {
+            await api.delete(`/api/projects/${slug}/containers/${containerId}`);
+          } catch (deleteError) {
+            console.warn(`Failed to clean up container ${containerId}:`, deleteError);
+          }
+        }
+
+        toast.error('Failed to create workflow', { id: 'workflow-create' });
+      }
+    },
+    [slug, project, setNodes, setEdges]
+  );
+
+  // Helper function to create container node (used by both regular drop and after credential modal)
+  const createContainerNode = useCallback(
+    async (
+      item: any,
+      position: { x: number; y: number },
+      credentials?: Record<string, string>,
+      externalEndpoint?: string
+    ) => {
       // Generate temporary ID for optimistic update
       const tempId = `temp-${Date.now()}`;
+
+      // Determine status based on service type
+      const isExternal = item.service_type === 'external' || item.service_type === 'hybrid';
+      const initialStatus = isExternal ? 'connected' : 'starting';
 
       // Optimistically add node to canvas immediately for better UX
       const optimisticNode: Node = {
@@ -335,10 +626,11 @@ export const ProjectGraphCanvas = () => {
         position,
         data: {
           name: item.name,
-          status: 'starting',
+          status: initialStatus,
           baseIcon: item.icon,
           techStack: item.tech_stack || [],
           containerType: item.type || 'base',
+          serviceType: item.service_type,
           onDelete: handleDeleteContainer,
           onClick: handleContainerClick,
           onDoubleClick: handleOpenBuilder,
@@ -360,6 +652,17 @@ export const ProjectGraphCanvas = () => {
         if (item.type === 'service') {
           payload.container_type = 'service';
           payload.service_slug = item.slug;
+
+          // For external services, add deployment mode and credentials
+          if (item.service_type === 'external' || item.service_type === 'hybrid') {
+            payload.deployment_mode = 'external';
+            if (externalEndpoint) {
+              payload.external_endpoint = externalEndpoint;
+            }
+            if (credentials && Object.keys(credentials).length > 0) {
+              payload.credentials = credentials;
+            }
+          }
         } else {
           // Default to base
           payload.container_type = 'base';
@@ -382,8 +685,9 @@ export const ProjectGraphCanvas = () => {
                   data: {
                     ...node.data,
                     name: newContainer.name,
-                    status: 'stopped',
+                    status: isExternal ? 'connected' : 'stopped',
                     containerType: newContainer.container_type || item.type || 'base',
+                    serviceType: item.service_type,
                     port: newContainer.port,
                   },
                 }
@@ -399,6 +703,25 @@ export const ProjectGraphCanvas = () => {
       }
     },
     [slug, project, setNodes]
+  );
+
+  // Handle credential modal submission
+  const handleExternalServiceCredentialSubmit = useCallback(
+    async (credentials: Record<string, string>, externalEndpoint?: string) => {
+      if (!externalServiceModal.item || !externalServiceModal.position) return;
+
+      // Close modal first
+      setExternalServiceModal({ isOpen: false, item: null, position: null });
+
+      // Create the container with credentials
+      await createContainerNode(
+        externalServiceModal.item,
+        externalServiceModal.position,
+        credentials,
+        externalEndpoint
+      );
+    },
+    [externalServiceModal, createContainerNode]
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -546,7 +869,7 @@ export const ProjectGraphCanvas = () => {
   const leftSidebarItems = [
     {
       icon: <FlowArrow size={18} />,
-      title: 'Architecture Graph',
+      title: 'Architecture',
       onClick: () => setActiveView('graph'),
       active: activeView === 'graph'
     },
@@ -584,7 +907,7 @@ export const ProjectGraphCanvas = () => {
     },
     {
       icon: <Storefront size={18} />,
-      title: 'Agent Marketplace',
+      title: 'Agents',
       onClick: () => navigate('/marketplace')
     },
     {
@@ -818,12 +1141,50 @@ export const ProjectGraphCanvas = () => {
         {/* Main View Container */}
         <div className="flex-1 overflow-hidden bg-[var(--bg)]">
           {/* Graph View */}
-          <div className={`w-full h-full ${activeView === 'graph' ? 'flex' : 'hidden'}`}>
-            {/* Left sidebar with marketplace items (only in graph view) */}
-            <MarketplaceSidebar />
+          <div className={`w-full h-full ${activeView === 'graph' ? 'flex' : 'hidden'} relative`}>
+            {/* Left sidebar with marketplace items - hidden on mobile, shown as overlay when toggled */}
+            <div className="hidden md:block">
+              <MarketplaceSidebar />
+            </div>
+
+            {/* Mobile Components Sidebar Overlay */}
+            <AnimatePresence>
+              {isMobileComponentsOpen && (
+                <>
+                  {/* Backdrop */}
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="md:hidden fixed inset-0 bg-black/50 z-40"
+                    onClick={() => setIsMobileComponentsOpen(false)}
+                  />
+                  {/* Sidebar */}
+                  <motion.div
+                    initial={{ x: '-100%' }}
+                    animate={{ x: 0 }}
+                    exit={{ x: '-100%' }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                    className="md:hidden fixed left-0 top-0 bottom-0 w-80 max-w-[85vw] z-50 shadow-2xl"
+                  >
+                    <div className="relative h-full">
+                      <MarketplaceSidebar />
+                      {/* Close button */}
+                      <button
+                        onClick={() => setIsMobileComponentsOpen(false)}
+                        className="absolute top-3 right-3 p-2 bg-[var(--surface)] hover:bg-[var(--sidebar-hover)] rounded-full shadow-lg border border-[var(--sidebar-border)] z-10"
+                      >
+                        <X size={18} className="text-[var(--text)]" />
+                      </button>
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
 
             {/* React Flow canvas */}
-            <div className="flex-1" ref={reactFlowWrapper}>
+            <div className="flex-1 relative" ref={reactFlowWrapper}>
               <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -842,12 +1203,18 @@ export const ProjectGraphCanvas = () => {
                   }
                 }}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
                 defaultViewport={{ x: 0, y: 0, zoom: 0.5 }}
                 fitView
                 fitViewOptions={{ padding: 0.3, minZoom: 0.3, maxZoom: 1.5 }}
                 minZoom={0.1}
                 maxZoom={2}
-                className="bg-[var(--bg)]"
+                panOnScroll
+                panOnDrag
+                zoomOnPinch
+                zoomOnScroll
+                selectNodesOnDrag={false}
+                className="bg-[var(--bg)] touch-none"
               >
                 <Background
                   variant={BackgroundVariant.Dots}
@@ -855,14 +1222,69 @@ export const ProjectGraphCanvas = () => {
                   size={1}
                   color={theme === 'dark' ? '#374151' : '#e5e7eb'}
                 />
-                <Controls />
-                <Panel position="top-right" className="bg-[var(--surface)] px-4 py-2 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
+                <Controls className="!bg-[var(--surface)] !border-[var(--sidebar-border)] !shadow-lg [&>button]:!bg-[var(--surface)] [&>button]:!border-[var(--sidebar-border)] [&>button]:!fill-[var(--text)] [&>button:hover]:!bg-[var(--sidebar-hover)]" />
+
+                {/* Desktop hint */}
+                <Panel position="top-right" className="hidden md:block bg-[var(--surface)] px-4 py-2 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
                   <p className="text-xs text-[var(--text)]/60">
                     Double-click a container to open the builder
                   </p>
                 </Panel>
+
+                {/* Mobile hint */}
+                <Panel position="top-center" className="md:hidden bg-[var(--surface)] px-3 py-1.5 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
+                  <p className="text-[10px] text-[var(--text)]/60 flex items-center gap-1.5">
+                    <Hand size={12} className="text-[var(--primary)]" />
+                    Pinch to zoom • Drag to pan
+                  </p>
+                </Panel>
               </ReactFlow>
+
+              {/* Mobile floating button to open components sidebar */}
+              <button
+                onClick={() => setIsMobileComponentsOpen(true)}
+                className="md:hidden fixed bottom-24 left-4 z-30 flex items-center gap-2 px-4 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-full shadow-lg transition-all active:scale-95"
+              >
+                <Package size={20} weight="fill" />
+                <span className="text-sm font-medium">Components</span>
+              </button>
             </div>
+
+            {/* Container Properties Panel - inline with graph */}
+            {selectedContainer && (
+              <ContainerPropertiesPanel
+                containerId={selectedContainer.id}
+                containerName={selectedContainer.name}
+                containerStatus={selectedContainer.status}
+                projectSlug={slug || ''}
+                port={selectedContainer.port}
+                onClose={() => setSelectedContainer(null)}
+                onStatusChange={(newStatus) => {
+                  setNodes((nds) =>
+                    nds.map((node) =>
+                      node.id === selectedContainer.id
+                        ? { ...node, data: { ...node.data, status: newStatus } }
+                        : node
+                    )
+                  );
+                  setSelectedContainer({...selectedContainer, status: newStatus});
+                }}
+                onNameChange={(newName) => {
+                  // Update node name in the graph
+                  setNodes((nds) =>
+                    nds.map((node) =>
+                      node.id === selectedContainer.id
+                        ? { ...node, data: { ...node.data, name: newName } }
+                        : node
+                    )
+                  );
+                  // Update selected container state
+                  setSelectedContainer({...selectedContainer, name: newName});
+                  // Refresh project data to get updated container list
+                  fetchProjectData();
+                }}
+              />
+            )}
           </div>
 
           {/* Code View */}
@@ -955,31 +1377,18 @@ export const ProjectGraphCanvas = () => {
         </div>
       )}
 
-      {/* Container Properties Panel */}
-      {selectedContainer && (
-        <ContainerPropertiesPanel
-          containerId={selectedContainer.id}
-          containerName={selectedContainer.name}
-          containerStatus={selectedContainer.status}
-          projectSlug={slug || ''}
-          port={selectedContainer.port}
-          onClose={() => setSelectedContainer(null)}
-          onStatusChange={(newStatus) => {
-            // Update the node status in the graph
-            setNodes((nds) =>
-              nds.map((node) =>
-                node.id === selectedContainer.id
-                  ? { ...node, data: { ...node.data, status: newStatus } }
-                  : node
-              )
-            );
-            setSelectedContainer({...selectedContainer, status: newStatus});
-          }}
-        />
-      )}
-
       {/* Discord Support */}
       <DiscordSupport />
+
+      {/* External Service Credential Modal */}
+      {externalServiceModal.item && (
+        <ExternalServiceCredentialModal
+          isOpen={externalServiceModal.isOpen}
+          item={externalServiceModal.item}
+          onClose={() => setExternalServiceModal({ isOpen: false, item: null, position: null })}
+          onSubmit={handleExternalServiceCredentialSubmit}
+        />
+      )}
     </div>
   );
 };

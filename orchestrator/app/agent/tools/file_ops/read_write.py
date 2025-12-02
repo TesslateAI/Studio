@@ -2,7 +2,12 @@
 File Read/Write Tools
 
 Tools for reading and writing files in user development environments.
-Deployment-aware: supports both Docker (local filesystem) and Kubernetes (pod API) modes.
+Deployment-aware: supports both Docker (shared volume) and Kubernetes (pod API) modes.
+
+Architecture (Docker mode):
+- Uses shared tesslate-projects-data volume mounted at /projects
+- Each project has files at /projects/{project-slug}/
+- Direct filesystem access - no temp containers needed
 
 Retry Strategy:
 - Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
@@ -18,7 +23,6 @@ from uuid import UUID
 from ..registry import Tool, ToolCategory
 from ....config import get_settings
 from ..output_formatter import success_output, error_output, format_file_size, pluralize
-from ....utils.resource_naming import get_project_path
 from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
@@ -30,7 +34,7 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     Read a file from the user's development environment.
 
     Deployment-aware:
-    - Docker mode: Reads from local filesystem at users/{user_id}/{project_id}/
+    - Docker mode: Reads from shared volume at /projects/{project-slug}/
     - Kubernetes mode: Reads from pod via K8s API
 
     Retry behavior:
@@ -40,7 +44,7 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
 
     Args:
         params: {file_path: str}
-        context: {user_id: UUID, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, project_slug: str, db: AsyncSession}
 
     Returns:
         Dict with file content or error
@@ -51,6 +55,9 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    project_slug = context.get("project_slug")
+    container_directory = context.get("container_directory")  # Container subdir for scoped agents
+    db = context.get("db")
     settings = get_settings()
 
     if settings.deployment_mode == "kubernetes":
@@ -81,79 +88,95 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
             }
         )
     else:
-        # Docker mode: Read from database (source of truth) or filesystem/volume
-        use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
-
-        # Strategy 1: Try database first (fastest, always available)
-        try:
-            from ....models import ProjectFile
-            from sqlalchemy import select
-
-            result = await db.execute(
-                select(ProjectFile).where(
-                    ProjectFile.project_id == project_id,
-                    ProjectFile.file_path == file_path
-                )
-            )
-            db_file = result.scalar_one_or_none()
-
-            if db_file and db_file.content:
-                return success_output(
-                    message=f"Read {format_file_size(len(db_file.content))} from '{file_path}' (database)",
-                    file_path=file_path,
-                    content=db_file.content,
-                    details={
-                        "size_bytes": len(db_file.content),
-                        "lines": len(db_file.content.split('\n')),
-                        "source": "database"
-                    }
-                )
-        except Exception as e:
-            logger.debug(f"Could not read from database: {e}")
-
-        # Strategy 2: Try filesystem/volume if not in database
-        if use_volumes:
-            # Volume mode: Not implemented yet (files should be in database)
-            return error_output(
-                message=f"File '{file_path}' not found in database",
-                suggestion="File may not be synced yet. Wait for container initialization to complete.",
-                exists=False,
-                file_path=file_path
-            )
-        else:
-            # Legacy bind mount mode
-            project_dir = get_project_path(user_id, project_id)
-            full_path = os.path.join("/app", project_dir, file_path)
-
-            if not os.path.exists(full_path):
-                return error_output(
-                    message=f"File '{file_path}' does not exist",
-                    suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
-                    exists=False,
-                    file_path=file_path
-                )
-
+        # Docker mode: Read from shared volume (primary) or database (fallback)
+        # Strategy 1: Try shared volume first (direct filesystem access)
+        if project_slug:
             try:
-                with open(full_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
+                from ....services.volume_manager import get_volume_manager
+                volume_manager = get_volume_manager()
 
-                return success_output(
-                    message=f"Read {format_file_size(len(content))} from '{file_path}' (bind mount)",
-                    file_path=file_path,
-                    content=content,
-                    details={
-                        "size_bytes": len(content),
-                        "lines": len(content.split('\n')),
-                        "source": "bind_mount"
-                    }
-                )
+                # If container_directory is set, files are relative to that subdir
+                content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+
+                if content is not None:
+                    return success_output(
+                        message=f"Read {format_file_size(len(content))} from '{file_path}'",
+                        file_path=file_path,
+                        content=content,
+                        details={
+                            "size_bytes": len(content),
+                            "lines": len(content.split('\n')),
+                            "source": "shared_volume"
+                        }
+                    )
             except Exception as e:
-                return error_output(
-                    message=f"Could not read '{file_path}': {str(e)}",
-                    suggestion="Check if the file has read permissions or is a binary file",
-                    file_path=file_path,
-                    details={"error": str(e)}
+                logger.debug(f"Could not read from shared volume: {e}")
+
+        # Strategy 2: Try database as fallback
+        if db:
+            try:
+                from ....models import Project, ProjectFile
+                from sqlalchemy import select
+
+                # Get project slug if not provided
+                if not project_slug:
+                    project_result = await db.execute(
+                        select(Project).where(Project.id == UUID(project_id))
+                    )
+                    project = project_result.scalar_one_or_none()
+                    if project:
+                        project_slug = project.slug
+
+                        # Try shared volume with the retrieved slug
+                        try:
+                            from ....services.volume_manager import get_volume_manager
+                            volume_manager = get_volume_manager()
+
+                            content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+
+                            if content is not None:
+                                return success_output(
+                                    message=f"Read {format_file_size(len(content))} from '{file_path}'",
+                                    file_path=file_path,
+                                    content=content,
+                                    details={
+                                        "size_bytes": len(content),
+                                        "lines": len(content.split('\n')),
+                                        "source": "shared_volume"
+                                    }
+                                )
+                        except Exception as e:
+                            logger.debug(f"Could not read from shared volume: {e}")
+
+                # Try database as final fallback
+                result = await db.execute(
+                    select(ProjectFile).where(
+                        ProjectFile.project_id == UUID(project_id),
+                        ProjectFile.file_path == file_path
+                    )
                 )
+                db_file = result.scalar_one_or_none()
+
+                if db_file and db_file.content:
+                    return success_output(
+                        message=f"Read {format_file_size(len(db_file.content))} from '{file_path}' (database)",
+                        file_path=file_path,
+                        content=db_file.content,
+                        details={
+                            "size_bytes": len(db_file.content),
+                            "lines": len(db_file.content.split('\n')),
+                            "source": "database"
+                        }
+                    )
+            except Exception as e:
+                logger.debug(f"Could not read from database: {e}")
+
+        return error_output(
+            message=f"File '{file_path}' does not exist",
+            suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
+            exists=False,
+            file_path=file_path
+        )
 
 
 @tool_retry
@@ -162,7 +185,7 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     Write content to a file in the user's development environment.
 
     Deployment-aware:
-    - Docker mode: Writes to local filesystem at users/{user_id}/{project_id}/
+    - Docker mode: Writes to shared volume at /projects/{project-slug}/
     - Kubernetes mode: Writes to pod via K8s API
 
     Retry behavior:
@@ -172,7 +195,7 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     Args:
         params: {file_path: str, content: str}
-        context: {user_id: UUID, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, project_slug: str, db: AsyncSession}
 
     Returns:
         Dict with success status
@@ -187,6 +210,9 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
+    project_slug = context.get("project_slug")
+    container_directory = context.get("container_directory")  # Container subdir for scoped agents
+    db = context.get("db")
     settings = get_settings()
 
     # Show a preview of what was written (first and last few lines)
@@ -226,17 +252,48 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             }
         )
     else:
-        # Docker mode: Write using dual-write pattern
+        # Docker mode: Write to shared volume and database
         try:
-            use_volumes = os.getenv('USE_DOCKER_VOLUMES', 'true').lower() == 'true'
-            db = context.get("db")
+            # Get project slug if not provided
+            if not project_slug and db:
+                try:
+                    from ....models import Project
+                    from sqlalchemy import select
 
-            # Step 1: Write to database (source of truth)
+                    project_result = await db.execute(
+                        select(Project).where(Project.id == UUID(project_id))
+                    )
+                    project = project_result.scalar_one_or_none()
+                    if project:
+                        project_slug = project.slug
+                except Exception as e:
+                    logger.warning(f"[AGENT] Could not get project slug: {e}")
+
+            # Step 1: Write to shared volume (primary storage)
+            volume_write_success = False
+            if project_slug:
+                try:
+                    from ....services.volume_manager import get_volume_manager
+                    volume_manager = get_volume_manager()
+
+                    volume_write_success = await volume_manager.write_file(
+                        project_slug,
+                        file_path,
+                        content,
+                        subdir=container_directory
+                    )
+
+                    if volume_write_success:
+                        subdir_log = f"/{container_directory}" if container_directory else ""
+                        logger.info(f"[AGENT] Wrote {file_path} to shared volume /projects/{project_slug}{subdir_log}")
+                except Exception as e:
+                    logger.warning(f"[AGENT] Failed to write to shared volume: {e}")
+
+            # Step 2: Write to database (backup/version history)
             if db:
                 try:
                     from ....models import ProjectFile
                     from sqlalchemy import select
-                    from uuid import UUID
 
                     result = await db.execute(
                         select(ProjectFile).where(
@@ -261,34 +318,6 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 except Exception as e:
                     logger.warning(f"[AGENT] Failed to save to database: {e}")
 
-            # Step 2: Write to filesystem/volume
-            if use_volumes:
-                # Volume mode: Async write (non-blocking)
-                # TODO: Implement volume write for agent
-                logger.info(f"[AGENT] Skipping volume write (will sync later)")
-            else:
-                # Legacy bind mount mode
-                project_dir = get_project_path(user_id, project_id)
-                full_path = os.path.join("/app", project_dir, file_path)
-
-                try:
-                    # Create parent directory (with safety check for Windows Docker volumes)
-                    parent_dir = os.path.dirname(full_path)
-                    if parent_dir:
-                        try:
-                            os.makedirs(parent_dir, exist_ok=True)
-                        except FileExistsError:
-                            # Handle race condition on Windows Docker volumes - verify it exists
-                            if not os.path.exists(parent_dir):
-                                raise
-
-                    with open(full_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
-
-                    logger.info(f"[AGENT] Wrote {file_path} to bind mount")
-                except Exception as e:
-                    logger.warning(f"[AGENT] Failed to write to bind mount: {e}")
-
             return success_output(
                 message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
                 file_path=file_path,
@@ -296,7 +325,7 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 details={
                     "size_bytes": len(content),
                     "line_count": len(lines),
-                    "storage": "volume" if use_volumes else "bind_mount"
+                    "storage": "shared_volume" if volume_write_success else "database_only"
                 }
             )
         except Exception as e:

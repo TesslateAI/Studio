@@ -40,9 +40,8 @@ import {
   Coins
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { MobileMenu } from '../components/ui';
+import { MobileMenu, MarkerEditor, MarkerPalette, type MarkerEditorHandle } from '../components/ui';
 import { ConfirmDialog } from '../components/modals';
-import { MarkerPalette } from '../components/ui/MarkerPalette';
 import { ToolManagement } from '../components/ToolManagement';
 import { ImageUpload } from '../components/ImageUpload';
 import { marketplaceApi, secretsApi, usersApi, billingApi } from '../lib/api';
@@ -66,7 +65,7 @@ interface LibraryAgent {
   pricing_type: string;
   features: string[];
   tools?: string[] | null;
-  tool_configs?: Record<string, { description?: string; examples?: string[] }> | null;
+  tool_configs?: Record<string, { description?: string; examples?: string[]; system_prompt?: string }> | null;
   purchase_date: string;
   purchase_type: string;
   expires_at: string | null;
@@ -1651,7 +1650,7 @@ function EditAgentModal({
   agent: LibraryAgent;
   availableModels: string[];
   onClose: () => void;
-  onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string; tools?: string[]; tool_configs?: Record<string, { description?: string; examples?: string[] }>; avatar_url?: string | null }) => void;
+  onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string; tools?: string[]; tool_configs?: Record<string, { description?: string; examples?: string[]; system_prompt?: string }>; avatar_url?: string | null }) => void;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description);
@@ -1660,9 +1659,9 @@ function EditAgentModal({
   const [model, setModel] = useState(currentModel);
   const [originalPrompt] = useState(agent.system_prompt || '');
   const [tools, setTools] = useState<string[]>(agent.tools || []);
-  const [toolConfigs, setToolConfigs] = useState<Record<string, { description?: string; examples?: string[] }>>(agent.tool_configs || {});
+  const [toolConfigs, setToolConfigs] = useState<Record<string, { description?: string; examples?: string[]; system_prompt?: string }>>(agent.tool_configs || {});
   const [avatarUrl, setAvatarUrl] = useState<string | null>(agent.avatar_url || null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<MarkerEditorHandle>(null);
 
   const handleReset = () => {
     setSystemPrompt(originalPrompt);
@@ -1670,26 +1669,7 @@ function EditAgentModal({
   };
 
   const insertMarker = (marker: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = systemPrompt;
-
-    const newText =
-      text.substring(0, start) +
-      `{${marker}}` +
-      text.substring(end);
-
-    setSystemPrompt(newText);
-
-    // Move cursor after inserted marker
-    setTimeout(() => {
-      textarea.focus();
-      const newPos = start + marker.length + 2;
-      textarea.setSelectionRange(newPos, newPos);
-    }, 0);
+    editorRef.current?.insertMarker(marker);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1806,16 +1786,17 @@ function EditAgentModal({
                     </button>
                   )}
                 </div>
-                <textarea
-                  ref={textareaRef}
+
+                {/* Rich text editor with inline marker pills */}
+                <MarkerEditor
+                  ref={editorRef}
                   value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  onChange={setSystemPrompt}
                   rows={12}
-                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm resize-y"
-                  required
+                  placeholder="Enter your agent's system prompt..."
                 />
                 <p className="mt-1 text-xs text-[var(--text)]/40">
-                  {systemPrompt.length} characters
+                  {systemPrompt.length} characters • Markers appear as pills and show descriptions on hover
                 </p>
 
                 {/* Marker Palette */}

@@ -294,56 +294,41 @@ def get_base_config_from_cache(base_slug: str) -> Optional[BaseConfig]:
         return None
 
 
-async def get_base_config_from_volume(volume_name: str) -> Optional[BaseConfig]:
+async def get_base_config_from_volume(project_slug: str) -> Optional[BaseConfig]:
     """
-    Read and parse TESSLATE.md from a project volume (custom user repos).
+    Read and parse TESSLATE.md from the shared projects volume.
 
-    This supports user-provided custom bases from their own GitHub repos.
+    With the new architecture, orchestrator has direct filesystem access
+    to /projects/{project-slug}/, so no temp containers needed.
 
     Args:
-        volume_name: Docker volume name (e.g., 'project-slug-container-name')
+        project_slug: Project slug (e.g., 'my-project-abc123')
 
     Returns:
         BaseConfig object or None if not found
     """
-    import docker
-
     try:
-        client = docker.from_env()
+        # NEW ARCHITECTURE: Direct filesystem access via shared projects-data volume
+        # Orchestrator has this mounted at /projects
+        tesslate_path = Path(f"/projects/{project_slug}/TESSLATE.md")
 
-        # Read TESSLATE.md from project volume using temporary container
-        command = "cat /project/TESSLATE.md"
+        if tesslate_path.exists():
+            content = tesslate_path.read_text(encoding='utf-8')
+            config = parse_tesslate_md(content)
 
-        result = await asyncio.to_thread(
-            client.containers.run,
-            image="alpine",
-            command=["sh", "-c", command],
-            volumes={
-                volume_name: {
-                    'bind': '/project',
-                    'mode': 'ro'
-                }
-            },
-            remove=True,
-            stdout=True,
-            stderr=False
-        )
+            # SECURITY: Validate the configuration (CRITICAL for user-provided repos!)
+            if not config.validate():
+                logger.error(f"[SECURITY] ❌ Config validation failed for {project_slug}: {config.validation_error}")
+                return None
 
-        content = result.decode('utf-8', errors='replace')
-        config = parse_tesslate_md(content)
-
-        # SECURITY: Validate the configuration (CRITICAL for user-provided repos!)
-        if not config.validate():
-            logger.error(f"[SECURITY] ❌ Config validation failed for volume {volume_name}: {config.validation_error}")
-            # Return None = will use safe default instead
+            logger.info(f"[BASE-CONFIG] ✅ Successfully parsed and validated config from /projects/{project_slug}")
+            return config
+        else:
+            logger.debug(f"[BASE-CONFIG] No TESSLATE.md found at {tesslate_path}")
             return None
 
-        logger.info(f"[BASE-CONFIG] ✅ Successfully parsed and validated config from volume {volume_name}")
-        return config
-
     except Exception as e:
-        logger.debug(f"[BASE-CONFIG] Could not read TESSLATE.md from volume {volume_name}: {e}")
-        # This is normal for volumes without TESSLATE.md
+        logger.debug(f"[BASE-CONFIG] Could not read TESSLATE.md for {project_slug}: {e}")
         return None
 
 

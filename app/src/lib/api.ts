@@ -311,6 +311,10 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}/containers`);
     return response.data;
   },
+  getContainersRuntimeStatus: async (slug: string) => {
+    const response = await api.get(`/api/projects/${slug}/containers/status`);
+    return response.data;
+  },
   startAllContainers: async (slug: string) => {
     const response = await api.post(`/api/projects/${slug}/containers/start-all`);
     return response.data;

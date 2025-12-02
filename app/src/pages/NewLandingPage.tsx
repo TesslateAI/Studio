@@ -917,6 +917,306 @@ export default function NewLandingPage() {
           </div>
         </section>
 
+        {/* INTEGRATIONS SECTION */}
+        <section className="py-16 sm:py-24 border-t overflow-hidden" style={{ borderColor: '#1a1a1a', backgroundColor: '#0a0a0a' }}>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="text-center mb-12 sm:mb-16">
+              <p className="text-[var(--primary)] text-sm font-semibold uppercase tracking-wider mb-3">Integrations</p>
+              <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4">
+                Connect to Everything
+              </h2>
+              <p className="text-lg text-gray-400 max-w-2xl mx-auto">
+                One-click integrations with 20+ databases, AI providers, and cloud services
+              </p>
+            </div>
+          </div>
+
+          {/* Logo Marquee - Row 1 */}
+          <div className="relative mb-6">
+            <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-[#0a0a0a] to-transparent z-10" />
+            <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-[#0a0a0a] to-transparent z-10" />
+            <div className="integration-marquee flex items-center gap-8" style={{ animation: 'scroll-left 40s linear infinite' }}>
+              {/* PostgreSQL */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg" alt="PostgreSQL" className="w-8 h-8" />
+                  <span className="text-white font-medium">PostgreSQL</span>
+                </div>
+              </div>
+              {/* Supabase */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/supabase/supabase-original.svg" alt="Supabase" className="w-8 h-8" />
+                  <span className="text-white font-medium">Supabase</span>
+                </div>
+              </div>
+              {/* OpenAI */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="white"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>
+                  <span className="text-white font-medium">OpenAI</span>
+                </div>
+              </div>
+              {/* Redis */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/redis/redis-original.svg" alt="Redis" className="w-8 h-8" />
+                  <span className="text-white font-medium">Redis</span>
+                </div>
+              </div>
+              {/* Stripe */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <svg className="w-8 h-8" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#635BFF"/><path fillRule="evenodd" clipRule="evenodd" d="M13.3 11.046c0-.632.52-.874 1.38-.874 1.233 0 2.79.373 4.023 1.04V7.54c-1.348-.534-2.68-.747-4.023-.747-3.29 0-5.477 1.717-5.477 4.586 0 4.476 6.163 3.763 6.163 5.695 0 .747-.65.988-1.558.988-1.348 0-3.07-.555-4.432-1.303v3.725c1.51.65 3.037.927 4.432.927 3.37 0 5.684-1.665 5.684-4.572-.016-4.83-6.192-3.975-6.192-5.792z" fill="#fff"/></svg>
+                  <span className="text-white font-medium">Stripe</span>
+                </div>
+              </div>
+              {/* MongoDB */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mongodb/mongodb-original.svg" alt="MongoDB" className="w-8 h-8" />
+                  <span className="text-white font-medium">MongoDB</span>
+                </div>
+              </div>
+              {/* Anthropic */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-[#D4A27F] flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">A</span>
+                  </div>
+                  <span className="text-white font-medium">Anthropic</span>
+                </div>
+              </div>
+              {/* Pinecone */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00D09C] to-[#006B5B] flex items-center justify-center">
+                    <span className="text-white text-lg font-bold">P</span>
+                  </div>
+                  <span className="text-white font-medium">Pinecone</span>
+                </div>
+              </div>
+              {/* Duplicate set for seamless loop */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg" alt="PostgreSQL" className="w-8 h-8" />
+                  <span className="text-white font-medium">PostgreSQL</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/supabase/supabase-original.svg" alt="Supabase" className="w-8 h-8" />
+                  <span className="text-white font-medium">Supabase</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="white"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>
+                  <span className="text-white font-medium">OpenAI</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/redis/redis-original.svg" alt="Redis" className="w-8 h-8" />
+                  <span className="text-white font-medium">Redis</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <svg className="w-8 h-8" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#635BFF"/><path fillRule="evenodd" clipRule="evenodd" d="M13.3 11.046c0-.632.52-.874 1.38-.874 1.233 0 2.79.373 4.023 1.04V7.54c-1.348-.534-2.68-.747-4.023-.747-3.29 0-5.477 1.717-5.477 4.586 0 4.476 6.163 3.763 6.163 5.695 0 .747-.65.988-1.558.988-1.348 0-3.07-.555-4.432-1.303v3.725c1.51.65 3.037.927 4.432.927 3.37 0 5.684-1.665 5.684-4.572-.016-4.83-6.192-3.975-6.192-5.792z" fill="#fff"/></svg>
+                  <span className="text-white font-medium">Stripe</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mongodb/mongodb-original.svg" alt="MongoDB" className="w-8 h-8" />
+                  <span className="text-white font-medium">MongoDB</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-[#D4A27F] flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">A</span>
+                  </div>
+                  <span className="text-white font-medium">Anthropic</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00D09C] to-[#006B5B] flex items-center justify-center">
+                    <span className="text-white text-lg font-bold">P</span>
+                  </div>
+                  <span className="text-white font-medium">Pinecone</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Logo Marquee - Row 2 (reverse direction) */}
+          <div className="relative">
+            <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-[#0a0a0a] to-transparent z-10" />
+            <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-[#0a0a0a] to-transparent z-10" />
+            <div className="integration-marquee-reverse flex items-center gap-8" style={{ animation: 'scroll-right 40s linear infinite' }}>
+              {/* Clerk */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#6C47FF] to-[#4F37C8] flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">C</span>
+                  </div>
+                  <span className="text-white font-medium">Clerk</span>
+                </div>
+              </div>
+              {/* MySQL */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg" alt="MySQL" className="w-8 h-8" />
+                  <span className="text-white font-medium">MySQL</span>
+                </div>
+              </div>
+              {/* Neon */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00E599] to-[#00CC88] flex items-center justify-center">
+                    <span className="text-black text-sm font-bold">N</span>
+                  </div>
+                  <span className="text-white font-medium">Neon</span>
+                </div>
+              </div>
+              {/* Grafana */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg" alt="Grafana" className="w-8 h-8" />
+                  <span className="text-white font-medium">Grafana</span>
+                </div>
+              </div>
+              {/* Upstash */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00E9A3] to-[#00C48C] flex items-center justify-center">
+                    <span className="text-black text-sm font-bold">U</span>
+                  </div>
+                  <span className="text-white font-medium">Upstash</span>
+                </div>
+              </div>
+              {/* Turso */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4FF8D2] to-[#00D4AA] flex items-center justify-center">
+                    <span className="text-black text-sm font-bold">T</span>
+                  </div>
+                  <span className="text-white font-medium">Turso</span>
+                </div>
+              </div>
+              {/* Qdrant */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#DC244C] to-[#B01C3C] flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">Q</span>
+                  </div>
+                  <span className="text-white font-medium">Qdrant</span>
+                </div>
+              </div>
+              {/* Resend */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-black border border-white/20 flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">R</span>
+                  </div>
+                  <span className="text-white font-medium">Resend</span>
+                </div>
+              </div>
+              {/* Duplicate for seamless loop */}
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#6C47FF] to-[#4F37C8] flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">C</span>
+                  </div>
+                  <span className="text-white font-medium">Clerk</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg" alt="MySQL" className="w-8 h-8" />
+                  <span className="text-white font-medium">MySQL</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00E599] to-[#00CC88] flex items-center justify-center">
+                    <span className="text-black text-sm font-bold">N</span>
+                  </div>
+                  <span className="text-white font-medium">Neon</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg" alt="Grafana" className="w-8 h-8" />
+                  <span className="text-white font-medium">Grafana</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00E9A3] to-[#00C48C] flex items-center justify-center">
+                    <span className="text-black text-sm font-bold">U</span>
+                  </div>
+                  <span className="text-white font-medium">Upstash</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#4FF8D2] to-[#00D4AA] flex items-center justify-center">
+                    <span className="text-black text-sm font-bold">T</span>
+                  </div>
+                  <span className="text-white font-medium">Turso</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#DC244C] to-[#B01C3C] flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">Q</span>
+                  </div>
+                  <span className="text-white font-medium">Qdrant</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 group">
+                <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-black border border-white/20 flex items-center justify-center">
+                    <span className="text-white text-sm font-bold">R</span>
+                  </div>
+                  <span className="text-white font-medium">Resend</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* CTA */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 mt-12 text-center">
+            <p className="text-gray-500 text-sm mb-6">
+              + Elasticsearch, RabbitMQ, SendGrid, Cloudinary, n8n, Vercel KV, Prometheus & more
+            </p>
+            <a href="/register" className="inline-flex items-center gap-2 px-8 py-4 rounded-xl text-base font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors shadow-lg shadow-[var(--primary)]/25">
+              <span>Start Building for Free</span>
+              <ArrowRight className="w-5 h-5" />
+            </a>
+          </div>
+
+          {/* Animation Styles */}
+          <style>{`
+            @keyframes scroll-left {
+              0% { transform: translateX(0); }
+              100% { transform: translateX(-50%); }
+            }
+            @keyframes scroll-right {
+              0% { transform: translateX(-50%); }
+              100% { transform: translateX(0); }
+            }
+            .integration-marquee:hover,
+            .integration-marquee-reverse:hover {
+              animation-play-state: paused;
+            }
+          `}</style>
+        </section>
+
         {/* FEATURE SECTION - TOP 3 FEATURES */}
         <section className="py-16 sm:py-24" aria-labelledby="features-heading">
           <div className="max-w-7xl mx-auto px-4 sm:px-6">

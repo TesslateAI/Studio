@@ -14,3 +14,8 @@ export { MarketplaceCard } from './MarketplaceCard';
 export { default as HelpModal } from './HelpModal';
 export { Breadcrumbs } from './Breadcrumbs';
 export type { BreadcrumbItem } from './Breadcrumbs';
+export { MarkerEditor, insertMarkerAtCursor } from './MarkerEditor';
+export type { MarkerEditorHandle } from './MarkerEditor';
+export { MarkerPill } from './MarkerPill';
+export { MarkerPalette, AVAILABLE_MARKERS } from './MarkerPalette';
+export type { Marker } from './MarkerPalette';

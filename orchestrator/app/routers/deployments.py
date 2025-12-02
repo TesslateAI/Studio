@@ -404,7 +404,7 @@ async def deploy_project(
                     custom_build_command=request.build_command,
                     project_settings=project.settings,
                     container_name=build_container_name,
-                    volume_name=project.volume_name
+                    volume_name=project.slug  # Use project.slug for shared volume path
                 )
 
                 if not success:
@@ -438,7 +438,7 @@ async def deploy_project(
             project_settings=project.settings,
             collect_source=use_source_deployment,
             container_directory=build_directory,
-            volume_name=project.volume_name
+            volume_name=project.slug  # Use project.slug for shared volume path
         )
 
         deployment.logs.append(f"Collected {len(files)} files")

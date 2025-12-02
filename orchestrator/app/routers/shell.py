@@ -26,6 +26,7 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     project_id: UUID
     command: str = "/bin/bash"
+    container_name: Optional[str] = None  # For multi-container projects: specify which container
 
 
 class CreateSessionResponse(BaseModel):
@@ -86,6 +87,7 @@ async def create_shell_session(
         project_id=str(request.project_id),
         db=db,
         command=request.command,
+        container_name=request.container_name,
     )
 
     return session_info

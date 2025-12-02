@@ -342,7 +342,7 @@ export function MiniAsteroids() {
       if (ship.shield > 0) ship.shield--;
 
       // Update ship - smooth rotation (Arrow keys or WASD)
-      const rotationSpeed = 0.5; // Much slower, more precise turning
+      const rotationSpeed = 0.07; // Very slow, precise turning
       if (keys['ArrowLeft'] || keys['a']) ship.angle -= rotationSpeed * dt * 60;
       if (keys['ArrowRight'] || keys['d']) ship.angle += rotationSpeed * dt * 60;
 

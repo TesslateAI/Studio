@@ -649,10 +649,34 @@ async def agent_chat(
         # Fetch chat history for context
         chat_history = await _get_chat_history(chat.id, db, limit=10)
 
+        # Get container directory for file operations
+        # If container_id is provided, agent is scoped to that container (files at root)
+        # If not, agent is at project level (sees all container directories)
+        container_directory = None
+        if request.container_id:
+            try:
+                from ..models import Container
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.id == request.container_id,
+                        Container.project_id == request.project_id
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+                if container and container.directory and container.directory != '.':
+                    container_directory = container.directory
+                    logger.info(f"[AGENT-CHAT] Container-scoped agent, directory: {container_directory}")
+            except Exception as e:
+                logger.warning(f"[AGENT-CHAT] Could not get container directory: {e}")
+        else:
+            logger.info(f"[AGENT-CHAT] Project-level agent (no container_id)")
+
         # Prepare context for tool execution
         context = {
             "user_id": current_user.id,
             "project_id": request.project_id,
+            "project_slug": project.slug,  # For shared volume file access
+            "container_directory": container_directory,  # Container subdirectory for file ops
             "chat_id": chat.id,
             "db": db,
             "chat_history": chat_history,
@@ -1044,6 +1068,7 @@ async def agent_chat_stream(
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
+                "project_slug": project.slug,  # For shared volume file access
                 "chat_id": chat.id,
                 "db": db,
                 "chat_history": chat_history,
@@ -1544,6 +1569,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'user': user,
         'user_id': user.id,
         'project_id': project_id,
+        'project_slug': project.slug if project else None,  # For shared volume file access
         'chat_id': chat_id,
         'db': db,
         'project_context_str': project_context_str,

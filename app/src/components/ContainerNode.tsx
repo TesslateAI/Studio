@@ -5,10 +5,11 @@ import { Cube, X } from '@phosphor-icons/react';
 interface ContainerNodeData extends Record<string, unknown> {
   name: string;
   baseIcon?: string;
-  status: 'stopped' | 'starting' | 'running' | 'failed';
+  status: 'stopped' | 'starting' | 'running' | 'failed' | 'connected';
   port?: number;
   techStack?: string[];
   containerType?: 'base' | 'service';
+  serviceType?: 'container' | 'external' | 'hybrid';
   onDelete?: (id: string) => void;
   onClick?: (id: string) => void;
   onDoubleClick?: (id: string) => void;
@@ -22,6 +23,7 @@ export const ContainerNode = memo(({ data, id }: ContainerNodeProps) => {
     starting: 'bg-yellow-500',
     running: 'bg-green-500',
     failed: 'bg-red-500',
+    connected: 'bg-purple-500',  // External services that are connected
   };
 
   const statusDot = statusColors[data.status] || 'bg-gray-500';

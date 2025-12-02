@@ -80,6 +80,7 @@ services:
       - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver
       - ./orchestrator/users:/app/users
       - base-cache:/app/base-cache  # Named Docker volume for pre-installed marketplace bases
+      - projects-data:/projects  # Shared volume for all project source code (orchestrator has direct r/w access)
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-tesslate_user}:${POSTGRES_PASSWORD:-dev_password_change_me}@postgres:5432/${POSTGRES_DB:-tesslate_dev}
@@ -260,3 +261,5 @@ volumes:
     name: tesslate-postgres-dev-data
   base-cache:
     name: tesslate-base-cache
+  projects-data:
+    name: tesslate-projects-data  # Shared volume for all project source code

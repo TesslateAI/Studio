@@ -33,6 +33,7 @@ class Tool:
         executor: Async function that executes the tool
         category: Tool category
         examples: Example usage patterns
+        system_prompt: Optional additional instructions for this tool
     """
     name: str
     description: str
@@ -40,6 +41,7 @@ class Tool:
     executor: Callable
     category: ToolCategory
     examples: Optional[List[str]] = None
+    system_prompt: Optional[str] = None
 
     def to_prompt_format(self) -> str:
         """Convert tool to format suitable for LLM system prompt."""
@@ -57,10 +59,14 @@ class Tool:
         if self.examples:
             examples_text = "\n  Examples:\n    " + "\n    ".join(self.examples)
 
+        system_prompt_text = ""
+        if self.system_prompt:
+            system_prompt_text = f"\n  Instructions: {self.system_prompt}"
+
         return f"""
 {self.name}: {self.description}
   Parameters:
-{params_text}{examples_text}
+{params_text}{examples_text}{system_prompt_text}
 """.strip()
 
 
@@ -293,12 +299,14 @@ def create_scoped_tool_registry(
                 config = tool_configs[name]
                 custom_description = config.get("description", tool.description)
                 custom_examples = config.get("examples", tool.examples)
+                custom_system_prompt = config.get("system_prompt", tool.system_prompt)
 
-                # Create a copy of the tool with custom description and examples
+                # Create a copy of the tool with custom description, examples, and system_prompt
                 custom_tool = replace(
                     tool,
                     description=custom_description,
-                    examples=custom_examples
+                    examples=custom_examples,
+                    system_prompt=custom_system_prompt
                 )
                 scoped_registry.register(custom_tool)
                 logger.info(f"Registered tool '{name}' with custom configuration")
