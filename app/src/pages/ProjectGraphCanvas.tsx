@@ -1335,6 +1335,7 @@ export const ProjectGraphCanvas = () => {
       {agents.length > 0 ? (
         <ChatContainer
           projectId={project?.id}
+          containerId={selectedContainer?.id}
           agents={agents}
           currentAgent={agents[0]}
           onSelectAgent={(agent) => console.log('Selected agent:', agent)}

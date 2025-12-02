@@ -38,6 +38,7 @@ export interface AgentChatRequest {
   project_id: string;
   message: string;
   agent_id?: string;  // ID of the agent to use
+  container_id?: string;  // If set, agent is scoped to this container (files at root)
   max_iterations?: number;
   minimal_prompts?: boolean;
   edit_mode?: 'allow' | 'ask' | 'plan';  // Edit control mode

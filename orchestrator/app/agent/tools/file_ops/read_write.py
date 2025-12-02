@@ -60,6 +60,9 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     db = context.get("db")
     settings = get_settings()
 
+    # Debug logging for container scoping
+    logger.info(f"[READ-FILE] Reading '{file_path}' - project_slug: {project_slug}, container_directory: {container_directory}")
+
     if settings.deployment_mode == "kubernetes":
         # Kubernetes mode: Read from pod
         from ....k8s_client import get_k8s_manager

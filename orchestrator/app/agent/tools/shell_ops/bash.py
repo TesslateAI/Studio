@@ -27,8 +27,8 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     """
     Execute a single command (convenience wrapper).
 
-    Opens a shell session, executes the command, returns output, and closes the session.
-    Use this for one-off commands. For multiple commands, use shell_open + shell_exec.
+    Reuses shell session within the same agent run for efficiency.
+    Session is stored in context['_bash_session_id'] and reused across calls.
 
     Retry behavior:
     - Automatically retries on ConnectionError, TimeoutError, IOError
@@ -50,18 +50,28 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     if not command:
         raise ValueError("command parameter is required")
 
-    session_id = None
-    try:
-        # 1. Open session
-        session_result = await shell_open_executor({}, context)
-        if not session_result.get("success"):
-            return error_output(
-                message="Failed to open shell session",
-                suggestion="Check if the dev container is running",
-                details={"error": str(session_result)}
-            )
+    # Check if we have a reusable session from a previous bash_exec call
+    session_id = context.get("_bash_session_id")
+    session_created = False
 
-        session_id = session_result["session_id"]
+    try:
+        # 1. Open session only if we don't have one
+        if not session_id:
+            session_result = await shell_open_executor({}, context)
+            if not session_result.get("success"):
+                return error_output(
+                    message="Failed to open shell session",
+                    suggestion="Check if the dev container is running",
+                    details={"error": str(session_result)}
+                )
+
+            session_id = session_result["session_id"]
+            session_created = True
+            # Store in context for reuse within this agent run
+            context["_bash_session_id"] = session_id
+            logger.info(f"[BASH] Created new session {session_id} for agent run")
+        else:
+            logger.debug(f"[BASH] Reusing existing session {session_id}")
 
         # 2. Execute command
         exec_result = await shell_exec_executor({
@@ -70,24 +80,24 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
             "wait_seconds": wait_seconds
         }, context)
 
-        # 3. Close session
-        await shell_close_executor({"session_id": session_id}, context)
-
-        # 4. Return execution result
+        # 3. Return execution result (session stays open for reuse)
         return success_output(
             message=f"Executed '{command}'",
             output=exec_result.get("output", ""),
             details={
                 "command": command,
-                "exit_code": 0  # We don't capture exit codes yet
+                "exit_code": 0,  # We don't capture exit codes yet
+                "session_reused": not session_created
             }
         )
 
     except Exception as e:
-        # Cleanup: try to close session if it was opened
+        # On error, close and clear the session so next call creates a fresh one
         if session_id:
             try:
                 await shell_close_executor({"session_id": session_id}, context)
+                context.pop("_bash_session_id", None)
+                logger.info(f"[BASH] Closed session {session_id} due to error")
             except Exception:
                 pass  # Ignore cleanup errors
 

@@ -654,20 +654,27 @@ async def agent_chat(
         # If not, agent is at project level (sees all container directories)
         container_directory = None
         if request.container_id:
+            logger.info(f"[AGENT-CHAT] Looking up container_id: {request.container_id} for project: {request.project_id}")
             try:
                 from ..models import Container
+                from uuid import UUID
+                # Convert string to UUID if needed
+                container_uuid = UUID(str(request.container_id)) if not isinstance(request.container_id, UUID) else request.container_id
                 container_result = await db.execute(
                     select(Container).where(
-                        Container.id == request.container_id,
+                        Container.id == container_uuid,
                         Container.project_id == request.project_id
                     )
                 )
                 container = container_result.scalar_one_or_none()
+                logger.info(f"[AGENT-CHAT] Container lookup result: {container}")
                 if container and container.directory and container.directory != '.':
                     container_directory = container.directory
                     logger.info(f"[AGENT-CHAT] Container-scoped agent, directory: {container_directory}")
+                else:
+                    logger.warning(f"[AGENT-CHAT] Container found but no directory: {container}")
             except Exception as e:
-                logger.warning(f"[AGENT-CHAT] Could not get container directory: {e}")
+                logger.warning(f"[AGENT-CHAT] Could not get container directory: {e}", exc_info=True)
         else:
             logger.info(f"[AGENT-CHAT] Project-level agent (no container_id)")
 
@@ -831,6 +838,16 @@ async def agent_chat(
         db.add(assistant_message)
         await db.commit()
 
+        # Cleanup: Close any bash session that was opened during this agent run
+        if context.get("_bash_session_id"):
+            try:
+                from ..services.shell_session_manager import get_shell_session_manager
+                shell_manager = get_shell_session_manager()
+                await shell_manager.close_session(context["_bash_session_id"])
+                logger.info(f"[HTTP-AGENT] Cleaned up bash session {context['_bash_session_id']}")
+            except Exception as cleanup_err:
+                logger.warning(f"[HTTP-AGENT] Failed to cleanup bash session: {cleanup_err}")
+
         logger.info(
             f"[HTTP-AGENT] Agent chat completed - success: {success}, "
             f"iterations: {iterations}, tool_calls: {tool_calls_made}"
@@ -926,7 +943,7 @@ async def agent_chat_stream(
     from fastapi.responses import StreamingResponse
     import json
 
-    logger.info(f"[SSE-AGENT] Starting streaming agent chat - user: {current_user.id}, project: {request.project_id}")
+    logger.info(f"[SSE-AGENT] Starting streaming agent chat - user: {current_user.id}, project: {request.project_id}, container_id: {request.container_id}")
 
     async def event_generator():
         try:
@@ -1064,11 +1081,40 @@ async def agent_chat_stream(
                 project_context["git_context"] = git_context
                 logger.info(f"[SSE-AGENT] Added Git context for project {project.id}")
 
+            # Get container directory for file operations
+            # If container_id is provided, agent is scoped to that container (files at root)
+            # If not, agent is at project level (sees all container directories)
+            container_directory = None
+            if request.container_id:
+                logger.info(f"[SSE-AGENT] Looking up container_id: {request.container_id} for project: {request.project_id}")
+                try:
+                    from ..models import Container
+                    # Convert string to UUID if needed
+                    container_uuid = UUID(str(request.container_id)) if not isinstance(request.container_id, UUID) else request.container_id
+                    container_result = await db.execute(
+                        select(Container).where(
+                            Container.id == container_uuid,
+                            Container.project_id == request.project_id
+                        )
+                    )
+                    container = container_result.scalar_one_or_none()
+                    logger.info(f"[SSE-AGENT] Container lookup result: {container}")
+                    if container and container.directory and container.directory != '.':
+                        container_directory = container.directory
+                        logger.info(f"[SSE-AGENT] Container-scoped agent, directory: {container_directory}")
+                    else:
+                        logger.warning(f"[SSE-AGENT] Container found but no directory: {container}")
+                except Exception as e:
+                    logger.warning(f"[SSE-AGENT] Could not get container directory: {e}", exc_info=True)
+            else:
+                logger.info(f"[SSE-AGENT] Project-level agent (no container_id)")
+
             # Prepare execution context
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
                 "project_slug": project.slug,  # For shared volume file access
+                "container_directory": container_directory,  # Container subdirectory for file ops
                 "chat_id": chat.id,
                 "db": db,
                 "chat_history": chat_history,
@@ -1138,6 +1184,16 @@ async def agent_chat_stream(
             )
             db.add(assistant_message)
             await db.commit()
+
+            # Cleanup: Close any bash session that was opened during this agent run
+            if context.get("_bash_session_id"):
+                try:
+                    from ..services.shell_session_manager import get_shell_session_manager
+                    shell_manager = get_shell_session_manager()
+                    await shell_manager.close_session(context["_bash_session_id"])
+                    logger.info(f"[SSE-AGENT] Cleaned up bash session {context['_bash_session_id']}")
+                except Exception as cleanup_err:
+                    logger.warning(f"[SSE-AGENT] Failed to cleanup bash session: {cleanup_err}")
 
             logger.info(f"[SSE-AGENT] Streaming complete - user: {current_user.id}, project: {request.project_id}, saved to database")
 
@@ -1304,7 +1360,10 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     message_content = data.get("message")
     project_id = data.get("project_id")
     agent_id = data.get("agent_id")  # Get agent_id from request
+    container_id = data.get("container_id")  # Get container_id for container-scoped agents
     edit_mode = data.get("edit_mode", "ask")  # Get edit_mode from request, default to ask
+
+    logger.info(f"[WebSocket] Received message - project_id: {project_id}, container_id: {container_id}, agent_id: {agent_id}")
 
     try:
         # Get or create chat for this user and project
@@ -1484,6 +1543,27 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             project_result = await db.execute(select(Project).where(Project.id == project_id))
             project = project_result.scalar_one_or_none()
 
+        # Get container directory for file operations (container-scoped agents)
+        container_directory = None
+        if container_id and project_id:
+            try:
+                from ..models import Container
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.id == container_id,
+                        Container.project_id == project_id
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+                if container and container.directory and container.directory != '.':
+                    container_directory = container.directory
+                    logger.info(f"[UNIFIED-CHAT] Container-scoped agent, directory: {container_directory}")
+            except Exception as e:
+                logger.warning(f"[UNIFIED-CHAT] Could not get container directory: {e}")
+
+        if not container_id:
+            logger.info(f"[UNIFIED-CHAT] Project-level agent (no container_id)")
+
         # Build TESSLATE context
         tesslate_context = None
         if project:
@@ -1570,6 +1650,7 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'user_id': user.id,
         'project_id': project_id,
         'project_slug': project.slug if project else None,  # For shared volume file access
+        'container_directory': container_directory,  # Container subdirectory for file ops
         'chat_id': chat_id,
         'db': db,
         'project_context_str': project_context_str,

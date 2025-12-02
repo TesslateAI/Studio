@@ -56,6 +56,7 @@ interface ProjectFile {
 
 interface ChatContainerProps {
   projectId: number;
+  containerId?: string;  // Container ID for container-scoped agents
   agents: Agent[];
   currentAgent: Agent;
   onSelectAgent: (agent: Agent) => void;
@@ -68,6 +69,7 @@ interface ChatContainerProps {
 
 export function ChatContainer({
   projectId,
+  containerId,
   agents: initialAgents,
   currentAgent: initialCurrentAgent,
   onSelectAgent,
@@ -503,6 +505,7 @@ export function ChatContainer({
     wsRef.current.send(JSON.stringify({
       message,
       project_id: projectId,
+      container_id: containerId,  // Container ID for scoped file access
       agent_id: currentAgent.backendId,  // Include agent_id
       edit_mode: editMode  // Include edit mode
     }));
@@ -595,6 +598,7 @@ export function ChatContainer({
       await chatApi.sendAgentMessageStreaming(
         {
           project_id: projectId.toString(),
+          container_id: containerId,  // Container ID for scoped file access
           message,
           agent_id: currentAgent.backendId?.toString(),
           max_iterations: 20,

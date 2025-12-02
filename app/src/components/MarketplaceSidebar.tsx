@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MagnifyingGlass, Package, Plus, Cloud, Database, HardDrive, FlowArrow, Cube } from '@phosphor-icons/react';
 import api from '../lib/api';
+import { MainTechIcon, TechStackIcons } from './ui/TechStackIcons';
 
 interface CredentialField {
   key: string;
@@ -164,8 +165,13 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                 className="group cursor-move bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 md:p-3 hover:border-[var(--primary)] hover:shadow-md transition-all overflow-hidden"
               >
                 <div className="flex items-start gap-2 md:gap-3 min-w-0">
-                  <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center bg-[var(--primary)]/10 rounded-lg">
-                    <span className="text-xl md:text-2xl">{item.icon}</span>
+                  <div className="flex-shrink-0 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center bg-[var(--primary)]/10 rounded-lg text-[var(--primary)]">
+                    <MainTechIcon
+                      techStack={item.tech_stack || []}
+                      itemName={item.name}
+                      fallbackEmoji={item.icon}
+                      size={20}
+                    />
                   </div>
 
                   <div className="flex-1 min-w-0 overflow-hidden">
@@ -182,19 +188,17 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                     </div>
 
                     {item.tech_stack && item.tech_stack.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5 md:mt-2">
-                        {item.tech_stack.slice(0, 2).map((tech, index) => (
-                          <span
-                            key={index}
-                            className="px-1.5 md:px-2 py-0.5 text-xs font-medium bg-[var(--sidebar-hover)] text-[var(--text)] rounded truncate max-w-[80px]"
-                            title={tech}
-                          >
-                            {tech}
-                          </span>
-                        ))}
-                        {item.tech_stack.length > 2 && (
-                          <span className="px-1.5 md:px-2 py-0.5 text-xs font-medium bg-[var(--sidebar-hover)] text-[var(--text)]/70 rounded flex-shrink-0">
-                            +{item.tech_stack.length - 2}
+                      <div className="flex items-center gap-1 mt-1.5 md:mt-2">
+                        <TechStackIcons
+                          techStack={item.tech_stack}
+                          maxIcons={4}
+                          size={14}
+                          className="text-[var(--text)]/70"
+                          iconClassName="hover:text-[var(--primary)] transition-colors"
+                        />
+                        {item.tech_stack.length > 4 && (
+                          <span className="text-xs text-[var(--text)]/50 ml-0.5">
+                            +{item.tech_stack.length - 4}
                           </span>
                         )}
                       </div>
