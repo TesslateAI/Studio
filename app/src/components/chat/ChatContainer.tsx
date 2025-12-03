@@ -79,7 +79,6 @@ export function ChatContainer({
   projectName = 'project',
   className = '',
   sidebarExpanded = true,
-  containerId
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
