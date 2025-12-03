@@ -355,8 +355,9 @@ class KubernetesPTYBroker(BasePTYBroker):
         # Look up pod name if not provided (find first pod in deployment)
         if not pod_name:
             try:
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
+                from .orchestration import get_orchestrator
+                orchestrator = get_orchestrator()
+                k8s_manager = orchestrator.k8s_manager
                 names = k8s_manager._generate_resource_names(user_id, project_id)
 
                 pods = await asyncio.to_thread(
@@ -512,12 +513,11 @@ _kubernetes_pty_broker = None
 
 def get_pty_broker() -> BasePTYBroker:
     """Factory function to get singleton PTY broker based on deployment mode."""
-    from ..config import get_settings
-    settings = get_settings()
+    from .orchestration import is_kubernetes_mode
 
     global _docker_pty_broker, _kubernetes_pty_broker
 
-    if settings.deployment_mode == "kubernetes":
+    if is_kubernetes_mode():
         if _kubernetes_pty_broker is None:
             _kubernetes_pty_broker = KubernetesPTYBroker()
             logger.info("Created singleton KubernetesPTYBroker instance")

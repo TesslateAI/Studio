@@ -16,7 +16,7 @@ import json
 from typing import Dict, Optional, Any, List
 from uuid import UUID
 from .utils.resource_naming import get_container_name, get_project_path
-from .k8s_client_helpers import (
+from .deprecated_k8s_client_helpers import (
     create_s3_init_container_manifest,
     create_dehydration_lifecycle_hook,
     create_dynamic_pvc_manifest,

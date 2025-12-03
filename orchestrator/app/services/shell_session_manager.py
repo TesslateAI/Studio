@@ -380,11 +380,13 @@ class ShellSessionManager:
         Returns:
             The Docker container name or K8s pod name
         """
-        if settings.deployment_mode == "kubernetes":
+        from .orchestration import get_orchestrator, is_kubernetes_mode
+        orchestrator = get_orchestrator()
+
+        if is_kubernetes_mode():
             # K8s: Generate deployment name based on container_name_hint for multi-container
-            # The k8s_client._generate_resource_names handles the sanitization
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            # The k8s_manager._generate_resource_names handles the sanitization
+            k8s_manager = orchestrator.k8s_manager
             names = k8s_manager._generate_resource_names(user_id, project_id, container_name=container_name_hint)
             return names["deployment"]
         else:
@@ -399,9 +401,7 @@ class ShellSessionManager:
             else:
                 # Default to the first container in the project
                 # We'll look this up from the docker-compose file
-                from ..services.docker_compose_orchestrator import get_compose_orchestrator
-                orchestrator = get_compose_orchestrator()
-                status = await orchestrator.get_project_status(project_slug)
+                status = await orchestrator.get_project_status(project_slug, project_id)
 
                 if status.get('containers'):
                     # Get the first running container, or first container if none running
@@ -435,18 +435,16 @@ class ShellSessionManager:
         Returns:
             True if the container is running
         """
-        if settings.deployment_mode == "kubernetes":
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
-            # Use get_dev_environment_status which is the correct method on KubernetesManager
-            # For multi-container, we should check the specific container's deployment
-            status = await k8s_manager.get_dev_environment_status(user_id, project_id, container_name=container_name)
-            return status.get("deployment_ready", False)
+        from .orchestration import get_orchestrator, is_kubernetes_mode
+        orchestrator = get_orchestrator()
+
+        if is_kubernetes_mode():
+            # Use orchestrator's is_container_ready method
+            status = await orchestrator.is_container_ready(user_id, project_id, container_name)
+            return status.get("ready", False)
         else:
             # Docker multi-container mode
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
-            orchestrator = get_compose_orchestrator()
-            status = await orchestrator.get_project_status(project_slug)
+            status = await orchestrator.get_project_status(project_slug, project_id)
 
             if status.get('status') == 'not_found':
                 return False

@@ -29,10 +29,7 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
         Formatted environment context string
     """
     from datetime import datetime
-    import platform
-    from ..config import get_settings
-
-    settings = get_settings()
+    from ..services.orchestration import is_kubernetes_mode, get_deployment_mode
 
     context_parts = [
         "\n=== ENVIRONMENT CONTEXT ===\n"
@@ -43,10 +40,11 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
     context_parts.append(f"Time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
     # Deployment mode
-    context_parts.append(f"Deployment Mode: {settings.deployment_mode}")
+    deployment_mode = get_deployment_mode()
+    context_parts.append(f"Deployment Mode: {deployment_mode.value}")
 
     # Container/Pod info
-    if settings.deployment_mode == "kubernetes":
+    if is_kubernetes_mode():
         pod_name = get_container_name(user_id, project_id, mode="kubernetes")
         namespace = "tesslate-user-environments"
         context_parts.append(f"Pod: {pod_name}")
@@ -75,13 +73,11 @@ async def get_file_listing_context(user_id: UUID, project_id: str, max_lines: in
     Returns:
         Formatted file listing or None if unable to retrieve
     """
-    from ..config import get_settings
+    from ..services.orchestration import is_kubernetes_mode
     import asyncio
 
-    settings = get_settings()
-
     try:
-        if settings.deployment_mode == "kubernetes":
+        if is_kubernetes_mode():
             # Kubernetes: Execute ls in pod
             pod_name = get_container_name(user_id, project_id, mode="kubernetes")
             namespace = "tesslate-user-environments"

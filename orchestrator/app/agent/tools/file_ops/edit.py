@@ -59,31 +59,37 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     project_id = str(context["project_id"])
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
-    settings = get_settings()
 
     # Import diff editing utilities
     from ....utils.code_patching import apply_search_replace
+    from ....services.orchestration import is_kubernetes_mode
 
-    # 1. Read current file content
+    # Get container name from context (for multi-container projects)
+    container_name = context.get("container_name")
+    from ....services.orchestration import get_orchestrator
+
+    # 1. Read current file content using unified orchestrator
     current_content = None
 
-    if settings.deployment_mode == "kubernetes":
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
-        current_content = await k8s_manager.read_file_from_pod(
+    try:
+        orchestrator = get_orchestrator()
+        current_content = await orchestrator.read_file(
             user_id=user_id,
             project_id=project_id,
+            container_name=container_name,
             file_path=file_path
         )
-    else:
-        # Docker mode: Read from shared volume using volume_manager
-        if project_slug:
-            try:
-                from ....services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
-                current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
-            except Exception as e:
-                logger.debug(f"Could not read from shared volume: {e}")
+    except Exception as e:
+        logger.debug(f"Could not read file via orchestrator: {e}")
+
+    # Fallback to volume_manager for Docker mode if orchestrator failed
+    if current_content is None and not is_kubernetes_mode() and project_slug:
+        try:
+            from ....services.volume_manager import get_volume_manager
+            volume_manager = get_volume_manager()
+            current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+        except Exception as e:
+            logger.debug(f"Could not read from shared volume: {e}")
 
     if current_content is None:
         return error_output(
@@ -103,43 +109,30 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             details={"error": result.error}
         )
 
-    # 3. Write the patched content back
-    if settings.deployment_mode == "kubernetes":
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
-        success = await k8s_manager.write_file_to_pod(
+    # 3. Write the patched content back using unified orchestrator
+    try:
+        orchestrator = get_orchestrator()
+        success = await orchestrator.write_file(
             user_id=user_id,
             project_id=project_id,
+            container_name=container_name,
             file_path=file_path,
             content=result.content
         )
 
         if not success:
             return error_output(
-                message=f"Failed to save patched file '{file_path}' to pod",
-                suggestion="Check pod write permissions and disk space",
+                message=f"Failed to save patched file '{file_path}'",
+                suggestion="Check container write permissions and disk space",
                 file_path=file_path
             )
-    else:
-        # Docker mode: Write to shared volume using volume_manager
-        if project_slug:
-            try:
-                from ....services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
-                success = await volume_manager.write_file(project_slug, file_path, result.content, subdir=container_directory)
-                if not success:
-                    return error_output(
-                        message=f"Could not save patched file '{file_path}'",
-                        suggestion="Check if you have write permissions",
-                        file_path=file_path
-                    )
-            except Exception as e:
-                return error_output(
-                    message=f"Could not save patched file '{file_path}': {str(e)}",
-                    suggestion="Check if you have write permissions",
-                    file_path=file_path,
-                    details={"error": str(e)}
-                )
+    except Exception as e:
+        return error_output(
+            message=f"Could not save patched file '{file_path}': {str(e)}",
+            suggestion="Check if you have write permissions",
+            file_path=file_path,
+            details={"error": str(e)}
+        )
 
     # Generate a diff preview showing what changed
     def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:
@@ -221,31 +214,36 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     project_id = str(context["project_id"])
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
-    settings = get_settings()
 
     # Import diff editing utilities
     from ....utils.code_patching import apply_search_replace
+    from ....services.orchestration import get_orchestrator, is_kubernetes_mode
 
-    # 1. Read current file content
+    # Get container name from context (for multi-container projects)
+    container_name = context.get("container_name")
+
+    # 1. Read current file content using unified orchestrator
     current_content = None
 
-    if settings.deployment_mode == "kubernetes":
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
-        current_content = await k8s_manager.read_file_from_pod(
+    try:
+        orchestrator = get_orchestrator()
+        current_content = await orchestrator.read_file(
             user_id=user_id,
             project_id=project_id,
+            container_name=container_name,
             file_path=file_path
         )
-    else:
-        # Docker mode: Read from shared volume using volume_manager
-        if project_slug:
-            try:
-                from ....services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
-                current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
-            except Exception as e:
-                logger.debug(f"Could not read from shared volume: {e}")
+    except Exception as e:
+        logger.debug(f"Could not read file via orchestrator: {e}")
+
+    # Fallback to volume_manager for Docker mode if orchestrator failed
+    if current_content is None and not is_kubernetes_mode() and project_slug:
+        try:
+            from ....services.volume_manager import get_volume_manager
+            volume_manager = get_volume_manager()
+            current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+        except Exception as e:
+            logger.debug(f"Could not read from shared volume: {e}")
 
     if current_content is None:
         return error_output(
@@ -290,43 +288,30 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             "match_method": result.match_method
         })
 
-    # 3. Write the patched content back
-    if settings.deployment_mode == "kubernetes":
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
-        success = await k8s_manager.write_file_to_pod(
+    # 3. Write the patched content back using unified orchestrator
+    try:
+        orchestrator = get_orchestrator()
+        success = await orchestrator.write_file(
             user_id=user_id,
             project_id=project_id,
+            container_name=container_name,
             file_path=file_path,
             content=content
         )
 
         if not success:
             return error_output(
-                message=f"Failed to save edited file '{file_path}' to pod",
-                suggestion="Check pod write permissions and disk space",
+                message=f"Failed to save edited file '{file_path}'",
+                suggestion="Check container write permissions and disk space",
                 file_path=file_path
             )
-    else:
-        # Docker mode: Write to shared volume using volume_manager
-        if project_slug:
-            try:
-                from ....services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
-                success = await volume_manager.write_file(project_slug, file_path, content, subdir=container_directory)
-                if not success:
-                    return error_output(
-                        message=f"Could not save edited file '{file_path}'",
-                        suggestion="Check if you have write permissions",
-                        file_path=file_path
-                    )
-            except Exception as e:
-                return error_output(
-                    message=f"Could not save edited file '{file_path}': {str(e)}",
-                    suggestion="Check if you have write permissions",
-                    file_path=file_path,
-                    details={"error": str(e)}
-                )
+    except Exception as e:
+        return error_output(
+            message=f"Could not save edited file '{file_path}': {str(e)}",
+            suggestion="Check if you have write permissions",
+            file_path=file_path,
+            details={"error": str(e)}
+        )
 
     # Generate a diff preview showing what changed
     def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:

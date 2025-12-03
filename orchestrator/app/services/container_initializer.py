@@ -27,7 +27,7 @@ from sqlalchemy.orm import selectinload
 from ..models import Container, Project, ProjectFile, MarketplaceBase
 from ..services.volume_manager import get_volume_manager
 from ..services.base_cache_manager import get_base_cache_manager
-from ..services.docker_compose_orchestrator import get_compose_orchestrator
+from ..services.orchestration import get_orchestrator, is_docker_mode
 from ..config import get_settings
 from ..database import AsyncSessionLocal
 
@@ -133,32 +133,35 @@ async def initialize_container_async(
             task.update_progress(40, 100, "Using existing project files...")
             logger.info(f"[CONTAINER-INIT] Reusing existing files at /projects/{container_path}")
 
-        # Step 3: Regenerate docker-compose
-        task.update_progress(80, 100, "Updating Docker Compose configuration...")
-        try:
-            # Get all containers and connections
-            containers_result = await db.execute(
-                select(Container)
-                .where(Container.project_id == project_id)
-                .options(selectinload(Container.base))  # Eagerly load base
-            )
-            all_containers = containers_result.scalars().all()
+        # Step 3: Regenerate orchestrator configuration (docker-compose.yml in Docker mode)
+        if is_docker_mode():
+            task.update_progress(80, 100, "Updating Docker Compose configuration...")
+            try:
+                # Get all containers and connections
+                containers_result = await db.execute(
+                    select(Container)
+                    .where(Container.project_id == project_id)
+                    .options(selectinload(Container.base))  # Eagerly load base
+                )
+                all_containers = containers_result.scalars().all()
 
-            from ..models import ContainerConnection
-            connections_result = await db.execute(
-                select(ContainerConnection).where(ContainerConnection.project_id == project_id)
-            )
-            all_connections = connections_result.scalars().all()
+                from ..models import ContainerConnection
+                connections_result = await db.execute(
+                    select(ContainerConnection).where(ContainerConnection.project_id == project_id)
+                )
+                all_connections = connections_result.scalars().all()
 
-            # Regenerate docker-compose.yml
-            orchestrator = get_compose_orchestrator()
-            await orchestrator.write_compose_file(
-                project, all_containers, all_connections, user_id
-            )
+                # Regenerate docker-compose.yml
+                orchestrator = get_orchestrator()
+                await orchestrator.write_compose_file(
+                    project, all_containers, all_connections, user_id
+                )
 
-            logger.info(f"[CONTAINER-INIT] Updated docker-compose.yml")
-        except Exception as e:
-            logger.error(f"[CONTAINER-INIT] Failed to update docker-compose: {e}")
+                logger.info(f"[CONTAINER-INIT] Updated docker-compose.yml")
+            except Exception as e:
+                logger.error(f"[CONTAINER-INIT] Failed to update docker-compose: {e}")
+        else:
+            task.update_progress(80, 100, "Skipping compose update (Kubernetes mode)")
 
         # Done!
         task.update_progress(100, 100, "Container initialized successfully")

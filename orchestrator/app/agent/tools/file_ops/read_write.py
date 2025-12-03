@@ -58,135 +58,126 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
     db = context.get("db")
-    settings = get_settings()
 
     # Debug logging for container scoping
     logger.info(f"[READ-FILE] Reading '{file_path}' - project_slug: {project_slug}, container_directory: {container_directory}")
 
-    if settings.deployment_mode == "kubernetes":
-        # Kubernetes mode: Read from pod
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
+    # Get container name for multi-container projects
+    container_name = context.get("container_name")
 
-        # Get container info for multi-container projects
-        container_name = context.get("container_name")
-        project_slug = context.get("project_slug")
+    from ....services.orchestration import get_orchestrator, is_kubernetes_mode
 
-        content = await k8s_manager.read_file_from_pod(
+    # Try unified orchestrator first
+    try:
+        orchestrator = get_orchestrator()
+        content = await orchestrator.read_file(
             user_id=user_id,
             project_id=project_id,
-            file_path=file_path,
             container_name=container_name,
-            project_slug=project_slug
-        )
-
-        if content is None:
-            return error_output(
-                message=f"File '{file_path}' does not exist",
-                suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
-                exists=False,
-                file_path=file_path
-            )
-
-        return success_output(
-            message=f"Read {format_file_size(len(content))} from '{file_path}'",
-            file_path=file_path,
-            content=content,
-            details={
-                "size_bytes": len(content),
-                "lines": len(content.split('\n'))
-            }
-        )
-    else:
-        # Docker mode: Read from shared volume (primary) or database (fallback)
-        # Strategy 1: Try shared volume first (direct filesystem access)
-        if project_slug:
-            try:
-                from ....services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
-
-                # If container_directory is set, files are relative to that subdir
-                content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
-
-                if content is not None:
-                    return success_output(
-                        message=f"Read {format_file_size(len(content))} from '{file_path}'",
-                        file_path=file_path,
-                        content=content,
-                        details={
-                            "size_bytes": len(content),
-                            "lines": len(content.split('\n')),
-                            "source": "shared_volume"
-                        }
-                    )
-            except Exception as e:
-                logger.debug(f"Could not read from shared volume: {e}")
-
-        # Strategy 2: Try database as fallback
-        if db:
-            try:
-                from ....models import Project, ProjectFile
-                from sqlalchemy import select
-
-                # Get project slug if not provided
-                if not project_slug:
-                    project_result = await db.execute(
-                        select(Project).where(Project.id == UUID(project_id))
-                    )
-                    project = project_result.scalar_one_or_none()
-                    if project:
-                        project_slug = project.slug
-
-                        # Try shared volume with the retrieved slug
-                        try:
-                            from ....services.volume_manager import get_volume_manager
-                            volume_manager = get_volume_manager()
-
-                            content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
-
-                            if content is not None:
-                                return success_output(
-                                    message=f"Read {format_file_size(len(content))} from '{file_path}'",
-                                    file_path=file_path,
-                                    content=content,
-                                    details={
-                                        "size_bytes": len(content),
-                                        "lines": len(content.split('\n')),
-                                        "source": "shared_volume"
-                                    }
-                                )
-                        except Exception as e:
-                            logger.debug(f"Could not read from shared volume: {e}")
-
-                # Try database as final fallback
-                result = await db.execute(
-                    select(ProjectFile).where(
-                        ProjectFile.project_id == UUID(project_id),
-                        ProjectFile.file_path == file_path
-                    )
-                )
-                db_file = result.scalar_one_or_none()
-
-                if db_file and db_file.content:
-                    return success_output(
-                        message=f"Read {format_file_size(len(db_file.content))} from '{file_path}' (database)",
-                        file_path=file_path,
-                        content=db_file.content,
-                        details={
-                            "size_bytes": len(db_file.content),
-                            "lines": len(db_file.content.split('\n')),
-                            "source": "database"
-                        }
-                    )
-            except Exception as e:
-                logger.debug(f"Could not read from database: {e}")
-
-        return error_output(
-            message=f"File '{file_path}' does not exist",
-            suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
-            exists=False,
             file_path=file_path
         )
+
+        if content is not None:
+            return success_output(
+                message=f"Read {format_file_size(len(content))} from '{file_path}'",
+                file_path=file_path,
+                content=content,
+                details={
+                    "size_bytes": len(content),
+                    "lines": len(content.split('\n'))
+                }
+            )
+    except Exception as e:
+        logger.debug(f"Could not read via orchestrator: {e}")
+
+    # Fallback: Docker mode - Try shared volume (direct filesystem access)
+    if not is_kubernetes_mode() and project_slug:
+        try:
+            from ....services.volume_manager import get_volume_manager
+            volume_manager = get_volume_manager()
+
+            # If container_directory is set, files are relative to that subdir
+            content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+
+            if content is not None:
+                return success_output(
+                    message=f"Read {format_file_size(len(content))} from '{file_path}'",
+                    file_path=file_path,
+                    content=content,
+                    details={
+                        "size_bytes": len(content),
+                        "lines": len(content.split('\n')),
+                        "source": "shared_volume"
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Could not read from shared volume: {e}")
+
+    # Strategy 2: Try database as fallback
+    if db:
+        try:
+            from ....models import Project, ProjectFile
+            from sqlalchemy import select
+
+            # Get project slug if not provided
+            if not project_slug:
+                project_result = await db.execute(
+                    select(Project).where(Project.id == UUID(project_id))
+                )
+                project = project_result.scalar_one_or_none()
+                if project:
+                    project_slug = project.slug
+
+                    # Try shared volume with the retrieved slug
+                    try:
+                        from ....services.volume_manager import get_volume_manager
+                        volume_manager = get_volume_manager()
+
+                        content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
+
+                        if content is not None:
+                            return success_output(
+                                message=f"Read {format_file_size(len(content))} from '{file_path}'",
+                                file_path=file_path,
+                                content=content,
+                                details={
+                                    "size_bytes": len(content),
+                                    "lines": len(content.split('\n')),
+                                    "source": "shared_volume"
+                                }
+                            )
+                    except Exception as e:
+                        logger.debug(f"Could not read from shared volume: {e}")
+
+            # Try database as final fallback
+            result = await db.execute(
+                select(ProjectFile).where(
+                    ProjectFile.project_id == UUID(project_id),
+                    ProjectFile.file_path == file_path
+                )
+            )
+            db_file = result.scalar_one_or_none()
+
+            if db_file and db_file.content:
+                return success_output(
+                    message=f"Read {format_file_size(len(db_file.content))} from '{file_path}' (database)",
+                    file_path=file_path,
+                    content=db_file.content,
+                    details={
+                        "size_bytes": len(db_file.content),
+                        "lines": len(db_file.content.split('\n')),
+                        "source": "database"
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Could not read from database: {e}")
+
+    return error_output(
+        message=f"File '{file_path}' does not exist",
+        suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
+        exists=False,
+        file_path=file_path
+    )
 
 
 @tool_retry
@@ -223,7 +214,6 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
     db = context.get("db")
-    settings = get_settings()
 
     # Show a preview of what was written (first and last few lines)
     lines = content.split('\n')
@@ -234,41 +224,37 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     else:
         preview = '\n'.join(lines[:preview_lines]) + '\n\n... (' + str(len(lines) - preview_lines * 2) + ' lines omitted) ...\n\n' + '\n'.join(lines[-preview_lines:])
 
-    if settings.deployment_mode == "kubernetes":
-        # Kubernetes mode: Write to pod
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
+    # Get container info for multi-container projects
+    container_name = context.get("container_name")
 
-        # Get container info for multi-container projects
-        container_name = context.get("container_name")
-        project_slug = context.get("project_slug")
+    from ....services.orchestration import get_orchestrator, is_kubernetes_mode
 
-        success = await k8s_manager.write_file_to_pod(
+    # Try unified orchestrator first
+    try:
+        orchestrator = get_orchestrator()
+        success = await orchestrator.write_file(
             user_id=user_id,
             project_id=project_id,
-            file_path=file_path,
-            content=content,
             container_name=container_name,
-            project_slug=project_slug
-        )
-
-        if not success:
-            return error_output(
-                message=f"Failed to write to '{file_path}' in pod",
-                suggestion="Check if the pod has write permissions and sufficient disk space",
-                file_path=file_path
-            )
-
-        return success_output(
-            message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
             file_path=file_path,
-            preview=preview,
-            details={
-                "size_bytes": len(content),
-                "line_count": len(lines)
-            }
+            content=content
         )
-    else:
+
+        if success:
+            return success_output(
+                message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
+                file_path=file_path,
+                preview=preview,
+                details={
+                    "size_bytes": len(content),
+                    "line_count": len(lines)
+                }
+            )
+    except Exception as e:
+        logger.debug(f"Could not write via orchestrator: {e}")
+
+    # Fallback: Docker mode - write to shared volume and database
+    if not is_kubernetes_mode():
         # Docker mode: Write to shared volume and database
         try:
             # Get project slug if not provided
@@ -352,6 +338,13 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 file_path=file_path,
                 details={"error": str(e)}
             )
+
+    # If we get here, orchestrator failed and we're not in Docker mode
+    return error_output(
+        message=f"Failed to write to '{file_path}'",
+        suggestion="Check if the container has write permissions and sufficient disk space",
+        file_path=file_path
+    )
 
 
 def register_read_write_tools(registry):

@@ -386,10 +386,9 @@ class DeploymentBuilder:
         Returns:
             Absolute path to project directory
         """
-        from ...config import get_settings
-        settings = get_settings()
+        from ..orchestration import is_kubernetes_mode
 
-        if settings.deployment_mode == "kubernetes":
+        if is_kubernetes_mode():
             # Kubernetes uses shared PVC
             base_path = "/mnt/shared"
         else:

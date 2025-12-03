@@ -759,22 +759,23 @@ async def get_project_files(
         except Exception as e:
             logger.warning(f"[FILES] Failed to read from shared volume: {e}, falling back to database")
 
-    # If from_pod requested, try to read from running container (K8s only)
-    if from_pod and settings.deployment_mode == "kubernetes":
+    # If from_pod requested, try to read from running container
+    from ..services.orchestration import get_orchestrator, is_kubernetes_mode
+    if from_pod and is_kubernetes_mode():
         try:
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            orchestrator = get_orchestrator()
 
-            # Check if pod is ready
-            readiness = await k8s_manager.is_pod_ready(current_user.id, str(project_id))
+            # Check if container is ready
+            readiness = await orchestrator.is_container_ready(current_user.id, project_id, None)
 
             if readiness["ready"]:
-                logger.info(f"[FILES] Reading files from pod for project {project_id}")
+                logger.info(f"[FILES] Reading files from container for project {project_id}")
 
-                # Get list of files from pod
-                pod_files = await k8s_manager.list_files_in_pod(
-                    current_user.id,
-                    str(project_id),
+                # Get list of files from container
+                pod_files = await orchestrator.list_files(
+                    user_id=current_user.id,
+                    project_id=project_id,
+                    container_name=None,
                     directory="."
                 )
 
@@ -784,10 +785,11 @@ async def get_project_files(
                 for pod_file in pod_files:
                     if pod_file["type"] == "file":
                         try:
-                            content = await k8s_manager.read_file_from_pod(
-                                current_user.id,
-                                str(project_id),
-                                pod_file["path"]
+                            content = await orchestrator.read_file(
+                                user_id=current_user.id,
+                                project_id=project_id,
+                                container_name=None,
+                                file_path=pod_file["path"]
                             )
 
                             if content is not None:
@@ -892,30 +894,31 @@ async def get_container_status(
     project_id = project.id  # For internal operations
 
     try:
-        settings = get_settings()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-        if settings.deployment_mode == "kubernetes":
+        if is_kubernetes_mode():
             # Kubernetes mode
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            orchestrator = get_orchestrator()
 
-            readiness = await k8s_manager.is_pod_ready(
-                current_user.id,
-                str(project_id),
-                check_responsive=True
+            readiness = await orchestrator.is_container_ready(
+                user_id=current_user.id,
+                project_id=project_id,
+                container_name=None
             )
 
             # Get full environment status
-            env_status = await k8s_manager.get_dev_environment_status(
-                current_user.id,
-                str(project_id)
+            env_status = await orchestrator.get_container_status(
+                project_slug=None,
+                project_id=project_id,
+                container_name=None,
+                user_id=current_user.id
             )
 
             return {
                 "status": "ready" if readiness["ready"] else "starting",
                 "ready": readiness["ready"],
-                "phase": readiness["phase"],
-                "message": readiness["message"],
+                "phase": readiness.get("phase", "Unknown"),
+                "message": readiness.get("message", ""),
                 "responsive": readiness.get("responsive"),
                 "conditions": readiness.get("conditions", []),
                 "pod_name": readiness.get("pod_name"),
@@ -967,32 +970,32 @@ async def save_project_file(
         raise HTTPException(status_code=400, detail="file_path and content are required")
 
     try:
-        settings = get_settings()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-        # 1. Write file to container/filesystem
-        if settings.deployment_mode == "kubernetes":
-            # K8s mode: Write directly to pod via K8s API
-            try:
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
+        # 1. Write file to container/filesystem using unified orchestrator
+        try:
+            orchestrator = get_orchestrator()
 
-                success = await k8s_manager.write_file_to_pod(
-                    user_id=current_user.id,
-                    project_id=str(project_id),
-                    file_path=file_path,
-                    content=content
-                )
+            success = await orchestrator.write_file(
+                user_id=current_user.id,
+                project_id=project_id,
+                container_name=None,
+                file_path=file_path,
+                content=content
+            )
 
-                if not success:
-                    raise RuntimeError("Failed to write file to pod")
+            if success:
+                logger.info(f"[FILE] ✅ Wrote {file_path} to container for user {current_user.id}, project {project_id}")
+                orchestrator.track_activity(current_user.id, str(project_id))
+            else:
+                logger.warning(f"[FILE] ⚠️ Failed to write to container")
 
-                logger.info(f"[FILE] ✅ Wrote {file_path} to pod for user {current_user.id}, project {project_id}")
-                k8s_manager.track_activity(current_user.id, str(project_id))
+        except Exception as write_error:
+            logger.warning(f"[FILE] ⚠️ Failed to write via orchestrator: {write_error}")
+            # Continue to save in DB even if container write fails
 
-            except Exception as k8s_error:
-                logger.warning(f"[FILE] ⚠️ Failed to write to pod: {k8s_error}")
-                # Continue to save in DB even if pod write fails
-        else:
+        # Fallback for Docker mode: Write to shared volume
+        if not is_kubernetes_mode():
             # Docker mode: Write directly to shared projects volume
             try:
                 from ..services.volume_manager import get_volume_manager
@@ -1043,7 +1046,7 @@ async def save_project_file(
         return {
             "message": "File saved successfully",
             "file_path": file_path,
-            "method": "shared_volume" if settings.deployment_mode == "docker" else "kubernetes_pod"
+            "method": "shared_volume" if not is_kubernetes_mode() else "kubernetes_pod"
         }
 
     except HTTPException:
@@ -1111,7 +1114,7 @@ async def _perform_project_deletion(
     """Background worker to delete a project"""
     from ..database import get_db
     from ..utils.async_fileio import rmtree_async
-    from ..services.docker_compose_orchestrator import get_compose_orchestrator
+    from ..services.orchestration import get_orchestrator, is_kubernetes_mode
     from ..services.regional_traefik_manager import get_regional_traefik_manager
 
     # Get a new database session for this background task
@@ -1122,10 +1125,9 @@ async def _perform_project_deletion(
         logger.info(f"[DELETE] Starting deletion of project {project_id} for user {user_id}")
         task.update_progress(0, 100, "Stopping containers...")
 
-        # 1. Stop and remove containers using new orchestrator
+        # 1. Stop and remove containers using unified orchestrator
         try:
-            # Get compose orchestrator
-            compose_orchestrator = get_compose_orchestrator()
+            orchestrator = get_orchestrator()
             regional_manager = get_regional_traefik_manager()
 
             # Get project to access slug
@@ -1137,7 +1139,7 @@ async def _perform_project_deletion(
             if project:
                 try:
                     # Stop the entire project (all containers)
-                    await compose_orchestrator.stop_project(project.slug)
+                    await orchestrator.stop_project(project.slug, project_id, user_id)
                     logger.info(f"[DELETE] Stopped all containers for project {project.slug}")
                 except Exception as e:
                     logger.warning(f"[DELETE] Error stopping project containers: {e}")
@@ -1219,10 +1221,8 @@ async def _perform_project_deletion(
 
             # 4a. Delete Kubernetes namespace and resources
             try:
-                from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
-                k8s_orchestrator = get_kubernetes_orchestrator()
-
-                await k8s_orchestrator.stop_project(
+                # Reuse the orchestrator already defined at top of function
+                await orchestrator.stop_project(
                     project_slug=project_slug,
                     project_id=project_id,
                     user_id=user_id
@@ -1823,18 +1823,20 @@ async def create_asset_directory(
             os.makedirs(full_dir_path, exist_ok=True)
             logger.info(f"[ASSETS] Created directory: {full_dir_path}")
         else:
-            # Kubernetes mode - create directory in pod
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            # Kubernetes mode - create directory in container
+            from ..services.orchestration import get_orchestrator
+            orchestrator = get_orchestrator()
 
-            # Use exec to create directory in pod
-            command = f"mkdir -p /app/{directory_path}"
-            await k8s_manager.exec_command_in_pod(
-                current_user.id,
-                str(project_id),
-                command
+            # Use exec to create directory in container
+            command = ["/bin/sh", "-c", f"mkdir -p /app/{directory_path}"]
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project_id,
+                container_name=None,
+                command=command,
+                timeout=30
             )
-            logger.info(f"[ASSETS] Created directory in pod: {directory_path}")
+            logger.info(f"[ASSETS] Created directory in container: {directory_path}")
 
         return {"message": "Directory created", "path": directory_path}
 
@@ -1941,29 +1943,32 @@ async def upload_asset(
 
             logger.info(f"[ASSETS] Saved file to: {file_path_absolute}")
         else:
-            # Kubernetes mode - write to pod
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            # Kubernetes mode - write to container
+            from ..services.orchestration import get_orchestrator
+            orchestrator = get_orchestrator()
 
             # Ensure directory exists
-            await k8s_manager.exec_command_in_pod(
-                current_user.id,
-                str(project_id),
-                f"mkdir -p /app/{directory}"
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project_id,
+                container_name=None,
+                command=["/bin/sh", "-c", f"mkdir -p /app/{directory}"],
+                timeout=30
             )
 
-            # Write file to pod
-            success = await k8s_manager.write_file_to_pod(
+            # Write file to container
+            success = await orchestrator.write_file(
                 user_id=current_user.id,
-                project_id=str(project_id),
+                project_id=project_id,
+                container_name=None,
                 file_path=file_path_relative,
                 content=content.decode('latin-1')  # Binary content
             )
 
             if not success:
-                raise RuntimeError("Failed to write file to pod")
+                raise RuntimeError("Failed to write file to container")
 
-            logger.info(f"[ASSETS] Saved file to pod: {file_path_relative}")
+            logger.info(f"[ASSETS] Saved file to container: {file_path_relative}")
 
         # Get image dimensions if it's an image
         width, height = None, None
@@ -2100,18 +2105,19 @@ async def get_asset_file(
             filename=asset.filename
         )
     else:
-        # Kubernetes mode - read from pod and return
-        from ..k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
+        # Kubernetes mode - read from container and return
+        from ..services.orchestration import get_orchestrator
+        orchestrator = get_orchestrator()
 
-        content = await k8s_manager.read_file_from_pod(
-            current_user.id,
-            str(project.id),
-            asset.file_path
+        content = await orchestrator.read_file(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=None,
+            file_path=asset.file_path
         )
 
         if not content:
-            raise HTTPException(status_code=404, detail="Asset file not found in pod")
+            raise HTTPException(status_code=404, detail="Asset file not found in container")
 
         from fastapi.responses import Response
         return Response(content=content.encode('latin-1'), media_type=asset.mime_type)
@@ -2134,26 +2140,28 @@ async def delete_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     try:
-        settings = get_settings()
         project_path = get_project_path(current_user.id, project.id)
         file_path = os.path.join(project_path, asset.file_path)
 
-        # Delete file from filesystem or pod
-        if settings.deployment_mode == "docker":
+        # Delete file from filesystem or container
+        from ..services.orchestration import is_docker_mode
+        if is_docker_mode():
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"[ASSETS] Deleted file: {file_path}")
         else:
-            # Kubernetes mode - delete from pod
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            # Kubernetes mode - delete from container
+            from ..services.orchestration import get_orchestrator
+            orchestrator = get_orchestrator()
 
-            await k8s_manager.exec_command_in_pod(
-                current_user.id,
-                str(project.id),
-                f"rm -f /app/{asset.file_path}"
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["/bin/sh", "-c", f"rm -f /app/{asset.file_path}"],
+                timeout=30
             )
-            logger.info(f"[ASSETS] Deleted file from pod: {asset.file_path}")
+            logger.info(f"[ASSETS] Deleted file from container: {asset.file_path}")
 
         # Delete database record
         await db.delete(asset)
@@ -2205,29 +2213,30 @@ async def rename_asset(
         raise HTTPException(status_code=400, detail="An asset with this name already exists in this directory")
 
     try:
-        settings = get_settings()
         project_path = get_project_path(current_user.id, project.id)
 
         old_file_path = os.path.join(project_path, asset.file_path)
         new_file_path_relative = f"{asset.directory.strip('/')}/{new_filename}".lstrip('/')
         new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
 
-        # Rename file in filesystem or pod
-        if settings.deployment_mode == "docker":
+        # Rename file in filesystem or container
+        from ..services.orchestration import get_orchestrator, is_docker_mode
+        if is_docker_mode():
             if os.path.exists(old_file_path):
                 os.rename(old_file_path, new_file_path_absolute)
                 logger.info(f"[ASSETS] Renamed file: {old_file_path} -> {new_file_path_absolute}")
         else:
             # Kubernetes mode
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            orchestrator = get_orchestrator()
 
-            await k8s_manager.exec_command_in_pod(
-                current_user.id,
-                str(project.id),
-                f"mv /app/{asset.file_path} /app/{new_file_path_relative}"
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["/bin/sh", "-c", f"mv /app/{asset.file_path} /app/{new_file_path_relative}"],
+                timeout=30
             )
-            logger.info(f"[ASSETS] Renamed file in pod: {asset.file_path} -> {new_file_path_relative}")
+            logger.info(f"[ASSETS] Renamed file in container: {asset.file_path} -> {new_file_path_relative}")
 
         # Update database record
         asset.filename = new_filename
@@ -2282,15 +2291,15 @@ async def move_asset(
         return {"message": "Asset is already in this directory"}
 
     try:
-        settings = get_settings()
         project_path = get_project_path(current_user.id, project.id)
 
         old_file_path = os.path.join(project_path, asset.file_path)
         new_file_path_relative = f"{new_directory.strip('/')}/{asset.filename}".lstrip('/')
         new_file_path_absolute = os.path.join(project_path, new_file_path_relative)
 
-        # Move file in filesystem or pod
-        if settings.deployment_mode == "docker":
+        # Move file in filesystem or container
+        from ..services.orchestration import get_orchestrator, is_docker_mode
+        if is_docker_mode():
             # Ensure new directory exists (async to avoid blocking)
             new_dir_absolute = os.path.dirname(new_file_path_absolute)
             await asyncio.to_thread(os.makedirs, new_dir_absolute, exist_ok=True)
@@ -2301,23 +2310,17 @@ async def move_asset(
                 logger.info(f"[ASSETS] Moved file: {old_file_path} -> {new_file_path_absolute}")
         else:
             # Kubernetes mode
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+            orchestrator = get_orchestrator()
 
-            # Ensure directory exists
-            await k8s_manager.exec_command_in_pod(
-                current_user.id,
-                str(project.id),
-                f"mkdir -p /app/{new_directory.strip('/')}"
+            # Ensure directory exists and move file
+            await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["/bin/sh", "-c", f"mkdir -p /app/{new_directory.strip('/')} && mv /app/{asset.file_path} /app/{new_file_path_relative}"],
+                timeout=30
             )
-
-            # Move file
-            await k8s_manager.exec_command_in_pod(
-                current_user.id,
-                str(project.id),
-                f"mv /app/{asset.file_path} /app/{new_file_path_relative}"
-            )
-            logger.info(f"[ASSETS] Moved file in pod: {asset.file_path} -> {new_file_path_relative}")
+            logger.info(f"[ASSETS] Moved file in container: {asset.file_path} -> {new_file_path_relative}")
 
         # Update database record
         asset.directory = new_directory
@@ -3150,8 +3153,8 @@ async def add_container_to_project(
             all_connections = connections_result.scalars().all()
 
             # Regenerate docker-compose.yml
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
-            orchestrator = get_compose_orchestrator()
+            from ..services.orchestration import get_orchestrator
+            orchestrator = get_orchestrator()
             await orchestrator.write_compose_file(
                 project, all_containers, all_connections, current_user.id
             )
@@ -3231,7 +3234,7 @@ async def create_container_connection(
 
         # Regenerate docker-compose.yml with updated depends_on
         try:
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+            from ..services.orchestration import get_orchestrator
 
             # Use selectinload to eagerly load the base relationship
             containers_result = await db.execute(
@@ -3246,7 +3249,7 @@ async def create_container_connection(
             )
             all_connections = connections_result.scalars().all()
 
-            orchestrator = get_compose_orchestrator()
+            orchestrator = get_orchestrator()
             await orchestrator.write_compose_file(
                 project, all_containers, all_connections, current_user.id
             )
@@ -3313,15 +3316,15 @@ async def get_containers_status(
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     try:
-        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+        from ..services.orchestration import get_orchestrator
 
-        orchestrator = get_compose_orchestrator()
-        status = await orchestrator.get_project_status(project.slug)
+        orchestrator = get_orchestrator()
+        status = await orchestrator.get_project_status(project.slug, project.id)
 
         return status
 
     except Exception as e:
-        logger.error(f"[COMPOSE] Failed to get container status: {e}", exc_info=True)
+        logger.error(f"[ORCHESTRATION] Failed to get container status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
 
@@ -3499,12 +3502,13 @@ async def rename_container(
             )
             all_connections = connections_result.scalars().all()
 
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
-            orchestrator = get_compose_orchestrator()
-            await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id
-            )
-            logger.info(f"[CONTAINER] Regenerated docker-compose.yml after rename")
+            from ..services.orchestration import get_orchestrator, is_docker_mode
+            if is_docker_mode():
+                orchestrator = get_orchestrator()
+                await orchestrator.write_compose_file(
+                    project, all_containers, all_connections, current_user.id
+                )
+                logger.info(f"[CONTAINER] Regenerated docker-compose.yml after rename")
         except Exception as e:
             logger.error(f"[CONTAINER] Failed to regenerate docker-compose: {e}")
 
@@ -3571,31 +3575,32 @@ async def delete_container(
 
         logger.info(f"[CONTAINER] ✅ Deleted container {container_id} from project {project.id}")
 
-        # Regenerate docker-compose.yml
+        # Regenerate docker-compose.yml (Docker mode only)
         try:
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
+            from ..services.orchestration import get_orchestrator, is_docker_mode
 
-            # Get remaining containers and connections
-            # Use selectinload to eagerly load the base relationship
-            containers_result = await db.execute(
-                select(Container)
-                .where(Container.project_id == project.id)
-                .options(selectinload(Container.base))  # Eagerly load base
-            )
-            remaining_containers = containers_result.scalars().all()
+            if is_docker_mode():
+                # Get remaining containers and connections
+                # Use selectinload to eagerly load the base relationship
+                containers_result = await db.execute(
+                    select(Container)
+                    .where(Container.project_id == project.id)
+                    .options(selectinload(Container.base))  # Eagerly load base
+                )
+                remaining_containers = containers_result.scalars().all()
 
-            connections_result = await db.execute(
-                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-            )
-            remaining_connections = connections_result.scalars().all()
+                connections_result = await db.execute(
+                    select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+                )
+                remaining_connections = connections_result.scalars().all()
 
-            # Update docker-compose.yml
-            orchestrator = get_compose_orchestrator()
-            await orchestrator.write_compose_file(
-                project, remaining_containers, remaining_connections, current_user.id
-            )
+                # Update docker-compose.yml
+                orchestrator = get_orchestrator()
+                await orchestrator.write_compose_file(
+                    project, remaining_containers, remaining_connections, current_user.id
+                )
 
-            logger.info(f"[CONTAINER] Updated docker-compose.yml after deletion")
+                logger.info(f"[CONTAINER] Updated docker-compose.yml after deletion")
         except Exception as e:
             logger.warning(f"[CONTAINER] Failed to update docker-compose.yml: {e}")
 
@@ -3623,9 +3628,6 @@ async def start_all_containers(
     In Docker mode: Uses docker-compose up to start containers.
     In Kubernetes mode: Creates namespace, deployments, and services.
     """
-    from ..config import get_settings
-    settings = get_settings()
-
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     try:
@@ -3646,43 +3648,26 @@ async def start_all_containers(
         )
         connections = connections_result.scalars().all()
 
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes mode
-            from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
+        # Use unified orchestration (handles both Docker and Kubernetes)
+        from ..services.orchestration import get_orchestrator, get_deployment_mode
 
-            orchestrator = get_kubernetes_orchestrator()
-            result = await orchestrator.start_project(
-                project, containers, connections, current_user.id, db
-            )
+        orchestrator = get_orchestrator()
+        deployment_mode = get_deployment_mode()
 
-            logger.info(f"[K8S] Started all containers for project {project.slug}")
+        result = await orchestrator.start_project(
+            project, containers, connections, current_user.id, db
+        )
 
-            return {
-                "message": "All containers started successfully",
-                "project_slug": project.slug,
-                "containers": result.get("containers", {}),
-                "namespace": result.get("namespace"),
-                "deployment_mode": "kubernetes"
-            }
+        logger.info(f"[{deployment_mode.value.upper()}] Started all containers for project {project.slug}")
 
-        else:
-            # Docker mode
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
-
-            orchestrator = get_compose_orchestrator()
-            result = await orchestrator.start_project(
-                project, containers, connections, current_user.id
-            )
-
-            logger.info(f"[COMPOSE] Started all containers for project {project.slug}")
-
-            return {
-                "message": "All containers started successfully",
-                "project_slug": project.slug,
-                "containers": result["containers"],
-                "network": result["network"],
-                "deployment_mode": "docker"
-            }
+        return {
+            "message": "All containers started successfully",
+            "project_slug": project.slug,
+            "containers": result.get("containers", {}),
+            "network": result.get("network"),
+            "namespace": result.get("namespace"),
+            "deployment_mode": deployment_mode.value
+        }
 
     except Exception as e:
         logger.error(f"[ORCHESTRATOR] Failed to start containers: {e}", exc_info=True)
@@ -3701,39 +3686,23 @@ async def stop_all_containers(
     In Docker mode: Uses docker-compose down.
     In Kubernetes mode: Deletes the project namespace.
     """
-    from ..config import get_settings
-    settings = get_settings()
-
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
     try:
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes mode
-            from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
+        # Use unified orchestration (handles both Docker and Kubernetes)
+        from ..services.orchestration import get_orchestrator, get_deployment_mode
 
-            orchestrator = get_kubernetes_orchestrator()
-            await orchestrator.stop_project(project.slug, project.id, current_user.id)
+        orchestrator = get_orchestrator()
+        deployment_mode = get_deployment_mode()
 
-            logger.info(f"[K8S] Stopped all containers for project {project.slug}")
+        await orchestrator.stop_project(project.slug, project.id, current_user.id)
 
-            return {
-                "message": "All containers stopped successfully",
-                "deployment_mode": "kubernetes"
-            }
+        logger.info(f"[{deployment_mode.value.upper()}] Stopped all containers for project {project.slug}")
 
-        else:
-            # Docker mode
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
-
-            orchestrator = get_compose_orchestrator()
-            await orchestrator.stop_project(project.slug)
-
-            logger.info(f"[COMPOSE] Stopped all containers for project {project.slug}")
-
-            return {
-                "message": "All containers stopped successfully",
-                "deployment_mode": "docker"
-            }
+        return {
+            "message": "All containers stopped successfully",
+            "deployment_mode": deployment_mode.value
+        }
 
     except Exception as e:
         logger.error(f"[ORCHESTRATOR] Failed to stop containers: {e}", exc_info=True)
@@ -3780,9 +3749,8 @@ async def _start_container_background_task(
         RuntimeError: If container start fails at any stage
     """
     from ..database import get_db
-    from ..config import get_settings
+    from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-    settings = get_settings()
     db_gen = get_db()
     db = await db_gen.__anext__()
 
@@ -3799,8 +3767,8 @@ async def _start_container_background_task(
             raise RuntimeError(f"Container not found in project '{project_slug}'")
 
         # Check if container is already running - skip full startup if so
-        orchestrator = get_compose_orchestrator()
-        status = await orchestrator.get_project_status(project.slug)
+        orchestrator = get_orchestrator()
+        status = await orchestrator.get_project_status(project.slug, project.id)
 
         # Sanitize service name to match what's in status
         import re
@@ -3825,7 +3793,8 @@ async def _start_container_background_task(
             }
 
         task.add_log(f"Starting container '{container.name}' in project '{project.slug}'")
-        task.add_log(f"Deployment mode: {settings.deployment_mode}")
+        deployment_mode = "kubernetes" if is_kubernetes_mode() else "docker"
+        task.add_log(f"Deployment mode: {deployment_mode}")
 
         # Stage 2: Fetch all containers and connections (25%)
         task.update_progress(25, 100, "Loading project configuration")
@@ -3845,15 +3814,11 @@ async def _start_container_background_task(
         all_connections = connections_result.scalars().all()
         task.add_log(f"Found {len(all_connections)} container connections")
 
-        # Choose orchestrator based on deployment mode
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes mode: Use K8s orchestrator
-            from ..services.kubernetes_orchestrator import get_kubernetes_orchestrator
-
+        # Choose orchestrator based on deployment mode (orchestrator already obtained above)
+        if is_kubernetes_mode():
+            # Kubernetes mode
             task.update_progress(40, 100, "Preparing Kubernetes deployment")
             task.add_log("Using Kubernetes orchestrator")
-
-            orchestrator = get_kubernetes_orchestrator()
 
             # Stage 4: Start container in K8s (55%)
             task.update_progress(55, 100, f"Creating Kubernetes resources for '{container.name}'")
@@ -3881,20 +3846,18 @@ async def _start_container_background_task(
 
         else:
             # Docker mode: Use Docker Compose orchestrator
-            from ..services.docker_compose_orchestrator import get_compose_orchestrator
 
-            orchestrator = get_compose_orchestrator()
+            # Stage 3-4: Start container (includes compose file generation)
+            task.update_progress(40, 100, f"Starting container '{container.name}'")
 
-            # Stage 3: Write compose file (40%)
-            task.update_progress(40, 100, "Generating docker-compose configuration")
-            await orchestrator.write_compose_file(
-                project, all_containers, all_connections, user_id
+            result = await orchestrator.start_container(
+                project=project,
+                container=container,
+                all_containers=all_containers,
+                connections=all_connections,
+                user_id=user_id,
+                db=db
             )
-            task.add_log("Docker compose file generated successfully")
-
-            # Stage 4: Start container (55%)
-            task.update_progress(55, 100, f"Starting container '{container.name}'")
-            await orchestrator.start_container(project.slug, container.name)
             task.add_log(f"Container '{container.name}' started via docker compose")
 
             # Stage 5: Regional Traefik routing (70%)
@@ -3904,11 +3867,8 @@ async def _start_container_background_task(
             # Stage 6: Wait for container health (85%)
             task.update_progress(85, 100, "Waiting for container to be ready")
 
-            # Build container URL
-            service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-            service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
-            sanitized_container_name = f"{project.slug}-{service_name}"
-            container_url = f"http://{sanitized_container_name}.localhost"
+            # Get container URL from result
+            container_url = result.get("url", f"http://{project.slug}-{container.name}.localhost")
 
             # Give container a moment to fully initialize
             import asyncio
@@ -3919,7 +3879,7 @@ async def _start_container_background_task(
         task.update_progress(100, 100, "Container ready")
         task.add_log(f"Container accessible at {container_url}")
 
-        logger.info(f"[ORCHESTRATOR] Successfully started container {container.name} in project {project.slug} ({settings.deployment_mode} mode)")
+        logger.info(f"[ORCHESTRATOR] Successfully started container {container.name} in project {project.slug} ({deployment_mode} mode)")
 
         return {
             "container_id": str(container.id),
@@ -4049,12 +4009,12 @@ async def stop_single_container(
         raise HTTPException(status_code=404, detail="Container not found")
 
     try:
-        from ..services.docker_compose_orchestrator import get_compose_orchestrator
+        from ..services.orchestration import get_orchestrator
 
-        orchestrator = get_compose_orchestrator()
+        orchestrator = get_orchestrator()
         await orchestrator.stop_container(project.slug, container.name)
 
-        logger.info(f"[COMPOSE] Stopped container {container.name} in project {project.slug}")
+        logger.info(f"[ORCHESTRATION] Stopped container {container.name} in project {project.slug}")
 
         return {
             "message": f"Container {container.name} stopped successfully",
@@ -4128,7 +4088,7 @@ async def _restart_container_background_task(
 ) -> dict:
     """Background task worker for restarting a container."""
     from ..database import get_db
-    from ..services.docker_compose_orchestrator import get_compose_orchestrator
+    from ..services.orchestration import get_orchestrator, is_docker_mode
 
     db_gen = get_db()
     db = await db_gen.__anext__()
@@ -4142,17 +4102,22 @@ async def _restart_container_background_task(
         if not container or container.project_id != project.id:
             raise RuntimeError("Container not found")
 
-        orchestrator = get_compose_orchestrator()
+        orchestrator = get_orchestrator()
 
         # Stop the container
         task.update_progress(30, 100, f"Stopping container '{container.name}'")
         try:
-            await orchestrator.stop_container(project.slug, container.name)
+            await orchestrator.stop_container(
+                project_slug=project.slug,
+                project_id=project.id,
+                container_name=container.name,
+                user_id=user_id
+            )
             task.add_log(f"Container '{container.name}' stopped")
         except Exception as e:
             task.add_log(f"Note: Container may not have been running: {e}")
 
-        # Regenerate compose file
+        # Load containers and connections for restart
         task.update_progress(50, 100, "Regenerating configuration")
         containers_result = await db.execute(
             select(Container)
@@ -4166,11 +4131,16 @@ async def _restart_container_background_task(
         )
         all_connections = connections_result.scalars().all()
 
-        await orchestrator.write_compose_file(project, all_containers, all_connections, user_id)
-
-        # Start the container
+        # Start the container (includes compose file generation)
         task.update_progress(70, 100, f"Starting container '{container.name}'")
-        await orchestrator.start_container(project.slug, container.name)
+        result = await orchestrator.start_container(
+            project=project,
+            container=container,
+            all_containers=all_containers,
+            connections=all_connections,
+            user_id=user_id,
+            db=db
+        )
         task.add_log(f"Container '{container.name}' started")
 
         # Wait for container to be ready
@@ -4178,13 +4148,8 @@ async def _restart_container_background_task(
         import asyncio
         await asyncio.sleep(2)
 
-        # Build container URL
-        import re
-        service_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-        service_name = ''.join(c for c in service_name if c.isalnum() or c == '-')
-        service_name = re.sub(r'-+', '-', service_name).strip('-')
-        sanitized_container_name = f"{project.slug}-{service_name}"
-        container_url = f"http://{sanitized_container_name}.localhost"
+        # Get container URL from result
+        container_url = result.get("url", f"http://{project.slug}-{container.name}.localhost")
 
         task.update_progress(100, 100, "Container restarted successfully")
         logger.info(f"[COMPOSE] Successfully restarted container {container.name}")

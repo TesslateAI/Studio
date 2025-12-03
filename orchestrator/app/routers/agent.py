@@ -152,22 +152,20 @@ async def execute_command(
             )
 
         # 4. Check if container/pod is ready
-        from ..config import get_settings
-        settings = get_settings()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-        if settings.deployment_mode == "kubernetes":
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
-            pod_status = await k8s_manager.is_pod_ready(
+        if is_kubernetes_mode():
+            orchestrator = get_orchestrator()
+            container_status = await orchestrator.is_container_ready(
                 user_id=current_user.id,
-                project_id=str(request.project_id),
-                check_responsive=True
+                project_id=request.project_id,
+                container_name=None  # Use default container
             )
 
-            if not pod_status["ready"] or not pod_status.get("responsive", False):
+            if not container_status["ready"] or not container_status.get("responsive", False):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=f"Development environment not ready: {pod_status['message']}"
+                    detail=f"Development environment not ready: {container_status['message']}"
                 )
         else:
             # Docker mode - not supported for agent commands

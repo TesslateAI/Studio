@@ -25,7 +25,18 @@ class Settings(BaseSettings):
     dev_server_base_url: str = ""
 
     # Deployment mode: "docker" (local with Docker+Traefik) or "kubernetes" (K8s cluster)
+    # Use the orchestration module for type-safe access: from app.services.orchestration import is_docker_mode
     deployment_mode: str = "docker"
+
+    @property
+    def is_docker_mode(self) -> bool:
+        """Check if running in Docker deployment mode."""
+        return self.deployment_mode.lower() == "docker"
+
+    @property
+    def is_kubernetes_mode(self) -> bool:
+        """Check if running in Kubernetes deployment mode."""
+        return self.deployment_mode.lower() == "kubernetes"
 
     # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_level: str = "INFO"

@@ -344,9 +344,8 @@ async def startup():
     # Create users directory for Docker mode
     # In Docker mode, user project files are stored in the users directory
     # In K8s mode, files are stored on PVC and this is not needed
-    from .config import get_settings
-    settings = get_settings()
-    if settings.deployment_mode == "docker":
+    from .services.orchestration import is_docker_mode
+    if is_docker_mode():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
 
@@ -359,7 +358,7 @@ async def startup():
     asyncio.create_task(stats_flush_loop())
 
     # Initialize base cache (Docker mode only - async - doesn't block startup)
-    if settings.deployment_mode == "docker":
+    if is_docker_mode():
         from .services.base_cache_manager import get_base_cache_manager
         base_cache_manager = get_base_cache_manager()
         asyncio.create_task(base_cache_manager.initialize_cache())

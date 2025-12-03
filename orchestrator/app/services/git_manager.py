@@ -58,22 +58,17 @@ class GitManager:
         command = ["/bin/sh", "-c", f"cd {project_path} && git {' '.join(shlex.quote(arg) for arg in git_args)}"]
 
         try:
-            # Use the container manager to execute the command
-            if self.settings.deployment_mode == "kubernetes":
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
-                output = await k8s_manager.execute_command_in_pod(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=command,
-                    timeout=timeout
-                )
-            else:
-                # Docker mode - TODO: Update for multi-container projects
-                raise NotImplementedError(
-                    "Git operations not yet implemented for multi-container Docker projects. "
-                    "Please use Kubernetes mode or update git_manager for multi-container support."
-                )
+            # Use the unified orchestrator to execute the command
+            from .orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            output = await orchestrator.execute_command(
+                user_id=self.user_id,
+                project_id=self.project_id,
+                container_name=None,  # Use default container
+                command=command,
+                timeout=timeout
+            )
 
             return output.strip()
 
@@ -160,7 +155,8 @@ class GitManager:
                 repo_url = repo_url.replace("https://github.com/", f"https://{auth_token}@github.com/")
 
             # Direct filesystem clone (for Docker mode without container)
-            if direct_to_filesystem and self.settings.deployment_mode == "docker":
+            from .orchestration import is_docker_mode
+            if direct_to_filesystem and is_docker_mode():
                 import asyncio
                 import os
 
@@ -215,20 +211,16 @@ class GitManager:
                 "rm -rf /tmp/git-clone"
             ]
 
-            if self.settings.deployment_mode == "kubernetes":
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
-                await k8s_manager.execute_command_in_pod(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=move_command,
-                    timeout=60
-                )
-            else:
-                # Docker mode - TODO: Update for multi-container projects
-                raise NotImplementedError(
-                    "Git operations not yet implemented for multi-container Docker projects."
-                )
+            from .orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            await orchestrator.execute_command(
+                user_id=self.user_id,
+                project_id=self.project_id,
+                container_name=None,  # Use default container
+                command=move_command,
+                timeout=60
+            )
 
             logger.info(f"[GIT] Repository files moved to project directory")
             return True

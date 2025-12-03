@@ -248,14 +248,15 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
         # Read TESSLATE.md from the user's project (deployment-aware)
         tesslate_content = None
 
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes mode: Read from pod
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-            tesslate_content = await k8s_manager.read_file_from_pod(
+        # Try unified orchestrator first
+        try:
+            orchestrator = get_orchestrator()
+            tesslate_content = await orchestrator.read_file(
                 user_id=user_id,
-                project_id=str(project.id),
+                project_id=project.id,
+                container_name=None,  # Use default container
                 file_path="TESSLATE.md"
             )
 
@@ -269,10 +270,11 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
                     async with aiofiles.open(template_path, 'r', encoding='utf-8') as f:
                         template_content = await f.read()
 
-                    # Write template to pod
-                    success = await k8s_manager.write_file_to_pod(
+                    # Write template to container
+                    success = await orchestrator.write_file(
                         user_id=user_id,
-                        project_id=str(project.id),
+                        project_id=project.id,
+                        container_name=None,
                         file_path="TESSLATE.md",
                         content=template_content
                     )
@@ -281,12 +283,16 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
                         tesslate_content = template_content
                         logger.info(f"[TESSLATE-CONTEXT] Successfully copied template to project {project.id}")
                     else:
-                        logger.warning(f"[TESSLATE-CONTEXT] Failed to write template to pod")
+                        logger.warning(f"[TESSLATE-CONTEXT] Failed to write template to container")
 
                 except Exception as e:
                     logger.error(f"[TESSLATE-CONTEXT] Failed to read template file: {e}")
 
-        else:
+        except Exception as e:
+            logger.debug(f"[TESSLATE-CONTEXT] Could not read via orchestrator: {e}")
+
+        # Fallback: Docker mode - read from local filesystem
+        if tesslate_content is None and not is_kubernetes_mode():
             # Docker mode: Read from local filesystem
             project_dir = get_project_path(user_id, project.id)
             tesslate_path = os.path.join(project_dir, "TESSLATE.md")
@@ -1883,30 +1889,32 @@ async def save_file(file_path: str, code: str, project_id: UUID, user_id: UUID, 
             # Continue to try writing to container even if DB save fails
 
         # 2. Write file to dev container (deployment mode aware)
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes: Write to pod via K8s API
-            try:
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-                success = await k8s_manager.write_file_to_pod(
-                    user_id=user_id,
-                    project_id=str(project_id),
-                    file_path=file_path,
-                    content=code
-                )
+        # Try unified orchestrator first
+        orchestrator_success = False
+        try:
+            orchestrator = get_orchestrator()
+            success = await orchestrator.write_file(
+                user_id=user_id,
+                project_id=project_id,
+                container_name=None,  # Use default container
+                file_path=file_path,
+                content=code
+            )
 
-                if not success:
-                    raise RuntimeError("Failed to write file to pod")
+            if success:
+                print(f"[ORCHESTRATOR] ✅ Wrote {file_path} to container - Vite HMR will trigger")
+                orchestrator_success = True
+            else:
+                print(f"[ORCHESTRATOR] ⚠️ Warning: Failed to write to container")
 
-                print(f"[K8S] ✅ Wrote {file_path} to pod - Vite HMR will trigger")
+        except Exception as e:
+            print(f"[ORCHESTRATOR] ⚠️ Warning: Failed to write via orchestrator: {e}")
+            # Don't fail the entire operation - file is in DB
 
-            except Exception as e:
-                print(f"[K8S] ⚠️ Warning: Failed to write to pod: {e}")
-                print(f"[K8S] File saved to DB but pod not updated - HMR won't trigger")
-                # Don't fail the entire operation - file is in DB
-
-        else:
+        # Fallback: Docker mode - write to local filesystem
+        if not orchestrator_success and not is_kubernetes_mode():
             # Docker: Write to local filesystem
             try:
                 project_dir = get_project_path(user_id, project_id)

@@ -33,7 +33,7 @@ class KubernetesOrchestrator:
 
     def __init__(self):
         # Import here to avoid circular dependencies
-        from ..k8s_client import get_k8s_manager
+        from ..deprecated_k8s_client import get_k8s_manager
         from ..config import get_settings
 
         self.k8s_manager = get_k8s_manager()
@@ -62,7 +62,7 @@ class KubernetesOrchestrator:
             Dictionary with status and container URLs
         """
         from kubernetes import client
-        from ..k8s_client_helpers import create_dynamic_pvc_manifest
+        from ..deprecated_k8s_client_helpers import create_dynamic_pvc_manifest
 
         project_id = str(project.id)
         namespace = self.k8s_manager._get_project_namespace(project_id)
@@ -204,7 +204,7 @@ class KubernetesOrchestrator:
             Dictionary with status and container URL
         """
         from kubernetes import client
-        from ..k8s_client_helpers import create_dynamic_pvc_manifest
+        from ..deprecated_k8s_client_helpers import create_dynamic_pvc_manifest
 
         project_id = str(project.id)
         namespace = self.k8s_manager._get_project_namespace(project_id)
