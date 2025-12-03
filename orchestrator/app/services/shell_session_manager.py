@@ -384,10 +384,10 @@ class ShellSessionManager:
         orchestrator = get_orchestrator()
 
         if is_kubernetes_mode():
-            # K8s: Generate deployment name based on container_name_hint for multi-container
-            # The k8s_manager._generate_resource_names handles the sanitization
-            k8s_manager = orchestrator.k8s_manager
-            names = k8s_manager._generate_resource_names(user_id, project_id, container_name=container_name_hint)
+            # K8s: Generate deployment name based on container_name for multi-container
+            # The k8s_client.generate_resource_names handles the sanitization
+            k8s_client = orchestrator.k8s_client
+            names = k8s_client.generate_resource_names(user_id, project_id, container_name=container_name)
             return names["deployment"]
         else:
             # Docker multi-container mode

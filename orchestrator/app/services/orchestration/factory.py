@@ -67,7 +67,7 @@ class OrchestratorFactory:
             logger.info("[ORCHESTRATOR] Created Docker orchestrator")
 
         elif mode == DeploymentMode.KUBERNETES:
-            from .kubernetes import KubernetesOrchestrator
+            from .kubernetes_orchestrator import KubernetesOrchestrator
             orchestrator = KubernetesOrchestrator()
             logger.info("[ORCHESTRATOR] Created Kubernetes orchestrator")
 

@@ -357,8 +357,8 @@ class KubernetesPTYBroker(BasePTYBroker):
             try:
                 from .orchestration import get_orchestrator
                 orchestrator = get_orchestrator()
-                k8s_manager = orchestrator.k8s_manager
-                names = k8s_manager._generate_resource_names(user_id, project_id)
+                k8s_client = orchestrator.k8s_client
+                names = k8s_client.generate_resource_names(user_id, project_id)
 
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,

@@ -69,17 +69,21 @@ class TestReadFileTool:
             await read_file_tool({}, test_context)
 
     @pytest.mark.asyncio
-    async def test_read_file_kubernetes_mode(self, test_context, mock_k8s_manager, monkeypatch):
+    async def test_read_file_kubernetes_mode(self, test_context, monkeypatch):
         """Test reading a file in Kubernetes mode."""
         from app.config import get_settings
+        from unittest.mock import AsyncMock
         settings = get_settings()
         monkeypatch.setattr(settings, "deployment_mode", "kubernetes")
 
-        # Mock the K8s manager
-        monkeypatch.setattr("app.agent.tools.file_ops.read_write.get_k8s_manager",
-                          lambda: mock_k8s_manager)
+        # Mock the orchestrator
+        mock_orchestrator = Mock()
+        mock_orchestrator.read_file = AsyncMock(return_value="File content from pod")
 
-        mock_k8s_manager.read_file_from_pod.return_value = "File content from pod"
+        monkeypatch.setattr("app.agent.tools.file_ops.read_write.get_orchestrator",
+                          lambda: mock_orchestrator)
+        monkeypatch.setattr("app.agent.tools.file_ops.read_write.is_kubernetes_mode",
+                          lambda: True)
 
         result = await read_file_tool(
             {"file_path": "src/App.jsx"},
@@ -88,7 +92,7 @@ class TestReadFileTool:
 
         assert "content" in result
         assert result["content"] == "File content from pod"
-        mock_k8s_manager.read_file_from_pod.assert_called_once()
+        mock_orchestrator.read_file.assert_called_once()
 
 
 @pytest.mark.unit
@@ -139,15 +143,21 @@ class TestWriteFileTool:
         assert file_path.exists()
 
     @pytest.mark.asyncio
-    async def test_write_file_kubernetes_mode(self, test_context, mock_k8s_manager, monkeypatch):
+    async def test_write_file_kubernetes_mode(self, test_context, monkeypatch):
         """Test writing a file in Kubernetes mode."""
         from app.config import get_settings
+        from unittest.mock import AsyncMock
         settings = get_settings()
         monkeypatch.setattr(settings, "deployment_mode", "kubernetes")
-        monkeypatch.setattr("app.agent.tools.file_ops.read_write.get_k8s_manager",
-                          lambda: mock_k8s_manager)
 
-        mock_k8s_manager.write_file_to_pod.return_value = True
+        # Mock the orchestrator
+        mock_orchestrator = Mock()
+        mock_orchestrator.write_file = AsyncMock(return_value=True)
+
+        monkeypatch.setattr("app.agent.tools.file_ops.read_write.get_orchestrator",
+                          lambda: mock_orchestrator)
+        monkeypatch.setattr("app.agent.tools.file_ops.read_write.is_kubernetes_mode",
+                          lambda: True)
 
         result = await write_file_tool(
             {"file_path": "src/NewComponent.jsx", "content": "Component code"},
@@ -155,7 +165,7 @@ class TestWriteFileTool:
         )
 
         assert "preview" in result
-        mock_k8s_manager.write_file_to_pod.assert_called_once()
+        mock_orchestrator.write_file.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_write_file_missing_parameters(self, test_context):

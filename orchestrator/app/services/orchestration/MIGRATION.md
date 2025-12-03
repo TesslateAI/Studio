@@ -185,13 +185,16 @@ All orchestrators implement these methods:
 
 ## Backward Compatibility
 
-The old files are still available for backward compatibility:
-- `services/docker_compose_orchestrator.py` - Original Docker implementation
-- `services/kubernetes_orchestrator.py` - Original K8s implementation
-- `k8s_client.py` - Low-level K8s API client
-- `k8s_container_manager.py` - K8s container manager
+**IMPORTANT: The old files have been removed.** All code has been migrated to use the new unified orchestration system.
 
-These will be deprecated in a future release. Migrate to the new system at your convenience.
+### Removed Files (December 2025)
+- `deprecated_k8s_client.py` - Replaced by `orchestration/kubernetes/client.py`
+- `deprecated_k8s_client_helpers.py` - Replaced by `orchestration/kubernetes/helpers.py`
+- `deprecated_k8s_container_manager.py` - Replaced by `orchestration/kubernetes/manager.py`
+- `services/deprecated_docker_compose_orchestrator.py` - Replaced by `orchestration/docker.py`
+- `services/deprecated_kubernetes_orchestrator.py` - Replaced by `orchestration/kubernetes.py`
+
+Use the new unified interface through `get_orchestrator()` for all operations.
 
 ## Testing
 
@@ -240,11 +243,11 @@ Expected output: Only `services/__init__.py` (backward compatibility) should mat
 
 ### Notes
 
-1. **Backward Compatibility**: `services/__init__.py` still exports the old orchestrator getters
-   for any external code that may depend on them.
+1. **Complete Migration**: All deprecated files have been removed. The new orchestration module
+   is the single source of truth for all container/orchestration operations.
 
-2. **Orchestration Wrappers**: `services/orchestration/docker.py` and `kubernetes.py` delegate
-   to the original orchestrators, so internal references in those files are expected.
+2. **Unified Interface**: `services/orchestration/docker.py` and `kubernetes.py` now contain
+   the complete implementations, not wrappers around deprecated code.
 
 3. **Deployment Provider Modes**: Some `deployment_mode` checks like `"external"` or `"source"`
    are for *deployment provider modes* (Vercel/Netlify), NOT orchestrator deployment modes.

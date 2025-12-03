@@ -17,20 +17,34 @@ from unittest.mock import AsyncMock, Mock, patch
 pytest.importorskip("kubernetes")
 
 from kubernetes.client.rest import ApiException
-from app.services.kubernetes_orchestrator import KubernetesOrchestrator
+from app.services.orchestration.kubernetes_orchestrator import KubernetesOrchestrator
 
 
 @pytest.fixture
-def mock_k8s_manager():
-    """Mock KubernetesManager for orchestrator."""
-    manager = AsyncMock()
-    manager.core_v1 = AsyncMock()
-    manager.apps_v1 = AsyncMock()
-    manager.networking_v1 = AsyncMock()
-    manager._get_project_namespace = Mock(return_value=f"proj-{uuid4()}")
-    manager._create_namespace_if_not_exists = AsyncMock()
-    manager._create_network_policy = AsyncMock()
-    return manager
+def mock_k8s_client():
+    """Mock KubernetesClient for orchestrator."""
+    client = AsyncMock()
+    client.core_v1 = AsyncMock()
+    client.apps_v1 = AsyncMock()
+    client.networking_v1 = AsyncMock()
+    client.get_project_namespace = Mock(return_value=f"proj-{uuid4()}")
+    client.create_namespace_if_not_exists = AsyncMock()
+    client.create_network_policy = AsyncMock()
+    client.generate_resource_names = Mock(return_value={
+        "namespace": f"proj-{uuid4()}",
+        "deployment": "test-deployment",
+        "service": "test-service",
+        "ingress": "test-ingress",
+        "pvc": "test-pvc"
+    })
+    return client
+
+
+# Alias for backward compatibility
+@pytest.fixture
+def mock_k8s_manager(mock_k8s_client):
+    """Backward compatible alias."""
+    return mock_k8s_client
 
 
 @pytest.fixture
@@ -41,17 +55,18 @@ def mock_settings():
     settings.k8s_pvc_size = "5Gi"
     settings.app_domain = "tesslate.com"
     settings.k8s_ingress_class = "nginx"
+    settings.deployment_mode = "kubernetes"
     return settings
 
 
 @pytest.fixture
-def orchestrator(mock_k8s_manager, mock_settings):
+def orchestrator(mock_k8s_client, mock_settings):
     """Create KubernetesOrchestrator with mocked dependencies."""
-    with patch('app.services.kubernetes_orchestrator.get_k8s_manager', return_value=mock_k8s_manager):
-        with patch('app.services.kubernetes_orchestrator.get_settings', return_value=mock_settings):
+    with patch('app.services.orchestration.kubernetes.get_k8s_client', return_value=mock_k8s_client):
+        with patch('app.services.orchestration.kubernetes.get_settings', return_value=mock_settings):
             orch = KubernetesOrchestrator()
-            orch.k8s_manager = mock_k8s_manager
-            orch.settings = mock_settings
+            orch._k8s_client = mock_k8s_client
+            orch._settings = mock_settings
             return orch
 
 
@@ -103,7 +118,7 @@ class TestMultiContainerStartup:
                 db=db
             )
 
-        mock_k8s_manager._create_namespace_if_not_exists.assert_called_once()
+        mock_k8s_manager.create_namespace_if_not_exists.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_creates_shared_pvc_for_source_code(self, orchestrator, mock_project, mock_containers, mock_k8s_manager):
@@ -117,7 +132,7 @@ class TestMultiContainerStartup:
         mock_k8s_manager.core_v1.create_namespaced_persistent_volume_claim = AsyncMock()
 
         with patch('asyncio.to_thread', new=lambda f, *args, **kwargs: f(*args, **kwargs)):
-            with patch('app.services.kubernetes_orchestrator.create_dynamic_pvc_manifest') as mock_pvc:
+            with patch('app.services.orchestration.kubernetes.helpers.create_dynamic_pvc_manifest') as mock_pvc:
                 mock_pvc.return_value = Mock()
 
                 await orchestrator.start_project(

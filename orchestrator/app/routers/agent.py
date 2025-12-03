@@ -200,10 +200,11 @@ async def execute_command(
                 )
 
                 # Kubernetes mode - execute command in pod
-                output = await k8s_manager.execute_command_in_pod(
+                output = await orchestrator.execute_command(
                     user_id=current_user.id,
-                    project_id=str(request.project_id),
-                    command=validation.sanitized_command,
+                    project_id=request.project_id,
+                    container_name=request.container_name if hasattr(request, 'container_name') else None,
+                    command=validation.sanitized_command if isinstance(validation.sanitized_command, list) else ["/bin/sh", "-c", validation.sanitized_command],
                     timeout=request.timeout
                 )
                 stdout = output

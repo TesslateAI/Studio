@@ -19,18 +19,31 @@ from unittest.mock import AsyncMock, Mock, patch, call
 pytest.importorskip("kubernetes")
 
 from kubernetes.client.rest import ApiException
-from app.k8s_client import KubernetesManager
-from app.agent.tools.file_ops.read_write import read_file, write_file
+from app.services.orchestration.kubernetes.client import KubernetesClient, get_k8s_client
+from app.agent.tools.file_ops.read_write import read_file_tool, write_file_tool
 
 
 @pytest.fixture
-def mock_k8s_manager():
-    """Mock KubernetesManager for file operations."""
-    with patch('app.k8s_client.config'):
-        manager = KubernetesManager()
-        manager.core_v1 = AsyncMock()
-        manager.execute_command_in_pod = AsyncMock()
-        return manager
+def mock_k8s_client():
+    """Mock KubernetesClient for file operations."""
+    with patch('app.services.orchestration.kubernetes.client.config'):
+        client = Mock(spec=KubernetesClient)
+        client.core_v1 = AsyncMock()
+        client.execute_command_in_pod = AsyncMock()
+        client.read_file_from_pod = AsyncMock()
+        client.write_file_to_pod = AsyncMock()
+        client.delete_file_from_pod = AsyncMock()
+        client.list_files_in_pod = AsyncMock()
+        client.glob_files_in_pod = AsyncMock()
+        client.grep_in_pod = AsyncMock()
+        return client
+
+
+# Alias for backward compatibility with tests
+@pytest.fixture
+def mock_k8s_manager(mock_k8s_client):
+    """Backward compatible alias for mock_k8s_client."""
+    return mock_k8s_client
 
 
 @pytest.mark.unit
