@@ -554,7 +554,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         # Create Ingress
         if container_port:
-            await self._create_ingress(names, namespace, container_port, user_id)
+            await self._create_ingress(names, namespace, container_port)
 
     async def _create_service_container(
         self,
@@ -664,29 +664,30 @@ class KubernetesOrchestrator(BaseOrchestrator):
         self,
         names: Dict[str, str],
         namespace: str,
-        port: int,
-        user_id: UUID
+        port: int
     ) -> None:
-        """Create Ingress for external access."""
-        app_base_url = self.settings.get_app_base_url
+        """Create Ingress for external access.
 
+        Unlike the main Tesslate application ingress, user project previews
+        do NOT use nginx auth subrequests. This matches how Docker deployment
+        uses simple Traefik labels without auth middleware.
+
+        Security note: File operations, shell access, and agent commands still
+        require JWT authentication through the main backend API - that auth
+        is separate from this ingress-level routing.
+        """
         ingress = client.V1Ingress(
             metadata=client.V1ObjectMeta(
                 name=names["ingress"],
                 namespace=namespace,
                 annotations={
+                    # SSL/TLS
                     "cert-manager.io/cluster-issuer": "letsencrypt-prod",
                     "nginx.ingress.kubernetes.io/ssl-redirect": "false",
-                    "nginx.ingress.kubernetes.io/auth-url": f"{app_base_url}/api/auth/verify-access",
-                    "nginx.ingress.kubernetes.io/auth-method": "GET",
-                    "nginx.ingress.kubernetes.io/auth-response-headers": "X-User-ID",
-                    "nginx.ingress.kubernetes.io/auth-snippet": f"""
-                        proxy_set_header X-Original-URI $request_uri;
-                        proxy_set_header X-Expected-User-ID {user_id};
-                        proxy_set_header X-Forwarded-Host $host;
-                    """,
+                    # WebSocket support
                     "nginx.ingress.kubernetes.io/proxy-http-version": "1.1",
                     "nginx.ingress.kubernetes.io/websocket-services": names["service"],
+                    # Allow iframe embedding (for preview panel)
                     "nginx.ingress.kubernetes.io/server-snippet": """
                         proxy_hide_header X-Frame-Options;
                         proxy_hide_header Content-Security-Policy;

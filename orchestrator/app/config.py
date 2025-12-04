@@ -230,7 +230,6 @@ class Settings(BaseSettings):
     k8s_user_environments_namespace: str = "tesslate-user-environments"
     # Name of the shared projects PVC (when using shared PVC mode)
     k8s_projects_pvc_name: str = "tesslate-projects-pvc"
-
     # Container Cleanup Configuration
     # Two-tier cleanup system for idle dev containers
     container_cleanup_interval_minutes: int = 2  # How often to run cleanup (default: every 2 minutes)
