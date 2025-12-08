@@ -97,9 +97,9 @@ class ShellSessionManager:
             user_id, project_id, project.slug, container_name
         )
 
-        # 5. Verify container is running
+        # 5. Verify container is running (use resolved name for accurate check)
         is_running = await self._is_container_running(
-            user_id, project_id, project.slug, container_name
+            user_id, project_id, project.slug, resolved_container_name
         )
         if not is_running:
             raise HTTPException(
@@ -394,7 +394,8 @@ class ShellSessionManager:
             # Container name format: {project_slug}-{service_name}
             if container_name:
                 # Sanitize the container name to match docker-compose naming
-                sanitized = container_name.lower().replace(' ', '-').replace('_', '-')
+                # Note: Must match sanitization in projects.py container creation
+                sanitized = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
                 sanitized = ''.join(c for c in sanitized if c.isalnum() or c == '-')
                 sanitized = sanitized.strip('-')
                 return f"{project_slug}-{sanitized}"
@@ -445,18 +446,42 @@ class ShellSessionManager:
         else:
             # Docker multi-container mode
             status = await orchestrator.get_project_status(project_slug, project_id)
+            logger.info(f"[_is_container_running] project_slug={project_slug}, container_name={container_name}, status={status}")
 
             if status.get('status') == 'not_found':
+                logger.warning(f"[_is_container_running] Project status not found for {project_slug}")
                 return False
 
             if container_name:
                 # Check specific container
-                sanitized = container_name.lower().replace(' ', '-').replace('_', '-')
-                sanitized = ''.join(c for c in sanitized if c.isalnum() or c == '-')
-                sanitized = sanitized.strip('-')
+                # container_name could be:
+                # - Full docker name: "project-slug-next-js-15"
+                # - Service name: "next-js-15"
+                containers = status.get('containers', {})
+                logger.info(f"[_is_container_running] Looking for '{container_name}' in containers: {containers}")
 
-                container_info = status.get('containers', {}).get(sanitized)
-                return container_info.get('running', False) if container_info else False
+                # First try: look up by 'name' field (matches full docker container name)
+                for service_name, info in containers.items():
+                    if info.get('name') == container_name:
+                        logger.info(f"[_is_container_running] Found by name field: running={info.get('running', False)}")
+                        return info.get('running', False)
+
+                # Second try: extract service name if full name (project-slug-service)
+                if container_name.startswith(f"{project_slug}-"):
+                    service_name = container_name[len(project_slug)+1:]
+                    container_info = containers.get(service_name)
+                    if container_info:
+                        logger.info(f"[_is_container_running] Found by extracted service name '{service_name}': running={container_info.get('running', False)}")
+                        return container_info.get('running', False)
+
+                # Third try: direct service name lookup
+                container_info = containers.get(container_name)
+                if container_info:
+                    logger.info(f"[_is_container_running] Found by direct lookup: running={container_info.get('running', False)}")
+                    return container_info.get('running', False)
+
+                logger.warning(f"[_is_container_running] Container '{container_name}' not found in containers dict")
+                return False
             else:
                 # Check if any container is running
                 for info in status.get('containers', {}).values():

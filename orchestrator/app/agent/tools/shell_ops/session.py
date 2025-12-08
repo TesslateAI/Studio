@@ -34,7 +34,7 @@ async def shell_open_executor(params: Dict[str, Any], context: Dict[str, Any]) -
             project_id=project_id,
             db=db,
             command=command,
-            container_name_hint=container_name,
+            container_name=container_name,
         )
 
         session_id = session_info["session_id"]

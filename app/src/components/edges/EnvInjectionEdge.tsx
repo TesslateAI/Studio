@@ -9,9 +9,9 @@ import { Gear } from '@phosphor-icons/react';
 
 /**
  * EnvInjectionEdge - Represents environment variable injection between containers
- * Visual: Orange dashed line with gear icon
+ * Visual: Orange dashed curved line with env label
  */
-export const EnvInjectionEdge = memo(({
+const EnvInjectionEdgeComponent = ({
   id,
   sourceX,
   sourceY,
@@ -19,7 +19,6 @@ export const EnvInjectionEdge = memo(({
   targetY,
   sourcePosition,
   targetPosition,
-  style = {},
   markerEnd,
   data,
 }: EdgeProps) => {
@@ -32,7 +31,6 @@ export const EnvInjectionEdge = memo(({
     targetPosition,
   });
 
-  // Get env var count from config if available
   const envCount = data?.config?.env_mapping
     ? Object.keys(data.config.env_mapping).length
     : 0;
@@ -43,19 +41,14 @@ export const EnvInjectionEdge = memo(({
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
-        style={{
-          ...style,
-          stroke: '#f97316', // Orange
-          strokeWidth: 2,
-          strokeDasharray: '5,5',
-        }}
+        style={{ stroke: '#f97316', strokeWidth: 2, strokeDasharray: '5,5' }}
       />
       <EdgeLabelRenderer>
         <div
           style={{
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'all',
+            pointerEvents: 'none',
           }}
           className="flex items-center gap-1 px-2 py-1 bg-orange-500/20 border border-orange-500/30 rounded text-[10px] text-orange-400 font-medium"
         >
@@ -65,6 +58,7 @@ export const EnvInjectionEdge = memo(({
       </EdgeLabelRenderer>
     </>
   );
-});
+};
 
+export const EnvInjectionEdge = memo(EnvInjectionEdgeComponent);
 EnvInjectionEdge.displayName = 'EnvInjectionEdge';

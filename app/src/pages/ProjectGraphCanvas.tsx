@@ -1,17 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ReactFlow,
-  Background,
-  Controls,
   addEdge,
   useNodesState,
   useEdgesState,
   type Edge,
   type Node,
   type NodeTypes,
-  BackgroundVariant,
-  Panel,
   type OnConnect,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -32,11 +27,10 @@ import {
   Kanban,
   Package,
   X,
-  ArrowsOutSimple,
-  Hand,
 } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
+import { GraphCanvas } from '../components/GraphCanvas';
 import { MarketplaceSidebar } from '../components/MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../components/ContainerPropertiesPanel';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
@@ -103,6 +97,11 @@ export const ProjectGraphCanvas = () => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // Refs for stable callback references - prevents node re-renders when parent state changes
+  const nodesRef = useRef<Node[]>(nodes);
+  const filesRef = useRef<any[]>([]);
+  const slugRef = useRef(slug);
   const [project, setProject] = useState<any>(null);
   const [files, setFiles] = useState<any[]>([]);
   const [agents, setAgents] = useState<UIAgent[]>([]);
@@ -125,6 +124,19 @@ export const ProjectGraphCanvas = () => {
     position: { x: number; y: number } | null;
   }>({ isOpen: false, item: null, position: null });
 
+  // Keep refs in sync with state - this allows callbacks to access latest values without re-creating
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  useEffect(() => {
+    slugRef.current = slug;
+  }, [slug]);
+
   useEffect(() => {
     if (slug) {
       fetchProjectData();
@@ -141,20 +153,21 @@ export const ProjectGraphCanvas = () => {
       try {
         const statusData = await projectsApi.getContainersRuntimeStatus(slug);
         if (statusData.containers) {
-          // Update nodes with actual Docker status
-          setNodes((currentNodes) =>
-            currentNodes.map((node) => {
+          // Update nodes with actual Docker status - only update if something changed
+          setNodes((currentNodes) => {
+            let hasChanges = false;
+            const updatedNodes = currentNodes.map((node) => {
               // Find matching container by service name (sanitized container name)
-              // Must match backend sanitization: lowercase, replace non-alphanumeric with dash, collapse dashes, strip leading/trailing dashes
               const serviceName = node.data.name?.toLowerCase()
                 .replace(/[^a-z0-9-]/g, '-')
                 .replace(/-+/g, '-')
-                .replace(/^-|-$/g, ''); // Strip leading/trailing dashes
+                .replace(/^-|-$/g, '');
               const containerStatus = statusData.containers[serviceName];
 
               if (containerStatus) {
                 const newStatus = containerStatus.running ? 'running' : 'stopped';
                 if (node.data.status !== newStatus) {
+                  hasChanges = true;
                   return {
                     ...node,
                     data: {
@@ -165,8 +178,11 @@ export const ProjectGraphCanvas = () => {
                 }
               }
               return node;
-            })
-          );
+            });
+
+            // Only return new array if something actually changed
+            return hasChanges ? updatedNodes : currentNodes;
+          });
 
           // Update isRunning state based on overall status
           setIsRunning(statusData.status === 'running');
@@ -729,8 +745,9 @@ export const ProjectGraphCanvas = () => {
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
+  // Stable callback - uses ref to access latest nodes without dependency
   const handleContainerClick = useCallback((containerId: string) => {
-    const containerNode = nodes.find(n => n.id === containerId);
+    const containerNode = nodesRef.current.find(n => n.id === containerId);
     if (containerNode) {
       setSelectedContainer({
         id: containerId,
@@ -739,19 +756,21 @@ export const ProjectGraphCanvas = () => {
         port: containerNode.data.port,
       });
     }
-  }, [nodes]);
+  }, []); // Empty deps - uses ref
 
+  // Stable callback - uses refs to access latest values without dependencies
   const handleDeleteContainer = useCallback(
     async (containerId: string) => {
-      // Get container name for the confirmation message
-      const containerNode = nodes.find(n => n.id === containerId);
+      // Get container name for the confirmation message - use ref for latest nodes
+      const containerNode = nodesRef.current.find(n => n.id === containerId);
       const containerName = containerNode?.data?.name || 'this container';
+      const currentSlug = slugRef.current;
 
       if (!confirm(`Are you sure you want to delete ${containerName}?`)) return;
 
       try {
         // Delete the container from backend
-        await api.delete(`/api/projects/${slug}/containers/${containerId}`);
+        await api.delete(`/api/projects/${currentSlug}/containers/${containerId}`);
 
         // Remove from graph
         setNodes((nds) => nds.filter((node) => node.id !== containerId));
@@ -767,8 +786,8 @@ export const ProjectGraphCanvas = () => {
         );
 
         if (deleteFiles) {
-          // Find all files that belong to this container
-          const containerFiles = files.filter(file => {
+          // Find all files that belong to this container - use ref for latest files
+          const containerFiles = filesRef.current.filter(file => {
             // Files are typically organized as: containerName/...
             const pathParts = file.file_path.split('/');
             return pathParts[0] === containerName || pathParts[0] === containerId;
@@ -781,7 +800,7 @@ export const ProjectGraphCanvas = () => {
 
           // Delete each file
           const deletePromises = containerFiles.map(file =>
-            projectsApi.deleteFile(slug!, file.file_path)
+            projectsApi.deleteFile(currentSlug!, file.file_path)
           );
 
           try {
@@ -803,9 +822,10 @@ export const ProjectGraphCanvas = () => {
         toast.error('Failed to delete container');
       }
     },
-    [slug, nodes, files, setNodes, setEdges, loadFiles]
+    [setNodes, setEdges, loadFiles] // Removed slug, nodes, files - now uses refs
   );
 
+  // Stable callback - uses ref for slug
   const handleNodeDragStop = useCallback(
     async (_event: any, node: Node) => {
       // Skip API call for temporary nodes (not yet saved to backend)
@@ -815,7 +835,7 @@ export const ProjectGraphCanvas = () => {
 
       try {
         // Update position in backend
-        await api.patch(`/api/projects/${slug}/containers/${node.id}`, {
+        await api.patch(`/api/projects/${slugRef.current}/containers/${node.id}`, {
           position_x: node.position.x,
           position_y: node.position.y,
         });
@@ -823,7 +843,7 @@ export const ProjectGraphCanvas = () => {
         console.error('Failed to update container position:', error);
       }
     },
-    [slug]
+    [] // Empty deps - uses ref
   );
 
   const handleStartAll = async () => {
@@ -854,9 +874,23 @@ export const ProjectGraphCanvas = () => {
     }
   };
 
-  const handleOpenBuilder = (containerId: string) => {
-    navigate(`/project/${slug}/builder?container=${containerId}`);
-  };
+  // Stable callback - uses ref for slug
+  const handleOpenBuilder = useCallback((containerId: string) => {
+    navigate(`/project/${slugRef.current}/builder?container=${containerId}`);
+  }, [navigate]);
+
+  // Stable callbacks for ReactFlow to prevent re-renders
+  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    handleContainerClick(node.id);
+  }, [handleContainerClick]);
+
+  const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
+    // Only allow double-click navigation for base containers, not services
+    const containerType = node.data?.containerType || 'base';
+    if (containerType === 'base') {
+      handleOpenBuilder(node.id);
+    }
+  }, [handleOpenBuilder]);
 
   if (!project) {
     return (
@@ -1184,8 +1218,8 @@ export const ProjectGraphCanvas = () => {
             </AnimatePresence>
 
             {/* React Flow canvas */}
-            <div className="flex-1 relative" ref={reactFlowWrapper}>
-              <ReactFlow
+            <div className="flex-1 relative [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform" ref={reactFlowWrapper}>
+              <GraphCanvas
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={onNodesChange}
@@ -1194,51 +1228,12 @@ export const ProjectGraphCanvas = () => {
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 onNodeDragStop={handleNodeDragStop}
-                onNodeClick={(_, node) => handleContainerClick(node.id)}
-                onNodeDoubleClick={(_, node) => {
-                  // Only allow double-click navigation for base containers, not services
-                  const containerType = node.data?.containerType || 'base';
-                  if (containerType === 'base') {
-                    handleOpenBuilder(node.id);
-                  }
-                }}
+                onNodeClick={handleNodeClick}
+                onNodeDoubleClick={handleNodeDoubleClick}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
-                defaultViewport={{ x: 0, y: 0, zoom: 0.5 }}
-                fitView
-                fitViewOptions={{ padding: 0.3, minZoom: 0.3, maxZoom: 1.5 }}
-                minZoom={0.1}
-                maxZoom={2}
-                panOnScroll
-                panOnDrag
-                zoomOnPinch
-                zoomOnScroll
-                selectNodesOnDrag={false}
-                className="bg-[var(--bg)] touch-none"
-              >
-                <Background
-                  variant={BackgroundVariant.Dots}
-                  gap={16}
-                  size={1}
-                  color={theme === 'dark' ? '#374151' : '#e5e7eb'}
-                />
-                <Controls className="!bg-[var(--surface)] !border-[var(--sidebar-border)] !shadow-lg [&>button]:!bg-[var(--surface)] [&>button]:!border-[var(--sidebar-border)] [&>button]:!fill-[var(--text)] [&>button:hover]:!bg-[var(--sidebar-hover)]" />
-
-                {/* Desktop hint */}
-                <Panel position="top-right" className="hidden md:block bg-[var(--surface)] px-4 py-2 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
-                  <p className="text-xs text-[var(--text)]/60">
-                    Double-click a container to open the builder
-                  </p>
-                </Panel>
-
-                {/* Mobile hint */}
-                <Panel position="top-center" className="md:hidden bg-[var(--surface)] px-3 py-1.5 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
-                  <p className="text-[10px] text-[var(--text)]/60 flex items-center gap-1.5">
-                    <Hand size={12} className="text-[var(--primary)]" />
-                    Pinch to zoom • Drag to pan
-                  </p>
-                </Panel>
-              </ReactFlow>
+                theme={theme}
+              />
 
               {/* Mobile floating button to open components sidebar */}
               <button

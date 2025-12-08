@@ -9,9 +9,9 @@ import { Database } from '@phosphor-icons/react';
 
 /**
  * DatabaseEdge - Represents database connections between containers
- * Visual: Green solid line with database icon
+ * Visual: Green curved line with DB label
  */
-export const DatabaseEdge = memo(({
+const DatabaseEdgeComponent = ({
   id,
   sourceX,
   sourceY,
@@ -19,9 +19,7 @@ export const DatabaseEdge = memo(({
   targetY,
   sourcePosition,
   targetPosition,
-  style = {},
   markerEnd,
-  data,
 }: EdgeProps) => {
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -38,18 +36,14 @@ export const DatabaseEdge = memo(({
         id={id}
         path={edgePath}
         markerEnd={markerEnd}
-        style={{
-          ...style,
-          stroke: '#22c55e', // Green
-          strokeWidth: 3,
-        }}
+        style={{ stroke: '#22c55e', strokeWidth: 3 }}
       />
       <EdgeLabelRenderer>
         <div
           style={{
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'all',
+            pointerEvents: 'none',
           }}
           className="flex items-center gap-1 px-2 py-1 bg-green-500/20 border border-green-500/30 rounded text-[10px] text-green-400 font-medium"
         >
@@ -59,6 +53,7 @@ export const DatabaseEdge = memo(({
       </EdgeLabelRenderer>
     </>
   );
-});
+};
 
+export const DatabaseEdge = memo(DatabaseEdgeComponent);
 DatabaseEdge.displayName = 'DatabaseEdge';

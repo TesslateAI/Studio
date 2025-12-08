@@ -323,7 +323,7 @@ async def _setup_base_project(
         # Get cached base path
         base_cache_manager = get_base_cache_manager()
         cached_base_path = await base_cache_manager.get_base_path(base_repo.slug)
-        volume_manager = get_volume_manager()
+        orchestrator = get_orchestrator()
 
         # Track if we're using a temp clone directory (for K8s mode without local cache)
         temp_clone_dir = None
@@ -381,11 +381,7 @@ async def _setup_base_project(
 
         # Only do volume operations in Docker mode with local cache
         if settings.deployment_mode == "docker" and os.path.exists(cached_base_path) and not temp_clone_dir:
-            if use_volumes:
-                # NEW: Volume-based storage
-                from ..services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
-
+            # Note: orchestrator already obtained above at line 326
             logger.info(f"Copied base {base_repo.slug} to shared volume /projects/{db_project.slug}")
 
         task.update_progress(40, 100, "Base loaded successfully")
@@ -723,14 +719,14 @@ async def get_project_files(
     # Check if this is a Docker project - use shared projects volume
     if from_volume and settings.deployment_mode == "docker":
         try:
-            from ..services.volume_manager import get_volume_manager
-            volume_manager = get_volume_manager()
+            from ..services.orchestration import get_orchestrator
+            orchestrator = get_orchestrator()
 
             subdir_log = f"/{container_dir}" if container_dir else ""
             logger.info(f"[FILES] Reading files from shared projects volume: /projects/{project.slug}{subdir_log}")
 
             # Get files with content from shared volume (direct filesystem access)
-            volume_files = await volume_manager.get_files_with_content(
+            volume_files = await orchestrator.get_files_with_content(
                 project.slug,  # Uses /projects/{slug}/ directory
                 max_files=200,
                 max_file_size=100000,  # 100KB per file
@@ -994,18 +990,21 @@ async def save_project_file(
             logger.warning(f"[FILE] ⚠️ Failed to write via orchestrator: {write_error}")
             # Continue to save in DB even if container write fails
 
-        # Fallback for Docker mode: Write to shared volume
+        # Fallback for Docker mode: Write to shared volume via orchestrator
         if not is_kubernetes_mode():
             # Docker mode: Write directly to shared projects volume
             try:
-                from ..services.volume_manager import get_volume_manager
-                volume_manager = get_volume_manager()
+                from ..services.orchestration import get_orchestrator
+                orch = get_orchestrator()
 
                 # Write file to shared volume at /projects/{project.slug}/{file_path}
-                success = await volume_manager.write_file(
-                    project.slug,
-                    file_path,
-                    content
+                success = await orch.write_file(
+                    user_id=current_user.id,
+                    project_id=project_id,
+                    container_name=None,
+                    file_path=file_path,
+                    content=content,
+                    project_slug=project.slug
                 )
 
                 if success:
@@ -1205,12 +1204,9 @@ async def _perform_project_deletion(
         # 4. Delete project files from shared volume (Docker mode only - K8s uses PVCs)
         settings = get_settings()
         if settings.deployment_mode == "docker" and project:
-            from ..services.volume_manager import get_volume_manager
-            volume_manager = get_volume_manager()
-
-            # Delete project directory from shared volume
+            # Delete project directory from shared volume via orchestrator
             try:
-                await volume_manager.delete_project_directory(project.slug)
+                await orchestrator.delete_project_directory(project.slug)
                 logger.info(f"[DELETE] Deleted project directory: /projects/{project.slug}")
             except Exception as e:
                 logger.warning(f"[DELETE] Failed to delete project directory: {e}")
@@ -3469,12 +3465,12 @@ async def rename_container(
             except Exception as e:
                 logger.warning(f"[CONTAINER] Could not stop container before rename: {e}")
 
-            # Rename folder in shared volume
-            from ..services.volume_manager import get_volume_manager
-            volume_manager = get_volume_manager()
+            # Rename folder in shared volume via orchestrator
+            from ..services.orchestration import get_orchestrator
+            orch = get_orchestrator()
 
             try:
-                await volume_manager.rename_directory(project.slug, old_directory, new_directory)
+                await orch.rename_directory(project.slug, old_directory, new_directory)
                 logger.info(f"[CONTAINER] Renamed folder from {old_directory} to {new_directory}")
             except Exception as e:
                 logger.error(f"[CONTAINER] Failed to rename folder: {e}")
@@ -3543,7 +3539,6 @@ async def delete_container(
     try:
         # Step 1: Stop and remove Docker container (if running)
         import docker as docker_lib
-        from ..services.volume_manager import get_volume_manager
 
         try:
             docker_client = docker_lib.from_env()

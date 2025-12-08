@@ -276,11 +276,16 @@ export default function Project() {
 
       // If viewing a specific container, filter files to that container's directory
       // Each container has its own directory (e.g., next-js-15/, vite-react-fastapi/)
+      // Strip the container directory prefix so paths are relative to container root
       if (containerId && container && container.directory) {
         const containerDir = container.directory;
-        const filteredFiles = filesData.filter((file: any) =>
-          file.file_path.startsWith(containerDir + '/')
-        );
+        const filteredFiles = filesData
+          .filter((file: any) => file.file_path.startsWith(containerDir + '/'))
+          .map((file: any) => ({
+            ...file,
+            // Strip container directory prefix for display (e.g., "next-js-15/app/page.tsx" -> "app/page.tsx")
+            file_path: file.file_path.slice(containerDir.length + 1)
+          }));
         setFiles(filteredFiles);
       } else {
         // No container selected - show all files
@@ -346,6 +351,12 @@ export default function Project() {
   const handleFileUpdate = useCallback(async (filePath: string, content: string) => {
     if (!slug) return;
 
+    // For container-scoped views, prepend container directory when saving
+    // (we stripped it for display, now add it back for the API)
+    const saveFilePath = (containerId && container?.directory)
+      ? `${container.directory}/${filePath}`
+      : filePath;
+
     // Track if this is a new file or an update
     let isNewFile = false;
     setFiles(prev => {
@@ -360,7 +371,7 @@ export default function Project() {
     });
 
     try {
-      await projectsApi.saveFile(slug, filePath, content);
+      await projectsApi.saveFile(slug, saveFilePath, content);
 
       // Emit file event to refresh the code editor file tree
       fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
@@ -386,7 +397,7 @@ export default function Project() {
         }
       }, 5000);
     }
-  }, [slug]);
+  }, [slug, containerId, container]);
 
   const loadDevServerUrl = async () => {
     if (!slug) return;

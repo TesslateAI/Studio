@@ -235,12 +235,26 @@ async def _get_chat_history(
         return []
 
 
-async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSession) -> Optional[str]:
+async def _build_tesslate_context(
+    project: Project,
+    user_id: UUID,
+    db: AsyncSession,
+    container_name: Optional[str] = None,
+    container_directory: Optional[str] = None
+) -> Optional[str]:
     """
     Build TESSLATE.md context for agent.
 
-    Reads TESSLATE.md from the user's project container. If it doesn't exist,
-    copies the generic template from orchestrator/template/TESSLATE.md.
+    Reads TESSLATE.md from the user's project container. For container-scoped agents,
+    reads from the container's directory. If it doesn't exist, copies the generic
+    template from orchestrator/template/TESSLATE.md.
+
+    Args:
+        project: Project model
+        user_id: User UUID
+        db: Database session
+        container_name: Optional container name for multi-container projects
+        container_directory: Optional container directory for file path resolution
 
     Returns the TESSLATE.md content as a formatted string, or None if unable to read.
     """
@@ -256,8 +270,10 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
             tesslate_content = await orchestrator.read_file(
                 user_id=user_id,
                 project_id=project.id,
-                container_name=None,  # Use default container
-                file_path="TESSLATE.md"
+                container_name=container_name,  # Use specific container if provided
+                file_path="TESSLATE.md",
+                project_slug=project.slug,
+                subdir=container_directory  # Read from container's subdirectory
             )
 
             # If TESSLATE.md doesn't exist, copy the template
@@ -270,13 +286,15 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
                     async with aiofiles.open(template_path, 'r', encoding='utf-8') as f:
                         template_content = await f.read()
 
-                    # Write template to container
+                    # Write template to container's subdirectory
                     success = await orchestrator.write_file(
                         user_id=user_id,
                         project_id=project.id,
-                        container_name=None,
+                        container_name=container_name,
                         file_path="TESSLATE.md",
-                        content=template_content
+                        content=template_content,
+                        project_slug=project.slug,
+                        subdir=container_directory  # Write to container's subdirectory
                     )
 
                     if success:
@@ -677,7 +695,9 @@ async def agent_chat(
                 container = container_result.scalar_one_or_none()
                 if container:
                     container_id = container.id
-                    container_name = container.name
+                    # Use directory as service name for shell ops (it's already sanitized)
+                    # This gets prefixed with project_slug in _get_container_name()
+                    container_name = container.directory if container.directory and container.directory != '.' else None
                     # Set container directory for scoped file operations
                     if container.directory and container.directory != '.':
                         container_directory = container.directory
@@ -696,7 +716,8 @@ async def agent_chat(
             container = container_result.scalar_one_or_none()
             if container:
                 container_id = container.id
-                container_name = container.name
+                # Use directory as service name for shell ops (it's already sanitized)
+                container_name = container.directory if container.directory and container.directory != '.' else None
                 logger.info(f"[AGENT-CHAT] Using default container: {container_name} ({container_id})")
 
         # Prepare context for tool execution
@@ -721,7 +742,11 @@ async def agent_chat(
         }
 
         # Build TESSLATE.md context (project-specific documentation for AI agents)
-        tesslate_context = await _build_tesslate_context(project, current_user.id, db)
+        tesslate_context = await _build_tesslate_context(
+            project, current_user.id, db,
+            container_name=container_name,
+            container_directory=container_directory
+        )
         if tesslate_context:
             project_context["tesslate_context"] = tesslate_context
             logger.info(f"[AGENT-CHAT] Added TESSLATE.md context for project {project.id}")
@@ -991,6 +1016,7 @@ async def agent_chat_stream(
             # Fetch container info for multi-container project support
             container_id = None
             container_name = None
+            container_directory = None
             project_slug = project.slug
 
             if request.container_id:
@@ -1003,8 +1029,12 @@ async def agent_chat_stream(
                 container = container_result.scalar_one_or_none()
                 if container:
                     container_id = container.id
-                    container_name = container.name
-                    logger.info(f"[SSE-AGENT] Using container: {container_name} (id: {container_id})")
+                    # Use directory as service name for shell ops (it's already sanitized)
+                    container_name = container.directory if container.directory and container.directory != '.' else None
+                    # Capture container directory for scoped file operations
+                    if container.directory and container.directory != '.':
+                        container_directory = container.directory
+                    logger.info(f"[SSE-AGENT] Using container: {container_name} (id: {container_id}), directory: {container_directory}")
 
             # Get or create chat for message history persistence
             chat_result = await db.execute(
@@ -1112,7 +1142,11 @@ async def agent_chat_stream(
             }
 
             # Build TESSLATE.md context
-            tesslate_context = await _build_tesslate_context(project, current_user.id, db)
+            tesslate_context = await _build_tesslate_context(
+                project, current_user.id, db,
+                container_name=container_name,
+                container_directory=container_directory
+            )
             if tesslate_context:
                 project_context["tesslate_context"] = tesslate_context
                 logger.info(f"[SSE-AGENT] Added TESSLATE.md context for project {project.id}")
@@ -1123,35 +1157,8 @@ async def agent_chat_stream(
                 project_context["git_context"] = git_context
                 logger.info(f"[SSE-AGENT] Added Git context for project {project.id}")
 
-            # Get container directory for file operations
-            # If container_id is provided, agent is scoped to that container (files at root)
-            # If not, agent is at project level (sees all container directories)
-            container_directory = None
-            if request.container_id:
-                logger.info(f"[SSE-AGENT] Looking up container_id: {request.container_id} for project: {request.project_id}")
-                try:
-                    from ..models import Container
-                    # Convert string to UUID if needed
-                    container_uuid = UUID(str(request.container_id)) if not isinstance(request.container_id, UUID) else request.container_id
-                    container_result = await db.execute(
-                        select(Container).where(
-                            Container.id == container_uuid,
-                            Container.project_id == request.project_id
-                        )
-                    )
-                    container = container_result.scalar_one_or_none()
-                    logger.info(f"[SSE-AGENT] Container lookup result: {container}")
-                    if container and container.directory and container.directory != '.':
-                        container_directory = container.directory
-                        logger.info(f"[SSE-AGENT] Container-scoped agent, directory: {container_directory}")
-                    else:
-                        logger.warning(f"[SSE-AGENT] Container found but no directory: {container}")
-                except Exception as e:
-                    logger.warning(f"[SSE-AGENT] Could not get container directory: {e}", exc_info=True)
-            else:
-                logger.info(f"[SSE-AGENT] Project-level agent (no container_id)")
-
             # Prepare execution context
+            # Note: container_directory was already captured during initial container lookup above
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
@@ -1588,11 +1595,12 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             project_result = await db.execute(select(Project).where(Project.id == project_id))
             project = project_result.scalar_one_or_none()
 
-        # Get container directory for file operations (container-scoped agents)
+        # Get container info for file operations (container-scoped agents)
         container_directory = None
+        container_name = None  # Need this for TESSLATE context
         if container_id and project_id:
             try:
-                from ..models import Container
+                # Container is already imported at module level (line 7)
                 container_result = await db.execute(
                     select(Container).where(
                         Container.id == container_id,
@@ -1600,11 +1608,14 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
                     )
                 )
                 container = container_result.scalar_one_or_none()
-                if container and container.directory and container.directory != '.':
-                    container_directory = container.directory
-                    logger.info(f"[UNIFIED-CHAT] Container-scoped agent, directory: {container_directory}")
+                if container:
+                    # Use directory as service name for shell ops (it's already sanitized)
+                    container_name = container.directory if container.directory and container.directory != '.' else None
+                    if container.directory and container.directory != '.':
+                        container_directory = container.directory
+                    logger.info(f"[UNIFIED-CHAT] Container-scoped agent: {container_name}, directory: {container_directory}")
             except Exception as e:
-                logger.warning(f"[UNIFIED-CHAT] Could not get container directory: {e}")
+                logger.warning(f"[UNIFIED-CHAT] Could not get container info: {e}")
 
         if not container_id:
             logger.info(f"[UNIFIED-CHAT] Project-level agent (no container_id)")
@@ -1612,7 +1623,11 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         # Build TESSLATE context
         tesslate_context = None
         if project:
-            tesslate_context = await _build_tesslate_context(project, user.id, db)
+            tesslate_context = await _build_tesslate_context(
+                project, user.id, db,
+                container_name=container_name,
+                container_directory=container_directory
+            )
 
         # Build Git context
         git_context = None

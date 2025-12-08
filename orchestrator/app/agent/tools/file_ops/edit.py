@@ -3,6 +3,7 @@ File Edit Tools
 
 Tools for making surgical edits to existing files.
 Supports single edits (patch_file) and batch edits (multi_edit).
+Deployment-aware: supports both Docker (shared volume) and Kubernetes (pod API) modes.
 
 Retry Strategy:
 - Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
@@ -11,10 +12,8 @@ Retry Strategy:
 
 import logging
 from typing import Dict, Any, List
-from uuid import UUID
 
 from ..registry import Tool, ToolCategory
-from ....config import get_settings
 from ..output_formatter import success_output, error_output
 from ..retry_config import tool_retry
 
@@ -26,20 +25,12 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     """
     Apply search/replace edit to an existing file using fuzzy matching.
 
-    This tool allows surgical edits to files without rewriting the entire content.
-    Uses progressive fuzzy matching strategies to handle whitespace variations.
-
-    Retry behavior:
-    - Automatically retries on ConnectionError, TimeoutError, IOError
-    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    Uses the unified orchestrator which handles both Docker and Kubernetes modes.
+    Filesystem is the source of truth - no database fallback.
 
     Args:
-        params: {
-            file_path: str,
-            search: str,  # Code block to search for
-            replace: str  # Code block to replace it with
-        }
-        context: {user_id: UUID, project_id: str, db: AsyncSession}
+        params: {file_path: str, search: str, replace: str}
+        context: {user_id: UUID, project_id: str, project_slug: str, container_directory: str}
 
     Returns:
         Dict with success status and details
@@ -59,37 +50,27 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     project_id = str(context["project_id"])
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
-
-    # Import diff editing utilities
-    from ....utils.code_patching import apply_search_replace
-    from ....services.orchestration import is_kubernetes_mode
-
-    # Get container name from context (for multi-container projects)
     container_name = context.get("container_name")
+
+    logger.info(f"[PATCH-FILE] Patching '{file_path}' - project_slug: {project_slug}, subdir: {container_directory}")
+
+    from ....utils.code_patching import apply_search_replace
     from ....services.orchestration import get_orchestrator
 
-    # 1. Read current file content using unified orchestrator
-    current_content = None
-
+    # 1. Read current file content
     try:
         orchestrator = get_orchestrator()
         current_content = await orchestrator.read_file(
             user_id=user_id,
             project_id=project_id,
             container_name=container_name,
-            file_path=file_path
+            file_path=file_path,
+            project_slug=project_slug,
+            subdir=container_directory
         )
     except Exception as e:
-        logger.debug(f"Could not read file via orchestrator: {e}")
-
-    # Fallback to volume_manager for Docker mode if orchestrator failed
-    if current_content is None and not is_kubernetes_mode() and project_slug:
-        try:
-            from ....services.volume_manager import get_volume_manager
-            volume_manager = get_volume_manager()
-            current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
-        except Exception as e:
-            logger.debug(f"Could not read from shared volume: {e}")
+        logger.error(f"[PATCH-FILE] Failed to read '{file_path}': {e}")
+        current_content = None
 
     if current_content is None:
         return error_output(
@@ -109,15 +90,16 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             details={"error": result.error}
         )
 
-    # 3. Write the patched content back using unified orchestrator
+    # 3. Write the patched content back
     try:
-        orchestrator = get_orchestrator()
         success = await orchestrator.write_file(
             user_id=user_id,
             project_id=project_id,
             container_name=container_name,
             file_path=file_path,
-            content=result.content
+            content=result.content,
+            project_slug=project_slug,
+            subdir=container_directory
         )
 
         if not success:
@@ -127,6 +109,7 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 file_path=file_path
             )
     except Exception as e:
+        logger.error(f"[PATCH-FILE] Failed to write '{file_path}': {e}")
         return error_output(
             message=f"Could not save patched file '{file_path}': {str(e)}",
             suggestion="Check if you have write permissions",
@@ -135,35 +118,7 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         )
 
     # Generate a diff preview showing what changed
-    def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:
-        """Generate a concise diff preview showing changes."""
-        import difflib
-
-        old_lines = old.splitlines(keepends=True)
-        new_lines = new.splitlines(keepends=True)
-
-        diff = list(difflib.unified_diff(
-            old_lines,
-            new_lines,
-            fromfile='before',
-            tofile='after',
-            lineterm='',
-            n=2  # Context lines
-        ))
-
-        if not diff:
-            return "No changes"
-
-        # Skip the header lines (--- and +++)
-        diff_body = [line.rstrip() for line in diff[2:]]
-
-        # Truncate if too long
-        if len(diff_body) > max_lines:
-            diff_body = diff_body[:max_lines] + [f"... ({len(diff_body) - max_lines} more lines)"]
-
-        return '\n'.join(diff_body)
-
-    diff_preview = generate_diff_preview(current_content, result.content)
+    diff_preview = _generate_diff_preview(current_content, result.content)
 
     return success_output(
         message=f"Successfully patched '{file_path}'",
@@ -176,26 +131,46 @@ async def patch_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     )
 
 
+def _generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:
+    """Generate a concise diff preview showing changes."""
+    import difflib
+
+    old_lines = old.splitlines(keepends=True)
+    new_lines = new.splitlines(keepends=True)
+
+    diff = list(difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile='before',
+        tofile='after',
+        lineterm='',
+        n=2  # Context lines
+    ))
+
+    if not diff:
+        return "No changes"
+
+    # Skip the header lines (--- and +++)
+    diff_body = [line.rstrip() for line in diff[2:]]
+
+    # Truncate if too long
+    if len(diff_body) > max_lines:
+        diff_body = diff_body[:max_lines] + [f"... ({len(diff_body) - max_lines} more lines)"]
+
+    return '\n'.join(diff_body)
+
+
 @tool_retry
 async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Apply multiple search/replace edits to a single file atomically.
 
-    More efficient than multiple patch_file calls. All edits succeed or all fail.
-
-    Retry behavior:
-    - Automatically retries on ConnectionError, TimeoutError, IOError
-    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    Uses the unified orchestrator which handles both Docker and Kubernetes modes.
+    Filesystem is the source of truth - no database fallback.
 
     Args:
-        params: {
-            file_path: str,
-            edits: [
-                {search: str, replace: str},
-                ...
-            ]
-        }
-        context: {user_id: UUID, project_id: str, db: AsyncSession}
+        params: {file_path: str, edits: [{search: str, replace: str}, ...]}
+        context: {user_id: UUID, project_id: str, project_slug: str, container_directory: str}
 
     Returns:
         Dict with success status and details
@@ -214,36 +189,27 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     project_id = str(context["project_id"])
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
-
-    # Import diff editing utilities
-    from ....utils.code_patching import apply_search_replace
-    from ....services.orchestration import get_orchestrator, is_kubernetes_mode
-
-    # Get container name from context (for multi-container projects)
     container_name = context.get("container_name")
 
-    # 1. Read current file content using unified orchestrator
-    current_content = None
+    logger.info(f"[MULTI-EDIT] Editing '{file_path}' with {len(edits)} edits - project_slug: {project_slug}, subdir: {container_directory}")
 
+    from ....utils.code_patching import apply_search_replace
+    from ....services.orchestration import get_orchestrator
+
+    # 1. Read current file content
     try:
         orchestrator = get_orchestrator()
         current_content = await orchestrator.read_file(
             user_id=user_id,
             project_id=project_id,
             container_name=container_name,
-            file_path=file_path
+            file_path=file_path,
+            project_slug=project_slug,
+            subdir=container_directory
         )
     except Exception as e:
-        logger.debug(f"Could not read file via orchestrator: {e}")
-
-    # Fallback to volume_manager for Docker mode if orchestrator failed
-    if current_content is None and not is_kubernetes_mode() and project_slug:
-        try:
-            from ....services.volume_manager import get_volume_manager
-            volume_manager = get_volume_manager()
-            current_content = await volume_manager.read_file(project_slug, file_path, subdir=container_directory)
-        except Exception as e:
-            logger.debug(f"Could not read from shared volume: {e}")
+        logger.error(f"[MULTI-EDIT] Failed to read '{file_path}': {e}")
+        current_content = None
 
     if current_content is None:
         return error_output(
@@ -288,15 +254,16 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             "match_method": result.match_method
         })
 
-    # 3. Write the patched content back using unified orchestrator
+    # 3. Write the patched content back
     try:
-        orchestrator = get_orchestrator()
         success = await orchestrator.write_file(
             user_id=user_id,
             project_id=project_id,
             container_name=container_name,
             file_path=file_path,
-            content=content
+            content=content,
+            project_slug=project_slug,
+            subdir=container_directory
         )
 
         if not success:
@@ -306,6 +273,7 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                 file_path=file_path
             )
     except Exception as e:
+        logger.error(f"[MULTI-EDIT] Failed to write '{file_path}': {e}")
         return error_output(
             message=f"Could not save edited file '{file_path}': {str(e)}",
             suggestion="Check if you have write permissions",
@@ -313,36 +281,7 @@ async def multi_edit_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             details={"error": str(e)}
         )
 
-    # Generate a diff preview showing what changed
-    def generate_diff_preview(old: str, new: str, max_lines: int = 10) -> str:
-        """Generate a concise diff preview showing changes."""
-        import difflib
-
-        old_lines = old.splitlines(keepends=True)
-        new_lines = new.splitlines(keepends=True)
-
-        diff = list(difflib.unified_diff(
-            old_lines,
-            new_lines,
-            fromfile='before',
-            tofile='after',
-            lineterm='',
-            n=2  # Context lines
-        ))
-
-        if not diff:
-            return "No changes"
-
-        # Skip the header lines (--- and +++)
-        diff_body = [line.rstrip() for line in diff[2:]]
-
-        # Truncate if too long
-        if len(diff_body) > max_lines:
-            diff_body = diff_body[:max_lines] + [f"... ({len(diff_body) - max_lines} more lines)"]
-
-        return '\n'.join(diff_body)
-
-    diff_preview = generate_diff_preview(current_content, content)
+    diff_preview = _generate_diff_preview(current_content, content)
 
     return success_output(
         message=f"Successfully applied {len(edits)} edits to '{file_path}'",

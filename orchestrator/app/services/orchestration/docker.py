@@ -3,6 +3,12 @@ Docker Orchestrator
 
 Docker Compose-based container orchestration for local development.
 Implements the BaseOrchestrator interface for Docker deployments.
+
+File Operations Architecture:
+- Shared volume: tesslate-projects-data mounted at /projects
+- Each project: /projects/{project-slug}/
+- Multi-container projects: /projects/{project-slug}/{container-directory}/
+- Orchestrator has direct filesystem access - no temp containers needed
 """
 
 import os
@@ -13,15 +19,43 @@ import logging
 import json
 import socket
 import subprocess
+import shutil
 import time
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
+import aiofiles
+import aiofiles.os
 
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
 
 logger = logging.getLogger(__name__)
+
+# Shared projects volume mount point inside orchestrator
+PROJECTS_BASE_PATH = Path("/projects")
+
+# Binary file extensions to skip when reading content
+BINARY_EXTENSIONS = {
+    'png', 'jpg', 'jpeg', 'gif', 'ico', 'svg', 'webp', 'bmp',
+    'woff', 'woff2', 'ttf', 'eot', 'otf',
+    'mp3', 'mp4', 'wav', 'ogg', 'webm', 'avi', 'mov',
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+    'zip', 'tar', 'gz', 'rar', '7z',
+    'bin', 'exe', 'dll', 'so', 'dylib',
+    'class', 'jar', 'pyc', 'pyo',
+    'lock', 'map'
+}
+
+# Directories to exclude from file listings
+EXCLUDED_DIRS = {
+    'node_modules', '.git', '__pycache__', '.next', 'dist', 'build',
+    '.venv', 'venv', '.cache', '.turbo', 'coverage', '.nyc_output'
+}
+
+# Files to exclude from listings
+EXCLUDED_FILES = {'.DS_Store', 'Thumbs.db', '.env.local'}
 
 
 class DockerOrchestrator(BaseOrchestrator):
@@ -46,12 +80,17 @@ class DockerOrchestrator(BaseOrchestrator):
         self.host_users_base = self._detect_host_users_path()
         self.use_volumes = use_volumes
 
+        # Shared projects volume path
+        self.projects_path = PROJECTS_BASE_PATH
+        self.projects_path.mkdir(parents=True, exist_ok=True)
+
         # Activity tracking for cleanup
         self.activity_tracker: Dict[str, float] = {}
         self.paused_at_tracker: Dict[str, float] = {}
 
         logger.info(f"[DOCKER] Docker Compose orchestrator initialized")
         logger.info(f"[DOCKER] Storage mode: {'VOLUMES' if use_volumes else 'BIND_MOUNTS'}")
+        logger.info(f"[DOCKER] Projects path: {self.projects_path}")
         logger.info(f"[DOCKER] Compose files directory: {self.compose_files_dir}")
 
     @property
@@ -410,27 +449,164 @@ class DockerOrchestrator(BaseOrchestrator):
         return {'status': 'not_found'}
 
     # =========================================================================
-    # FILE OPERATIONS
+    # FILE OPERATIONS - Direct filesystem access to shared volume
+    # Path: /projects/{project_slug}/{subdir?}/{file_path}
     # =========================================================================
+
+    def get_project_path(self, project_slug: str) -> Path:
+        """Get the filesystem path for a project."""
+        return self.projects_path / project_slug
+
+    async def ensure_project_directory(self, project_slug: str) -> Path:
+        """Ensure the project directory exists."""
+        project_path = self.get_project_path(project_slug)
+        await aiofiles.os.makedirs(project_path, exist_ok=True)
+        logger.debug(f"[DOCKER] Ensured project directory: {project_path}")
+        return project_path
+
+    async def delete_project_directory(self, project_slug: str) -> bool:
+        """Delete a project's directory and all its contents."""
+        project_path = self.get_project_path(project_slug)
+
+        if not project_path.exists():
+            logger.warning(f"[DOCKER] Project directory not found: {project_slug}")
+            return False
+
+        try:
+            await asyncio.to_thread(shutil.rmtree, project_path)
+            logger.info(f"[DOCKER] ✅ Deleted project directory: {project_slug}")
+            return True
+        except Exception as e:
+            logger.error(f"[DOCKER] ❌ Failed to delete project directory {project_slug}: {e}")
+            raise
+
+    async def rename_directory(
+        self,
+        project_slug: str,
+        old_name: str,
+        new_name: str
+    ) -> bool:
+        """Rename a subdirectory within a project."""
+        project_path = self.get_project_path(project_slug)
+        old_path = project_path / old_name
+        new_path = project_path / new_name
+
+        if not old_path.exists():
+            raise FileNotFoundError(f"Directory '{old_name}' not found in project")
+        if new_path.exists():
+            raise FileExistsError(f"Directory '{new_name}' already exists in project")
+
+        try:
+            await asyncio.to_thread(shutil.move, str(old_path), str(new_path))
+            logger.info(f"[DOCKER] ✅ Renamed directory: {old_name} -> {new_name}")
+            return True
+        except Exception as e:
+            logger.error(f"[DOCKER] ❌ Failed to rename directory: {e}")
+            raise
+
+    async def copy_base_to_project(
+        self,
+        base_slug: str,
+        project_slug: str,
+        exclude_patterns: Optional[List[str]] = None,
+        target_subdir: Optional[str] = None
+    ) -> None:
+        """Copy a base from cache to a project directory."""
+        if exclude_patterns is None:
+            exclude_patterns = ['.git', '__pycache__', '*.pyc', '.DS_Store']
+
+        target_display = f"{project_slug}/{target_subdir}" if target_subdir else project_slug
+        logger.info(f"[DOCKER] Copying base {base_slug} to project {target_display}")
+
+        cache_path = Path(f"/app/base-cache/{base_slug}")
+        if not cache_path.exists():
+            raise RuntimeError(f"Base cache not found: {cache_path}")
+
+        if not any(cache_path.iterdir()):
+            raise RuntimeError(f"Base cache {base_slug} is empty.")
+
+        project_path = await self.ensure_project_directory(project_slug)
+        destination_path = project_path / target_subdir if target_subdir else project_path
+
+        if target_subdir:
+            await aiofiles.os.makedirs(destination_path, exist_ok=True)
+
+        try:
+            def ignore_patterns(directory, files):
+                ignored = []
+                for f in files:
+                    for pattern in exclude_patterns:
+                        if pattern.startswith('*.') and f.endswith(pattern[1:]):
+                            ignored.append(f)
+                            break
+                        elif f == pattern:
+                            ignored.append(f)
+                            break
+                return ignored
+
+            await asyncio.to_thread(
+                shutil.copytree,
+                cache_path,
+                destination_path,
+                ignore=ignore_patterns,
+                dirs_exist_ok=True
+            )
+
+            await asyncio.to_thread(self._fix_permissions, destination_path)
+            logger.info(f"[DOCKER] ✅ Copied base {base_slug} to {target_display}")
+
+        except Exception as e:
+            logger.error(f"[DOCKER] ❌ Failed to copy base {base_slug}: {e}", exc_info=True)
+            raise
+
+    def _fix_permissions(self, path: Path) -> None:
+        """Fix permissions for container user (uid 1000, gid 1000)."""
+        try:
+            for root, dirs, files in os.walk(path):
+                os.chown(root, 1000, 1000)
+                for d in dirs:
+                    os.chown(os.path.join(root, d), 1000, 1000)
+                for f in files:
+                    os.chown(os.path.join(root, f), 1000, 1000)
+        except (ImportError, PermissionError, KeyError, OSError):
+            pass  # Skip on Windows or if permissions fail
 
     async def read_file(
         self,
         user_id: UUID,
         project_id: UUID,
         container_name: str,
-        file_path: str
+        file_path: str,
+        project_slug: Optional[str] = None,
+        subdir: Optional[str] = None
     ) -> Optional[str]:
-        """Read a file from a container."""
-        # In Docker mode, files are on the shared volume accessible from orchestrator
-        # Use the projects data volume path
-        project_dir = f"/projects/{project_id}"
-        full_path = os.path.join(project_dir, file_path)
+        """
+        Read a file from a project directory.
+
+        Args:
+            project_slug: Project slug (preferred) - falls back to looking up by project_id
+            file_path: Relative file path
+            subdir: Optional subdirectory for multi-container projects (e.g., "frontend")
+        """
+        # Get project_slug if not provided
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                logger.error(f"[DOCKER] Could not find project slug for {project_id}")
+                return None
 
         try:
-            if os.path.exists(full_path):
-                with open(full_path, 'r') as f:
-                    return f.read()
-            return None
+            project_path = self.get_project_path(project_slug)
+            if subdir and subdir != '.':
+                project_path = project_path / subdir
+            full_path = project_path / file_path
+
+            if not full_path.exists():
+                return None
+
+            async with aiofiles.open(full_path, 'r', encoding='utf-8') as f:
+                return await f.read()
+
         except Exception as e:
             logger.error(f"[DOCKER] Failed to read file {file_path}: {e}")
             return None
@@ -441,17 +617,39 @@ class DockerOrchestrator(BaseOrchestrator):
         project_id: UUID,
         container_name: str,
         file_path: str,
-        content: str
+        content: str,
+        project_slug: Optional[str] = None,
+        subdir: Optional[str] = None
     ) -> bool:
-        """Write a file to a container."""
-        project_dir = f"/projects/{project_id}"
-        full_path = os.path.join(project_dir, file_path)
+        """
+        Write a file to a project directory.
+
+        Args:
+            project_slug: Project slug (preferred)
+            file_path: Relative file path
+            content: File content
+            subdir: Optional subdirectory for multi-container projects
+        """
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                logger.error(f"[DOCKER] Could not find project slug for {project_id}")
+                return False
 
         try:
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, 'w') as f:
-                f.write(content)
+            project_path = self.get_project_path(project_slug)
+            if subdir and subdir != '.':
+                project_path = project_path / subdir
+            full_path = project_path / file_path
+
+            await aiofiles.os.makedirs(full_path.parent, exist_ok=True)
+
+            async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
+                await f.write(content)
+
+            logger.debug(f"[DOCKER] Wrote file {file_path} to project {project_slug}")
             return True
+
         except Exception as e:
             logger.error(f"[DOCKER] Failed to write file {file_path}: {e}")
             return False
@@ -461,16 +659,27 @@ class DockerOrchestrator(BaseOrchestrator):
         user_id: UUID,
         project_id: UUID,
         container_name: str,
-        file_path: str
+        file_path: str,
+        project_slug: Optional[str] = None,
+        subdir: Optional[str] = None
     ) -> bool:
-        """Delete a file from a container."""
-        project_dir = f"/projects/{project_id}"
-        full_path = os.path.join(project_dir, file_path)
+        """Delete a file from a project directory."""
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                return False
 
         try:
-            if os.path.exists(full_path):
-                os.remove(full_path)
+            project_path = self.get_project_path(project_slug)
+            if subdir and subdir != '.':
+                project_path = project_path / subdir
+            full_path = project_path / file_path
+
+            if full_path.exists():
+                await aiofiles.os.remove(full_path)
+                logger.debug(f"[DOCKER] Deleted file {file_path}")
             return True
+
         except Exception as e:
             logger.error(f"[DOCKER] Failed to delete file {file_path}: {e}")
             return False
@@ -480,30 +689,156 @@ class DockerOrchestrator(BaseOrchestrator):
         user_id: UUID,
         project_id: UUID,
         container_name: str,
-        directory: str = "."
+        directory: str = ".",
+        project_slug: Optional[str] = None,
+        max_files: int = 500
     ) -> List[Dict[str, Any]]:
-        """List files in a directory."""
-        project_dir = f"/projects/{project_id}"
-        full_path = os.path.join(project_dir, directory)
+        """List files in a project directory (excluding node_modules, .git, etc.)."""
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                return []
+
+        project_path = self.get_project_path(project_slug)
+        if directory and directory != ".":
+            project_path = project_path / directory
+
+        if not project_path.exists():
+            return []
+
+        files = []
+        count = 0
 
         try:
-            files = []
-            if os.path.exists(full_path):
-                for entry in os.scandir(full_path):
-                    # Skip hidden files and node_modules
-                    if entry.name.startswith('.') or entry.name == 'node_modules':
+            for root, dirs, filenames in os.walk(project_path):
+                dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+
+                for filename in filenames:
+                    if count >= max_files:
+                        break
+                    if filename in EXCLUDED_FILES:
                         continue
 
+                    full_path = Path(root) / filename
+                    rel_path = full_path.relative_to(self.get_project_path(project_slug))
+
                     files.append({
-                        'name': entry.name,
-                        'type': 'directory' if entry.is_dir() else 'file',
-                        'size': entry.stat().st_size if entry.is_file() else 0,
-                        'path': os.path.join(directory, entry.name) if directory != "." else entry.name
+                        'path': str(rel_path),
+                        'name': filename,
+                        'type': 'file'
                     })
+                    count += 1
+
+                if count >= max_files:
+                    break
+
             return files
         except Exception as e:
-            logger.error(f"[DOCKER] Failed to list files in {directory}: {e}")
+            logger.error(f"[DOCKER] Failed to list files: {e}")
             return []
+
+    async def get_files_with_content(
+        self,
+        project_slug: str,
+        max_files: int = 200,
+        max_file_size: int = 100000,
+        subdir: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get all files in a project with their content (for Monaco editor)."""
+        project_path = self.get_project_path(project_slug)
+        if subdir and subdir != '.':
+            project_path = project_path / subdir
+
+        if not project_path.exists():
+            return []
+
+        files_with_content = []
+        count = 0
+
+        try:
+            for root, dirs, filenames in os.walk(project_path):
+                dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+
+                for filename in filenames:
+                    if count >= max_files:
+                        break
+                    if filename in EXCLUDED_FILES:
+                        continue
+
+                    ext = filename.split('.')[-1].lower() if '.' in filename else ''
+                    if ext in BINARY_EXTENSIONS:
+                        continue
+
+                    full_path = Path(root) / filename
+                    rel_path = full_path.relative_to(project_path)
+
+                    try:
+                        file_size = full_path.stat().st_size
+                        if file_size > max_file_size:
+                            continue
+                    except OSError:
+                        continue
+
+                    try:
+                        async with aiofiles.open(full_path, 'r', encoding='utf-8') as f:
+                            content = await f.read()
+
+                        files_with_content.append({
+                            'file_path': str(rel_path),
+                            'content': content
+                        })
+                        count += 1
+
+                    except (UnicodeDecodeError, IOError):
+                        continue
+
+                if count >= max_files:
+                    break
+
+            logger.info(f"[DOCKER] Loaded {len(files_with_content)} files from {project_slug}")
+            return files_with_content
+
+        except Exception as e:
+            logger.error(f"[DOCKER] Failed to get files with content: {e}")
+            return []
+
+    async def project_exists(self, project_slug: str) -> bool:
+        """Check if a project directory exists."""
+        project_path = self.get_project_path(project_slug)
+        return project_path.exists() and project_path.is_dir()
+
+    async def project_has_files(self, project_slug: str, subdir: Optional[str] = None) -> bool:
+        """Check if a project (or subdirectory) has any files."""
+        project_path = self.get_project_path(project_slug)
+        if subdir:
+            project_path = project_path / subdir
+
+        if not project_path.exists():
+            return False
+
+        for root, dirs, files in os.walk(project_path):
+            dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+            if any(f for f in files if not f.startswith('.')):
+                return True
+
+        return False
+
+    async def _get_project_slug(self, project_id: UUID) -> Optional[str]:
+        """Look up project slug from project_id."""
+        from ...models import Project
+        from ...database import async_session_maker
+
+        try:
+            async with async_session_maker() as db:
+                from sqlalchemy import select
+                result = await db.execute(
+                    select(Project).where(Project.id == project_id)
+                )
+                project = result.scalar_one_or_none()
+                return project.slug if project else None
+        except Exception as e:
+            logger.error(f"[DOCKER] Failed to get project slug: {e}")
+            return None
 
     async def glob_files(
         self,
@@ -511,35 +846,40 @@ class DockerOrchestrator(BaseOrchestrator):
         project_id: UUID,
         container_name: str,
         pattern: str,
-        directory: str = "."
+        directory: str = ".",
+        project_slug: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Find files matching a glob pattern."""
         import fnmatch
 
-        project_dir = f"/projects/{project_id}"
-        search_path = os.path.join(project_dir, directory)
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                return []
+
+        project_path = self.get_project_path(project_slug)
+        search_path = project_path / directory if directory != "." else project_path
 
         matches = []
         try:
-            if os.path.exists(search_path):
+            if search_path.exists():
                 for root, dirs, files in os.walk(search_path):
-                    # Skip common excluded directories
-                    dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', '__pycache__', '.next', 'dist', 'build']]
+                    dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
 
                     for filename in files:
                         if fnmatch.fnmatch(filename, pattern):
-                            full_path = os.path.join(root, filename)
-                            rel_path = os.path.relpath(full_path, project_dir)
+                            full_path = Path(root) / filename
+                            rel_path = full_path.relative_to(project_path)
                             matches.append({
                                 'name': filename,
-                                'path': rel_path,
+                                'path': str(rel_path),
                                 'type': 'file',
-                                'size': os.path.getsize(full_path)
+                                'size': full_path.stat().st_size
                             })
 
-            return matches[:100]  # Limit results
+            return matches[:100]
         except Exception as e:
-            logger.error(f"[DOCKER] Failed to glob files with pattern {pattern}: {e}")
+            logger.error(f"[DOCKER] Failed to glob files: {e}")
             return []
 
     async def grep_files(
@@ -551,14 +891,19 @@ class DockerOrchestrator(BaseOrchestrator):
         directory: str = ".",
         file_pattern: str = "*",
         case_sensitive: bool = True,
-        max_results: int = 100
+        max_results: int = 100,
+        project_slug: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search file contents for a pattern."""
-        import re
         import fnmatch
 
-        project_dir = f"/projects/{project_id}"
-        search_path = os.path.join(project_dir, directory)
+        if not project_slug:
+            project_slug = await self._get_project_slug(project_id)
+            if not project_slug:
+                return []
+
+        project_path = self.get_project_path(project_slug)
+        search_path = project_path / directory if directory != "." else project_path
 
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
@@ -569,33 +914,32 @@ class DockerOrchestrator(BaseOrchestrator):
 
         matches = []
         try:
-            if os.path.exists(search_path):
+            if search_path.exists():
                 for root, dirs, files in os.walk(search_path):
-                    # Skip common excluded directories
-                    dirs[:] = [d for d in dirs if d not in ['node_modules', '.git', '__pycache__', '.next', 'dist', 'build']]
+                    dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
 
                     for filename in files:
                         if not fnmatch.fnmatch(filename, file_pattern):
                             continue
 
-                        full_path = os.path.join(root, filename)
-                        rel_path = os.path.relpath(full_path, project_dir)
+                        full_path = Path(root) / filename
+                        rel_path = full_path.relative_to(project_path)
 
                         try:
                             with open(full_path, 'r', errors='ignore') as f:
                                 for line_num, line in enumerate(f, 1):
                                     if regex.search(line):
                                         matches.append({
-                                            'file': rel_path,
+                                            'file': str(rel_path),
                                             'line': line_num,
-                                            'content': line.strip()[:200],  # Truncate long lines
+                                            'content': line.strip()[:200],
                                             'match': True
                                         })
 
                                         if len(matches) >= max_results:
                                             return matches
                         except Exception:
-                            continue  # Skip binary/unreadable files
+                            continue
 
             return matches
         except Exception as e:

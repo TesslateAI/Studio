@@ -17,16 +17,40 @@ interface ContainerNodeData extends Record<string, unknown> {
 
 type ContainerNodeProps = Node<ContainerNodeData> & { id: string; data: ContainerNodeData };
 
-export const ContainerNode = memo(({ data, id }: ContainerNodeProps) => {
-  const statusColors = {
-    stopped: 'bg-gray-500',
-    starting: 'bg-yellow-500',
-    running: 'bg-green-500',
-    failed: 'bg-red-500',
-    connected: 'bg-purple-500',  // External services that are connected
-  };
+// Move constants outside component to prevent recreation on each render
+const STATUS_COLORS: Record<string, string> = {
+  stopped: 'bg-gray-500',
+  starting: 'bg-yellow-500',
+  running: 'bg-green-500',
+  failed: 'bg-red-500',
+  connected: 'bg-purple-500',
+};
 
-  const statusDot = statusColors[data.status] || 'bg-gray-500';
+// Custom comparison function for memo - only re-render when visual data changes
+const arePropsEqual = (
+  prevProps: ContainerNodeProps,
+  nextProps: ContainerNodeProps
+): boolean => {
+  const prevData = prevProps.data;
+  const nextData = nextProps.data;
+
+  // Compare only visual properties, ignore callback references
+  return (
+    prevProps.id === nextProps.id &&
+    prevData.name === nextData.name &&
+    prevData.status === nextData.status &&
+    prevData.port === nextData.port &&
+    prevData.baseIcon === nextData.baseIcon &&
+    prevData.containerType === nextData.containerType &&
+    prevData.serviceType === nextData.serviceType &&
+    // Shallow compare techStack array
+    prevData.techStack?.length === nextData.techStack?.length &&
+    (prevData.techStack?.every((t, i) => t === nextData.techStack?.[i]) ?? true)
+  );
+};
+
+const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
+  const statusDot = STATUS_COLORS[data.status] || 'bg-gray-500';
 
   return (
     <div className="relative">
@@ -51,7 +75,7 @@ export const ContainerNode = memo(({ data, id }: ContainerNodeProps) => {
             data.onDoubleClick(id);
           }
         }}
-        className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-lg shadow-lg min-w-[200px] hover:border-[var(--primary)] transition-colors cursor-pointer"
+        className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-lg shadow-lg min-w-[200px] hover:border-[var(--primary)] cursor-pointer"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-gradient-to-r from-[var(--sidebar-hover)] to-[var(--surface)]">
@@ -74,7 +98,7 @@ export const ContainerNode = memo(({ data, id }: ContainerNodeProps) => {
           {data.onDelete && (
             <button
               onClick={() => data.onDelete?.(id)}
-              className="p-1 text-[var(--text)]/40 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
+              className="p-1 text-[var(--text)]/40 hover:text-red-500 hover:bg-red-500/10 rounded"
               title="Delete container"
             >
               <X size={16} weight="bold" />
@@ -111,6 +135,9 @@ export const ContainerNode = memo(({ data, id }: ContainerNodeProps) => {
       </div>
     </div>
   );
-});
+};
+
+// Export memoized component with custom comparison to prevent unnecessary re-renders
+export const ContainerNode = memo(ContainerNodeComponent, arePropsEqual);
 
 ContainerNode.displayName = 'ContainerNode';

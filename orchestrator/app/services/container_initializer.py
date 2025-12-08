@@ -25,7 +25,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from ..models import Container, Project, ProjectFile, MarketplaceBase
-from ..services.volume_manager import get_volume_manager
 from ..services.base_cache_manager import get_base_cache_manager
 from ..services.orchestration import get_orchestrator, is_docker_mode
 from ..config import get_settings
@@ -64,7 +63,7 @@ async def initialize_container_async(
 
     try:
         settings = get_settings()
-        volume_manager = get_volume_manager()
+        orchestrator = get_orchestrator()
 
         # Get container and project
         container = await db.get(Container, container_id)
@@ -80,7 +79,7 @@ async def initialize_container_async(
 
         # Step 1: Ensure project directory exists in shared volume
         task.update_progress(20, 100, "Ensuring project directory exists...")
-        await volume_manager.ensure_project_directory(project.slug)
+        await orchestrator.ensure_project_directory(project.slug)
         logger.info(f"[CONTAINER-INIT] Project directory ready at /projects/{project.slug}")
 
         # Step 2: Copy base from cache (only for first container in project)
@@ -111,14 +110,14 @@ async def initialize_container_async(
             container_path = f"{project.slug}/{container_dir}"
 
         # Check if THIS container's directory has files (not just project root)
-        container_has_files = await volume_manager.project_has_files(project.slug, subdir=target_subdir)
+        container_has_files = await orchestrator.project_has_files(project.slug, subdir=target_subdir)
 
         if not container_has_files:
             # This container's directory is empty - copy base files
             task.update_progress(40, 100, "Copying base files...")
             if cached_base_path and os.path.exists(cached_base_path):
                 logger.info(f"[CONTAINER-INIT] Copying base files from cache to /projects/{container_path}")
-                await volume_manager.copy_base_to_project(
+                await orchestrator.copy_base_to_project(
                     base_slug,
                     project.slug,
                     exclude_patterns=['.git', '__pycache__', '*.pyc'],
