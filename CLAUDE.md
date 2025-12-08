@@ -70,7 +70,7 @@ DOCKER MODE (config.DEPLOYMENT_MODE="docker"):
       ├─ Generate docker-compose.yml from Container models
       ├─ docker-compose up -d
       ├─ Connect to Traefik network
-      └─> URLs: {container}.studio.localhost
+      └─> URLs: {container}.localhost
 
 KUBERNETES MODE (config.DEPLOYMENT_MODE="kubernetes"):
   └─> KubernetesOrchestrator.start_project()
@@ -165,7 +165,7 @@ tesslate-studio/
 
 ### Docker (Local Dev)
 - `DEPLOYMENT_MODE=docker` in config
-- Traefik routes `*.studio.localhost` to containers
+- Traefik routes `*.localhost` to containers
 - Project files on local filesystem
 
 ### Kubernetes (Production)

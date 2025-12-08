@@ -1,15 +1,12 @@
 import { memo } from 'react';
-import {
-  BaseEdge,
-  EdgeLabelRenderer,
-  getBezierPath,
-  type EdgeProps,
-} from '@xyflow/react';
-import { Database } from '@phosphor-icons/react';
+import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+
+// Static style object - defined once at module scope to prevent re-renders
+const EDGE_STYLE = { stroke: '#22c55e', strokeWidth: 2 };
 
 /**
- * DatabaseEdge - Represents database connections between containers
- * Visual: Green curved line with DB label
+ * DatabaseEdge - Lightweight edge for database connections
+ * Performance optimized: No labels, minimal rendering, static style
  */
 const DatabaseEdgeComponent = ({
   id,
@@ -19,9 +16,8 @@ const DatabaseEdgeComponent = ({
   targetY,
   sourcePosition,
   targetPosition,
-  markerEnd,
 }: EdgeProps) => {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -31,27 +27,11 @@ const DatabaseEdgeComponent = ({
   });
 
   return (
-    <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={markerEnd}
-        style={{ stroke: '#22c55e', strokeWidth: 3 }}
-      />
-      <EdgeLabelRenderer>
-        <div
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'none',
-          }}
-          className="flex items-center gap-1 px-2 py-1 bg-green-500/20 border border-green-500/30 rounded text-[10px] text-green-400 font-medium"
-        >
-          <Database size={12} weight="fill" />
-          <span>DB</span>
-        </div>
-      </EdgeLabelRenderer>
-    </>
+    <BaseEdge
+      id={id}
+      path={edgePath}
+      style={EDGE_STYLE}
+    />
   );
 };
 

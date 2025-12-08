@@ -17,13 +17,19 @@ interface ContainerNodeData extends Record<string, unknown> {
 
 type ContainerNodeProps = Node<ContainerNodeData> & { id: string; data: ContainerNodeData };
 
-// Move constants outside component to prevent recreation on each render
-const STATUS_COLORS: Record<string, string> = {
-  stopped: 'bg-gray-500',
-  starting: 'bg-yellow-500',
-  running: 'bg-green-500',
-  failed: 'bg-red-500',
-  connected: 'bg-purple-500',
+// Icon color based on container TYPE (not status)
+const TYPE_COLORS: Record<string, string> = {
+  external: 'bg-purple-500',
+  hybrid: 'bg-cyan-500',
+  service: 'bg-blue-500',
+  base: 'bg-green-500',
+  default: 'bg-gray-500',
+};
+
+const getTypeColor = (containerType?: string, serviceType?: string): string => {
+  if (serviceType && TYPE_COLORS[serviceType]) return TYPE_COLORS[serviceType];
+  if (containerType && TYPE_COLORS[containerType]) return TYPE_COLORS[containerType];
+  return TYPE_COLORS.default;
 };
 
 // Custom comparison function for memo - only re-render when visual data changes
@@ -34,7 +40,6 @@ const arePropsEqual = (
   const prevData = prevProps.data;
   const nextData = nextProps.data;
 
-  // Compare only visual properties, ignore callback references
   return (
     prevProps.id === nextProps.id &&
     prevData.name === nextData.name &&
@@ -43,95 +48,98 @@ const arePropsEqual = (
     prevData.baseIcon === nextData.baseIcon &&
     prevData.containerType === nextData.containerType &&
     prevData.serviceType === nextData.serviceType &&
-    // Shallow compare techStack array
     prevData.techStack?.length === nextData.techStack?.length &&
     (prevData.techStack?.every((t, i) => t === nextData.techStack?.[i]) ?? true)
   );
 };
 
 const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
-  const statusDot = STATUS_COLORS[data.status] || 'bg-gray-500';
+  const typeColor = getTypeColor(data.containerType, data.serviceType);
 
   return (
-    <div className="relative">
+    <div
+      className="relative group"
+      style={{ contain: 'layout style paint' }}
+    >
       {/* Connection handles */}
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-[var(--primary)] !w-3 !h-3 !border-2 !border-[var(--surface)]"
+        className="!bg-[#333] !w-2.5 !h-2.5 !border !border-[#444]"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-[var(--primary)] !w-3 !h-3 !border-2 !border-[var(--surface)]"
+        className="!bg-[#333] !w-2.5 !h-2.5 !border !border-[#444]"
       />
 
-      {/* Node content */}
+      {/* Node content - no transitions for performance */}
       <div
         onClick={() => data.onClick?.(id)}
         onDoubleClick={() => {
-          // Only allow double-click navigation for base containers, not services
           if (data.containerType === 'base' && data.onDoubleClick) {
             data.onDoubleClick(id);
           }
         }}
-        className="bg-[var(--surface)] border-2 border-[var(--border-color)] rounded-lg shadow-lg min-w-[200px] hover:border-[var(--primary)] cursor-pointer"
+        className="bg-[#1a1a1a] rounded-xl min-w-[180px] cursor-pointer shadow-md"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] bg-gradient-to-r from-[var(--sidebar-hover)] to-[var(--surface)]">
-          <div className="flex items-center gap-3">
+        {/* Header - Color-coded icon + Title/Status */}
+        <div className="flex items-center gap-3 p-3">
+          {/* Color-coded icon square */}
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${typeColor}`}>
             {data.baseIcon ? (
-              <span className="text-2xl">{data.baseIcon}</span>
+              <span className="text-lg">{data.baseIcon}</span>
             ) : (
-              <Cube size={24} weight="duotone" className="text-[var(--primary)]" />
+              <Cube size={20} weight="fill" className="text-white" />
             )}
-            <div>
-              <h3 className="font-semibold text-[var(--text)]">{data.name}</h3>
-              <div className="flex items-center gap-2 mt-1">
-                <div className={`w-2 h-2 rounded-full ${statusDot}`} />
-                <span className="text-xs text-[var(--text)]/70 capitalize">{data.status}</span>
-              </div>
-            </div>
           </div>
 
-          {/* Delete button */}
+          {/* Title and status */}
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium text-white text-sm truncate">{data.name}</h3>
+            <span className="text-xs text-gray-400 capitalize">{data.status}</span>
+          </div>
+
+          {/* Delete button - visible on hover, no transition */}
           {data.onDelete && (
             <button
-              onClick={() => data.onDelete?.(id)}
-              className="p-1 text-[var(--text)]/40 hover:text-red-500 hover:bg-red-500/10 rounded"
+              onClick={(e) => { e.stopPropagation(); data.onDelete?.(id); }}
+              className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg opacity-0 group-hover:opacity-100"
               title="Delete container"
             >
-              <X size={16} weight="bold" />
+              <X size={14} weight="bold" />
             </button>
           )}
         </div>
 
-        {/* Body */}
-        <div className="px-4 py-3">
-          {data.port && (
-            <div className="text-xs text-[var(--text)]/70 mb-2">
-              Port: <span className="font-mono font-medium text-[var(--primary)]">{data.port}</span>
-            </div>
-          )}
+        {/* Body - Only show if has content */}
+        {(data.port || (data.techStack && data.techStack.length > 0)) && (
+          <div className="px-3 pb-3 pt-0">
+            {data.port && (
+              <div className="text-xs text-gray-500 mb-2">
+                Port: <span className="font-mono text-gray-400">{data.port}</span>
+              </div>
+            )}
 
-          {data.techStack && data.techStack.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {data.techStack.slice(0, 3).map((tech, index) => (
-                <span
-                  key={index}
-                  className="px-2 py-1 text-xs font-medium bg-[var(--primary)]/10 text-[var(--primary)] rounded"
-                >
-                  {tech}
-                </span>
-              ))}
-              {data.techStack.length > 3 && (
-                <span className="px-2 py-1 text-xs font-medium bg-[var(--sidebar-hover)] text-[var(--text)]/70 rounded">
-                  +{data.techStack.length - 3}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
+            {data.techStack && data.techStack.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {data.techStack.slice(0, 3).map((tech, index) => (
+                  <span
+                    key={index}
+                    className="px-1.5 py-0.5 text-[10px] font-medium bg-white/5 text-gray-400 rounded"
+                  >
+                    {tech}
+                  </span>
+                ))}
+                {data.techStack.length > 3 && (
+                  <span className="px-1.5 py-0.5 text-[10px] text-gray-500 rounded">
+                    +{data.techStack.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

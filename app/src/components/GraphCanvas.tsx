@@ -23,6 +23,7 @@ interface GraphCanvasProps {
   onConnect: OnConnect;
   onDrop: (event: React.DragEvent) => void;
   onDragOver: (event: React.DragEvent) => void;
+  onNodeDragStart?: () => void;
   onNodeDragStop: (event: any, node: Node) => void;
   onNodeClick: (event: React.MouseEvent, node: Node) => void;
   onNodeDoubleClick: (event: React.MouseEvent, node: Node) => void;
@@ -30,6 +31,12 @@ interface GraphCanvasProps {
   edgeTypes: EdgeTypes;
   theme: 'dark' | 'light';
 }
+
+// Static styles - defined once, never recreated
+const CONNECTION_LINE_STYLE = { stroke: '#F89521', strokeWidth: 2 };
+const FIT_VIEW_OPTIONS = { padding: 0.3, minZoom: 0.3, maxZoom: 1.5 };
+const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.5 };
+const NODE_ORIGIN: [number, number] = [0.5, 0.5];
 
 // Memoized ReactFlow wrapper to prevent re-renders from parent state changes
 const GraphCanvasComponent = ({
@@ -40,6 +47,7 @@ const GraphCanvasComponent = ({
   onConnect,
   onDrop,
   onDragOver,
+  onNodeDragStart,
   onNodeDragStop,
   onNodeClick,
   onNodeDoubleClick,
@@ -48,28 +56,9 @@ const GraphCanvasComponent = ({
   theme,
 }: GraphCanvasProps) => {
   const bgColor = useMemo(
-    () => (theme === 'dark' ? '#374151' : '#e5e7eb'),
+    () => (theme === 'dark' ? '#2a2a2a' : '#e5e7eb'),
     [theme]
   );
-
-  const connectionLineStyle = useMemo(() => ({
-    stroke: 'var(--primary)',
-    strokeWidth: 2,
-  }), []);
-
-  const fitViewOptions = useMemo(() => ({
-    padding: 0.3,
-    minZoom: 0.3,
-    maxZoom: 1.5,
-  }), []);
-
-  const defaultViewport = useMemo(() => ({
-    x: 0,
-    y: 0,
-    zoom: 0.5,
-  }), []);
-
-  const nodeOrigin = useMemo((): [number, number] => [0.5, 0.5], []);
 
   return (
     <ReactFlow
@@ -80,14 +69,15 @@ const GraphCanvasComponent = ({
       onConnect={onConnect}
       onDrop={onDrop}
       onDragOver={onDragOver}
+      onNodeDragStart={onNodeDragStart}
       onNodeDragStop={onNodeDragStop}
       onNodeClick={onNodeClick}
       onNodeDoubleClick={onNodeDoubleClick}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
-      defaultViewport={defaultViewport}
+      defaultViewport={DEFAULT_VIEWPORT}
       fitView
-      fitViewOptions={fitViewOptions}
+      fitViewOptions={FIT_VIEW_OPTIONS}
       minZoom={0.1}
       maxZoom={2}
       panOnScroll
@@ -96,10 +86,12 @@ const GraphCanvasComponent = ({
       zoomOnScroll
       selectNodesOnDrag={false}
       // Performance optimizations
-      nodeOrigin={nodeOrigin}
+      nodeOrigin={NODE_ORIGIN}
       elevateNodesOnSelect={false}
+      nodesDraggable
+      nodesConnectable
       // Edge performance optimizations
-      connectionLineStyle={connectionLineStyle}
+      connectionLineStyle={CONNECTION_LINE_STYLE}
       edgesFocusable={false}
       edgesReconnectable={false}
       // Disable auto-pan during drag (major performance gain)
@@ -111,12 +103,14 @@ const GraphCanvasComponent = ({
       multiSelectionKeyCode={null}
       // Disable snapping for smoother drag
       snapToGrid={false}
-      className="bg-[var(--bg)] touch-none"
+      // Disable selection box
+      selectionOnDrag={false}
+      className="bg-[#0a0a0a] touch-none"
     >
       <Background
         variant={BackgroundVariant.Dots}
-        gap={16}
-        size={1}
+        gap={20}
+        size={0.8}
         color={bgColor}
       />
       <Controls className="!bg-[var(--surface)] !border-[var(--sidebar-border)] !shadow-lg [&>button]:!bg-[var(--surface)] [&>button]:!border-[var(--sidebar-border)] [&>button]:!fill-[var(--text)] [&>button:hover]:!bg-[var(--sidebar-hover)]" />
@@ -132,7 +126,7 @@ const GraphCanvasComponent = ({
       <Panel position="top-center" className="md:hidden bg-[var(--surface)] px-3 py-1.5 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
         <p className="text-[10px] text-[var(--text)]/60 flex items-center gap-1.5">
           <Hand size={12} className="text-[var(--primary)]" />
-          Pinch to zoom • Drag to pan
+          Pinch to zoom - Drag to pan
         </p>
       </Panel>
     </ReactFlow>

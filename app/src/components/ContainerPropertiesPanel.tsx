@@ -198,9 +198,9 @@ export const ContainerPropertiesPanel = ({
       />
 
       {/* Panel */}
-      <div className="fixed md:relative inset-y-0 right-0 w-full max-w-sm md:w-80 md:max-w-none bg-[var(--surface)] border-l border-[var(--border-color)] flex flex-col overflow-hidden flex-shrink-0 z-50 md:z-auto shadow-2xl md:shadow-none">
+      <div className="fixed md:absolute inset-y-4 md:inset-y-auto md:top-4 md:bottom-4 right-4 w-[calc(100%-2rem)] max-w-sm md:w-80 bg-[#1a1a1a] rounded-xl border border-[#2a2a2a] flex flex-col overflow-hidden z-50 shadow-2xl">
         {/* Header */}
-        <div className="px-3 py-3 border-b border-[var(--border-color)] flex items-center justify-between flex-shrink-0">
+        <div className="px-4 py-3 border-b border-[#2a2a2a] flex items-center justify-between flex-shrink-0">
         <div className="min-w-0 flex-1">
           {isEditingName ? (
             <div className="flex items-center gap-2">

@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { debounce } from 'lodash';
 import {
   addEdge,
   useNodesState,
@@ -30,6 +31,7 @@ import {
 } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
+import { BrowserPreviewNode } from '../components/BrowserPreviewNode';
 import { GraphCanvas } from '../components/GraphCanvas';
 import { MarketplaceSidebar } from '../components/MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../components/ContainerPropertiesPanel';
@@ -47,10 +49,11 @@ import api, { projectsApi, marketplaceApi, deploymentCredentialsApi } from '../l
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import toast from 'react-hot-toast';
-import { EnvInjectionEdge, HttpApiEdge, DatabaseEdge, CacheEdge, getEdgeType } from '../components/edges';
+import { EnvInjectionEdge, HttpApiEdge, DatabaseEdge, CacheEdge, BrowserPreviewEdge, getEdgeType } from '../components/edges';
 
 const nodeTypes: NodeTypes = {
   containerNode: ContainerNode,
+  browserPreview: BrowserPreviewNode,
 };
 
 // Custom edge types for different connector semantics
@@ -59,6 +62,7 @@ const edgeTypes = {
   http_api: HttpApiEdge,
   database: DatabaseEdge,
   cache: CacheEdge,
+  browser_preview: BrowserPreviewEdge,
 };
 
 type PanelType = 'github' | 'notes' | 'settings' | null;
@@ -114,6 +118,10 @@ export const ProjectGraphCanvas = () => {
   });
   const [selectedContainer, setSelectedContainer] = useState<{id: string, name: string, status: string} | null>(null);
 
+  // Drag state for pausing polling during drag operations - critical for performance
+  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
+
   // Mobile state
   const [isMobileComponentsOpen, setIsMobileComponentsOpen] = useState(false);
 
@@ -138,6 +146,10 @@ export const ProjectGraphCanvas = () => {
   }, [slug]);
 
   useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
+
+  useEffect(() => {
     if (slug) {
       fetchProjectData();
       loadFiles();
@@ -146,10 +158,14 @@ export const ProjectGraphCanvas = () => {
   }, [slug]);
 
   // Poll for container runtime status to update node statuses
+  // PERFORMANCE: Skip polling during drag operations to prevent re-renders
   useEffect(() => {
-    if (!slug || nodes.length === 0) return;
+    if (!slug) return;
 
     const pollContainerStatus = async () => {
+      // Skip polling if dragging or no nodes - use ref to avoid dependency
+      if (isDraggingRef.current || nodesRef.current.length === 0) return;
+
       try {
         const statusData = await projectsApi.getContainersRuntimeStatus(slug);
         if (statusData.containers) {
@@ -193,14 +209,17 @@ export const ProjectGraphCanvas = () => {
       }
     };
 
-    // Initial poll
-    pollContainerStatus();
+    // Initial poll (delayed to let nodes load)
+    const initialPollTimeout = setTimeout(pollContainerStatus, 1000);
 
     // Poll every 5 seconds
     const interval = setInterval(pollContainerStatus, 5000);
 
-    return () => clearInterval(interval);
-  }, [slug, nodes.length, setNodes]);
+    return () => {
+      clearTimeout(initialPollTimeout);
+      clearInterval(interval);
+    };
+  }, [slug, setNodes]); // Removed nodes.length - use ref instead
 
   useEffect(() => {
     localStorage.setItem('graphCanvasSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
@@ -279,8 +298,12 @@ export const ProjectGraphCanvas = () => {
       const connectionsRes = await api.get(`/api/projects/${slug}/containers/connections`);
       const connections: ContainerConnection[] = connectionsRes.data;
 
-      // Convert to React Flow nodes
-      const flowNodes: Node[] = containers.map((container: Container) => ({
+      // Fetch browser previews
+      const browserPreviewsRes = await api.get(`/api/projects/${slug}/browser-previews`);
+      const browserPreviews = browserPreviewsRes.data || [];
+
+      // Convert containers to React Flow nodes
+      const containerNodes: Node[] = containers.map((container: Container) => ({
         id: container.id,
         type: 'containerNode',
         position: { x: container.position_x, y: container.position_y },
@@ -297,15 +320,62 @@ export const ProjectGraphCanvas = () => {
         },
       }));
 
-      // Convert to React Flow edges
+      // Convert browser previews to React Flow nodes
+      const browserNodes: Node[] = browserPreviews.map((preview: any) => {
+        // Find connected container for URL building
+        const connectedContainer = preview.connected_container_id
+          ? containers.find((c: Container) => c.id === preview.connected_container_id)
+          : null;
+
+        let baseUrl = '';
+        if (connectedContainer) {
+          const sanitizedName = connectedContainer.name?.toLowerCase()
+            .replace(/[^a-z0-9-]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '') || 'app';
+          // URL format: {project-slug}-{container-name}.localhost
+          baseUrl = `http://${projectRes.slug}-${sanitizedName}.localhost`;
+        }
+
+        return {
+          id: preview.id,
+          type: 'browserPreview',
+          position: { x: preview.position_x, y: preview.position_y },
+          data: {
+            connectedContainerId: preview.connected_container_id,
+            connectedContainerName: connectedContainer?.name,
+            connectedPort: connectedContainer?.port,
+            baseUrl: baseUrl,
+            onDelete: handleDeleteBrowser,
+          },
+        };
+      });
+
+      // Combine all nodes
+      const flowNodes: Node[] = [...containerNodes, ...browserNodes];
+
+      // Convert to React Flow edges - animations disabled for performance
       const flowEdges: Edge[] = connections.map((connection) => ({
         id: connection.id,
         source: connection.source_container_id,
         target: connection.target_container_id,
         type: 'smoothstep',
         label: connection.label,
-        animated: true,
+        animated: false,
       }));
+
+      // Add browser preview edges for connected browsers
+      browserPreviews.forEach((preview: any) => {
+        if (preview.connected_container_id) {
+          flowEdges.push({
+            id: `browser-edge-${preview.id}`,
+            source: preview.connected_container_id,
+            target: preview.id,
+            type: 'browser_preview',
+            animated: false,
+          });
+        }
+      });
 
       setNodes(flowNodes);
       setEdges(flowEdges);
@@ -378,12 +448,85 @@ export const ProjectGraphCanvas = () => {
     setActivePanel(activePanel === panel ? null : panel);
   };
 
+  // Stable callback for deleting browser preview nodes - must be defined before onConnect
+  const handleDeleteBrowser = useCallback(async (browserId: string) => {
+    try {
+      // Delete from backend
+      await api.delete(`/api/projects/${slug}/browser-previews/${browserId}`);
+
+      // Remove the browser node
+      setNodes((nds) => nds.filter((node) => node.id !== browserId));
+      // Remove any edges connected to this browser
+      setEdges((eds) => eds.filter((edge) => edge.source !== browserId && edge.target !== browserId));
+      toast.success('Browser removed');
+    } catch (error) {
+      console.error('Failed to delete browser preview:', error);
+      toast.error('Failed to delete browser preview');
+    }
+  }, [slug, setNodes, setEdges]);
+
   const onConnect: OnConnect = useCallback(
     async (connection) => {
       if (!connection.source || !connection.target) return;
 
+      // Check if target is a browser preview node
+      const targetNode = nodesRef.current.find(n => n.id === connection.target);
+      const sourceNode = nodesRef.current.find(n => n.id === connection.source);
+
+      if (targetNode?.type === 'browserPreview' && sourceNode) {
+        // This is a connection to a browser preview - update browser data
+        const containerName = sourceNode.data.name;
+        const containerPort = sourceNode.data.port || 3000;
+
+        // Build the preview URL based on container name
+        // Format: {project-slug}-{container-name}.localhost
+        const sanitizedName = containerName?.toLowerCase()
+          .replace(/[^a-z0-9-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '') || 'app';
+
+        const baseUrl = `http://${project.slug}-${sanitizedName}.localhost`;
+
+        try {
+          // Save connection to backend
+          await api.post(`/api/projects/${slug}/browser-previews/${connection.target}/connect/${connection.source}`);
+
+          // Update the browser node with container data
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === connection.target
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      connectedContainerId: connection.source,
+                      connectedContainerName: containerName,
+                      connectedPort: containerPort,
+                      baseUrl: baseUrl,
+                      onDelete: handleDeleteBrowser,
+                    },
+                  }
+                : node
+            )
+          );
+
+          // Add the edge with browser_preview type
+          setEdges((eds) => addEdge({
+            ...connection,
+            type: 'browser_preview',
+            animated: false,
+          }, eds));
+
+          toast.success(`Connected ${containerName} to browser`);
+        } catch (error) {
+          console.error('Failed to connect browser to container:', error);
+          toast.error('Failed to connect browser to container');
+        }
+        return;
+      }
+
       try {
-        // Create connection in backend
+        // Create connection in backend (for container-to-container connections)
         await api.post(`/api/projects/${slug}/containers/connections`, {
           project_id: project.id,
           source_container_id: connection.source,
@@ -391,15 +534,15 @@ export const ProjectGraphCanvas = () => {
           connection_type: 'depends_on',
         });
 
-        // Update local state
-        setEdges((eds) => addEdge({ ...connection, type: 'smoothstep', animated: true }, eds));
+        // Update local state - animations disabled for performance
+        setEdges((eds) => addEdge({ ...connection, type: 'smoothstep', animated: false }, eds));
         toast.success('Connection created');
       } catch (error) {
         console.error('Failed to create connection:', error);
         toast.error('Failed to create connection');
       }
     },
-    [slug, project, setEdges]
+    [slug, project, setEdges, setNodes, handleDeleteBrowser]
   );
 
   const onDrop = useCallback(
@@ -417,6 +560,34 @@ export const ProjectGraphCanvas = () => {
         x: event.clientX - reactFlowBounds.left - 100,
         y: event.clientY - reactFlowBounds.top - 50,
       };
+
+      // Handle browser preview drops
+      if (item.type === 'browser') {
+        try {
+          // Create browser preview in backend
+          const response = await api.post(`/api/projects/${slug}/browser-previews`, {
+            project_id: project.id,
+            position_x: dropPosition.x,
+            position_y: dropPosition.y,
+          });
+
+          const browserPreview = response.data;
+          const browserNode: Node = {
+            id: browserPreview.id,
+            type: 'browserPreview',
+            position: dropPosition,
+            data: {
+              onDelete: handleDeleteBrowser,
+            },
+          };
+          setNodes((nds) => [...nds, browserNode]);
+          toast.success('Browser preview added');
+        } catch (error) {
+          console.error('Failed to create browser preview:', error);
+          toast.error('Failed to create browser preview');
+        }
+        return;
+      }
 
       // Handle workflow drops differently
       if (item.type === 'workflow' && item.template_definition) {
@@ -442,7 +613,7 @@ export const ProjectGraphCanvas = () => {
       // For container services and bases, create immediately
       await createContainerNode(item, dropPosition);
     },
-    [slug, project, setNodes]
+    [slug, project, setNodes, handleDeleteBrowser]
   );
 
   // Instantiate a workflow template (creates multiple nodes and connections)
@@ -825,25 +996,62 @@ export const ProjectGraphCanvas = () => {
     [setNodes, setEdges, loadFiles] // Removed slug, nodes, files - now uses refs
   );
 
-  // Stable callback - uses ref for slug
+  // Debounced position update - batches rapid position changes (300ms delay)
+  const debouncedContainerPositionUpdate = useMemo(
+    () =>
+      debounce(async (nodeId: string, x: number, y: number) => {
+        try {
+          await api.patch(`/api/projects/${slugRef.current}/containers/${nodeId}`, {
+            position_x: Math.round(x),
+            position_y: Math.round(y),
+          });
+        } catch (error) {
+          console.error('Failed to update container position:', error);
+        }
+      }, 300),
+    []
+  );
+
+  // Debounced browser preview position update
+  const debouncedBrowserPositionUpdate = useMemo(
+    () =>
+      debounce(async (previewId: string, x: number, y: number) => {
+        try {
+          await api.patch(`/api/projects/${slugRef.current}/browser-previews/${previewId}`, {
+            position_x: Math.round(x),
+            position_y: Math.round(y),
+          });
+        } catch (error) {
+          console.error('Failed to update browser preview position:', error);
+        }
+      }, 300),
+    []
+  );
+
+  // Stable callback - sets dragging state for pausing polling
+  const handleNodeDragStart = useCallback(() => {
+    setIsDragging(true);
+  }, []);
+
+  // Stable callback - uses ref for slug, debounces API call
   const handleNodeDragStop = useCallback(
     async (_event: any, node: Node) => {
-      // Skip API call for temporary nodes (not yet saved to backend)
+      // End dragging state
+      setIsDragging(false);
+
+      // Skip API call for temporary nodes
       if (typeof node.id === 'string' && node.id.startsWith('temp-')) {
         return;
       }
 
-      try {
-        // Update position in backend
-        await api.patch(`/api/projects/${slugRef.current}/containers/${node.id}`, {
-          position_x: node.position.x,
-          position_y: node.position.y,
-        });
-      } catch (error) {
-        console.error('Failed to update container position:', error);
+      // Use debounced update for better performance - different endpoint for browser vs container
+      if (node.type === 'browserPreview') {
+        debouncedBrowserPositionUpdate(node.id, node.position.x, node.position.y);
+      } else {
+        debouncedContainerPositionUpdate(node.id, node.position.x, node.position.y);
       }
     },
-    [] // Empty deps - uses ref
+    [debouncedContainerPositionUpdate, debouncedBrowserPositionUpdate]
   );
 
   const handleStartAll = async () => {
@@ -881,11 +1089,18 @@ export const ProjectGraphCanvas = () => {
 
   // Stable callbacks for ReactFlow to prevent re-renders
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    // Don't try to select browser preview nodes as containers
+    if (node.type === 'browserPreview') {
+      return;
+    }
     handleContainerClick(node.id);
   }, [handleContainerClick]);
 
   const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
-    // Only allow double-click navigation for base containers, not services
+    // Only allow double-click navigation for base containers, not services or browser previews
+    if (node.type === 'browserPreview') {
+      return; // Don't open builder for browser preview nodes
+    }
     const containerType = node.data?.containerType || 'base';
     if (containerType === 'base') {
       handleOpenBuilder(node.id);
@@ -1130,7 +1345,7 @@ export const ProjectGraphCanvas = () => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar with Breadcrumbs */}
-        <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center justify-between px-4 md:px-6">
+        <div className="h-12 bg-[var(--surface)] flex items-center justify-between px-4 md:px-6">
           <Breadcrumbs
             items={[
               { label: 'Projects', href: '/dashboard' },
@@ -1218,7 +1433,7 @@ export const ProjectGraphCanvas = () => {
             </AnimatePresence>
 
             {/* React Flow canvas */}
-            <div className="flex-1 relative [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform" ref={reactFlowWrapper}>
+            <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform" ref={reactFlowWrapper}>
               <GraphCanvas
                 nodes={nodes}
                 edges={edges}
@@ -1227,6 +1442,7 @@ export const ProjectGraphCanvas = () => {
                 onConnect={onConnect}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
+                onNodeDragStart={handleNodeDragStart}
                 onNodeDragStop={handleNodeDragStop}
                 onNodeClick={handleNodeClick}
                 onNodeDoubleClick={handleNodeDoubleClick}
@@ -1265,7 +1481,7 @@ export const ProjectGraphCanvas = () => {
                   setSelectedContainer({...selectedContainer, status: newStatus});
                 }}
                 onNameChange={(newName) => {
-                  // Update node name in the graph
+                  // Update node name in the graph - local state is already updated
                   setNodes((nds) =>
                     nds.map((node) =>
                       node.id === selectedContainer.id
@@ -1275,8 +1491,7 @@ export const ProjectGraphCanvas = () => {
                   );
                   // Update selected container state
                   setSelectedContainer({...selectedContainer, name: newName});
-                  // Refresh project data to get updated container list
-                  fetchProjectData();
+                  // PERFORMANCE: Removed fetchProjectData() - local state is sufficient
                 }}
               />
             )}

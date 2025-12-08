@@ -183,6 +183,37 @@ class ContainerConnection(BaseModel):
         from_attributes = True
 
 
+# Browser Preview Schemas
+
+class BrowserPreviewCreate(BaseModel):
+    """Create a browser preview node on the canvas."""
+    project_id: UUID
+    position_x: float = 0
+    position_y: float = 0
+    connected_container_id: Optional[UUID] = None
+
+class BrowserPreviewUpdate(BaseModel):
+    """Update a browser preview node (position, connection)."""
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
+    connected_container_id: Optional[UUID] = None
+    current_path: Optional[str] = None
+
+class BrowserPreview(BaseModel):
+    """Browser preview node response."""
+    id: UUID
+    project_id: UUID
+    connected_container_id: Optional[UUID] = None
+    position_x: float
+    position_y: float
+    current_path: str = "/"
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # Workflow Template Schemas
 
 class WorkflowTemplateNode(BaseModel):

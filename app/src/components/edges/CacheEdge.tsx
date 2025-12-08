@@ -1,15 +1,12 @@
 import { memo } from 'react';
-import {
-  BaseEdge,
-  EdgeLabelRenderer,
-  getBezierPath,
-  type EdgeProps,
-} from '@xyflow/react';
-import { Lightning } from '@phosphor-icons/react';
+import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+
+// Static style object - defined once at module scope to prevent re-renders
+const EDGE_STYLE = { stroke: '#ef4444', strokeWidth: 2, strokeDasharray: '6,3' };
 
 /**
- * CacheEdge - Represents cache/Redis connections between containers
- * Visual: Red dashed curved line with Cache label
+ * CacheEdge - Lightweight edge for cache/Redis connections
+ * Performance optimized: No labels, minimal rendering, static style
  */
 const CacheEdgeComponent = ({
   id,
@@ -19,9 +16,8 @@ const CacheEdgeComponent = ({
   targetY,
   sourcePosition,
   targetPosition,
-  markerEnd,
 }: EdgeProps) => {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -31,27 +27,11 @@ const CacheEdgeComponent = ({
   });
 
   return (
-    <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={markerEnd}
-        style={{ stroke: '#ef4444', strokeWidth: 2, strokeDasharray: '8,4' }}
-      />
-      <EdgeLabelRenderer>
-        <div
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'none',
-          }}
-          className="flex items-center gap-1 px-2 py-1 bg-red-500/20 border border-red-500/30 rounded text-[10px] text-red-400 font-medium"
-        >
-          <Lightning size={12} weight="fill" />
-          <span>Cache</span>
-        </div>
-      </EdgeLabelRenderer>
-    </>
+    <BaseEdge
+      id={id}
+      path={edgePath}
+      style={EDGE_STYLE}
+    />
   );
 };
 

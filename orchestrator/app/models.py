@@ -54,6 +54,7 @@ class Project(Base):
     kanban_board = relationship("KanbanBoard", back_populates="project", uselist=False, cascade="all, delete-orphan")
     notes = relationship("ProjectNote", back_populates="project", uselist=False, cascade="all, delete-orphan")
     containers = relationship("Container", back_populates="project", cascade="all, delete-orphan")
+    browser_previews = relationship("BrowserPreview", back_populates="project", cascade="all, delete-orphan")
     deployment_credentials = relationship("DeploymentCredential", back_populates="project", cascade="all, delete-orphan")
     deployments = relationship("Deployment", back_populates="project", cascade="all, delete-orphan")
 
@@ -136,6 +137,29 @@ class ContainerConnection(Base):
     # Relationships
     source_container = relationship("Container", foreign_keys=[source_container_id], back_populates="connections_from")
     target_container = relationship("Container", foreign_keys=[target_container_id], back_populates="connections_to")
+
+
+class BrowserPreview(Base):
+    """Browser preview windows in the React Flow graph for previewing running containers."""
+    __tablename__ = "browser_previews"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    connected_container_id = Column(UUID(as_uuid=True), ForeignKey("containers.id", ondelete="SET NULL"), nullable=True)
+
+    # React Flow position
+    position_x = Column(Float, default=0)
+    position_y = Column(Float, default=0)
+
+    # Browser state (optional - for restoring view state)
+    current_path = Column(String, default="/")
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project", back_populates="browser_previews")
+    connected_container = relationship("Container")
 
 
 class ProjectFile(Base):

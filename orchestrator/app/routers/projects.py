@@ -9,9 +9,9 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import selectinload
 from ..database import get_db
-from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset, Container, ContainerConnection, MarketplaceBase, DeploymentCredential
+from ..models import Project, User, ProjectFile, Chat, Message, ProjectAsset, Container, ContainerConnection, MarketplaceBase, DeploymentCredential, BrowserPreview
 import json
-from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema, Container as ContainerSchema, ContainerCreate, ContainerUpdate, ContainerRename, ContainerConnection as ContainerConnectionSchema, ContainerConnectionCreate
+from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectFile as ProjectFileSchema, Container as ContainerSchema, ContainerCreate, ContainerUpdate, ContainerRename, ContainerConnection as ContainerConnectionSchema, ContainerConnectionCreate, BrowserPreview as BrowserPreviewSchema, BrowserPreviewCreate, BrowserPreviewUpdate
 from ..config import get_settings
 from ..utils.slug_generator import generate_project_slug
 from ..utils.resource_naming import get_project_path
@@ -3294,6 +3294,214 @@ async def delete_container_connection(
         await db.rollback()
         logger.error(f"[CONTAINER] Failed to delete connection: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete connection: {str(e)}")
+
+
+# ============================================================================
+# Browser Preview Endpoints
+# ============================================================================
+
+@router.get("/{project_slug}/browser-previews", response_model=List[BrowserPreviewSchema])
+async def get_browser_previews(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all browser preview nodes for a project.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    result = await db.execute(
+        select(BrowserPreview).where(BrowserPreview.project_id == project.id)
+    )
+    previews = result.scalars().all()
+
+    return previews
+
+
+@router.post("/{project_slug}/browser-previews", response_model=BrowserPreviewSchema)
+async def create_browser_preview(
+    project_slug: str,
+    preview_data: BrowserPreviewCreate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a new browser preview node on the canvas.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    try:
+        # If a container ID is provided, verify it exists in this project
+        if preview_data.connected_container_id:
+            container = await db.get(Container, preview_data.connected_container_id)
+            if not container or container.project_id != project.id:
+                raise HTTPException(status_code=404, detail="Connected container not found")
+
+        preview = BrowserPreview(
+            project_id=project.id,
+            position_x=preview_data.position_x,
+            position_y=preview_data.position_y,
+            connected_container_id=preview_data.connected_container_id
+        )
+
+        db.add(preview)
+        await db.commit()
+        await db.refresh(preview)
+
+        logger.info(f"[BROWSER] Created browser preview {preview.id} for project {project.id}")
+
+        return preview
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[BROWSER] Failed to create browser preview: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create browser preview: {str(e)}")
+
+
+@router.patch("/{project_slug}/browser-previews/{preview_id}", response_model=BrowserPreviewSchema)
+async def update_browser_preview(
+    project_slug: str,
+    preview_id: UUID,
+    preview_data: BrowserPreviewUpdate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update a browser preview node (position, connected container, current path).
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    preview = await db.get(BrowserPreview, preview_id)
+    if not preview or preview.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Browser preview not found")
+
+    try:
+        # Update fields if provided
+        if preview_data.position_x is not None:
+            preview.position_x = preview_data.position_x
+        if preview_data.position_y is not None:
+            preview.position_y = preview_data.position_y
+        if preview_data.connected_container_id is not None:
+            # Verify container exists
+            if preview_data.connected_container_id:
+                container = await db.get(Container, preview_data.connected_container_id)
+                if not container or container.project_id != project.id:
+                    raise HTTPException(status_code=404, detail="Connected container not found")
+            preview.connected_container_id = preview_data.connected_container_id
+        if preview_data.current_path is not None:
+            preview.current_path = preview_data.current_path
+
+        await db.commit()
+        await db.refresh(preview)
+
+        return preview
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[BROWSER] Failed to update browser preview: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update browser preview: {str(e)}")
+
+
+@router.delete("/{project_slug}/browser-previews/{preview_id}")
+async def delete_browser_preview(
+    project_slug: str,
+    preview_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a browser preview node.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    preview = await db.get(BrowserPreview, preview_id)
+    if not preview or preview.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Browser preview not found")
+
+    try:
+        await db.delete(preview)
+        await db.commit()
+
+        logger.info(f"[BROWSER] Deleted browser preview {preview_id} from project {project.id}")
+
+        return {"message": "Browser preview deleted successfully"}
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[BROWSER] Failed to delete browser preview: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete browser preview: {str(e)}")
+
+
+@router.post("/{project_slug}/browser-previews/{preview_id}/connect/{container_id}", response_model=BrowserPreviewSchema)
+async def connect_browser_to_container(
+    project_slug: str,
+    preview_id: UUID,
+    container_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Connect a browser preview to a container for preview.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    preview = await db.get(BrowserPreview, preview_id)
+    if not preview or preview.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Browser preview not found")
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    try:
+        preview.connected_container_id = container_id
+        await db.commit()
+        await db.refresh(preview)
+
+        logger.info(f"[BROWSER] Connected browser {preview_id} to container {container_id}")
+
+        return preview
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[BROWSER] Failed to connect browser to container: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to connect browser: {str(e)}")
+
+
+@router.post("/{project_slug}/browser-previews/{preview_id}/disconnect", response_model=BrowserPreviewSchema)
+async def disconnect_browser_from_container(
+    project_slug: str,
+    preview_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Disconnect a browser preview from its container.
+    """
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    preview = await db.get(BrowserPreview, preview_id)
+    if not preview or preview.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Browser preview not found")
+
+    try:
+        preview.connected_container_id = None
+        await db.commit()
+        await db.refresh(preview)
+
+        logger.info(f"[BROWSER] Disconnected browser {preview_id} from container")
+
+        return preview
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[BROWSER] Failed to disconnect browser: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to disconnect browser: {str(e)}")
 
 
 # Container-specific endpoints (parameterized routes come after specific ones)

@@ -2,13 +2,13 @@ import { memo } from 'react';
 import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
 
 // Static style object - defined once at module scope to prevent re-renders
-const EDGE_STYLE = { stroke: '#3b82f6', strokeWidth: 2 };
+const EDGE_STYLE = { stroke: '#8b5cf6', strokeWidth: 2, strokeDasharray: '8,4' };
 
 /**
- * HttpApiEdge - Lightweight edge for HTTP/REST API calls
+ * BrowserPreviewEdge - Edge connecting containers to browser preview nodes
  * Performance optimized: No labels, minimal rendering, static style
  */
-const HttpApiEdgeComponent = ({
+const BrowserPreviewEdgeComponent = ({
   id,
   sourceX,
   sourceY,
@@ -35,5 +35,5 @@ const HttpApiEdgeComponent = ({
   );
 };
 
-export const HttpApiEdge = memo(HttpApiEdgeComponent);
-HttpApiEdge.displayName = 'HttpApiEdge';
+export const BrowserPreviewEdge = memo(BrowserPreviewEdgeComponent);
+BrowserPreviewEdge.displayName = 'BrowserPreviewEdge';

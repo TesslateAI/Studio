@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MagnifyingGlass, Package, Plus, Cloud, Database, HardDrive, FlowArrow, Cube } from '@phosphor-icons/react';
+import { MagnifyingGlass, Package, Plus, Cloud, Database, HardDrive, FlowArrow, Cube, Browser } from '@phosphor-icons/react';
 import api from '../lib/api';
 import { MainTechIcon, TechStackIcons } from './ui/TechStackIcons';
 
@@ -115,6 +115,12 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
     event.dataTransfer.setData('base', JSON.stringify(item));
   };
 
+  const onBrowserDragStart = (event: React.DragEvent) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/reactflow', 'browserPreview');
+    event.dataTransfer.setData('base', JSON.stringify({ type: 'browser', name: 'Browser Preview' }));
+  };
+
   return (
     <div className="w-full md:w-80 h-full bg-[var(--surface)] border-r border-[var(--sidebar-border)] flex flex-col overflow-hidden">
       {/* Header */}
@@ -132,6 +138,33 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 md:py-2 border border-[var(--border-color)] bg-[var(--bg)] text-[var(--text)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)] text-sm placeholder:text-[var(--text)]/40"
           />
+        </div>
+      </div>
+
+      {/* Tools section */}
+      <div className="px-2 md:px-3 py-2 border-b border-[var(--sidebar-border)]">
+        <p className="text-[10px] uppercase tracking-wider text-[var(--text)]/40 font-medium mb-2 px-1">Tools</p>
+        <div
+          draggable
+          onDragStart={onBrowserDragStart}
+          className="group cursor-move bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-lg p-2 md:p-2.5 hover:border-purple-400 hover:shadow-md transition-all"
+        >
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-purple-500/20 rounded-lg">
+              <Browser size={18} weight="fill" className="text-purple-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-medium text-sm text-[var(--text)] group-hover:text-purple-400 transition-colors">
+                Browser Preview
+              </h3>
+              <p className="text-[10px] text-[var(--text)]/50">
+                Preview running containers
+              </p>
+            </div>
+            <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Plus size={16} className="text-purple-400" weight="bold" />
+            </div>
+          </div>
         </div>
       </div>
 
