@@ -1,11 +1,4 @@
-# Stage 1: Build Alpine-compatible node_modules
-FROM node:20-alpine AS template-builder
-
-WORKDIR /template-build
-COPY template/package.json template/package-lock.json ./
-RUN npm ci --production=false
-
-# Stage 2: Main application
+# Main application
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -29,15 +22,8 @@ COPY app ./app
 RUN pip install --no-cache-dir uv && \
     uv pip install --system -e .
 
-# Copy rest of application (template/ already excluded in .dockerignore)
+# Copy rest of application
 COPY . .
-
-# Copy Alpine-built node_modules from builder stage
-RUN mkdir -p /app/template
-COPY --from=template-builder /template-build/node_modules /app/template/node_modules
-
-# Copy rest of template files
-COPY template/ /app/template/
 
 EXPOSE 8000
 

@@ -965,7 +965,7 @@ export const ProjectGraphCanvas = () => {
           });
 
           if (containerFiles.length === 0) {
-            toast.info('No files found for this container');
+            toast('No files found for this container', { icon: 'ℹ️' });
             return;
           }
 

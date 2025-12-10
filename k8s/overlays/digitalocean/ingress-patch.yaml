@@ -1,0 +1,59 @@
+# =============================================================================
+# DigitalOcean Ingress Patch
+# =============================================================================
+# Production ingress configuration with:
+# - Let's Encrypt TLS via cert-manager
+# - Wildcard certificate for user project subdomains
+# - NGINX ingress controller annotations
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tesslate-main-ingress
+  annotations:
+    # TLS Configuration
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - studio-demo.tesslate.com
+        - "*.studio-demo.tesslate.com"
+      secretName: tesslate-wildcard-tls
+  rules:
+    - host: studio-demo.tesslate.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-backend-service
+                port:
+                  number: 8005
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-frontend-service
+                port:
+                  number: 80

@@ -198,7 +198,7 @@ export default function Marketplace() {
     }
 
     if (!item.is_active) {
-      toast.info('Coming soon!');
+      toast('Coming soon!', { icon: 'ℹ️' });
       return;
     }
 

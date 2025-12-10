@@ -1,0 +1,39 @@
+# =============================================================================
+# AWS EKS Overlay
+# =============================================================================
+# This overlay customizes the base manifests for Amazon EKS:
+# - gp3 EBS StorageClass for PVCs
+# - ECR container registry authentication
+# - AWS ALB Ingress Controller (optional, can use nginx)
+# - Native S3 for project storage
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+resources:
+  - ../../base
+  - storage-class.yaml
+  # Secrets managed via AWS Secrets Manager + External Secrets Operator
+
+patches:
+  - path: backend-patch.yaml
+  - path: ingress-patch.yaml
+
+images:
+  - name: tesslate-backend
+    newName: <account-id>.dkr.ecr.<region>.amazonaws.com/tesslate-backend
+    newTag: latest
+  - name: tesslate-frontend
+    newName: <account-id>.dkr.ecr.<region>.amazonaws.com/tesslate-frontend
+    newTag: latest
+  - name: tesslate-devserver
+    newName: <account-id>.dkr.ecr.<region>.amazonaws.com/tesslate-devserver
+    newTag: latest
+
+# Common labels for all resources
+commonLabels:
+  cloud-provider: aws
+  environment: production

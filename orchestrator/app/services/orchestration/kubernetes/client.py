@@ -220,6 +220,114 @@ class KubernetesClient:
         )
         logger.info(f"[K8S] ✅ Created NetworkPolicy: {policy_name} in {namespace}")
 
+    async def apply_network_policy(
+        self,
+        network_policy: client.V1NetworkPolicy,
+        namespace: str
+    ) -> None:
+        """
+        Apply a NetworkPolicy manifest (create or update).
+
+        Args:
+            network_policy: NetworkPolicy manifest
+            namespace: Namespace to apply to
+        """
+        if not self.settings.k8s_enable_network_policies:
+            logger.debug(f"[K8S] NetworkPolicy creation disabled, skipping")
+            return
+
+        policy_name = network_policy.metadata.name
+
+        try:
+            await asyncio.to_thread(
+                self.networking_v1.create_namespaced_network_policy,
+                namespace=namespace,
+                body=network_policy
+            )
+            logger.info(f"[K8S] ✅ Created NetworkPolicy: {policy_name}")
+        except ApiException as e:
+            if e.status == 409:
+                logger.debug(f"[K8S] NetworkPolicy {policy_name} exists, updating...")
+                await asyncio.to_thread(
+                    self.networking_v1.patch_namespaced_network_policy,
+                    name=policy_name,
+                    namespace=namespace,
+                    body=network_policy
+                )
+                logger.info(f"[K8S] ✅ Updated NetworkPolicy: {policy_name}")
+            else:
+                raise
+
+    async def copy_s3_credentials_secret(
+        self,
+        target_namespace: str,
+        source_namespace: str = None,
+        secret_name: str = None
+    ) -> None:
+        """
+        Copy S3 credentials secret from source namespace to target namespace.
+
+        This is required for the S3 Sandwich pattern - user project pods need
+        access to S3/MinIO credentials for hydration/dehydration.
+
+        Args:
+            target_namespace: Namespace to copy the secret to
+            source_namespace: Namespace to copy from (defaults to tesslate)
+            secret_name: Name of the secret (defaults to k8s_s3_credentials_secret)
+        """
+        if source_namespace is None:
+            source_namespace = self.settings.k8s_default_namespace
+        if secret_name is None:
+            secret_name = self.settings.k8s_s3_credentials_secret
+
+        # Check if secret already exists in target namespace
+        try:
+            await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=target_namespace
+            )
+            logger.debug(f"[K8S] Secret {secret_name} already exists in {target_namespace}")
+            return
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+        # Read secret from source namespace
+        try:
+            source_secret = await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=source_namespace
+            )
+        except ApiException as e:
+            if e.status == 404:
+                logger.warning(f"[K8S] S3 credentials secret {secret_name} not found in {source_namespace}")
+                return
+            raise
+
+        # Create new secret in target namespace (copy data, new metadata)
+        new_secret = client.V1Secret(
+            metadata=client.V1ObjectMeta(
+                name=secret_name,
+                namespace=target_namespace,
+                labels={
+                    "app": "tesslate",
+                    "managed-by": "tesslate-backend",
+                    "copied-from": source_namespace
+                }
+            ),
+            type=source_secret.type,
+            data=source_secret.data
+        )
+
+        await asyncio.to_thread(
+            self.core_v1.create_namespaced_secret,
+            namespace=target_namespace,
+            body=new_secret
+        )
+        logger.info(f"[K8S] ✅ Copied S3 credentials secret to {target_namespace}")
+
     def get_project_namespace(self, project_id: str) -> str:
         """
         Get the namespace name for a project.
@@ -581,6 +689,45 @@ class KubernetesClient:
             if condition.type == "Ready":
                 return condition.status == "True"
         return False
+
+    async def get_file_manager_pod(self, namespace: str) -> Optional[str]:
+        """
+        Get the file-manager pod name in a namespace.
+
+        The file-manager pod is the always-running pod that handles
+        file operations when no dev containers are running.
+
+        Args:
+            namespace: Namespace to search
+
+        Returns:
+            Pod name if found, None otherwise
+        """
+        try:
+            pods = await asyncio.to_thread(
+                self.core_v1.list_namespaced_pod,
+                namespace=namespace,
+                label_selector="app=file-manager"
+            )
+
+            for pod in pods.items:
+                if pod.status.phase == "Running":
+                    if pod.status.container_statuses:
+                        for cs in pod.status.container_statuses:
+                            if cs.ready:
+                                return pod.metadata.name
+
+            logger.debug(f"[K8S] No ready file-manager pod found in {namespace}")
+            return None
+
+        except ApiException as e:
+            if e.status == 404:
+                return None
+            logger.error(f"[K8S] Error getting file-manager pod: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[K8S] Error getting file-manager pod: {e}")
+            return None
 
     async def wait_for_deployment_ready(
         self,

@@ -1,0 +1,283 @@
+# Tesslate Backend Deployment
+# FastAPI application that manages projects, containers, and AI agents
+#
+# Environment-specific values (images, secrets) are patched by overlays
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: backend
+spec:
+  replicas: 1  # Overridden by overlays for production
+  selector:
+    matchLabels:
+      app: tesslate-backend
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: tesslate-backend
+        component: backend
+    spec:
+      serviceAccountName: tesslate-backend-sa
+      containers:
+      - name: backend
+        image: tesslate-backend:latest  # Overridden by kustomization images
+        imagePullPolicy: IfNotPresent  # Overridden to Always for production
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        # Core settings
+        - name: DEPLOYMENT_MODE
+          value: "kubernetes"
+        - name: KUBERNETES_NAMESPACE
+          value: "tesslate"
+
+        # Database - from postgres-secret
+        - name: POSTGRES_HOST
+          value: "postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DATABASE_URL
+
+        # Security
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: SECRET_KEY
+
+        # LiteLLM Configuration
+        - name: LITELLM_API_BASE
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_API_BASE
+        - name: LITELLM_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_MASTER_KEY
+        - name: LITELLM_DEFAULT_MODELS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_DEFAULT_MODELS
+        - name: LITELLM_TEAM_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_TEAM_ID
+              optional: true
+        - name: LITELLM_EMAIL_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_EMAIL_DOMAIN
+              optional: true
+        - name: LITELLM_INITIAL_BUDGET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: LITELLM_INITIAL_BUDGET
+              optional: true
+
+        # JWT Config
+        - name: ALGORITHM
+          value: "HS256"
+        - name: ACCESS_TOKEN_EXPIRE_MINUTES
+          value: "30"
+
+        # CORS & Domain
+        - name: CORS_ORIGINS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: CORS_ORIGINS
+        - name: ALLOWED_HOSTS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: ALLOWED_HOSTS
+        - name: APP_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: APP_DOMAIN
+              optional: true
+        - name: APP_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: APP_BASE_URL
+              optional: true
+        - name: DEV_SERVER_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: DEV_SERVER_BASE_URL
+              optional: true
+
+        # OAuth - Google
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GOOGLE_CLIENT_ID
+              optional: true
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GOOGLE_CLIENT_SECRET
+              optional: true
+        - name: GOOGLE_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GOOGLE_OAUTH_REDIRECT_URI
+              optional: true
+
+        # OAuth - GitHub
+        - name: GITHUB_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GITHUB_CLIENT_ID
+              optional: true
+        - name: GITHUB_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GITHUB_CLIENT_SECRET
+              optional: true
+        - name: GITHUB_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: GITHUB_OAUTH_REDIRECT_URI
+              optional: true
+
+        # S3 Storage (Required for K8s - MinIO locally, real S3 in production)
+        - name: S3_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: S3_ACCESS_KEY_ID
+        - name: S3_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: S3_SECRET_ACCESS_KEY
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: S3_BUCKET_NAME
+        - name: S3_ENDPOINT_URL
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: S3_ENDPOINT_URL
+        - name: S3_REGION
+          valueFrom:
+            secretKeyRef:
+              name: s3-credentials
+              key: S3_REGION
+
+        # Kubernetes Settings (patched by overlays)
+        - name: K8S_NAMESPACE_PER_PROJECT
+          value: "true"
+        - name: K8S_ENABLE_NETWORK_POLICIES
+          value: "true"
+        - name: K8S_STORAGE_CLASS
+          value: "tesslate-block-storage"  # Abstract name, mapped per provider
+        - name: K8S_PVC_SIZE
+          value: "5Gi"
+        - name: K8S_INGRESS_CLASS
+          value: "nginx"
+        - name: K8S_DEVSERVER_IMAGE
+          value: "tesslate-devserver:latest"  # Patched by overlays
+        - name: K8S_IMAGE_PULL_SECRET
+          value: ""  # Empty for local, set for production
+        - name: K8S_WILDCARD_TLS_SECRET
+          value: ""  # Empty for local HTTP, set for production HTTPS
+
+        # Pod Affinity Settings
+        - name: K8S_ENABLE_POD_AFFINITY
+          value: "true"
+        - name: K8S_AFFINITY_TOPOLOGY_KEY
+          value: "kubernetes.io/hostname"
+
+        # Hibernation Settings
+        - name: K8S_HIBERNATION_IDLE_MINUTES
+          value: "30"
+        - name: K8S_HIBERNATION_GRACE_SECONDS
+          value: "120"
+        - name: K8S_DEHYDRATION_EXCLUDE_PATTERNS
+          value: "node_modules,.git,__pycache__,venv,.venv"
+
+        # Cookie Settings
+        - name: COOKIE_SECURE
+          value: "false"  # Set true for production HTTPS
+        - name: COOKIE_SAMESITE
+          value: "lax"
+        - name: COOKIE_DOMAIN
+          value: ""  # Set to .domain.com for production
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 24
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3

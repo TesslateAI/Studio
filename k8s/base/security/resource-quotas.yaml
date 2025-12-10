@@ -1,0 +1,45 @@
+# Resource Quotas for Tesslate Platform
+# Limits resource consumption in the tesslate namespace
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tesslate-quota
+  namespace: tesslate
+spec:
+  hard:
+    # Pod limits
+    pods: "20"
+
+    # Compute limits
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+
+    # Storage limits
+    persistentvolumeclaims: "10"
+    requests.storage: "100Gi"
+
+---
+# LimitRange for default container resources
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tesslate-limits
+  namespace: tesslate
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "128Mi"
+    max:
+      cpu: "2"
+      memory: "2Gi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"

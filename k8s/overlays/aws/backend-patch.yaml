@@ -1,0 +1,75 @@
+# =============================================================================
+# AWS EKS Backend Deployment Patch
+# =============================================================================
+# Production configuration for Amazon EKS
+# Uses native S3 (no endpoint URL needed)
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+spec:
+  template:
+    spec:
+      # Service account with IRSA for S3 access
+      serviceAccountName: tesslate-backend
+      containers:
+        - name: backend
+          env:
+            # Deployment mode
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+
+            # AWS-specific settings
+            - name: K8S_STORAGE_CLASS
+              value: "tesslate-block-storage"
+            - name: K8S_DEVSERVER_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: tesslate-config
+                  key: devserver_image
+            - name: K8S_REGISTRY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tesslate-config
+                  key: registry_url
+            - name: K8S_IMAGE_PULL_SECRET
+              value: ""  # Not needed with IRSA
+
+            # S3 Sandwich settings (Native AWS S3)
+            # Empty endpoint = use native AWS S3
+            - name: S3_ENDPOINT_URL
+              value: ""
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: tesslate-config
+                  key: s3_bucket_name
+            - name: S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: tesslate-config
+                  key: aws_region
+            # S3 credentials via IRSA (IAM Roles for Service Accounts)
+            # No need for explicit access keys
+
+            # Pod Affinity enabled
+            - name: K8S_ENABLE_POD_AFFINITY
+              value: "true"
+            - name: K8S_AFFINITY_TOPOLOGY_KEY
+              value: "topology.kubernetes.io/zone"  # Zone-aware for HA
+
+            # Hibernation settings
+            - name: K8S_HIBERNATION_IDLE_MINUTES
+              value: "30"
+            - name: K8S_HIBERNATION_GRACE_SECONDS
+              value: "120"
+
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"

@@ -1,0 +1,28 @@
+# =============================================================================
+# AWS EBS gp3 StorageClass
+# =============================================================================
+# Maps the abstract 'tesslate-block-storage' class to AWS EBS gp3.
+# EBS gp3 is:
+# - ReadWriteOnce (RWO) only
+# - SSD-backed with configurable IOPS
+# - Baseline 3,000 IOPS, up to 16,000 IOPS
+# - More cost-effective than gp2
+# =============================================================================
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tesslate-block-storage
+  labels:
+    app.kubernetes.io/name: tesslate
+    app.kubernetes.io/component: storage
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  fsType: ext4
+  # Optional: Configure IOPS and throughput
+  # iops: "3000"
+  # throughput: "125"
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

@@ -319,7 +319,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         self,
         user_id: UUID,
         project_id: str,
-        pod_name: str = None,
+        container_name: str = None,
         command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
@@ -332,7 +332,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         Args:
             user_id: User ID
             project_id: Project ID (used to determine namespace if not provided)
-            pod_name: Pod name (optional - will be looked up if not provided)
+            container_name: Container/pod name (optional - will be looked up if not provided)
             command: Shell command
             rows: Terminal rows
             cols: Terminal columns
@@ -346,6 +346,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         from kubernetes.client.rest import ApiException
 
         session_id = str(uuid.uuid4())
+        pod_name = container_name  # Alias for K8s terminology
 
         # Determine namespace if not provided
         if not namespace:
@@ -355,19 +356,16 @@ class KubernetesPTYBroker(BasePTYBroker):
         # Look up pod name if not provided (find first pod in deployment)
         if not pod_name:
             try:
-                from .orchestration import get_orchestrator
-                orchestrator = get_orchestrator()
-                k8s_client = orchestrator.k8s_client
-                names = k8s_client.generate_resource_names(user_id, project_id)
-
+                # List all dev container pods in the namespace
+                # Use correct label selector with tesslate.io prefix
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,
                     namespace=namespace,
-                    label_selector=f"app={names['deployment']}"
+                    label_selector="tesslate.io/component=dev-container"
                 )
 
                 if not pods.items:
-                    raise RuntimeError(f"No pod found for project {project_id} in namespace {namespace}")
+                    raise RuntimeError(f"No dev container pod found in namespace {namespace}")
 
                 pod_name = pods.items[0].metadata.name
                 logger.info(f"[PTY] Auto-detected pod name: {pod_name}")

@@ -1,0 +1,18 @@
+# PostgreSQL Persistent Volume Claim
+# Uses tesslate-block-storage class (mapped to provider-specific class via overlay)
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: tesslate
+  labels:
+    app: postgres
+    component: database
+spec:
+  storageClassName: tesslate-block-storage  # Mapped by overlay to provider-specific class
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi  # Can be overridden by overlay
