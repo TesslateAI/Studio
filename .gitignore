@@ -70,6 +70,7 @@ Thumbs.db
 .env.production
 .env.prod
 .env.minikube
+.tfvars
 
 # Docker
 *.pid
@@ -151,6 +152,19 @@ k8s/manifests/database/postgres-secret.yaml
 k8s/.env
 k8s/.env.*
 !k8s/.env.example
+
+# Terraform
+k8s/terraform/**/*.tfvars
+!k8s/terraform/**/*.tfvars.example
+k8s/terraform/**/*.tfstate
+k8s/terraform/**/*.tfstate.*
+k8s/terraform/**/.terraform/
+k8s/terraform/**/.terraform.lock.hcl
+k8s/terraform/**/crash.log
+k8s/terraform/**/override.tf
+k8s/terraform/**/override.tf.json
+k8s/terraform/**/*_override.tf
+k8s/terraform/**/*_override.tf.json
 
 # Claude AI
 .claude/

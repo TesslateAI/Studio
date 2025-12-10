@@ -1,13 +1,4 @@
-# =============================================================================
-# AWS EKS Overlay
-# =============================================================================
-# This overlay customizes the base manifests for Amazon EKS:
-# - gp3 EBS StorageClass for PVCs
-# - ECR container registry authentication
-# - AWS ALB Ingress Controller (optional, can use nginx)
-# - Native S3 for project storage
-# =============================================================================
-
+# AWS EKS Overlay for your-domain.com
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -16,24 +7,41 @@ namespace: tesslate
 resources:
   - ../../base
   - storage-class.yaml
-  # Secrets managed via AWS Secrets Manager + External Secrets Operator
 
-patches:
-  - path: backend-patch.yaml
-  - path: ingress-patch.yaml
+# Patch backend and replace ingress
+patchesStrategicMerge:
+  - backend-patch.yaml
+  - ingress-patch.yaml
 
 images:
   - name: tesslate-backend
-    newName: <account-id>.dkr.ecr.<region>.amazonaws.com/tesslate-backend
+    newName: <ECR_REGISTRY>/tesslate-backend
     newTag: latest
   - name: tesslate-frontend
-    newName: <account-id>.dkr.ecr.<region>.amazonaws.com/tesslate-frontend
+    newName: <ECR_REGISTRY>/tesslate-frontend
     newTag: latest
   - name: tesslate-devserver
-    newName: <account-id>.dkr.ecr.<region>.amazonaws.com/tesslate-devserver
+    newName: <ECR_REGISTRY>/tesslate-devserver
     newTag: latest
 
-# Common labels for all resources
-commonLabels:
-  cloud-provider: aws
-  environment: production
+configMapGenerator:
+  - name: tesslate-config
+    behavior: merge
+    literals:
+      - DEPLOYMENT_MODE=kubernetes
+      - K8S_NAMESPACE_PER_PROJECT=true
+      - K8S_ENABLE_NETWORK_POLICIES=true
+      - K8S_STORAGE_CLASS=tesslate-block-storage
+      - K8S_INGRESS_CLASS=nginx
+      - K8S_INGRESS_DOMAIN=your-domain.com
+      - devserver_image=<ECR_REGISTRY>/tesslate-devserver:latest
+      - registry_url=<ECR_REGISTRY>
+      - s3_bucket_name=tesslate-projects-production-7761157a
+      - aws_region=us-east-1
+
+labels:
+  - pairs:
+      cloud-provider: aws
+      environment: production
+      domain: your-domain.com
+    includeSelectors: false
