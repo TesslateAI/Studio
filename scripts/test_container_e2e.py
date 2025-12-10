@@ -200,18 +200,58 @@ def wait_for_task(token: str, task_id: str, timeout: int = 60) -> bool:
     return False
 
 
+def get_nextjs_marketplace_base(token: str) -> dict:
+    """Get the Next.js marketplace base with git repo."""
+
+    print(f"\n--- Fetching marketplace bases ---")
+
+    response = requests.get(
+        f"{API_BASE_URL}/api/marketplace/bases",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    if response.status_code != 200:
+        print(f"Failed to get bases: {response.status_code} - {response.text}")
+        return None
+
+    data = response.json()
+    bases = data.get("bases", [])  # API returns {"bases": [...], "page": ..., ...}
+    nextjs_base = next((b for b in bases if "next" in b.get("name", "").lower()), None)
+
+    if nextjs_base:
+        print(f"Found Next.js base: {nextjs_base.get('name')} (id: {nextjs_base.get('id')})")
+        print(f"  Git URL: {nextjs_base.get('git_repo_url', 'N/A')}")
+        print(f"  Slug: {nextjs_base.get('slug', 'N/A')}")
+    else:
+        print(f"Next.js base not found in {len(bases)} bases")
+        for b in bases:
+            print(f"  - {b.get('name')} ({b.get('slug')})")
+
+    return nextjs_base
+
+
 def add_nextjs_container(result: TestResult, token: str) -> dict:
     """Add a Next.js container to the project (simulates drag to grid)."""
+
+    # First get the marketplace base
+    nextjs_base = get_nextjs_marketplace_base(token)
+    if not nextjs_base:
+        result.log("Get Base", False, "Could not find Next.js marketplace base")
+        return None
+
+    result.log("Get Base", True, f"Found base: {nextjs_base.get('name')}")
 
     print(f"\n--- Adding Next.js container to project ---")
 
     response = requests.post(
         f"{API_BASE_URL}/api/projects/{result.project_slug}/containers",
         json={
-            "name": "Next.js 15",
+            "name": nextjs_base.get("name", "Next.js 15"),
             "project_id": result.project_id,
-            "base_id": "builtin",  # Built-in Next.js template
+            "base_id": nextjs_base.get("id"),  # Use actual marketplace base ID
+            "directory": nextjs_base.get("slug", "next-js-15"),
             "container_type": "base",
+            "internal_port": 3000,
             "position_x": 100,
             "position_y": 100
         },
@@ -298,6 +338,70 @@ def wait_for_container_ready(result: TestResult, token: str) -> dict:
 
     result.log("Container Ready", False, f"Timed out after {CONTAINER_READY_TIMEOUT}s")
     return None
+
+
+def verify_files_on_pvc(result: TestResult, container_dir: str) -> bool:
+    """Verify that Next.js files exist on the PVC using kubectl exec."""
+    import subprocess
+
+    print(f"\n--- Verifying files in container directory: {container_dir} ---")
+
+    namespace = f"proj-{result.project_id}"
+
+    try:
+        # Get file-manager pod name
+        cmd = ["kubectl", "get", "pods", "-n", namespace, "-l", "app=file-manager", "-o", "jsonpath={.items[0].metadata.name}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if proc.returncode != 0 or not proc.stdout.strip():
+            result.log("Verify Files", False, f"Could not find file-manager pod: {proc.stderr}")
+            return False
+
+        pod_name = proc.stdout.strip()
+        print(f"  Found file-manager pod: {pod_name}")
+
+        # List files in container directory
+        env = {**os.environ, "MSYS_NO_PATHCONV": "1"}  # Fix Windows path conversion
+        cmd = ["kubectl", "exec", "-n", namespace, pod_name, "--", "ls", "-la", f"/app/{container_dir}/"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+
+        if proc.returncode != 0:
+            result.log("Verify Files", False, f"Failed to list files: {proc.stderr}")
+            return False
+
+        print(f"  Files in /app/{container_dir}/:")
+        for line in proc.stdout.strip().split('\n')[:15]:
+            print(f"    {line}")
+
+        # Check for package.json
+        if "package.json" not in proc.stdout:
+            result.log("Verify Files", False, "package.json not found - git clone likely failed")
+            return False
+
+        # Check for node_modules
+        if "node_modules" not in proc.stdout:
+            result.log("Verify Files", False, "node_modules not found - npm install likely failed")
+            return False
+
+        # Check for node_modules/.bin/next (symlink verification)
+        cmd = ["kubectl", "exec", "-n", namespace, pod_name, "--", "ls", "-la", f"/app/{container_dir}/node_modules/.bin/"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+
+        if proc.returncode == 0 and "next" in proc.stdout:
+            print(f"  node_modules/.bin/next found - symlinks preserved!")
+            result.log("Verify Files", True, "All files present including node_modules/.bin symlinks")
+        else:
+            print(f"  WARNING: node_modules/.bin/next not found (symlinks may be broken)")
+            result.log("Verify Files", True, "Files present but symlinks may be missing")
+
+        return True
+
+    except subprocess.TimeoutExpired:
+        result.log("Verify Files", False, "kubectl command timed out")
+        return False
+    except Exception as e:
+        result.log("Verify Files", False, f"Error: {e}")
+        return False
 
 
 def check_dev_server_url(result: TestResult, url: str) -> bool:
@@ -403,6 +507,13 @@ def run_test():
         status = wait_for_container_ready(result, token)
         if not status:
             print("\n[FAIL] TEST FAILED: Container did not become ready within 60s")
+            delete_project(result, token)
+            return False
+
+        # Step 5.5: Verify files exist on PVC (critical test!)
+        container_dir = container.get("directory", "next-js-15")
+        if not verify_files_on_pvc(result, container_dir):
+            print("\n[FAIL] TEST FAILED: Files not found on PVC")
             delete_project(result, token)
             return False
 

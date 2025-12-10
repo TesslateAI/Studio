@@ -346,17 +346,36 @@ class KubernetesPTYBroker(BasePTYBroker):
         from kubernetes.client.rest import ApiException
 
         session_id = str(uuid.uuid4())
-        pod_name = container_name  # Alias for K8s terminology
+        deployment_name = container_name  # container_name is actually deployment name like "dev-next-js-15"
 
         # Determine namespace if not provided
         if not namespace:
             namespace = self._get_namespace_for_project(project_id)
             logger.info(f"[PTY] Auto-detected namespace for project {project_id}: {namespace}")
 
-        # Look up pod name if not provided (find first pod in deployment)
-        if not pod_name:
-            try:
-                # List all dev container pods in the namespace
+        # Always look up actual pod name - deployment_name is not the pod name
+        # Pods have suffix like "dev-next-js-15-f8d496f89-fpqsk"
+        pod_name = None
+        try:
+            if deployment_name:
+                # Look up pod by app label (matches deployment name)
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace,
+                    label_selector=f"app={deployment_name}"
+                )
+                if pods.items:
+                    # Get first running pod
+                    for pod in pods.items:
+                        if pod.status.phase == "Running":
+                            pod_name = pod.metadata.name
+                            break
+                    if not pod_name and pods.items:
+                        pod_name = pods.items[0].metadata.name
+                    logger.info(f"[PTY] Found pod {pod_name} for deployment {deployment_name}")
+
+            if not pod_name:
+                # Fallback: List all dev container pods in the namespace
                 # Use correct label selector with tesslate.io prefix
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,
@@ -369,9 +388,9 @@ class KubernetesPTYBroker(BasePTYBroker):
 
                 pod_name = pods.items[0].metadata.name
                 logger.info(f"[PTY] Auto-detected pod name: {pod_name}")
-            except Exception as e:
-                logger.error(f"[PTY] Failed to lookup pod for project {project_id}: {e}")
-                raise RuntimeError(f"Failed to find pod for project: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"[PTY] Failed to lookup pod for project {project_id}: {e}")
+            raise RuntimeError(f"Failed to find pod for project: {str(e)}") from e
 
         # Run command directly - pods already start in /app
         # Agent can use 'cd' commands if they need to change directories
