@@ -610,6 +610,21 @@ class KubernetesClient:
     # POD OPERATIONS
     # =========================================================================
 
+    def _get_stream_client(self) -> client.CoreV1Api:
+        """
+        Create a fresh CoreV1Api client for stream operations.
+
+        IMPORTANT: The kubernetes-python `stream()` function temporarily patches
+        the api_client.request method to use WebSocket. If we use the shared
+        self.core_v1 client, concurrent regular API calls (like read_namespace)
+        will accidentally use the WebSocket-patched method, causing errors like:
+        "WebSocketBadStatusException: Handshake status 200 OK"
+
+        By creating a fresh client for each stream operation, we isolate the
+        WebSocket patching and prevent it from affecting other concurrent calls.
+        """
+        return client.CoreV1Api()
+
     def _exec_in_pod(
         self,
         pod_name: str,
@@ -634,8 +649,13 @@ class KubernetesClient:
         try:
             logger.debug(f"[K8S:EXEC] Executing in pod {pod_name}: {' '.join(command[:3])}...")
 
+            # Use a fresh client for stream operations to avoid concurrency issues
+            # The stream() function patches api_client.request to use WebSocket,
+            # which would break concurrent regular API calls if using shared client
+            stream_client = self._get_stream_client()
+
             resp = stream(
-                self.core_v1.connect_get_namespaced_pod_exec,
+                stream_client.connect_get_namespaced_pod_exec,
                 pod_name,
                 namespace,
                 container=container_name,
@@ -658,15 +678,36 @@ class KubernetesClient:
     async def get_pod_for_deployment(
         self,
         deployment_name: str,
-        namespace: str
+        namespace: str,
+        use_prefix_match: bool = False
     ) -> Optional[str]:
-        """Get a ready pod name for a deployment."""
+        """Get a ready pod name for a deployment.
+
+        Args:
+            deployment_name: Deployment name or prefix if use_prefix_match=True
+            namespace: Kubernetes namespace
+            use_prefix_match: If True, match any pod whose app label starts with deployment_name
+        """
         try:
-            pods = await asyncio.to_thread(
-                self.core_v1.list_namespaced_pod,
-                namespace=namespace,
-                label_selector=f"app={deployment_name}"
-            )
+            if use_prefix_match:
+                # Get all pods in namespace and filter by prefix
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace
+                )
+                # Filter by app label prefix
+                matching_pods = []
+                for pod in pods.items:
+                    app_label = pod.metadata.labels.get("app", "") if pod.metadata.labels else ""
+                    if app_label.startswith(deployment_name):
+                        matching_pods.append(pod)
+                pods.items = matching_pods
+            else:
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace,
+                    label_selector=f"app={deployment_name}"
+                )
 
             for pod in pods.items:
                 if pod.status.phase == "Running":
@@ -774,7 +815,9 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
@@ -830,7 +873,9 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
@@ -889,7 +934,9 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
@@ -929,7 +976,9 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
@@ -940,9 +989,10 @@ class KubernetesClient:
             else:
                 full_path = f"/app/{safe_dir}"
 
+            # Use ls -la instead of find -printf (BusyBox find doesn't support -printf)
             list_cmd = [
                 "/bin/sh", "-c",
-                f"cd {shlex.quote(full_path)} && find . -maxdepth 1 -mindepth 1 -printf '%y %s %p\\n' | sort"
+                f"cd {shlex.quote(full_path)} && ls -la"
             ]
 
             output = await asyncio.to_thread(
@@ -959,13 +1009,19 @@ class KubernetesClient:
                 if not line:
                     continue
 
-                parts = line.split(' ', 2)
-                if len(parts) < 3:
+                # Parse ls -la output: drwxr-xr-x 2 user group 4096 Dec 10 12:00 filename
+                parts = line.split()
+                if len(parts) < 9:
                     continue
 
-                file_type = "directory" if parts[0] == 'd' else "file"
-                size = int(parts[1]) if parts[1].isdigit() else 0
-                name = parts[2].lstrip('./')
+                # Skip total line and . / .. entries
+                name = parts[-1]
+                if name in ('.', '..', 'total') or line.startswith('total'):
+                    continue
+
+                perms = parts[0]
+                file_type = "directory" if perms.startswith('d') else "file"
+                size = int(parts[4]) if parts[4].isdigit() else 0
 
                 # Skip hidden files and node_modules
                 if name.startswith('.') or name == 'node_modules':
@@ -1012,9 +1068,10 @@ class KubernetesClient:
             else:
                 full_path = f"/app/{safe_dir}"
 
+            # Use find with -exec stat for BusyBox compatibility (no -printf support)
             glob_cmd = [
                 "/bin/sh", "-c",
-                f"cd {shlex.quote(full_path)} && find . -type f -name {shlex.quote(pattern)} -printf '%s %T@ %p\\n' | sort -rn -k2"
+                f"cd {shlex.quote(full_path)} && find . -type f -name {shlex.quote(pattern)} 2>/dev/null"
             ]
 
             output = await asyncio.to_thread(
@@ -1031,13 +1088,13 @@ class KubernetesClient:
                 if not line:
                     continue
 
-                parts = line.split(' ', 2)
-                if len(parts) < 3:
+                path = line.lstrip('./')
+                if not path:
                     continue
 
-                size = int(parts[0]) if parts[0].isdigit() else 0
-                modified = float(parts[1]) if parts[1].replace('.', '').isdigit() else 0
-                path = parts[2].lstrip('./')
+                # Default values since we can't easily get size/mtime with BusyBox
+                size = 0
+                modified = 0
 
                 matches.append({
                     "path": path,
@@ -1216,11 +1273,34 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
+            # If no specific container_name, find ANY pod in the project namespace
+            # This handles multi-container projects where we don't care which container
+            if container_name:
+                label_selector = f"app={names['deployment']}"
+            else:
+                # Match any pod with the user-project prefix (e.g., dev-976599df-7745b013-*)
+                user_short = str(user_id)[:8]
+                project_short = str(project_id)[:8]
+                # List all pods in namespace and filter by app label prefix
+                label_selector = None  # Will filter manually
+
             pods = await asyncio.to_thread(
                 self.core_v1.list_namespaced_pod,
                 namespace=namespace,
-                label_selector=f"app={names['deployment']}"
+                label_selector=label_selector
             )
+
+            # If no specific container, filter pods by prefix
+            if not container_name and pods.items:
+                user_short = str(user_id)[:8]
+                project_short = str(project_id)[:8]
+                prefix = f"dev-{user_short}-{project_short}"
+                filtered_pods = []
+                for pod in pods.items:
+                    app_label = pod.metadata.labels.get("app", "")
+                    if app_label.startswith(prefix):
+                        filtered_pods.append(pod)
+                pods.items = filtered_pods
 
             if not pods.items:
                 return {

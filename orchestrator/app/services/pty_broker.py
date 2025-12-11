@@ -295,6 +295,22 @@ class KubernetesPTYBroker(BasePTYBroker):
         self.core_v1 = client.CoreV1Api()
         self.sessions: Dict[str, PTYSession] = {}
 
+    def _get_stream_client(self):
+        """
+        Create a fresh CoreV1Api client for stream operations.
+
+        IMPORTANT: The kubernetes-python `stream()` function temporarily patches
+        the api_client.request method to use WebSocket. If we use the shared
+        self.core_v1 client, concurrent regular API calls will accidentally use
+        the WebSocket-patched method, causing errors like:
+        "WebSocketBadStatusException: Handshake status 200 OK"
+
+        By creating a fresh client for each stream operation, we isolate the
+        WebSocket patching and prevent it from affecting other concurrent calls.
+        """
+        from kubernetes import client
+        return client.CoreV1Api()
+
     def _get_namespace_for_project(self, project_id: str) -> str:
         """
         Get the namespace for a project.
@@ -332,12 +348,12 @@ class KubernetesPTYBroker(BasePTYBroker):
         Args:
             user_id: User ID
             project_id: Project ID (used to determine namespace if not provided)
-            container_name: Container/pod name (optional - will be looked up if not provided)
+            container_name: Deployment/container name (used to look up pod)
             command: Shell command
             rows: Terminal rows
             cols: Terminal columns
             namespace: Namespace (optional - will be determined from project_id if not provided)
-            container: Container name within pod
+            container: Container name within pod (K8s container)
 
         Returns:
             PTYSession object
@@ -397,8 +413,13 @@ class KubernetesPTYBroker(BasePTYBroker):
         full_command = ["/bin/sh", "-c", command]
 
         # Create exec stream with PTY
+        # Use a fresh client for stream operations to avoid concurrency issues
+        # The stream() function patches api_client.request to use WebSocket,
+        # which would break concurrent regular API calls if using shared client
+        stream_client = self._get_stream_client()
+
         ws_stream = stream(
-            self.core_v1.connect_get_namespaced_pod_exec,
+            stream_client.connect_get_namespaced_pod_exec,
             pod_name,
             namespace,
             container=container,

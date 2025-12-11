@@ -793,7 +793,7 @@ async def get_project_files(
         except Exception as e:
             logger.warning(f"[FILES] Failed to read from shared volume: {e}, falling back to database")
 
-    # In K8s mode, always try reading from file-manager pod first
+    # For K8s mode, automatically try reading from pod (like Docker reads from volume)
     from ..services.orchestration import get_orchestrator, is_kubernetes_mode
     if is_kubernetes_mode():
         try:

@@ -97,9 +97,11 @@ class ShellSessionManager:
             user_id, project_id, project.slug, container_name
         )
 
-        # 5. Verify container is running (use resolved name for accurate check)
+        # 5. Verify container is running
+        # IMPORTANT: Pass original container_name (not resolved) for K8s mode
+        # because is_container_ready generates resource names from it internally
         is_running = await self._is_container_running(
-            user_id, project_id, project.slug, resolved_container_name
+            user_id, project_id, project.slug, container_name
         )
         if not is_running:
             raise HTTPException(

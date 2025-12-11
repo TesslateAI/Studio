@@ -286,7 +286,15 @@ export default function Project() {
             // Strip container directory prefix for display (e.g., "next-js-15/app/page.tsx" -> "app/page.tsx")
             file_path: file.file_path.slice(containerDir.length + 1)
           }));
-        setFiles(filteredFiles);
+
+        // In K8s mode, files are already container-scoped (no prefix)
+        // If filtering by prefix returns no files but we have data, use the data directly
+        if (filteredFiles.length === 0 && filesData.length > 0) {
+          // Files don't have container directory prefix - they're already scoped to this container
+          setFiles(filesData);
+        } else {
+          setFiles(filteredFiles);
+        }
       } else {
         // No container selected - show all files
         setFiles(filesData);
