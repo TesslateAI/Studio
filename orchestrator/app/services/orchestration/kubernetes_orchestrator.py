@@ -65,8 +65,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
         self.settings = get_settings()
         self._k8s_client: Optional[KubernetesClient] = None
 
-        # Track project environments (namespace exists + file-manager running)
-        self._active_environments: Dict[str, float] = {}
+        # Note: Activity tracking is now database-based (Project.last_activity)
+        # No in-memory tracking - supports horizontal scaling of backend
 
         logger.info("[K8S] Kubernetes orchestrator initialized (New Architecture)")
         logger.info(f"[K8S] Storage class: {self.settings.k8s_storage_class}")
@@ -176,8 +176,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
             if is_hibernated:
                 await self._restore_from_s3(project_id, user_id, namespace)
 
-            # Track environment
-            self._active_environments[project_id_str] = time.time()
+            # Activity tracking is now database-based (via activity_tracker service)
 
             logger.info(f"[K8S] ✅ Environment ready for project {project_id_str}")
             return namespace
@@ -224,8 +223,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 logger.error(f"[K8S] Error deleting environment: {e}")
                 raise
 
-        # Clean up tracking
-        self._active_environments.pop(project_id_str, None)
+        # Activity tracking is now database-based (no in-memory cleanup needed)
 
     async def ensure_project_directory(self, project_slug: str) -> None:
         """
@@ -278,14 +276,22 @@ class KubernetesOrchestrator(BaseOrchestrator):
         logger.info(f"[K8S] Git URL: {git_url or 'None (using template)'}")
 
         try:
-            # Ensure environment exists first
-            if project_id_str not in self._active_environments:
+            # Ensure environment exists first (check K8s namespace)
+            namespace_exists = await self.k8s_client.namespace_exists(namespace)
+            if not namespace_exists:
                 await self.ensure_project_environment(project_id, user_id)
 
-            # Get file-manager pod name
-            pod_name = await self.k8s_client.get_file_manager_pod(namespace)
+            # Get file-manager pod name (with retries - pod may still be starting)
+            pod_name = None
+            for attempt in range(10):  # Up to 30 seconds
+                pod_name = await self.k8s_client.get_file_manager_pod(namespace)
+                if pod_name:
+                    break
+                logger.info(f"[K8S] Waiting for file-manager pod... (attempt {attempt + 1}/10)")
+                await asyncio.sleep(3)
+
             if not pod_name:
-                raise RuntimeError("File manager pod not found")
+                raise RuntimeError("File manager pod not found after waiting 30 seconds")
 
             # CRITICAL: git_url is REQUIRED - containers must have a marketplace base with git repo
             if not git_url:
@@ -318,7 +324,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         except Exception as e:
             logger.error(f"[K8S] Error initializing files: {e}", exc_info=True)
-            return False
+            raise  # Re-raise to stop container start if files can't be initialized
 
     # =========================================================================
     # CONTAINER LIFECYCLE (START/STOP)
@@ -362,8 +368,9 @@ class KubernetesOrchestrator(BaseOrchestrator):
         logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
 
         try:
-            # Ensure environment exists
-            if project_id not in self._active_environments:
+            # Ensure environment exists (check K8s namespace)
+            namespace_exists = await self.k8s_client.namespace_exists(namespace)
+            if not namespace_exists:
                 await self.ensure_project_environment(project.id, user_id)
 
             # CRITICAL: Initialize container files BEFORE starting
@@ -444,8 +451,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
             protocol = "https" if self.settings.k8s_wildcard_tls_secret else "http"
             preview_url = f"{protocol}://{hostname}"
 
-            # Track activity
-            self._active_environments[project_id] = time.time()
+            # Activity tracking is now database-based (via activity_tracker service)
 
             logger.info(f"[K8S] ✅ Container started: {preview_url}")
 
@@ -1174,7 +1180,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         )
 
     # =========================================================================
-    # ACTIVITY TRACKING & CLEANUP
+    # ACTIVITY TRACKING & CLEANUP (Database-based for horizontal scaling)
     # =========================================================================
 
     def track_activity(
@@ -1183,62 +1189,77 @@ class KubernetesOrchestrator(BaseOrchestrator):
         project_id: str,
         container_name: Optional[str] = None
     ) -> None:
-        """Track activity for idle cleanup."""
-        self._active_environments[project_id] = time.time()
+        """
+        Track activity for idle cleanup.
+
+        Note: This is a sync no-op. Use track_project_activity() from
+        orchestrator/app/services/activity_tracker.py for actual DB updates.
+        """
+        # No-op: Activity tracking is now database-based
+        # Call track_project_activity() directly from routers with db session
+        pass
 
     async def cleanup_idle_environments(
         self,
         idle_timeout_minutes: int = None
     ) -> List[str]:
         """
-        Cleanup idle environments (hibernate to S3).
+        Cleanup idle environments by querying database for inactive projects.
 
-        Called periodically by cleanup service.
+        Called periodically by cleanup cronjob.
+        Projects are considered idle if last_activity is older than threshold.
         """
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import select
+        from ...database import AsyncSessionLocal
+        from ...models import Project
+
         if idle_timeout_minutes is None:
             idle_timeout_minutes = self.settings.k8s_hibernation_idle_minutes
 
         logger.info(f"[K8S:CLEANUP] Checking for idle environments (timeout: {idle_timeout_minutes} min)")
 
         hibernated = []
-        current_time = time.time()
-        idle_threshold = idle_timeout_minutes * 60
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=idle_timeout_minutes)
 
-        for project_id, last_activity in list(self._active_environments.items()):
-            idle_time = current_time - last_activity
+        try:
+            async with AsyncSessionLocal() as db:
+                # Find projects with running K8s environments that are idle
+                # environment_status='active' means K8s resources exist
+                result = await db.execute(
+                    select(Project).where(
+                        Project.environment_status == 'active',
+                        Project.last_activity < cutoff_time
+                    )
+                )
+                idle_projects = result.scalars().all()
 
-            if idle_time > idle_threshold:
-                idle_minutes = idle_time / 60
-                logger.info(f"[K8S:CLEANUP] Hibernating project {project_id} (idle {idle_minutes:.1f} min)")
+                logger.info(f"[K8S:CLEANUP] Found {len(idle_projects)} idle projects")
 
-                try:
-                    # We don't have user_id here, but namespace lookup doesn't need it
-                    namespace = self._get_namespace(project_id)
+                for project in idle_projects:
+                    idle_minutes = (datetime.now(timezone.utc) - project.last_activity).total_seconds() / 60
+                    logger.info(f"[K8S:CLEANUP] Hibernating project {project.slug} (idle {idle_minutes:.1f} min)")
 
-                    # Try to find user_id from namespace labels
                     try:
-                        ns = await asyncio.to_thread(
-                            self.k8s_client.core_v1.read_namespace,
-                            name=namespace
-                        )
-                        user_id_str = ns.metadata.labels.get("tesslate.io/user-id")
-                        if user_id_str:
-                            await self.hibernate_project(UUID(project_id), UUID(user_id_str))
-                            hibernated.append(project_id)
-                    except:
-                        # Just delete namespace if we can't get user_id
-                        await asyncio.to_thread(
-                            self.k8s_client.core_v1.delete_namespace,
-                            name=namespace
-                        )
-                        hibernated.append(project_id)
+                        # Hibernate project (S3 upload + delete namespace)
+                        await self.hibernate_project(project.id, project.user_id)
 
-                except Exception as e:
-                    logger.error(f"[K8S:CLEANUP] Error hibernating {project_id}: {e}")
+                        # Update database status
+                        project.environment_status = 'hibernated'
+                        project.hibernated_at = datetime.now(timezone.utc)
+                        await db.commit()
 
-                self._active_environments.pop(project_id, None)
+                        hibernated.append(str(project.id))
+                        logger.info(f"[K8S:CLEANUP] ✅ Hibernated {project.slug}")
 
-        logger.info(f"[K8S:CLEANUP] ✅ Hibernated {len(hibernated)} environments")
+                    except Exception as e:
+                        logger.error(f"[K8S:CLEANUP] ❌ Error hibernating {project.slug}: {e}")
+                        await db.rollback()
+
+        except Exception as e:
+            logger.error(f"[K8S:CLEANUP] ❌ Database error: {e}")
+
+        logger.info(f"[K8S:CLEANUP] ✅ Cleanup complete: Hibernated {len(hibernated)} environments")
         return hibernated
 
     # =========================================================================

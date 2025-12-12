@@ -313,7 +313,9 @@ def create_container_deployment(
         image=image,
         image_pull_policy=image_pull_policy,
         command=["sh", "-c"],
-        args=[f"cd {working_dir} && exec {startup_command}"],
+        # Check for node_modules before starting - if missing, run npm install first
+        # This prevents crashes when container restarts before npm install completes
+        args=[f"cd {working_dir} && ([ -d node_modules ] || npm install) && exec {startup_command}"],
         ports=[
             client.V1ContainerPort(
                 container_port=port,
@@ -612,6 +614,15 @@ def create_network_policy_manifest(
                             )
                         )
                     ]
+                ),
+                # Allow from same namespace (inter-container communication)
+                # This enables NextJS -> Postgres, Frontend -> Backend, etc.
+                client.V1NetworkPolicyIngressRule(
+                    _from=[
+                        client.V1NetworkPolicyPeer(
+                            pod_selector=client.V1LabelSelector()  # Empty = all pods in same namespace
+                        )
+                    ]
                 )
             ],
             egress=[
@@ -718,22 +729,18 @@ echo "[CLONE] Branch: {branch}"
 echo "[CLONE] Target: {target_dir}"
 echo "[CLONE] ======================================"
 
-# Create target directory
-mkdir -p {target_dir}
+# Remove target directory if exists (may have wrong permissions from failed starts)
+rm -rf {target_dir}
 
-# Clone repository
-git clone --depth 1 --branch {branch} --single-branch {git_url} /tmp/repo
+# Clone directly to target directory
+git clone --depth 1 --branch {branch} --single-branch {git_url} {target_dir}
 
-# Copy files to target (excluding .git)
-cd /tmp/repo
-find . -maxdepth 1 ! -name '.' ! -name '.git' -exec cp -r {{}} {target_dir}/ \\;
+# Remove .git folder to save space
+rm -rf {target_dir}/.git
 
-# Move to target directory
+# Move to target directory for dependency install
 cd {target_dir}
 {install_section}
-# Cleanup
-rm -rf /tmp/repo
-
 echo "[CLONE] ======================================"
 echo "[CLONE] ✅ Clone complete"
 echo "[CLONE] Files:"

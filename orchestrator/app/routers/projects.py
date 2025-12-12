@@ -1067,7 +1067,9 @@ async def save_project_file(
 
             if success:
                 logger.info(f"[FILE] ✅ Wrote {file_path} to container for user {current_user.id}, project {project_id}")
-                orchestrator.track_activity(current_user.id, str(project_id))
+                # Track activity for idle cleanup (database-based)
+                from ..services.activity_tracker import track_project_activity
+                await track_project_activity(db, project_id, "file_save")
             else:
                 logger.warning(f"[FILE] ⚠️ Failed to write to container")
 
@@ -2779,6 +2781,10 @@ async def interactive_terminal(
                 command="exec /bin/sh"
             )
             session_id = session_info["session_id"]
+
+            # Track activity for idle cleanup (database-based)
+            from ..services.activity_tracker import track_project_activity
+            await track_project_activity(db, project.id, "terminal")
 
             await websocket.send_json({"type": "status", "message": f"Shell session created: {session_id}"})
 

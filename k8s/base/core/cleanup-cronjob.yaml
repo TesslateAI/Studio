@@ -11,8 +11,8 @@ metadata:
     app: tesslate-backend
     component: cleanup
 spec:
-  # Run every 30 minutes to cleanup idle environments
-  schedule: "*/30 * * * *"
+  # Run every 2 minutes to cleanup idle environments (5 min idle timeout)
+  schedule: "*/2 * * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid  # Don't run multiple cleanup jobs simultaneously
@@ -136,7 +136,7 @@ spec:
               - name: K8S_STORAGE_CLASS
                 value: "tesslate-block-storage"
               - name: K8S_HIBERNATION_IDLE_MINUTES
-                value: "30"
+                value: "5"
             resources:
               requests:
                 memory: "128Mi"

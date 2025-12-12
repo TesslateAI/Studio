@@ -104,6 +104,27 @@ class KubernetesClient:
             else:
                 raise
 
+    async def namespace_exists(self, namespace: str) -> bool:
+        """
+        Check if a Kubernetes namespace exists.
+
+        Args:
+            namespace: Namespace name to check
+
+        Returns:
+            True if namespace exists, False otherwise
+        """
+        try:
+            await asyncio.to_thread(
+                self.core_v1.read_namespace,
+                name=namespace
+            )
+            return True
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            raise
+
     async def create_network_policy(self, namespace: str, project_id: str) -> None:
         """
         Create NetworkPolicy for project isolation.
