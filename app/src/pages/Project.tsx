@@ -312,7 +312,25 @@ export default function Project() {
       if (foundContainer) {
         setContainer(foundContainer);
 
-        // Auto-start the container when opening builder
+        // Check if container is already running before starting
+        try {
+          const status = await projectsApi.getContainersStatus(slug);
+          const containerDir = foundContainer.directory || foundContainer.name?.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+          const containerStatus = status?.containers?.[containerDir];
+
+          if (containerStatus?.running && containerStatus?.url) {
+            // Container already running - just set the URL without starting
+            setDevServerUrl(containerStatus.url);
+            setDevServerUrlWithAuth(containerStatus.url);
+            setCurrentPreviewUrl(containerStatus.url);
+            return;
+          }
+        } catch (statusError) {
+          // Status check failed, proceed with start anyway
+          console.warn('Failed to check container status, will attempt start:', statusError);
+        }
+
+        // Container not running - start it
         try {
           toast.loading(`Starting container ${foundContainer.name}...`, { id: 'container-start' });
           const response = await projectsApi.startContainer(slug, containerId);

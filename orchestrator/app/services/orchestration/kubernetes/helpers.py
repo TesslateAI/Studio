@@ -493,7 +493,8 @@ def create_ingress_manifest(
         V1Ingress manifest
     """
     ingress_name = f"dev-{container_directory}"
-    host = f"{container_directory}.{project_slug}.{domain}"
+    # Single subdomain level for wildcard cert compatibility (*.domain)
+    host = f"{project_slug}-{container_directory}.{domain}"
     service_name = f"dev-{container_directory}"
 
     # Build ingress spec

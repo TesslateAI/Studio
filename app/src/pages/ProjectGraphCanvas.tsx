@@ -45,7 +45,7 @@ import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../componen
 import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, marketplaceApi, deploymentCredentialsApi } from '../lib/api';
+import api, { projectsApi, marketplaceApi, deploymentCredentialsApi, configApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import toast from 'react-hot-toast';
@@ -109,6 +109,8 @@ export const ProjectGraphCanvas = () => {
   const [project, setProject] = useState<any>(null);
   const [files, setFiles] = useState<any[]>([]);
   const [agents, setAgents] = useState<UIAgent[]>([]);
+  const [appDomain, setAppDomain] = useState<string>('localhost');
+  const appDomainRef = useRef<string>('localhost');
   const [isRunning, setIsRunning] = useState(false);
   const [activeView, setActiveView] = useState<MainViewType>('graph');
   const [activePanel, setActivePanel] = useState<PanelType>(null);
@@ -148,6 +150,14 @@ export const ProjectGraphCanvas = () => {
   useEffect(() => {
     isDraggingRef.current = isDragging;
   }, [isDragging]);
+
+  // Fetch app domain config on mount
+  useEffect(() => {
+    configApi.getAppDomain().then((domain) => {
+      setAppDomain(domain);
+      appDomainRef.current = domain;
+    });
+  }, []);
 
   useEffect(() => {
     if (slug) {
@@ -333,8 +343,10 @@ export const ProjectGraphCanvas = () => {
             .replace(/[^a-z0-9-]/g, '-')
             .replace(/-+/g, '-')
             .replace(/^-|-$/g, '') || 'app';
-          // URL format: {project-slug}-{container-name}.localhost
-          baseUrl = `http://${projectRes.slug}-${sanitizedName}.localhost`;
+          // URL format: {project-slug}-{container-name}.{app_domain}
+          const domain = appDomainRef.current;
+          const protocol = domain.includes('localhost') ? 'http' : 'https';
+          baseUrl = `${protocol}://${projectRes.slug}-${sanitizedName}.${domain}`;
         }
 
         return {
@@ -479,13 +491,15 @@ export const ProjectGraphCanvas = () => {
         const containerPort = sourceNode.data.port || 3000;
 
         // Build the preview URL based on container name
-        // Format: {project-slug}-{container-name}.localhost
+        // Format: {project-slug}-{container-name}.{appDomain}
         const sanitizedName = containerName?.toLowerCase()
           .replace(/[^a-z0-9-]/g, '-')
           .replace(/-+/g, '-')
           .replace(/^-|-$/g, '') || 'app';
 
-        const baseUrl = `http://${project.slug}-${sanitizedName}.localhost`;
+        const domain = appDomainRef.current;
+        const protocol = domain.includes('localhost') ? 'http' : 'https';
+        const baseUrl = `${protocol}://${project.slug}-${sanitizedName}.${domain}`;
 
         try {
           // Save connection to backend

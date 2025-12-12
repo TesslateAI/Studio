@@ -328,6 +328,86 @@ class KubernetesClient:
         )
         logger.info(f"[K8S] ✅ Copied S3 credentials secret to {target_namespace}")
 
+    async def copy_wildcard_tls_secret(
+        self,
+        target_namespace: str,
+        source_namespace: str = None,
+        secret_name: str = None
+    ) -> bool:
+        """
+        Copy wildcard TLS secret from source namespace to target namespace.
+
+        This is required for HTTPS ingress in project namespaces - the wildcard
+        certificate needs to be available in each project namespace for TLS termination.
+
+        Args:
+            target_namespace: Namespace to copy the secret to
+            source_namespace: Namespace to copy from (defaults to tesslate)
+            secret_name: Name of the secret (defaults to k8s_wildcard_tls_secret)
+
+        Returns:
+            True if copied successfully, False if secret doesn't exist in source
+        """
+        if source_namespace is None:
+            source_namespace = self.settings.k8s_default_namespace
+        if secret_name is None:
+            secret_name = self.settings.k8s_wildcard_tls_secret
+
+        # Skip if no TLS secret configured (e.g., local dev without TLS)
+        if not secret_name:
+            logger.debug(f"[K8S] No wildcard TLS secret configured, skipping copy")
+            return False
+
+        # Check if secret already exists in target namespace
+        try:
+            await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=target_namespace
+            )
+            logger.debug(f"[K8S] TLS secret {secret_name} already exists in {target_namespace}")
+            return True
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+        # Read secret from source namespace
+        try:
+            source_secret = await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=source_namespace
+            )
+        except ApiException as e:
+            if e.status == 404:
+                logger.warning(f"[K8S] Wildcard TLS secret {secret_name} not found in {source_namespace}")
+                return False
+            raise
+
+        # Create new secret in target namespace (copy data, new metadata)
+        # TLS secrets have type kubernetes.io/tls
+        new_secret = client.V1Secret(
+            metadata=client.V1ObjectMeta(
+                name=secret_name,
+                namespace=target_namespace,
+                labels={
+                    "app": "tesslate",
+                    "managed-by": "tesslate-backend",
+                    "copied-from": source_namespace
+                }
+            ),
+            type=source_secret.type,
+            data=source_secret.data
+        )
+
+        await asyncio.to_thread(
+            self.core_v1.create_namespaced_secret,
+            namespace=target_namespace,
+            body=new_secret
+        )
+        logger.info(f"[K8S] ✅ Copied wildcard TLS secret to {target_namespace}")
+        return True
+
     def get_project_namespace(self, project_id: str) -> str:
         """
         Get the namespace name for a project.
@@ -808,7 +888,8 @@ class KubernetesClient:
         project_id: str,
         file_path: str,
         container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
+        project_slug: Optional[str] = None,
+        subdir: Optional[str] = None
     ) -> Optional[str]:
         """Read a file from a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
@@ -823,7 +904,11 @@ class KubernetesClient:
 
             k8s_container = "dev-server"
             safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/{safe_path}"
+            # Include subdir for multi-container projects
+            if subdir:
+                full_path = f"/app/{subdir}/{safe_path}"
+            else:
+                full_path = f"/app/{safe_path}"
 
             # Check if file exists
             check_cmd = ["/bin/sh", "-c", f"test -f {shlex.quote(full_path)} && echo exists || echo notfound"]
@@ -866,7 +951,8 @@ class KubernetesClient:
         file_path: str,
         content: str,
         container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
+        project_slug: Optional[str] = None,
+        subdir: Optional[str] = None
     ) -> bool:
         """Write a file to a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
@@ -881,7 +967,11 @@ class KubernetesClient:
 
             k8s_container = "dev-server"
             safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/{safe_path}"
+            # Include subdir for multi-container projects
+            if subdir:
+                full_path = f"/app/{subdir}/{safe_path}"
+            else:
+                full_path = f"/app/{safe_path}"
 
             # Ensure parent directory exists
             dir_path = os.path.dirname(full_path)

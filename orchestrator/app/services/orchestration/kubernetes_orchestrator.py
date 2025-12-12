@@ -150,7 +150,11 @@ class KubernetesOrchestrator(BaseOrchestrator):
             # 4. Copy S3 credentials secret (needed for hibernation operations)
             await self.k8s_client.copy_s3_credentials_secret(namespace)
 
-            # 5. Create file-manager deployment
+            # 5. Copy wildcard TLS secret (needed for HTTPS ingress)
+            if self.settings.k8s_wildcard_tls_secret:
+                await self.k8s_client.copy_wildcard_tls_secret(namespace)
+
+            # 6. Create file-manager deployment
             file_manager = create_file_manager_deployment(
                 namespace=namespace,
                 project_id=project_id,
@@ -161,14 +165,14 @@ class KubernetesOrchestrator(BaseOrchestrator):
             )
             await self.k8s_client.create_deployment(file_manager, namespace)
 
-            # 6. Wait for file-manager to be ready
+            # 7. Wait for file-manager to be ready
             await self.k8s_client.wait_for_deployment_ready(
                 deployment_name="file-manager",
                 namespace=namespace,
                 timeout=60
             )
 
-            # 7. If hibernated, restore from S3
+            # 8. If hibernated, restore from S3
             if is_hibernated:
                 await self._restore_from_s3(project_id, user_id, namespace)
 
@@ -435,8 +439,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
             )
             await self.k8s_client.create_ingress(ingress, namespace)
 
-            # Build preview URL
-            hostname = f"{container_directory}.{project.slug}.{self.settings.app_domain}"
+            # Build preview URL (single subdomain level for wildcard cert compatibility)
+            hostname = f"{project.slug}-{container_directory}.{self.settings.app_domain}"
             protocol = "https" if self.settings.k8s_wildcard_tls_secret else "http"
             preview_url = f"{protocol}://{hostname}"
 
@@ -662,6 +666,48 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 logger.error(f"[K8S] Error stopping project: {e}")
                 raise
 
+    async def delete_project_namespace(
+        self,
+        project_id: UUID,
+        user_id: UUID
+    ) -> None:
+        """
+        Delete the entire Kubernetes namespace for a project.
+
+        This completely removes all resources (pods, services, ingresses, PVCs)
+        and should only be called when permanently deleting a project.
+        """
+        project_id_str = str(project_id)
+        namespace = self._get_namespace(project_id_str)
+
+        logger.info(f"[K8S] Deleting namespace {namespace}")
+
+        try:
+            # Check if namespace exists
+            try:
+                await asyncio.to_thread(
+                    self.k8s_client.core_v1.read_namespace,
+                    name=namespace
+                )
+            except ApiException as e:
+                if e.status == 404:
+                    logger.info(f"[K8S] Namespace {namespace} does not exist, nothing to delete")
+                    return
+                raise
+
+            # Delete the namespace (this cascades to all resources in it)
+            await asyncio.to_thread(
+                self.k8s_client.core_v1.delete_namespace,
+                name=namespace
+            )
+
+            logger.info(f"[K8S] Namespace {namespace} deleted successfully")
+
+        except ApiException as e:
+            if e.status != 404:
+                logger.error(f"[K8S] Error deleting namespace {namespace}: {e}")
+                raise
+
     async def restart_project(
         self,
         project,
@@ -695,6 +741,10 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 namespace=namespace
             )
 
+            # Build URL helper
+            protocol = "https" if self.settings.k8s_wildcard_tls_secret else "http"
+            app_domain = self.settings.app_domain
+
             container_statuses = {}
             for pod in pods.items:
                 component = pod.metadata.labels.get("tesslate.io/component", "unknown")
@@ -703,12 +753,18 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 if component == "file-manager":
                     container_statuses["file-manager"] = {
                         "phase": pod.status.phase,
-                        "ready": self.k8s_client.is_pod_ready(pod)
+                        "ready": self.k8s_client.is_pod_ready(pod),
+                        "running": self.k8s_client.is_pod_ready(pod)
                     }
                 elif container_dir:
+                    is_ready = self.k8s_client.is_pod_ready(pod)
+                    # Generate URL for this container
+                    url = f"{protocol}://{project_slug}-{container_dir}.{app_domain}"
                     container_statuses[container_dir] = {
                         "phase": pod.status.phase,
-                        "ready": self.k8s_client.is_pod_ready(pod)
+                        "ready": is_ready,
+                        "running": is_ready,
+                        "url": url
                     }
 
             return {
@@ -855,10 +911,18 @@ class KubernetesOrchestrator(BaseOrchestrator):
         user_id: UUID,
         project_id: UUID,
         container_name: str,
-        file_path: str
+        file_path: str,
+        project_slug: str = None,
+        subdir: str = None
     ) -> Optional[str]:
         """Read a file from project storage."""
         namespace = self._get_namespace(str(project_id))
+
+        # Build full path including subdir for multi-container projects
+        if subdir:
+            full_path = f"/app/{subdir}/{file_path}"
+        else:
+            full_path = f"/app/{file_path}"
 
         try:
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -868,7 +932,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
                     user_id=user_id,
                     project_id=str(project_id),
                     file_path=file_path,
-                    container_name=container_name
+                    container_name=container_name,
+                    subdir=subdir
                 )
 
             result = await asyncio.to_thread(
@@ -876,7 +941,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 pod_name,
                 namespace,
                 "file-manager",
-                ["cat", f"/app/{file_path}"],
+                ["cat", full_path],
                 timeout=30
             )
             return result
@@ -891,10 +956,18 @@ class KubernetesOrchestrator(BaseOrchestrator):
         project_id: UUID,
         container_name: str,
         file_path: str,
-        content: str
+        content: str,
+        project_slug: str = None,
+        subdir: str = None
     ) -> bool:
         """Write a file to project storage."""
         namespace = self._get_namespace(str(project_id))
+
+        # Build full path including subdir for multi-container projects
+        if subdir:
+            full_path = f"/app/{subdir}/{file_path}"
+        else:
+            full_path = f"/app/{file_path}"
 
         try:
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -904,13 +977,13 @@ class KubernetesOrchestrator(BaseOrchestrator):
                     project_id=str(project_id),
                     file_path=file_path,
                     content=content,
-                    container_name=container_name
+                    container_name=container_name,
+                    subdir=subdir
                 )
 
             # Use base64 to handle special characters
             import base64
             encoded = base64.b64encode(content.encode()).decode()
-            full_path = f"/app/{file_path}"
 
             # Ensure directory exists
             dir_path = "/".join(full_path.split("/")[:-1])

@@ -1,3 +1,7 @@
+You are a senior level coding agent. You will apply real world solutions to all the problems, fixing them in such a way where you do not cheat the solution, break existing functionality, and are scoped in. The solutions you write must be scalable and for the future, not fixing or hardcoding.
+
+Everything u do or write should be non-blocking so certain actions don't hold up other people on our software. 
+
 # Tesslate Studio
 
 When I have an issue, fix it for the next time it happens in a general, scalable way. For example, if a container fails on startup, ensure all future container startups work 100%.
@@ -361,4 +365,176 @@ kubectl logs -n proj-<uuid> <pod-name> -c dev-server
 # Error: volumeMounts[0].name: Not found: "project-data"
 # Fix: Volume names should be "project-source" not "project-data"
 # This was fixed in kubernetes/helpers.py
+```
+
+
+## AWS EKS Production Deployment
+
+### Infrastructure
+
+- **Region**: us-east-1
+- **Cluster**: <EKS_CLUSTER_NAME>
+- **Domain**: your-domain.com (Cloudflare DNS)
+- **ECR Registry**: <ECR_REGISTRY>
+- **S3 Bucket**: tesslate-project-storage-prod (for project files)
+
+### Initial Setup / Login
+
+```powershell
+# Configure kubectl for EKS cluster
+aws eks update-kubeconfig --region us-east-1 --name <EKS_CLUSTER_NAME>
+
+# Verify connection
+kubectl get nodes
+kubectl get pods -n tesslate
+```
+
+### ECR Login & Image Push
+
+```powershell
+# Login to ECR (required before push)
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <ECR_REGISTRY>
+
+# Build, tag, and push backend
+docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker tag tesslate-backend:latest <ECR_REGISTRY>/tesslate-backend:latest
+docker push <ECR_REGISTRY>/tesslate-backend:latest
+
+# Build, tag, and push frontend
+docker build -t tesslate-frontend:latest -f app/Dockerfile.prod app/
+docker tag tesslate-frontend:latest <ECR_REGISTRY>/tesslate-frontend:latest
+docker push <ECR_REGISTRY>/tesslate-frontend:latest
+
+# Build, tag, and push devserver (user project containers)
+docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker tag tesslate-devserver:latest <ECR_REGISTRY>/tesslate-devserver:latest
+docker push <ECR_REGISTRY>/tesslate-devserver:latest
+```
+
+### Deploy / Restart Pods
+
+```powershell
+# Restart backend to pick up new image
+kubectl rollout restart deployment/tesslate-backend -n tesslate
+kubectl rollout status deployment/tesslate-backend -n tesslate --timeout=120s
+
+# Restart frontend
+kubectl rollout restart deployment/tesslate-frontend -n tesslate
+kubectl rollout status deployment/tesslate-frontend -n tesslate --timeout=120s
+
+# IMPORTANT: Restart ingress controller to refresh endpoint routing
+# This prevents site loading issues after backend restarts
+kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
+
+# Apply all manifests (if changed)
+kubectl apply -k k8s/overlays/aws
+```
+
+### Debugging Commands
+
+```powershell
+# Check pod status
+kubectl get pods -n tesslate -o wide
+kubectl get pods --all-namespaces | grep proj-
+
+# Check logs
+kubectl logs -n tesslate deployment/tesslate-backend --tail=100
+kubectl logs -n tesslate deployment/tesslate-backend -f  # follow
+
+# Check ingress
+kubectl get ingress -n tesslate
+kubectl get ingress --all-namespaces | grep proj-
+
+# Check NGINX ingress controller logs
+kubectl logs -n ingress-nginx deployment/ingress-nginx-controller --tail=50
+
+# Check certificates
+kubectl get certificate -n tesslate
+kubectl describe certificate tesslate-wildcard-tls -n tesslate
+
+# Execute commands in backend pod (use MSYS_NO_PATHCONV=1 on Windows)
+MSYS_NO_PATHCONV=1 kubectl exec -n tesslate deployment/tesslate-backend -- cat /app/app/config.py
+MSYS_NO_PATHCONV=1 kubectl exec -n tesslate deployment/tesslate-backend -- python -c "print('hello')"
+
+# Check user project pods
+kubectl get pods -n proj-<project-uuid>
+kubectl logs -n proj-<project-uuid> <pod-name> -c dev-server
+kubectl logs -n proj-<project-uuid> <pod-name> -c hydrate-project  # init container
+
+# Resource usage
+kubectl top pods -n tesslate
+kubectl top nodes
+```
+
+### Cleanup Orphaned Project Namespaces
+
+```powershell
+# List orphaned project namespaces
+kubectl get ns | grep proj-
+
+# Delete orphaned namespace (cascades to all resources)
+kubectl delete ns proj-<project-uuid>
+```
+
+### Secrets Management
+
+```powershell
+# View secrets (base64 encoded)
+kubectl get secret tesslate-secrets -n tesslate -o yaml
+
+# Update a secret value
+kubectl create secret generic tesslate-secrets -n tesslate \
+  --from-literal=SECRET_KEY=xxx \
+  --from-literal=DATABASE_URL=xxx \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+### AWS EKS Config Settings (k8s/overlays/aws/backend-patch.yaml)
+
+| Setting | Value |
+|---------|-------|
+| `K8S_DEVSERVER_IMAGE` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
+| `K8S_IMAGE_PULL_SECRET` | `ecr-credentials` |
+| `S3_ENDPOINT_URL` | `https://s3.us-east-1.amazonaws.com` |
+| `S3_BUCKET_NAME` | `tesslate-project-storage-prod` |
+| `COOKIE_DOMAIN` | `.your-domain.com` |
+| `replicas` | `1` (single replica - tasks stored in-memory) |
+
+### Common AWS Issues & Fixes
+
+**Container start fails with WebSocket error:**
+```
+WebSocketBadStatusException: Handshake status 200 OK
+```
+This is a bug in kubernetes Python client v34.x where REST calls get routed through WebSocket.
+Workaround: Pin kubernetes client to <32.0.0 in pyproject.toml, or wait for upstream fix.
+
+**SSL certificate doesn't cover subdomains:**
+```
+ERR_CERT_AUTHORITY_INVALID for foo.bar.your-domain.com
+```
+Wildcard certs (*.your-domain.com) only cover ONE level of subdomain.
+Fix: Enable Cloudflare proxy (orange cloud) with SSL mode "Full", or change URL structure.
+
+**Orphaned namespaces causing slowness:**
+When projects are deleted but K8s namespaces aren't cleaned up, NGINX Ingress Controller
+repeatedly tries to resolve them, causing configuration reload loops.
+Fix: The `delete_project_namespace()` method was added to properly clean up on project deletion.
+
+**ECR credentials expired:**
+```powershell
+# Re-login to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <ECR_REGISTRY>
+```
+
+**Cloudflare certificate not issued:**
+```powershell
+# Check cert-manager logs
+kubectl logs -n cert-manager deployment/cert-manager --tail=50
+
+# Check certificate status
+kubectl describe certificate tesslate-wildcard-tls -n tesslate
+
+# Cloudflare API token needs Zone:Zone:Read and Zone:DNS:Edit permissions
 ```

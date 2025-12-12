@@ -1300,11 +1300,10 @@ async def _perform_project_deletion(
             # Kubernetes mode: Delete K8s resources and S3 archive
             logger.info(f"[DELETE] Kubernetes mode: Cleaning up K8s resources and S3...")
 
-            # 4a. Delete Kubernetes namespace and resources
+            # 4a. Delete Kubernetes namespace and all resources
             try:
-                # Reuse the orchestrator already defined at top of function
-                await orchestrator.stop_project(
-                    project_slug=project_slug,
+                # Delete entire namespace (cascades to all pods, services, ingresses, PVCs)
+                await orchestrator.delete_project_namespace(
                     project_id=project_id,
                     user_id=user_id
                 )

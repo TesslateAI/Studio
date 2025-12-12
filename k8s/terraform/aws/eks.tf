@@ -132,9 +132,19 @@ module "eks" {
   enable_cluster_creator_admin_permissions = true
 
   # Node security group additional rules
-  # Note: EKS module v20+ already includes rules for webhook ports (4443, 6443, 8443, 9443)
-  # and node-to-node communication, so we only add egress rule here.
+  # Note: EKS module v20+ includes some rules but we need explicit pod-to-pod
+  # traffic across nodes for network policies to work correctly.
   node_security_group_additional_rules = {
+    # Allow all ingress from within VPC for pod-to-pod communication across nodes
+    # This is required for cross-node pod communication when using network policies
+    ingress_vpc_all = {
+      type        = "ingress"
+      protocol    = "-1"
+      from_port   = 0
+      to_port     = 0
+      cidr_blocks = [var.vpc_cidr]
+      description = "Allow all ingress from VPC CIDR for pod-to-pod traffic"
+    }
     # Allow all egress
     egress_all = {
       type        = "egress"
