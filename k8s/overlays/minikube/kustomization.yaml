@@ -1,0 +1,40 @@
+# Minikube Overlay for Local Development
+# Configures Tesslate Studio for local Minikube cluster with MinIO
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+resources:
+  - ../../base
+  # Local secrets (MinIO deployed separately in minio-system namespace)
+  - secrets/postgres-secret.yaml
+  - secrets/s3-credentials.yaml
+  - secrets/app-secrets.yaml
+  # Storage class
+  - storage-class.yaml
+
+patches:
+  # Backend patches for Minikube
+  - path: backend-patch.yaml
+  # Frontend patches for Minikube
+  - path: frontend-patch.yaml
+  # Ingress patches for local domain
+  - path: ingress-patch.yaml
+
+images:
+  # Use latest tag everywhere (same as production)
+  # imagePullPolicy: Never ensures local images are used
+  - name: tesslate-backend
+    newName: tesslate-backend
+    newTag: latest
+  - name: tesslate-frontend
+    newName: tesslate-frontend
+    newTag: latest
+  - name: tesslate-devserver
+    newName: tesslate-devserver
+    newTag: latest
+
+commonLabels:
+  environment: minikube

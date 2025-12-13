@@ -1,0 +1,60 @@
+# =============================================================================
+# GKE Ingress Patch
+# =============================================================================
+# Production ingress configuration with:
+# - GKE Ingress (Google Cloud Load Balancer) or NGINX Ingress
+# - Google-managed SSL certificates
+# - Cloud Armor WAF (optional)
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tesslate-main-ingress
+  annotations:
+    # Use NGINX Ingress (recommended for WebSocket support)
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+
+    # OR use GKE Ingress (Google Cloud Load Balancer):
+    # kubernetes.io/ingress.class: gce
+    # kubernetes.io/ingress.global-static-ip-name: tesslate-ip
+    # networking.gke.io/managed-certificates: tesslate-cert
+    # networking.gke.io/v1beta1.FrontendConfig: tesslate-frontend-config
+
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - tesslate.example.com
+        - "*.tesslate.example.com"
+      secretName: tesslate-wildcard-tls
+  rules:
+    - host: tesslate.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-backend-service
+                port:
+                  number: 8005
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-frontend-service
+                port:
+                  number: 80

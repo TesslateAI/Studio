@@ -1,0 +1,157 @@
+# AWS EKS Backend Deployment Patch for saipriya.org
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+spec:
+  replicas: 1  # Single replica required - tasks stored in-memory
+  template:
+    spec:
+      serviceAccountName: tesslate-backend-sa
+      containers:
+        - name: backend
+          imagePullPolicy: Always
+          env:
+            # Replace all env vars with AWS-specific config
+            - $patch: replace
+            # Core settings
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+            - name: KUBERNETES_NAMESPACE
+              value: "tesslate"
+            # Database
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: DATABASE_URL
+            # Security
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SECRET_KEY
+            # LiteLLM
+            - name: LITELLM_API_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: LITELLM_API_BASE
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: LITELLM_MASTER_KEY
+            - name: LITELLM_DEFAULT_MODELS
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: LITELLM_DEFAULT_MODELS
+            # JWT
+            - name: ALGORITHM
+              value: "HS256"
+            - name: ACCESS_TOKEN_EXPIRE_MINUTES
+              value: "30"
+            # Domain - AWS specific
+            - name: APP_DOMAIN
+              value: "saipriya.org"
+            - name: APP_BASE_URL
+              value: "https://saipriya.org"
+            - name: DEV_SERVER_BASE_URL
+              value: "https://*.saipriya.org"
+            - name: CORS_ORIGINS
+              value: "https://saipriya.org,https://*.saipriya.org"
+            - name: ALLOWED_HOSTS
+              value: "saipriya.org,*.saipriya.org"
+            # Kubernetes settings
+            - name: K8S_NAMESPACE_PER_PROJECT
+              value: "true"
+            - name: K8S_ENABLE_NETWORK_POLICIES
+              value: "true"
+            - name: K8S_STORAGE_CLASS
+              value: "tesslate-block-storage"
+            - name: K8S_PVC_SIZE
+              value: "5Gi"
+            - name: K8S_INGRESS_CLASS
+              value: "nginx"
+            - name: K8S_INGRESS_DOMAIN
+              value: "saipriya.org"
+            - name: K8S_DEVSERVER_IMAGE
+              value: "859561299901.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest"
+            - name: K8S_REGISTRY_URL
+              value: "859561299901.dkr.ecr.us-east-1.amazonaws.com"
+            - name: K8S_IMAGE_PULL_SECRET
+              value: ""
+            - name: K8S_IMAGE_PULL_POLICY
+              value: "Always"
+            - name: K8S_WILDCARD_TLS_SECRET
+              value: "tesslate-wildcard-tls"
+            # S3 - AWS native (IRSA handles auth)
+            - name: S3_ENDPOINT_URL
+              value: ""
+            - name: S3_BUCKET_NAME
+              value: "tesslate-projects-production-7761157a"
+            - name: S3_REGION
+              value: "us-east-1"
+            # Pod Affinity
+            - name: K8S_ENABLE_POD_AFFINITY
+              value: "true"
+            - name: K8S_AFFINITY_TOPOLOGY_KEY
+              value: "topology.kubernetes.io/zone"
+            # Hibernation
+            - name: K8S_HIBERNATION_IDLE_MINUTES
+              value: "30"
+            - name: K8S_HIBERNATION_GRACE_SECONDS
+              value: "120"
+            - name: K8S_DEHYDRATION_EXCLUDE_PATTERNS
+              value: "node_modules,.git,__pycache__,venv,.venv"
+            # Cookies
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: COOKIE_SAMESITE
+              value: "lax"
+            - name: COOKIE_DOMAIN
+              value: ".saipriya.org"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3

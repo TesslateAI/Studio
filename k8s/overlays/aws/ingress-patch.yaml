@@ -1,0 +1,113 @@
+# =============================================================================
+# AWS EKS Ingress Patch for saipriya.org
+# =============================================================================
+# Production ingress configuration with:
+# - NGINX Ingress Controller (for WebSocket support)
+# - cert-manager with Cloudflare DNS-01 challenge for wildcard TLS
+# - Proper routing for main app and user projects
+#
+# DNS Setup (Cloudflare):
+# - saipriya.org -> CNAME to NLB DNS name (or proxied A record)
+# - *.saipriya.org -> CNAME to NLB DNS name (or proxied A record)
+#
+# Cloudflare Settings:
+# - SSL/TLS mode: Full (strict)
+# - Edge Certificates: Enable Universal SSL
+# - Origin Server: Uses Let's Encrypt via cert-manager
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tesslate-ingress
+  namespace: tesslate
+  annotations:
+    # Use NGINX Ingress (recommended for WebSocket support)
+    kubernetes.io/ingress.class: nginx
+
+    # TLS via cert-manager with Let's Encrypt
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+    # Force HTTPS redirect
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # WebSocket support (essential for live reload, agent streaming)
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
+
+    # Large body size for file uploads
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+
+    # Use regex for wildcard routing
+    nginx.ingress.kubernetes.io/use-regex: "true"
+
+    # CORS configuration (handled by backend, but enable preflight)
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://saipriya.org, https://*.saipriya.org"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+
+    # Security headers via proxy-hide-header (configuration-snippet often blocked)
+    nginx.ingress.kubernetes.io/proxy-hide-header: "X-Powered-By"
+
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - saipriya.org
+        - "*.saipriya.org"
+      secretName: tesslate-wildcard-tls
+  rules:
+    # Main application at saipriya.org
+    - host: saipriya.org
+      http:
+        paths:
+          # API routes to backend
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-backend-service
+                port:
+                  number: 8000
+          # WebSocket endpoint for agent streaming
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-backend-service
+                port:
+                  number: 8000
+          # Health check endpoint
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-backend-service
+                port:
+                  number: 8000
+          # Everything else to frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tesslate-frontend-service
+                port:
+                  number: 80
+
+# =============================================================================
+# User Project Routing
+# =============================================================================
+# User project ingresses are created dynamically by the backend when containers
+# are started. They follow the pattern:
+#
+#   <container>.<project-slug>.saipriya.org -> Service in proj-<uuid> namespace
+#
+# Example: frontend.my-app-k3x8n2.saipriya.org
+#
+# The backend uses K8S_INGRESS_DOMAIN="saipriya.org" to construct these URLs.
+# See kubernetes_orchestrator.py -> create_ingress_for_container()
+# =============================================================================

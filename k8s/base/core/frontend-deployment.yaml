@@ -1,0 +1,64 @@
+# Tesslate Frontend Deployment
+# React app built with Vite, served via NGINX on port 80
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-frontend
+  namespace: tesslate
+  labels:
+    app: tesslate-frontend
+    component: frontend
+spec:
+  replicas: 1  # Overridden by overlays for production
+  selector:
+    matchLabels:
+      app: tesslate-frontend
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: tesslate-frontend
+        component: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: tesslate-frontend:latest  # Overridden by kustomization images
+        imagePullPolicy: IfNotPresent  # Overridden to Always for production
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: REACT_APP_API_URL
+          value: ""
+        - name: VITE_API_URL
+          value: ""
+        - name: VITE_ALLOWED_HOSTS
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: ALLOWED_HOSTS
+              optional: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3

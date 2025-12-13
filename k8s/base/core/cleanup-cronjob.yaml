@@ -1,0 +1,146 @@
+# Dev Environment Cleanup CronJob
+# Runs periodically to hibernate idle development environments
+# Uses S3 Sandwich pattern: idle → dehydrate to S3 → delete resources
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dev-environment-cleanup
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: cleanup
+spec:
+  # Run every 2 minutes to cleanup idle environments (5 min idle timeout)
+  schedule: "*/2 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid  # Don't run multiple cleanup jobs simultaneously
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: tesslate-cleanup
+        spec:
+          serviceAccountName: tesslate-backend-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: tesslate-backend:latest  # Overridden by kustomization images
+            imagePullPolicy: Always  # Always pull to get latest code changes
+            command: ["python", "-c"]
+            args:
+              - |
+                import asyncio
+                import sys
+                sys.path.append('/app')
+
+                from app.services.orchestration import get_orchestrator
+                from app.config import get_settings
+                import logging
+
+                logging.basicConfig(level=logging.INFO)
+                logger = logging.getLogger(__name__)
+
+                async def cleanup_idle_environments():
+                    """Clean up idle development environments using S3 sandwich pattern."""
+                    try:
+                        settings = get_settings()
+                        logger.info("Starting idle environment cleanup (S3 Sandwich mode)...")
+                        logger.info(f"Hibernation idle timeout: {settings.k8s_hibernation_idle_minutes} minutes")
+
+                        # Get the orchestrator (will be KubernetesOrchestrator)
+                        orchestrator = get_orchestrator()
+
+                        # Run cleanup - hibernates idle projects to S3
+                        cleaned = await orchestrator.cleanup_idle_environments(
+                            idle_timeout_minutes=settings.k8s_hibernation_idle_minutes
+                        )
+
+                        logger.info(f"Cleanup completed. Hibernated {len(cleaned)} environments")
+
+                        if cleaned:
+                            for env in cleaned:
+                                logger.info(f"  - Hibernated: {env}")
+
+                    except Exception as e:
+                        logger.error(f"Cleanup error: {e}", exc_info=True)
+                        sys.exit(1)
+
+                # Run the cleanup
+                asyncio.run(cleanup_idle_environments())
+            env:
+              - name: KUBERNETES_NAMESPACE
+                value: tesslate
+              - name: DEPLOYMENT_MODE
+                value: "kubernetes"
+              - name: DATABASE_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: DATABASE_URL
+              - name: SECRET_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: tesslate-app-secrets
+                    key: SECRET_KEY
+              - name: POSTGRES_HOST
+                value: "postgres"
+              - name: POSTGRES_PORT
+                value: "5432"
+              - name: POSTGRES_DB
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_DB
+              - name: POSTGRES_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_USER
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: POSTGRES_PASSWORD
+              # S3 credentials for dehydration
+              - name: S3_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: s3-credentials
+                    key: S3_ACCESS_KEY_ID
+              - name: S3_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: s3-credentials
+                    key: S3_SECRET_ACCESS_KEY
+              - name: S3_BUCKET_NAME
+                valueFrom:
+                  secretKeyRef:
+                    name: s3-credentials
+                    key: S3_BUCKET_NAME
+              - name: S3_ENDPOINT_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: s3-credentials
+                    key: S3_ENDPOINT_URL
+              - name: S3_REGION
+                valueFrom:
+                  secretKeyRef:
+                    name: s3-credentials
+                    key: S3_REGION
+              # Kubernetes configuration
+              - name: K8S_NAMESPACE_PER_PROJECT
+                value: "true"
+              - name: K8S_STORAGE_CLASS
+                value: "tesslate-block-storage"
+              - name: K8S_HIBERNATION_IDLE_MINUTES
+                value: "5"
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"

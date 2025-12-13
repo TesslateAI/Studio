@@ -16,10 +16,10 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-REGISTRY="registry.digitalocean.com/finetune"
+REGISTRY="registry.digitalocean.com/tesslate-container-registry-nyc3"
 BACKEND_IMAGE="${REGISTRY}/tesslate-backend:latest"
 FRONTEND_IMAGE="${REGISTRY}/tesslate-frontend:latest"
-DEV_SERVER_IMAGE="${REGISTRY}/tesslate-dev-server:latest"
+DEV_SERVER_IMAGE="${REGISTRY}/tesslate-devserver:latest"
 
 echo "Building and pushing Tesslate images to DigitalOcean Container Registry..."
 

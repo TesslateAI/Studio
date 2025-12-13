@@ -9,14 +9,17 @@ import os
 import asyncio
 import logging
 import shutil
-import docker
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from ..models import MarketplaceBase
 from ..database import AsyncSessionLocal
+from ..config import get_settings
+
+if TYPE_CHECKING:
+    import docker
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +32,37 @@ class BaseCacheManager:
         # Use Docker volume name for mounting to dev containers
         self.cache_volume_name = "tesslate-base-cache"
         self._initialized = False
-        self.docker_client = docker.from_env()
+        self._docker_client: Optional["docker.DockerClient"] = None
         self.dev_server_image = "tesslate-devserver:latest"
+
+    @property
+    def docker_client(self) -> "docker.DockerClient":
+        """Lazy-initialize Docker client only when needed (Docker mode only)."""
+        if self._docker_client is None:
+            import docker
+            self._docker_client = docker.from_env()
+        return self._docker_client
+
+    def _is_docker_mode(self) -> bool:
+        """Check if running in Docker mode."""
+        settings = get_settings()
+        return settings.deployment_mode == "docker"
 
     async def initialize_cache(self) -> None:
         """
         Initialize base cache on startup.
         Clones and installs all marketplace bases if not already cached.
+
+        Only runs in Docker mode - K8s mode uses S3 for file storage.
         """
         if self._initialized:
             logger.info("[BASE-CACHE] Already initialized, skipping")
+            return
+
+        # Skip cache initialization in K8s mode - no Docker socket available
+        if not self._is_docker_mode():
+            logger.info("[BASE-CACHE] Skipping cache initialization (Kubernetes mode)")
+            self._initialized = True
             return
 
         logger.info("[BASE-CACHE] Initializing marketplace base cache...")
@@ -275,8 +299,12 @@ class BaseCacheManager:
             base_slug: Slug of the marketplace base
 
         Returns:
-            Path to cached base, or None if not found
+            Path to cached base, or None if not found (always None in K8s mode)
         """
+        # In K8s mode, cache is not used - files come from S3
+        if not self._is_docker_mode():
+            return None
+
         base_path = self.cache_dir / base_slug
         if base_path.exists():
             return base_path
@@ -290,8 +318,12 @@ class BaseCacheManager:
             base_slug: Slug of the marketplace base
 
         Returns:
-            True if cached, False otherwise
+            True if cached, False otherwise (always False in K8s mode)
         """
+        # In K8s mode, cache is not used - files come from S3
+        if not self._is_docker_mode():
+            return False
+
         base_path = self.cache_dir / base_slug
         return base_path.exists()
 

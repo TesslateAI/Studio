@@ -1,481 +1,264 @@
 # Tesslate Studio Kubernetes Deployment
 
-This directory contains the complete Kubernetes manifests and scripts for deploying Tesslate Studio using kubeadm on a single server or multi-node cluster.
+This directory contains all Kubernetes manifests and scripts for deploying Tesslate Studio to DigitalOcean Managed Kubernetes (DOKS).
 
 ## Directory Structure
 
 ```
 k8s/
 ├── manifests/
-│   ├── base/               # Core infrastructure (namespaces, storage, network policies)
-│   ├── database/           # PostgreSQL deployment and configuration
-│   ├── app/                # Application deployments (backend, frontend)
-│   └── registry/           # Local Docker registry for container images
+│   ├── archived/           # Archived configs (k3s, local dev, local registry)
+│   ├── base/               # Namespace and network policies
+│   ├── core/               # Application deployments (backend, frontend, ingress)
+│   ├── database/           # PostgreSQL deployment
+│   ├── ingress/            # NGINX ingress configuration
+│   ├── secrets/            # S3/Spaces credentials docs
+│   ├── security/           # App secrets, RBAC, resource quotas
+│   ├── storage/            # Dynamic storage class
+│   └── user-environments/  # User dev environment namespace config
 ├── scripts/
-│   ├── 01-prepare-server.sh     # Server preparation script
-│   ├── 02-install-kubernetes.sh # Kubernetes installation
-│   ├── 03-configure-cluster.sh  # Cluster configuration and add-ons
-│   ├── 04-deploy-tesslate.sh    # Application deployment
-│   ├── build-images.sh          # Docker image building
-│   ├── setup-all.sh             # Complete setup orchestration
-│   └── manage-tesslate.sh       # Management utilities
-├── docs/
-│   ├── KUBERNETES_DEPLOYMENT_GUIDE.md      # Comprehensive deployment guide
-│   ├── PRODUCTION_DEPLOYMENT_STRATEGY.md   # Production deployment strategies
-│   └── SERVERLESS_CONTAINER_ARCHITECTURE.md # Serverless architecture docs
-├── local-dev/
-│   ├── LOCAL_K8S_README.md      # Local development setup guide
-│   ├── k8s-local-setup.sh       # Local k8s in Docker setup (Linux/macOS)
-│   ├── k8s-local-helper.sh      # Local k8s management helper
-│   ├── k8s-local-windows.ps1    # Local k8s in Docker setup (Windows)
-│   ├── deploy-to-local-k8s.sh   # Deploy to local k8s (Linux/macOS)
-│   └── deploy-to-local-k8s.ps1  # Deploy to local k8s (Windows)
-└── README.md
+│   ├── deployment/         # Production deployment scripts
+│   ├── local-deployment/   # Local/self-hosted deployment scripts
+│   ├── testing/            # Testing and validation scripts
+│   ├── generate-secrets.sh # Secret generation script (Linux/macOS)
+│   └── generate-secrets.bat # Secret generation script (Windows)
+├── .env                    # DOCR token (not committed)
+├── .env.example            # Environment template
+└── README.md               # This file
 ```
 
-## Quick Start (Single Server)
+## Quick Start (DigitalOcean)
 
 ### Prerequisites
 
-- Ubuntu 22.04 LTS server (or compatible)
-- Minimum 2-4 CPU cores, 4-8GB RAM, 100GB SSD
-- Static IP address
-- Root or sudo access
+- DigitalOcean account with Kubernetes cluster
+- `doctl` and `kubectl` CLI tools installed
+- Docker installed locally
 
-### Choose Your Kubernetes Distribution
-
-#### Option 1: k3s (Recommended for Single Server)
-**Faster, lighter, easier to manage**
+### 1. Connect to Cluster
 
 ```bash
-# Clone the repository
-git clone https://github.com/TesslateAI/Studio.git
-cd Studio/k8s/scripts
+# Authenticate with DigitalOcean
+doctl auth init
 
-# Run k3s setup (much faster!)
-sudo ./k3s-setup-all.sh 192.168.1.100
+# Connect to cluster
+doctl kubernetes cluster kubeconfig save tesslate-studio-nyc2
+
+# Verify connection
+kubectl get nodes
 ```
 
-#### Option 2: Full Kubernetes with kubeadm
-**More customizable, better for multi-node clusters**
+### 2. Configure Environment
 
 ```bash
-# Run complete kubeadm setup
-sudo ./setup-all.sh 192.168.1.100
+cd k8s
+
+# Copy environment template
+cp .env.example .env
+
+# Edit .env and add your DOCR token
+# Get token from: https://cloud.digitalocean.com/account/api/tokens
+```
+
+### 3. Generate Secrets
+
+```bash
+# Linux/macOS
+./scripts/generate-secrets.sh
+
+# Windows
+scripts\generate-secrets.bat
+```
+
+### 4. Deploy
+
+```bash
+cd scripts/deployment
+./deploy-all.sh
 ```
 
 This will:
-1. Prepare the server (disable swap, install containerd)
-2. Install Kubernetes components (kubeadm, kubelet, kubectl)
-3. Initialize the cluster and install CNI
-4. Install Ingress Controller and cert-manager
-5. Build application Docker images
-6. Deploy Tesslate Studio
+1. Install NGINX Ingress Controller
+2. Install cert-manager for SSL
+3. Setup registry authentication
+4. Build and push Docker images
+5. Deploy PostgreSQL, backend, and frontend
 
-### Manual Step-by-Step Installation
+## Production Configuration
 
-```bash
-# Step 1: Prepare the server
-sudo ./01-prepare-server.sh
+| Setting | Value |
+|---------|-------|
+| **Cluster** | tesslate-studio-nyc2 (DigitalOcean NYC2) |
+| **Registry** | registry.digitalocean.com/tesslate-container-registry-nyc3/ |
+| **Namespace** | tesslate |
+| **User Environments** | tesslate-user-environments |
+| **Domain** | Configurable via APP_DOMAIN secret |
 
-# Step 2: Install Kubernetes
-sudo ./02-install-kubernetes.sh <SERVER_IP>
+### Current Deployments
 
-# Step 3: Configure cluster
-sudo ./03-configure-cluster.sh
-
-# Step 4: Build Docker images
-./build-images.sh
-
-# Step 5: Deploy application
-./04-deploy-tesslate.sh
-```
-
-## Configuration
-
-### DigitalOcean Container Registry Authentication
-
-Before deploying to production, configure your DigitalOcean Container Registry token:
-
-```bash
-# Navigate to k8s directory
-cd k8s
-
-# Copy the example file
-cp .env.example .env
-
-# Edit .env and replace YOUR_DOCR_TOKEN_HERE with your actual token
-# Get your token from: https://cloud.digitalocean.com/account/api/tokens
-```
-
-The `.env` file should contain:
-```
-DOCR_TOKEN=your_actual_token_here
-```
-
-**Important**: The `.env` file is already in `.gitignore` and will not be committed.
-
-### Secrets Setup
-
-Before deploying to production, you must configure all secrets. Follow these steps:
-
-#### Step 1: Create Secret Files
-
-```bash
-# Navigate to manifests directory
-cd k8s/manifests
-
-# Copy example files to create actual secret files
-cp security/app-secrets.yaml.example security/app-secrets.yaml
-cp database/postgres-secret.yaml.example database/postgres-secret.yaml
-
-# Secure file permissions (Unix/Linux/Mac)
-chmod 600 security/app-secrets.yaml
-chmod 600 database/postgres-secret.yaml
-```
-
-#### Step 2: Generate Strong Passwords
-
-Use these commands to generate cryptographically secure passwords:
-
-```bash
-# Generate 64-character secrets (for JWT, SECRET_KEY)
-openssl rand -base64 64
-
-# Generate 32-character passwords (for database)
-openssl rand -base64 32
-```
-
-#### Step 3: Configure PostgreSQL Secrets
-
-Edit `k8s/manifests/database/postgres-secret.yaml`:
-
-```bash
-# Generate passwords
-POSTGRES_PASSWORD=$(openssl rand -base64 32)
-POSTGRES_ROOT_PASSWORD=$(openssl rand -base64 32)
-
-echo "POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
-echo "POSTGRES_ROOT_PASSWORD: $POSTGRES_ROOT_PASSWORD"
-```
-
-**Important**: Keep the generated POSTGRES_PASSWORD - you'll need it for the next step!
-
-#### Step 4: Configure Application Secrets
-
-Edit `k8s/manifests/security/app-secrets.yaml`:
-
-**Required Values:**
-
-1. **SECRET_KEY** (Application Secret)
-   ```bash
-   SECRET_KEY=$(openssl rand -base64 64)
-   echo "SECRET_KEY: $SECRET_KEY"
-   ```
-
-2. **JWT_SECRET** (JWT Signing Key)
-   ```bash
-   JWT_SECRET=$(openssl rand -base64 64)
-   echo "JWT_SECRET: $JWT_SECRET"
-   ```
-
-3. **DATABASE_URL** - Format:
-   ```
-   postgresql+asyncpg://tesslate_user:<POSTGRES_PASSWORD>@postgres.tesslate.svc.cluster.local:5432/tesslate
-   ```
-   Replace `<POSTGRES_PASSWORD>` with the password from Step 3.
-
-4. **AI Service Credentials**:
-   - `OPENAI_API_KEY`: Your AI provider API key
-   - `OPENAI_API_BASE`: API endpoint URL (e.g., `https://api.openai.com/v1`)
-   - `OPENAI_MODEL`: Model identifier (e.g., `gpt-5-turbo`)
-
-#### Step 5: Verify Secret Files
-
-```bash
-# Check files exist
-ls -la k8s/manifests/security/app-secrets.yaml
-ls -la k8s/manifests/database/postgres-secret.yaml
-
-# Verify no "REPLACE_WITH" placeholders remain
-grep -i "REPLACE_WITH" k8s/manifests/security/app-secrets.yaml
-grep -i "REPLACE_WITH" k8s/manifests/database/postgres-secret.yaml
-# Should return nothing
-
-# Confirm files are in .gitignore
-git status k8s/manifests/security/app-secrets.yaml
-git status k8s/manifests/database/postgres-secret.yaml
-# Should show: "nothing to commit" or file not tracked
-```
-
-#### Step 6: Deploy Secrets to Kubernetes
-
-```bash
-# Deploy PostgreSQL secret
-kubectl apply -f k8s/manifests/database/postgres-secret.yaml
-
-# Deploy application secrets
-kubectl apply -f k8s/manifests/security/app-secrets.yaml
-
-# Verify secrets were created
-kubectl get secrets -n tesslate
-```
-
-#### Security Checklist
-
-Before deploying to production, ensure:
-- [ ] All secrets generated with `openssl rand`
-- [ ] No "REPLACE_WITH" or "changeme" values remain
-- [ ] DATABASE_URL password matches POSTGRES_PASSWORD
-- [ ] All secrets are at least 32 characters
-- [ ] Secret files are in .gitignore
-- [ ] Secrets NOT committed to git
-- [ ] Backup stored in password manager
-- [ ] All pods start successfully
-- [ ] Application can connect to database
-
-**See also**: `manifests/security/SECRETS_SETUP_GUIDE.md` for detailed instructions and troubleshooting
-
-### Environment Variables
-
-Configure environment variables in:
-- **Backend config**: `manifests/app/02-backend-configmap.yaml`
+- **Backend**: 2 replicas, FastAPI on port 8000
+- **Frontend**: 2 replicas, nginx serving React on port 80
+- **PostgreSQL**: 1 replica on port 5432
 
 ### Storage
 
-By default, uses local storage at `/opt/k8s-data/`. Modify PersistentVolume definitions in `manifests/base/03-persistent-volumes.yaml` to change paths.
+- **postgres-pvc**: 20Gi for PostgreSQL data
+- **tesslate-projects-pvc**: 5Gi for user projects (DO Block Storage)
 
-## Management
+## Deployment Scripts
 
-### Using the Management Script
+### Production (DigitalOcean)
 
 ```bash
-# Check status
-./scripts/manage-tesslate.sh status
+cd k8s/scripts/deployment
 
-# View logs
-./scripts/manage-tesslate.sh logs backend
-./scripts/manage-tesslate.sh logs frontend
-
-# Restart services
-./scripts/manage-tesslate.sh restart backend
-
-# Scale deployments
-./scripts/manage-tesslate.sh scale backend 3
-
-# Database backup
-./scripts/manage-tesslate.sh backup
-
-# Port forwarding for local access
-./scripts/manage-tesslate.sh port-forward
-
-# Update secrets
-./scripts/manage-tesslate.sh secrets
+./deploy-all.sh              # Full deployment
+./build-push-images.sh       # Build and push images
+./deploy-application.sh      # Deploy manifests only
+./deploy-user-namespace.sh   # Setup user environments
+./install-prerequisites.sh   # Install ingress + cert-manager
+./setup-registry-auth.sh     # Configure DOCR authentication
+./verify-deployment.sh       # Verify deployment status
+./cleanup.sh                 # Remove all resources
 ```
 
-### Common kubectl Commands
+### Local/Self-Hosted (k3s/kubeadm)
 
 ```bash
-# View all pods
-kubectl get pods -n tesslate
+cd k8s/scripts/local-deployment
 
-# View logs
+./setup-all.sh               # Full local setup
+./k3s-setup-all.sh          # k3s-specific setup
+./build-images.sh           # Build images locally
+./deploy-tesslate.sh        # Deploy to local cluster
+./manage-tesslate.sh        # Management utilities
+```
+
+## Common Commands
+
+### View Status
+
+```bash
+# All resources
+kubectl get all -n tesslate
+
+# Pods with status
+kubectl get pods -n tesslate -w
+
+# Ingress and load balancer
+kubectl get ingress -n tesslate
+kubectl get svc -n ingress-nginx
+
+# SSL certificates
+kubectl get certificates -n tesslate
+```
+
+### View Logs
+
+```bash
 kubectl logs -f deployment/tesslate-backend -n tesslate
+kubectl logs -f deployment/tesslate-frontend -n tesslate
+kubectl logs deployment/postgres -n tesslate
+```
 
-# Execute commands in pods
-kubectl exec -it deployment/postgres -n tesslate -- psql -U tesslate_user
+### Restart Deployments
 
-# Describe resources
+```bash
+kubectl rollout restart deployment/tesslate-backend -n tesslate
+kubectl rollout restart deployment/tesslate-frontend -n tesslate
+```
+
+### Scale
+
+```bash
+kubectl scale deployment tesslate-backend --replicas=3 -n tesslate
+kubectl scale deployment tesslate-frontend --replicas=3 -n tesslate
+```
+
+### Database Operations
+
+```bash
+# Connect to PostgreSQL
+kubectl exec -it deployment/postgres -n tesslate -- psql -U tesslate_user -d tesslate
+
+# Backup
+kubectl exec -n tesslate deployment/postgres -- \
+  pg_dump -U tesslate_user tesslate > backup-$(date +%Y%m%d).sql
+```
+
+### Debug
+
+```bash
+# Describe pod for issues
 kubectl describe pod <pod-name> -n tesslate
 
-# Port forward for debugging
-kubectl port-forward service/tesslate-frontend-service 3000:80 -n tesslate
+# Recent events
+kubectl get events -n tesslate --sort-by='.lastTimestamp'
+
+# Shell into pod
+kubectl exec -it deployment/tesslate-backend -n tesslate -- /bin/bash
 ```
-
-## Architecture
-
-### Namespaces
-
-- **tesslate**: Main application namespace (backend, frontend, database)
-- **tesslate-registry**: Docker registry for container images
-- **tesslate-monitoring**: Monitoring stack (Prometheus, Grafana) - optional
-
-### Services
-
-- **Backend**: FastAPI application on port 8005
-- **Frontend**: React application served by nginx on port 80
-- **PostgreSQL**: Database on port 5432
-- **Registry**: Docker registry on NodePort 30500
-
-### Ingress
-
-- HTTP: `http://<SERVER_IP>:30080`
-- HTTPS: `https://<SERVER_IP>:30443`
-- Hostname: `tesslate.local`
-
-### Storage
-
-- PostgreSQL data: 20Gi PVC
-- Project files: 50Gi PVC (shared between backend pods)
-- Registry: 30Gi PVC
-
-## Networking
-
-### Access Points
-
-After deployment, access the application at:
-
-- **Web Interface**: `http://<SERVER_IP>:30080`
-- **API Endpoint**: `http://<SERVER_IP>:30080/api`
-- **Docker Registry**: `<SERVER_IP>:30500`
-
-### Configure Local Access
-
-Add to `/etc/hosts`:
-```
-<SERVER_IP> tesslate.local
-```
-
-Then access: `http://tesslate.local:30080`
 
 ## Troubleshooting
 
 ### Pods Not Starting
 
 ```bash
-# Check pod status
 kubectl describe pod <pod-name> -n tesslate
-
-# Check events
-kubectl get events -n tesslate --sort-by='.lastTimestamp'
+kubectl logs <pod-name> -n tesslate
 ```
 
-### Database Connection Issues
+### Image Pull Errors
 
 ```bash
-# Check PostgreSQL pod
+# Recreate registry secret
+cd k8s/scripts/deployment
+./setup-registry-auth.sh
+```
+
+### Certificate Issues
+
+```bash
+kubectl describe certificate tesslate-domain-cert -n tesslate
+kubectl logs -n cert-manager deployment/cert-manager
+```
+
+### Database Connection Failed
+
+```bash
+# Check postgres logs
 kubectl logs deployment/postgres -n tesslate
 
-# Test connection
-kubectl run -it --rm debug --image=postgres:15 --restart=Never -- psql -h postgres.tesslate.svc.cluster.local -U tesslate_user
+# Verify secrets match
+kubectl get secret postgres-secret -n tesslate -o yaml
+kubectl get secret tesslate-app-secrets -n tesslate -o yaml | grep DATABASE_URL
 ```
 
-### Ingress Not Working
+## Architecture
 
-```bash
-# Check ingress controller
-kubectl get pods -n ingress-nginx
+### Namespaces
 
-# Check ingress configuration
-kubectl describe ingress tesslate-ingress -n tesslate
-```
+- **tesslate**: Main application (backend, frontend, database)
+- **tesslate-user-environments**: Dynamic user development containers
 
-### Storage Issues
+### User Environments
 
-```bash
-# Check PVC status
-kubectl get pvc -n tesslate
+User development environments are created dynamically by the backend:
+- Unique deployments, services, and ingresses per user/project
+- Subdomain routing: `{project-slug}.{domain}`
+- Automatic cleanup via CronJob (every 30 minutes for idle environments)
+- Resource quotas: 50 pods max, 20 CPU / 40GB RAM limits
 
-# Check PV status
-kubectl get pv
-```
+### Ingress
 
-## Scaling
-
-### Horizontal Scaling
-
-```bash
-# Scale backend
-kubectl scale deployment tesslate-backend --replicas=3 -n tesslate
-
-# Scale frontend
-kubectl scale deployment tesslate-frontend --replicas=3 -n tesslate
-```
-
-### Adding Worker Nodes
-
-```bash
-# On master node, generate join command
-kubeadm token create --print-join-command
-
-# On worker node, run the join command
-sudo <join-command-from-above>
-```
-
-## Backup and Recovery
-
-### Database Backup
-
-```bash
-# Manual backup
-./scripts/manage-tesslate.sh backup
-
-# Scheduled backup (add to crontab)
-0 2 * * * /path/to/scripts/manage-tesslate.sh backup
-```
-
-### Database Restore
-
-```bash
-./scripts/manage-tesslate.sh restore backup_file.sql
-```
-
-### Full Cluster Backup
-
-For production, consider using Velero for complete cluster backup.
-
-## Security Considerations
-
-1. **Change all default passwords** before production deployment
-2. **Enable RBAC** for fine-grained access control
-3. **Use TLS/SSL** for all external communications
-4. **Implement network policies** to restrict pod-to-pod communication
-5. **Regular security updates** for cluster and applications
-6. **Use secrets management** solutions like Sealed Secrets or External Secrets
-
-## Migration from Docker Compose
-
-If migrating from the existing Docker Compose setup:
-
-1. Backup PostgreSQL data from Docker environment
-2. Build and push Docker images
-3. Deploy to Kubernetes
-4. Restore data to Kubernetes PostgreSQL
-5. Update DNS/proxy settings
-
-## Local Development
-
-For local testing using Docker containers instead of a real server:
-
-```bash
-# Navigate to local development directory
-cd local-dev/
-
-# For Linux/macOS
-./k8s-local-setup.sh
-./deploy-to-local-k8s.sh
-
-# For Windows (PowerShell)
-.\k8s-local-windows.ps1
-.\deploy-to-local-k8s.ps1
-```
-
-See [local-dev/LOCAL_K8S_README.md](local-dev/LOCAL_K8S_README.md) for complete local development setup.
+- NGINX Ingress Controller with DigitalOcean Load Balancer
+- SSL/TLS via Let's Encrypt (cert-manager)
+- Wildcard certificate for user environments
 
 ## Documentation
 
-- **[docs/K3S_DEPLOYMENT_GUIDE.md](docs/K3S_DEPLOYMENT_GUIDE.md)**: k3s deployment guide (recommended for single-server)
-- **[docs/KUBERNETES_DEPLOYMENT_GUIDE.md](docs/KUBERNETES_DEPLOYMENT_GUIDE.md)**: Full Kubernetes deployment with kubeadm
-- **[docs/PRODUCTION_DEPLOYMENT_STRATEGY.md](docs/PRODUCTION_DEPLOYMENT_STRATEGY.md)**: Production deployment strategies and best practices
-- **[docs/SERVERLESS_CONTAINER_ARCHITECTURE.md](docs/SERVERLESS_CONTAINER_ARCHITECTURE.md)**: Serverless architecture documentation
-
-## Support
-
-For issues or questions:
-- Check the [main deployment guide](docs/KUBERNETES_DEPLOYMENT_GUIDE.md)
-- Review logs using `kubectl logs`
-- Check cluster events with `kubectl get events`
-
-## License
-
-See the main project LICENSE file.
+- [DIGITALOCEAN_QUICKSTART.md](DIGITALOCEAN_QUICKSTART.md) - Fast deployment guide
+- [DIGITALOCEAN_DEPLOYMENT_CHECKLIST.md](DIGITALOCEAN_DEPLOYMENT_CHECKLIST.md) - Detailed checklist
+- [CLOUDFLARE_SETUP.md](CLOUDFLARE_SETUP.md) - Cloudflare DNS/SSL setup
+- [DEPLOYMENT_SUMMARY.md](DEPLOYMENT_SUMMARY.md) - Deployment overview
+- [scripts/deployment/README.md](scripts/deployment/README.md) - Script documentation

@@ -110,27 +110,61 @@ async def initialize_container_async(
             container_path = f"{project.slug}/{container_dir}"
 
         # Check if THIS container's directory has files (not just project root)
-        container_has_files = await orchestrator.project_has_files(project.slug, subdir=target_subdir)
+        # In K8s mode, we always initialize files via file-manager pod
+        if not is_docker_mode():
+            # KUBERNETES MODE: Initialize files via file-manager pod
+            task.update_progress(40, 100, "Initializing container files (K8s mode)...")
 
-        if not container_has_files:
-            # This container's directory is empty - copy base files
-            task.update_progress(40, 100, "Copying base files...")
-            if cached_base_path and os.path.exists(cached_base_path):
-                logger.info(f"[CONTAINER-INIT] Copying base files from cache to /projects/{container_path}")
-                await orchestrator.copy_base_to_project(
-                    base_slug,
-                    project.slug,
-                    exclude_patterns=['.git', '__pycache__', '*.pyc'],
-                    target_subdir=target_subdir  # Copy to container's subdirectory
+            # Get git URL from base if available
+            git_url = git_repo_url  # Use passed in URL as fallback
+
+            # Try to get base from DB to get git_repo_url
+            if container.base_id:
+                base_query = await db.execute(
+                    select(MarketplaceBase).where(MarketplaceBase.id == container.base_id)
                 )
-                logger.info(f"[CONTAINER-INIT] Successfully copied from cache to {container_path}")
+                base = base_query.scalar_one_or_none()
+                if base and base.git_repo_url:
+                    git_url = base.git_repo_url
+                    logger.info(f"[CONTAINER-INIT] Using base git URL: {git_url}")
+
+            # Initialize files via K8s orchestrator
+            logger.info(f"[CONTAINER-INIT] K8s mode: Initializing files for {container_dir}")
+            success = await orchestrator.initialize_container_files(
+                project_id=project_id,
+                user_id=user_id,
+                container_id=container_id,
+                container_directory=container_dir if container_dir != '.' else container.name.lower().replace(' ', '-'),
+                git_url=git_url
+            )
+
+            if success:
+                logger.info(f"[CONTAINER-INIT] ✅ K8s files initialized for {container.name}")
             else:
-                logger.warning(f"[CONTAINER-INIT] Base {base_slug} not in cache, skipping file copy")
-                # TODO: Fallback to git clone into volume
+                logger.error(f"[CONTAINER-INIT] ❌ K8s file initialization failed for {container.name}")
         else:
-            # Container directory already has files
-            task.update_progress(40, 100, "Using existing project files...")
-            logger.info(f"[CONTAINER-INIT] Reusing existing files at /projects/{container_path}")
+            # DOCKER MODE: Copy from cache as before
+            container_has_files = await orchestrator.project_has_files(project.slug, subdir=target_subdir)
+
+            if not container_has_files:
+                # This container's directory is empty - copy base files
+                task.update_progress(40, 100, "Copying base files...")
+                if cached_base_path and os.path.exists(cached_base_path):
+                    logger.info(f"[CONTAINER-INIT] Copying base files from cache to /projects/{container_path}")
+                    await orchestrator.copy_base_to_project(
+                        base_slug,
+                        project.slug,
+                        exclude_patterns=['.git', '__pycache__', '*.pyc'],
+                        target_subdir=target_subdir  # Copy to container's subdirectory
+                    )
+                    logger.info(f"[CONTAINER-INIT] Successfully copied from cache to {container_path}")
+                else:
+                    logger.warning(f"[CONTAINER-INIT] Base {base_slug} not in cache, skipping file copy")
+                    # TODO: Fallback to git clone into volume
+            else:
+                # Container directory already has files
+                task.update_progress(40, 100, "Using existing project files...")
+                logger.info(f"[CONTAINER-INIT] Reusing existing files at /projects/{container_path}")
 
         # Step 3: Regenerate orchestrator configuration (docker-compose.yml in Docker mode)
         if is_docker_mode():
