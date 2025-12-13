@@ -39,8 +39,8 @@ import {
   ArrowClockwise,
   FloppyDisk
 } from '@phosphor-icons/react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
+import api from '../../lib/api';
 
 const lowlight = createLowlight(common);
 
@@ -70,7 +70,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
       Link.configure({
         openOnClick: false,
         HTMLAttributes: {
-          class: 'text-orange-400 hover:text-orange-300 underline cursor-pointer',
+          class: 'text-[var(--primary)] hover:text-[var(--primary-hover)] underline cursor-pointer',
         },
       }).extend({
         name: 'customLink', // Rename to avoid conflict with StarterKit
@@ -138,10 +138,8 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
 
   const loadNotes = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(
-        `${API_URL}/api/kanban/projects/${projectSlug}/notes`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const response = await api.get(
+        `/api/kanban/projects/${projectSlug}/notes`
       );
 
       if (editor && response.data.content) {
@@ -159,14 +157,12 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
   const saveNotes = async (content: string) => {
     try {
       setIsSaving(true);
-      const token = localStorage.getItem('token');
-      await axios.put(
-        `${API_URL}/api/kanban/projects/${projectSlug}/notes`,
+      await api.put(
+        `/api/kanban/projects/${projectSlug}/notes`,
         {
           content,
           content_format: 'html'
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
+        }
       );
       setLastSaved(new Date());
     } catch (error: any) {
@@ -224,7 +220,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleBold().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('bold') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('bold') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Bold (Ctrl+B)"
             >
@@ -233,7 +229,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleItalic().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('italic') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('italic') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Italic (Ctrl+I)"
             >
@@ -242,7 +238,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('underline') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('underline') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Underline (Ctrl+U)"
             >
@@ -251,7 +247,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleStrike().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('strike') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('strike') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Strikethrough"
             >
@@ -260,7 +256,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleHighlight().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('highlight') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('highlight') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Highlight"
             >
@@ -273,7 +269,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('heading', { level: 1 }) ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('heading', { level: 1 }) ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Heading 1"
             >
@@ -282,7 +278,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('heading', { level: 2 }) ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('heading', { level: 2 }) ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Heading 2"
             >
@@ -291,7 +287,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('heading', { level: 3 }) ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('heading', { level: 3 }) ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Heading 3"
             >
@@ -304,7 +300,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('bulletList') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('bulletList') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Bullet List"
             >
@@ -313,7 +309,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('orderedList') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('orderedList') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Numbered List"
             >
@@ -322,7 +318,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleTaskList().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('taskList') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('taskList') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Task List"
             >
@@ -335,7 +331,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().setTextAlign('left').run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive({ textAlign: 'left' }) ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive({ textAlign: 'left' }) ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Align Left"
             >
@@ -344,7 +340,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().setTextAlign('center').run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive({ textAlign: 'center' }) ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive({ textAlign: 'center' }) ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Align Center"
             >
@@ -353,7 +349,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().setTextAlign('right').run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive({ textAlign: 'right' }) ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive({ textAlign: 'right' }) ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Align Right"
             >
@@ -366,7 +362,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('codeBlock') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('codeBlock') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Code Block"
             >
@@ -375,7 +371,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={() => editor.chain().focus().toggleBlockquote().run()}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('blockquote') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('blockquote') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Quote"
             >
@@ -384,7 +380,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
             <button
               onClick={addLink}
               className={`p-2 rounded hover:bg-white/10 transition-colors ${
-                editor.isActive('link') ? 'bg-orange-500/20 text-orange-400' : 'text-[var(--text)]/60'
+                editor.isActive('link') ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]' : 'text-[var(--text)]/60'
               }`}
               title="Add Link"
             >

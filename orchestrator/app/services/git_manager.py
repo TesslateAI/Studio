@@ -11,7 +11,6 @@ from datetime import datetime
 import logging
 
 from ..config import get_settings
-from ..dev_server_manager import get_container_manager
 from ..utils.resource_naming import get_project_path
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,8 @@ class GitManager:
         self.user_id = user_id
         self.project_id = project_id
         self.settings = get_settings()
-        self.container_manager = get_container_manager()
+        # TODO: Update for multi-container system - need to determine which container to run git commands in
+        self.container_manager = None
 
     async def _execute_git_command(
         self,
@@ -58,26 +58,17 @@ class GitManager:
         command = ["/bin/sh", "-c", f"cd {project_path} && git {' '.join(shlex.quote(arg) for arg in git_args)}"]
 
         try:
-            # Use the container manager to execute the command
-            if self.settings.deployment_mode == "kubernetes":
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
-                output = await k8s_manager.execute_command_in_pod(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=command,
-                    timeout=timeout
-                )
-            else:
-                # Docker mode
-                from ..docker_container_manager import DockerContainerManager
-                docker_manager: DockerContainerManager = self.container_manager
-                output = await docker_manager.execute_command_in_container(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=command,
-                    timeout=timeout
-                )
+            # Use the unified orchestrator to execute the command
+            from .orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            output = await orchestrator.execute_command(
+                user_id=self.user_id,
+                project_id=self.project_id,
+                container_name=None,  # Use default container
+                command=command,
+                timeout=timeout
+            )
 
             return output.strip()
 
@@ -164,7 +155,8 @@ class GitManager:
                 repo_url = repo_url.replace("https://github.com/", f"https://{auth_token}@github.com/")
 
             # Direct filesystem clone (for Docker mode without container)
-            if direct_to_filesystem and self.settings.deployment_mode == "docker":
+            from .orchestration import is_docker_mode
+            if direct_to_filesystem and is_docker_mode():
                 import asyncio
                 import os
 
@@ -219,24 +211,16 @@ class GitManager:
                 "rm -rf /tmp/git-clone"
             ]
 
-            if self.settings.deployment_mode == "kubernetes":
-                from ..k8s_client import get_k8s_manager
-                k8s_manager = get_k8s_manager()
-                await k8s_manager.execute_command_in_pod(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=move_command,
-                    timeout=60
-                )
-            else:
-                from ..docker_container_manager import DockerContainerManager
-                docker_manager: DockerContainerManager = self.container_manager
-                await docker_manager.execute_command_in_container(
-                    user_id=self.user_id,
-                    project_id=self.project_id,
-                    command=move_command,
-                    timeout=60
-                )
+            from .orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            await orchestrator.execute_command(
+                user_id=self.user_id,
+                project_id=self.project_id,
+                container_name=None,  # Use default container
+                command=move_command,
+                timeout=60
+            )
 
             logger.info(f"[GIT] Repository files moved to project directory")
             return True

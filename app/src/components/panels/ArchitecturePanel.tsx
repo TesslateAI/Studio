@@ -12,6 +12,7 @@ interface ArchitecturePanelProps {
 export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
   const { theme } = useTheme();
   const [diagram, setDiagram] = useState<string>('');
+  const [diagramType, setDiagramType] = useState<'mermaid' | 'c4_plantuml'>('mermaid');
   const [loading, setLoading] = useState(false);
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [modelUsed, setModelUsed] = useState<string>('');
@@ -65,11 +66,11 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
       },
     });
 
-    // Re-render diagram when theme changes
-    if (diagram) {
+    // Re-render diagram when theme or diagram changes (but not during initial load)
+    if (diagram && !loadingInitial) {
       renderDiagram();
     }
-  }, [theme, diagram]);
+  }, [theme, diagram, diagramType, loadingInitial]);
 
   useEffect(() => {
     // Load saved diagram on mount
@@ -82,6 +83,10 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
       if (data.architecture_diagram) {
         setDiagram(data.architecture_diagram);
       }
+      // Load diagram type (defaults to mermaid for backwards compatibility)
+      if (data.diagram_type) {
+        setDiagramType(data.diagram_type);
+      }
     } catch (error) {
       console.error('Failed to load saved diagram:', error);
     } finally {
@@ -89,24 +94,89 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
     }
   };
 
+  const sanitizeDiagram = (diagramCode: string): string => {
+    // Client-side sanitization for Mermaid syntax
+    let sanitized = diagramCode;
+
+    // Remove double quotes from node labels: ["text"] -> [text]
+    sanitized = sanitized.replace(/\["([^"]+)"\]/g, '[$1]');
+    sanitized = sanitized.replace(/\("([^"]+)"\)/g, '($1)');
+    sanitized = sanitized.replace(/\{"([^"]+)"\}/g, '{$1}');
+
+    // Replace @ symbol which causes parsing issues
+    sanitized = sanitized.replace(/@/g, 'at-');
+
+    // Remove stray quotes from node/edge definitions
+    const lines = sanitized.split('\n');
+    const cleanedLines = lines.map(line => {
+      // Skip directive lines
+      if (line.trim().startsWith('graph') ||
+          line.trim().startsWith('flowchart') ||
+          line.trim().startsWith('%%') ||
+          line.trim().startsWith('classDef') ||
+          line.trim().startsWith('class ') ||
+          line.trim().startsWith('style ')) {
+        return line;
+      }
+      // Remove stray quotes from other lines
+      return line.replace(/"/g, '');
+    });
+
+    return cleanedLines.join('\n');
+  };
+
   const renderDiagram = async () => {
+    if (!diagram) {
+      setDiagramSvg('');
+      return;
+    }
+
     try {
-      const uniqueId = `mermaid-diagram-${Date.now()}`;
-      const { svg } = await mermaid.render(uniqueId, diagram);
-      setDiagramSvg(svg);
+      if (diagramType === 'c4_plantuml') {
+        // For PlantUML, use Kroki API to render the diagram
+        const krokiUrl = 'https://kroki.io/c4plantuml/svg';
+
+        const response = await fetch(krokiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain',
+          },
+          body: diagram
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to render PlantUML diagram via Kroki');
+        }
+
+        const svgText = await response.text();
+        setDiagramSvg(svgText);
+      } else {
+        // Mermaid rendering (using local mermaid library for better control)
+        const sanitized = sanitizeDiagram(diagram);
+        const uniqueId = `mermaid-diagram-${Date.now()}`;
+        const { svg } = await mermaid.render(uniqueId, sanitized);
+        setDiagramSvg(svg);
+      }
     } catch (error) {
-      console.error('Failed to render Mermaid diagram:', error);
-      toast.error('Failed to render diagram');
+      console.error('Failed to render diagram:', error);
+      // Clear the broken diagram SVG
+      setDiagramSvg('');
+      // Only show error once, not on every render
+      if (diagram) {
+        toast.error('Failed to render diagram. Please regenerate it.', { id: 'diagram-error' });
+      }
     }
   };
 
-  const handleGenerateDiagram = async () => {
+  const handleGenerateDiagram = async (type?: 'mermaid' | 'c4_plantuml') => {
     setLoading(true);
+    const requestedType = type || diagramType;
     try {
-      const response = await diagramApi.generateDiagram(projectSlug);
+      const response = await diagramApi.generateDiagram(projectSlug, requestedType);
       setDiagram(response.diagram);
+      setDiagramType(response.diagram_type);
       setModelUsed(response.model_used);
-      toast.success('Architecture diagram generated successfully!');
+      toast.success(`${requestedType === 'c4_plantuml' ? 'C4 PlantUML' : 'Mermaid'} diagram generated successfully!`);
     } catch (error: any) {
       console.error('Failed to generate diagram:', error);
       const errorMsg = error.response?.data?.detail || 'Failed to generate diagram';
@@ -137,31 +207,10 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
               </p>
             </div>
           </div>
-          <button
-            onClick={handleGenerateDiagram}
-            disabled={loading}
-            className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50 rounded-lg text-white transition-colors flex items-center gap-2 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <>
-                <RefreshCw size={16} className="animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Sparkle size={16} />
-                Generate Diagram
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Diagram Display */}
-        {diagram ? (
-          <div className="space-y-4 flex-1 flex flex-col min-h-0">
-            <div className="diagram-scroll-container bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg flex-1 overflow-auto p-4 relative">
-              {/* Zoom Controls */}
-              <div className="absolute top-4 right-4 z-10 flex gap-2">
+          <div className="flex items-center gap-3">
+            {/* Zoom Controls - In header */}
+            {diagram && (
+              <div className="flex gap-2">
                 <button
                   onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
                   className="p-2 bg-[var(--surface)] border border-[var(--text)]/20 rounded-lg hover:bg-orange-500/10 hover:border-orange-500/50 transition-colors"
@@ -187,18 +236,71 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
                   {Math.round(zoom * 100)}%
                 </div>
               </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleGenerateDiagram('mermaid')}
+                disabled={loading}
+                className={`px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 disabled:cursor-not-allowed ${
+                  diagramType === 'mermaid'
+                    ? 'bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50'
+                    : 'bg-[var(--surface)] border border-[var(--text)]/20 text-[var(--text)] hover:bg-orange-500/10 hover:border-orange-500/50'
+                }`}
+              >
+                {loading && diagramType === 'mermaid' ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkle size={16} />
+                    Mermaid
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => handleGenerateDiagram('c4_plantuml')}
+                disabled={loading}
+                className={`px-4 py-2 rounded-lg text-white transition-colors flex items-center gap-2 disabled:cursor-not-allowed ${
+                  diagramType === 'c4_plantuml'
+                    ? 'bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50'
+                    : 'bg-[var(--surface)] border border-[var(--text)]/20 text-[var(--text)] hover:bg-orange-500/10 hover:border-orange-500/50'
+                }`}
+              >
+                {loading && diagramType === 'c4_plantuml' ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkle size={16} />
+                    C4 PlantUML
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
 
+        {/* Diagram Display */}
+        {diagram ? (
+          <div className="flex-1 flex flex-col min-h-0 space-y-4">
+            {/* Scrollable Diagram Container */}
+            <div className="diagram-scroll-container bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg flex-1 overflow-auto p-4">
               <div
                 className="mermaid-container"
                 style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
                 dangerouslySetInnerHTML={{ __html: diagramSvg }}
               />
             </div>
+
             {modelUsed && (
               <div className="flex items-center justify-between text-xs text-[var(--text)]/60">
-                <span>Generated with {modelUsed}</span>
+                <span>Generated with {modelUsed} ({diagramType === 'c4_plantuml' ? 'C4 PlantUML' : 'Mermaid'})</span>
                 <button
-                  onClick={handleGenerateDiagram}
+                  onClick={() => handleGenerateDiagram()}
                   className="flex items-center gap-1 hover:text-orange-400 transition-colors"
                 >
                   <RefreshCw size={12} />
@@ -222,25 +324,44 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
               No diagram generated yet
             </p>
             <p className="text-xs text-[var(--text)]/40 mb-6">
-              Click "Generate Diagram" to create an AI-powered visualization of your project's architecture
+              Choose a diagram type to create an AI-powered visualization of your project's architecture
             </p>
-            <button
-              onClick={handleGenerateDiagram}
-              disabled={loading}
-              className="px-6 py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50 rounded-lg text-white transition-colors inline-flex items-center gap-2 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <RefreshCw size={18} className="animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Sparkle size={18} />
-                  Generate Diagram
-                </>
-              )}
-            </button>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => handleGenerateDiagram('mermaid')}
+                disabled={loading}
+                className="px-6 py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50 rounded-lg text-white transition-colors inline-flex items-center gap-2 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkle size={18} />
+                    Generate Mermaid
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => handleGenerateDiagram('c4_plantuml')}
+                disabled={loading}
+                className="px-6 py-3 bg-purple-500 hover:bg-purple-600 disabled:bg-purple-500/50 rounded-lg text-white transition-colors inline-flex items-center gap-2 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkle size={18} />
+                    Generate C4 PlantUML
+                  </>
+                )}
+              </button>
+            </div>
             </div>
           </div>
         )}

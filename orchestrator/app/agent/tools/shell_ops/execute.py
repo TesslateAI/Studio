@@ -2,6 +2,10 @@
 Shell Execution Tools
 
 Tools for executing commands in shell sessions.
+
+Retry Strategy:
+- Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
+- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
 """
 
 import asyncio
@@ -11,18 +15,27 @@ from typing import Dict, Any
 
 from ..registry import Tool, ToolCategory
 from ..output_formatter import success_output, truncate_session_id, strip_ansi_codes
+from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
+@tool_retry
 async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute command and return output."""
+    """
+    Execute command and return output.
+
+    Retry behavior:
+    - Automatically retries on ConnectionError, TimeoutError, IOError
+    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    """
     from ....services.shell_session_manager import get_shell_session_manager
 
     session_id = params["session_id"]
     command = params["command"]
     wait_seconds = params.get("wait_seconds", 2.0)
     db = context["db"]
+    user_id = context["user_id"]
 
     # Add newline if not present
     if not command.endswith("\n"):
@@ -30,22 +43,22 @@ async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -
 
     session_manager = get_shell_session_manager()
 
-    # Write command
+    # Write command (with authorization check)
     data_bytes = command.encode('utf-8')
-    await session_manager.write_to_session(session_id, data_bytes, db)
+    await session_manager.write_to_session(session_id, data_bytes, db, user_id=user_id)
 
     # Wait for execution
     await asyncio.sleep(wait_seconds)
 
-    # Read output
-    output_data = await session_manager.read_output(session_id, db)
+    # Read output (with authorization check)
+    output_data = await session_manager.read_output(session_id, db, user_id=user_id)
 
     # Decode base64 output and strip control characters
     output_text = base64.b64decode(output_data["output"]).decode('utf-8', errors='replace')
     output_text = strip_ansi_codes(output_text)
 
     return success_output(
-        message=f"Executed '{command.strip()}' in session {truncate_session_id(session_id)}",
+        message=f"Executed '{command.strip()}' in session {session_id}",
         output=output_text,
         session_id=session_id,
         details={
@@ -82,8 +95,8 @@ def register_execute_tools(registry):
         },
         executor=shell_exec_executor,
         examples=[
-            'shell_exec({"session_id": "abc123", "command": "npm install"})',
-            'shell_exec({"session_id": "abc123", "command": "echo \'Hello\'"})'
+            '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "npm install"}}',
+            '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "echo \'Hello\'"}}'
         ]
     ))
 

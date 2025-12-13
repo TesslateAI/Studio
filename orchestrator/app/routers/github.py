@@ -21,7 +21,7 @@ from ..schemas import (
 from ..services.credential_manager import get_credential_manager
 from ..services.github_client import GitHubClient
 from ..services.github_oauth import get_github_oauth_service
-from ..auth import get_current_active_user as get_current_user
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ oauth_states = {}
 
 @router.get("/oauth/authorize")
 async def github_oauth_authorize(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     scope: str = Query(default="repo user:email", description="OAuth scopes to request")
 ):
     """
@@ -181,7 +181,7 @@ async def github_oauth_callback(
 
 @router.post("/oauth/refresh")
 async def refresh_github_token(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -198,7 +198,7 @@ async def refresh_github_token(
 
 @router.get("/status", response_model=GitHubCredentialResponse)
 async def get_github_status(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -231,7 +231,7 @@ async def get_github_status(
 
 @router.delete("/disconnect")
 async def disconnect_github(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -276,7 +276,7 @@ async def disconnect_github(
 
 @router.get("/repositories")
 async def list_github_repositories(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -346,7 +346,7 @@ async def list_github_repositories(
 @router.post("/repositories", status_code=status.HTTP_201_CREATED)
 async def create_github_repository(
     request: CreateGitHubRepoRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -416,7 +416,7 @@ async def create_github_repository(
 async def list_repository_branches(
     owner: str,
     repo: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """

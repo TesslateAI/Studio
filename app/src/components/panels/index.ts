@@ -5,3 +5,5 @@ export { SettingsPanel } from './SettingsPanel';
 export { MarketplacePanel } from './MarketplacePanel';
 export { AssetsPanel } from './AssetsPanel';
 export { KanbanPanel } from './KanbanPanel';
+export { TerminalPanel } from './TerminalPanel';
+export { DeploymentsPanel } from './DeploymentsPanel';

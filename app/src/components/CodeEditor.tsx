@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { File, Folder, ChevronRight, ChevronDown, FileText, Code } from 'lucide-react';
+import { File, Folder, ChevronRight, ChevronDown, FileText, Code, PanelLeftClose, PanelLeft } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '../theme/ThemeContext';
 
@@ -22,6 +22,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const editorRef = useRef<any>(null);
 
   const getLanguage = (fileName: string): string => {
@@ -67,7 +68,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
       parts.forEach((part: string, index: number) => {
         const fullPath = currentPath ? `${currentPath}/${part}` : part;
         const isFile = index === parts.length - 1;
-        
+
         if (!pathMap.has(fullPath)) {
           const node: FileNode = {
             name: part,
@@ -76,9 +77,9 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
             children: !isFile ? [] : undefined,
             content: isFile ? file.content : undefined
           };
-          
+
           pathMap.set(fullPath, node);
-          
+
           if (currentPath === '') {
             tree.push(node);
           } else {
@@ -88,7 +89,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
             }
           }
         }
-        
+
         currentPath = fullPath;
       });
     });
@@ -99,7 +100,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
     if (!selectedFile && files.length > 0) {
       setSelectedFile(files[0].file_path);
     }
-  }, [files, selectedFile]);
+  }, [files]);
 
 
   const toggleDirectory = (path: string) => {
@@ -188,8 +189,10 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
   return (
     <div className="h-full flex bg-[var(--surface)] overflow-hidden">
       {/* File tree sidebar */}
-      <div className="w-72 bg-[var(--background)] border-r border-[var(--border-color)] overflow-y-auto flex flex-col">
-        <div className="p-4 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm">
+      <div className={`bg-[var(--background)] border-r border-[var(--border-color)] overflow-y-auto flex flex-col transition-all duration-300 ${
+        isSidebarCollapsed ? 'w-0 border-0' : 'w-72'
+      }`}>
+        <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-pink-600 rounded-lg flex items-center justify-center shadow-lg">
               <FileText size={16} className="text-white" />
@@ -203,7 +206,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
           </div>
         </div>
         
-        <div className="flex-1 p-2 overflow-y-auto">
+        <div className="flex-1 p-2 overflow-y-auto" key={files.length}>
           {fileTree.length > 0 ? renderFileTree(fileTree) : (
             <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
               <Code size={32} className="mx-auto mb-3 opacity-50" />
@@ -219,8 +222,20 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
         {selectedFile && selectedFileContent ? (
           <>
             {/* File header */}
-            <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm">
+            <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center">
               <div className="flex items-center gap-3">
+                {/* Toggle sidebar button */}
+                <button
+                  onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                  className="p-1.5 hover:bg-[var(--text)]/10 active:bg-[var(--text)]/20 rounded transition-colors"
+                  title={isSidebarCollapsed ? "Show file explorer" : "Hide file explorer"}
+                >
+                  {isSidebarCollapsed ? (
+                    <PanelLeft size={16} className="text-[var(--text)]/60" />
+                  ) : (
+                    <PanelLeftClose size={16} className="text-[var(--text)]/60" />
+                  )}
+                </button>
                 {getFileIcon(selectedFile.split('/').pop() || '')}
                 <div className="flex-1">
                   <h4 className="text-sm font-semibold text-[var(--text)]">{selectedFile}</h4>
@@ -234,6 +249,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
             {/* Monaco Editor */}
             <div className="flex-1 overflow-hidden">
               <Editor
+                key={selectedFile}
                 height="100%"
                 language={getLanguage(selectedFile)}
                 value={selectedFileContent.content}

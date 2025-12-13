@@ -1,0 +1,126 @@
+# Production Docker Compose for Tesslate Studio with Cloudflare Tunnel
+# Designed to work with cloudflared running on host (not in container)
+# Traefik handles internal routing, cloudflared forwards traffic from internet
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: tesslate-traefik
+    restart: unless-stopped
+    environment:
+      - DOCKER_API_VERSION=1.52
+    ports:
+      # Only expose to localhost - cloudflared on host will connect here
+      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8081:8080"  # Dashboard (optional)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.tunnel.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      # Dashboard at /traefik
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=web"
+      - "traefik.http.routers.traefik-dashboard.middlewares=traefik-stripprefix,traefik-auth"
+      - "traefik.http.middlewares.traefik-stripprefix.stripprefix.prefixes=/traefik"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}"
+      - "traefik.http.routers.traefik-dashboard.priority=200"
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: tesslate-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=tesslate
+      - POSTGRES_USER=tesslate_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - tesslate-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tesslate_user -d tesslate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: tesslate-orchestrator
+    restart: unless-stopped
+    volumes:
+      - ./users:/app/users
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./orchestrator/app:/app/app:ro
+      - ./orchestrator/Dockerfile.devserver:/app/Dockerfile.devserver:ro
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://tesslate_user:${POSTGRES_PASSWORD}@postgres:5432/tesslate
+      - SECRET_KEY=${SECRET_KEY}
+      - DEPLOYMENT_MODE=docker
+      - LITELLM_API_BASE=${LITELLM_API_BASE}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_DEFAULT_MODELS=${LITELLM_DEFAULT_MODELS:-gpt-4o-mini,gpt-3.5-turbo}
+      - LITELLM_TEAM_ID=${LITELLM_TEAM_ID:-default}
+      - LITELLM_EMAIL_DOMAIN=${LITELLM_EMAIL_DOMAIN}
+      - LITELLM_INITIAL_BUDGET=${LITELLM_INITIAL_BUDGET:-10.0}
+      - APP_PROTOCOL=https
+      - APP_DOMAIN=${APP_DOMAIN}
+      - DEV_SERVER_BASE_URL=https://${APP_DOMAIN}
+      - CORS_ORIGINS=https://${APP_DOMAIN}
+      - ALLOWED_HOSTS=${APP_DOMAIN}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GITHUB_OAUTH_REDIRECT_URI=${GITHUB_OAUTH_REDIRECT_URI}
+    networks:
+      - tesslate-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      # API routes - handle both /api and websocket paths
+      - "traefik.http.routers.orchestrator.rule=Host(`${APP_DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
+      - "traefik.http.routers.orchestrator.entrypoints=web"
+      - "traefik.http.routers.orchestrator.priority=100"
+      - "traefik.http.services.orchestrator.loadbalancer.server.port=8000"
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.prod
+      args:
+        - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY}
+        - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}
+    container_name: tesslate-app
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=
+      - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY}
+      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}
+    networks:
+      - tesslate-network
+    labels:
+      - "traefik.enable=true"
+      # Frontend routes - everything except /api, /ws, and /traefik
+      - "traefik.http.routers.app.rule=Host(`${APP_DOMAIN}`) && !PathPrefix(`/api`) && !PathPrefix(`/ws`) && !PathPrefix(`/traefik`)"
+      - "traefik.http.routers.app.entrypoints=web"
+      - "traefik.http.routers.app.priority=10"
+      - "traefik.http.services.app.loadbalancer.server.port=80"
+
+networks:
+  tesslate-network:
+    name: tesslate-network
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: tesslate-postgres-data

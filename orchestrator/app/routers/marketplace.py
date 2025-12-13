@@ -4,7 +4,7 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 import logging
 
 from ..database import get_db
-from ..auth import get_current_active_user
 from ..models import (
     User, MarketplaceAgent, UserPurchasedAgent,
     ProjectAgent, AgentReview, Project,
@@ -24,6 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 from ..config import get_settings
+from ..users import current_active_user, current_superuser
 settings = get_settings()
 
 
@@ -33,7 +33,7 @@ settings = get_settings()
 
 @router.get("/models")
 async def get_available_models(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -51,8 +51,8 @@ async def get_available_models(
     # These are typical costs - actual costs may vary
     model_pricing = {
         # OpenAI
-        "gpt-5": {"input": 30.0, "output": 60.0},
-        "gpt-5-turbo": {"input": 10.0, "output": 30.0},
+        "gpt-4": {"input": 30.0, "output": 60.0},
+        "gpt-4-turbo": {"input": 10.0, "output": 30.0},
         "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
 
         # Anthropic
@@ -167,15 +167,13 @@ async def get_available_models(
 async def add_custom_model(
     model_id: str = Body(...),
     model_name: str = Body(...),
-    provider: str = Body(..., description="Provider name (openrouter, ollama, lmstudio, llamacpp, custom)"),
     pricing_input: Optional[float] = Body(None),
     pricing_output: Optional[float] = Body(None),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Add a custom model from any provider to the user's account.
-    Supports: openrouter, ollama, lmstudio, llamacpp, custom endpoints.
+    Add a custom OpenRouter model to the user's account.
     """
     from ..models import UserCustomModel
 
@@ -196,7 +194,7 @@ async def add_custom_model(
         user_id=current_user.id,
         model_id=model_id,
         model_name=model_name,
-        provider=provider,
+        provider="openrouter",
         pricing_input=pricing_input,
         pricing_output=pricing_output
     )
@@ -224,7 +222,7 @@ async def add_custom_model(
 @router.delete("/models/custom/{model_id}")
 async def delete_custom_model(
     model_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -253,237 +251,6 @@ async def delete_custom_model(
     }
 
 
-@router.post("/models/fetch")
-async def fetch_provider_models(
-    provider: str = Body(..., description="Provider name (openrouter, ollama, lmstudio, llamacpp, custom)"),
-    base_url: Optional[str] = Body(None, description="Override base URL for this request"),
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Fetch available models from a provider's API endpoint.
-    Supports OpenRouter, Ollama, LM Studio, llama.cpp, and custom OpenAI-compatible endpoints.
-    """
-    import aiohttp
-    from ..models import UserAPIKey
-    from ..routers.secrets import decode_key
-
-    # Get user's API key/config for this provider
-    key_query = select(UserAPIKey).where(
-        UserAPIKey.user_id == current_user.id,
-        UserAPIKey.provider == provider,
-        UserAPIKey.is_active == True
-    )
-    result = await db.execute(key_query)
-    api_key_record = result.scalar_one_or_none()
-
-    if not api_key_record:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No configuration found for {provider}. Please add API configuration first."
-        )
-
-    # Determine base URL and API key
-    if base_url:
-        # Use override URL if provided
-        fetch_base_url = base_url
-    elif provider == "custom":
-        fetch_base_url = api_key_record.provider_metadata.get("base_url")
-        if not fetch_base_url:
-            raise HTTPException(
-                status_code=400,
-                detail="No base URL configured for custom endpoint"
-            )
-    elif provider == "openrouter":
-        fetch_base_url = api_key_record.provider_metadata.get(
-            "base_url",
-            "https://openrouter.ai/api/v1"
-        )
-    elif provider == "ollama":
-        fetch_base_url = api_key_record.provider_metadata.get(
-            "base_url",
-            "http://localhost:11434"
-        )
-    elif provider == "lmstudio":
-        fetch_base_url = api_key_record.provider_metadata.get(
-            "base_url",
-            "http://localhost:1234"
-        )
-    elif provider == "llamacpp":
-        fetch_base_url = api_key_record.provider_metadata.get(
-            "base_url",
-            "http://localhost:8080"
-        )
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
-
-    # Get API key if provider requires it
-    api_key = None
-    if provider in ["openrouter", "custom"]:
-        try:
-            api_key = decode_key(api_key_record.encrypted_value)
-        except Exception:
-            api_key = None
-
-    # Determine endpoint path
-    if provider == "ollama":
-        endpoint = f"{fetch_base_url}/api/tags"
-    else:
-        # OpenRouter, LM Studio, llama.cpp, custom all use OpenAI-compatible /v1/models
-        endpoint = f"{fetch_base_url}/v1/models" if not fetch_base_url.endswith("/v1/models") else fetch_base_url
-
-    # Fetch models from provider API
-    async with aiohttp.ClientSession() as session:
-        headers = {}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        try:
-            async with session.get(endpoint, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Failed to fetch models from {provider}: {error_text[:200]}"
-                    )
-
-                data = await resp.json()
-
-                # Parse response based on provider format
-                if provider == "ollama":
-                    # Ollama format: { models: [{ name, size, modified_at }] }
-                    models = [
-                        {
-                            "id": m["name"],
-                            "name": m["name"],
-                            "provider": provider,
-                            "size": m.get("size", 0),
-                            "modified_at": m.get("modified_at")
-                        }
-                        for m in data.get("models", [])
-                    ]
-                elif provider == "openrouter":
-                    # OpenRouter format: { data: [{ id, name, pricing }] }
-                    models = [
-                        {
-                            "id": m["id"],
-                            "name": m.get("name", m["id"]),
-                            "provider": provider,
-                            "pricing": m.get("pricing", {})
-                        }
-                        for m in data.get("data", [])
-                    ]
-                else:
-                    # OpenAI-compatible format: { data: [{ id, object: "model" }] }
-                    # Used by lmstudio, llamacpp, custom
-                    models = [
-                        {
-                            "id": m["id"],
-                            "name": m.get("name", m["id"]),
-                            "provider": provider
-                        }
-                        for m in data.get("data", [])
-                    ]
-
-                return {
-                    "models": models,
-                    "count": len(models),
-                    "provider": provider,
-                    "endpoint": endpoint
-                }
-
-        except aiohttp.ClientError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Network error connecting to {provider}: {str(e)}"
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error fetching models from {provider}: {str(e)}"
-            )
-
-
-@router.post("/models/import-batch")
-async def import_batch_models(
-    provider: str = Body(..., description="Provider name"),
-    models: list = Body(..., description="List of models to import with {model_id, model_name}"),
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Import multiple models at once from a provider.
-    Used after fetching models to batch import selected ones.
-    """
-    from ..models import UserCustomModel
-
-    imported_count = 0
-    skipped_count = 0
-    errors = []
-
-    for model_data in models:
-        model_id = model_data.get("model_id") or model_data.get("id")
-        model_name = model_data.get("model_name") or model_data.get("name") or model_id
-
-        # Add provider prefix if not present
-        if not model_id.startswith(f"{provider}/"):
-            model_id = f"{provider}/{model_id}"
-
-        try:
-            # Check if model already exists
-            existing_query = select(UserCustomModel).where(
-                UserCustomModel.user_id == current_user.id,
-                UserCustomModel.model_id == model_id,
-                UserCustomModel.is_active == True
-            )
-            result = await db.execute(existing_query)
-            existing = result.scalar_one_or_none()
-
-            if existing:
-                skipped_count += 1
-                continue
-
-            # Extract pricing if provided (for OpenRouter)
-            pricing_input = model_data.get("pricing", {}).get("prompt") if "pricing" in model_data else None
-            pricing_output = model_data.get("pricing", {}).get("completion") if "pricing" in model_data else None
-
-            # Create new custom model
-            custom_model = UserCustomModel(
-                user_id=current_user.id,
-                model_id=model_id,
-                model_name=model_name,
-                provider=provider,
-                pricing_input=pricing_input,
-                pricing_output=pricing_output
-            )
-
-            db.add(custom_model)
-            imported_count += 1
-
-        except Exception as e:
-            errors.append({"model_id": model_id, "error": str(e)})
-            skipped_count += 1
-
-    # Commit all imports at once
-    try:
-        await db.commit()
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to import models: {str(e)}"
-        )
-
-    return {
-        "message": f"Imported {imported_count} models from {provider}",
-        "imported": imported_count,
-        "skipped": skipped_count,
-        "total": len(models),
-        "errors": errors if errors else None,
-        "success": True
-    }
-
-
 # ============================================================================
 # Browse Marketplace
 # ============================================================================
@@ -497,7 +264,7 @@ async def get_marketplace_agents(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Browse marketplace agents with filtering and sorting.
@@ -583,6 +350,7 @@ async def get_marketplace_agents(
             "is_forkable": agent.is_forkable,
             "is_active": agent.is_active,
             "icon": agent.icon,
+            "avatar_url": agent.avatar_url,  # Custom logo/profile picture
             "pricing_type": agent.pricing_type,
             "price": agent.price / 100.0 if agent.price else 0,  # Convert cents to dollars
             "usage_count": agent.usage_count or 0,  # Number of messages sent to this agent
@@ -610,7 +378,7 @@ async def get_marketplace_agents(
 async def get_agent_details(
     slug: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get detailed information about a specific agent.
@@ -655,6 +423,7 @@ async def get_agent_details(
         "system_prompt": agent.system_prompt,  # Include system prompt for forking
         "model": agent.model,
         "icon": agent.icon,
+        "avatar_url": agent.avatar_url,  # Custom logo/profile picture
         "preview_image": agent.preview_image,
         "pricing_type": agent.pricing_type,
         "price": agent.price / 100.0 if agent.price else 0,
@@ -687,8 +456,9 @@ async def get_agent_details(
 @router.post("/agents/{agent_id}/purchase")
 async def purchase_agent(
     agent_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Purchase or add a free agent to user's library.
@@ -743,20 +513,16 @@ async def purchase_agent(
         }
 
     # For paid agents, create Stripe checkout session
-    # This will be implemented when we add the Stripe service
-    from ..services.stripe_service import StripeService
+    from ..services.stripe_service import stripe_service
 
-    stripe_service = StripeService()
-    settings = get_settings()
-
-    # Create checkout session with config-based URLs
-    protocol = "https" if settings.deployment_mode == "kubernetes" else "http"
-    base_url = f"{protocol}://{settings.app_domain}"
-    success_url = f"{base_url}/marketplace/success?agent={agent.slug}"
-    cancel_url = f"{base_url}/marketplace/agent/{agent.slug}"
+    # Create checkout session with origin-based URLs to preserve user's domain
+    # This ensures localStorage and cookies work correctly after Stripe redirect
+    origin = request.headers.get('origin') or request.headers.get('referer', '').rstrip('/').split('?')[0].rsplit('/', 1)[0] or settings.get_app_base_url
+    success_url = f"{origin}/marketplace/success?agent={agent.slug}&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/marketplace/agent/{agent.slug}"
 
     try:
-        session = await stripe_service.create_checkout_session(
+        session = await stripe_service.create_agent_purchase_checkout(
             user=current_user,
             agent=agent,
             success_url=success_url,
@@ -764,14 +530,364 @@ async def purchase_agent(
             db=db
         )
 
+        if not session:
+            raise HTTPException(
+                status_code=500,
+                detail="Stripe not configured or checkout creation failed"
+            )
+
         return {
             "checkout_url": session['url'] if isinstance(session, dict) else session.url,
             "session_id": session['id'] if isinstance(session, dict) else session.id,
             "agent_id": agent_id
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create Stripe checkout: {e}")
         raise HTTPException(status_code=500, detail="Failed to create checkout session")
+
+
+@router.post("/verify-purchase")
+async def verify_agent_purchase(
+    session_id: str = Body(..., embed=True),
+    agent_slug: Optional[str] = Body(None, embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Verify a Stripe checkout session and add the agent to the user's library.
+    Called after successful checkout redirect.
+    """
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
+    if not stripe_service.stripe:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    try:
+        # Retrieve the checkout session from Stripe
+        session = stripe_lib.checkout.Session.retrieve(
+            session_id,
+            expand=['line_items', 'subscription']
+        )
+
+        # Verify session is complete
+        if session.payment_status != 'paid':
+            raise HTTPException(
+                status_code=400,
+                detail="Payment not completed"
+            )
+
+        # Verify the customer matches the current user
+        user_billing = await db.execute(
+            select(User).where(User.id == current_user.id)
+        )
+        user = user_billing.scalar_one()
+
+        if not user.stripe_customer_id or user.stripe_customer_id != session.customer:
+            raise HTTPException(
+                status_code=403,
+                detail="Session customer does not match user"
+            )
+
+        # Get agent from metadata or slug parameter
+        agent_id_from_metadata = session.metadata.get('agent_id') if session.metadata else None
+
+        # Try to find agent by ID from metadata or by slug
+        query = select(MarketplaceAgent)
+        if agent_id_from_metadata:
+            query = query.where(MarketplaceAgent.id == agent_id_from_metadata)
+        elif agent_slug:
+            query = query.where(MarketplaceAgent.slug == agent_slug)
+        else:
+            raise HTTPException(status_code=400, detail="No agent identifier provided")
+
+        result = await db.execute(query)
+        agent = result.scalar_one_or_none()
+
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Check if user already has this agent
+        existing_query = select(UserPurchasedAgent).where(
+            and_(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.agent_id == agent.id
+            )
+        )
+        existing_result = await db.execute(existing_query)
+        existing_purchase = existing_result.scalar_one_or_none()
+
+        if existing_purchase:
+            # Update existing purchase with new subscription ID
+            existing_purchase.stripe_subscription_id = session.subscription.id if session.subscription else None
+            existing_purchase.stripe_payment_intent = session.payment_intent
+            existing_purchase.is_active = True
+            existing_purchase.purchase_date = datetime.now(timezone.utc)
+
+            if session.subscription:
+                # Subscription - set expires_at to None (ongoing)
+                existing_purchase.expires_at = None
+                existing_purchase.purchase_type = "monthly"
+            else:
+                # One-time payment - set expiration if applicable
+                existing_purchase.purchase_type = "one_time"
+        else:
+            # Create new purchase record
+            new_purchase = UserPurchasedAgent(
+                user_id=current_user.id,
+                agent_id=agent.id,
+                stripe_payment_intent=session.payment_intent,
+                stripe_subscription_id=session.subscription.id if session.subscription else None,
+                purchase_type="monthly" if session.subscription else "one_time",
+                purchase_date=datetime.now(timezone.utc),
+                is_active=True,
+                expires_at=None if session.subscription else None,  # Subscriptions don't expire until cancelled
+                selected_model=agent.model
+            )
+            db.add(new_purchase)
+
+        # Update agent download count
+        agent.downloads += 1
+
+        await db.commit()
+
+        return {
+            "success": True,
+            "message": "Agent added to your library",
+            "agent_id": str(agent.id),
+            "agent_name": agent.name
+        }
+
+    except stripe_lib.error.StripeError as e:
+        logger.error(f"Stripe error during purchase verification: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to verify payment: {str(e)}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to verify purchase: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to verify purchase"
+        )
+
+
+@router.get("/subscriptions")
+async def get_user_subscriptions(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Get all active agent subscriptions and purchases for the current user.
+    Returns both one-time purchases and recurring subscriptions.
+    """
+    # Get all active purchased agents (both one-time and subscriptions)
+    query = select(UserPurchasedAgent, MarketplaceAgent).join(
+        MarketplaceAgent,
+        UserPurchasedAgent.agent_id == MarketplaceAgent.id
+    ).where(
+        and_(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.is_active == True
+        )
+    )
+
+    result = await db.execute(query)
+    purchases = result.all()
+
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
+    subscriptions = []
+    for purchase, agent in purchases:
+        subscription_data = {
+            "id": str(purchase.id),
+            "agent_id": str(agent.id),
+            "name": agent.name,
+            "slug": agent.slug,
+            "icon": agent.icon,
+            "price": agent.price,
+            "purchase_type": purchase.purchase_type,  # "onetime" or "monthly"
+            "subscription_id": purchase.stripe_subscription_id,
+            "purchase_date": purchase.purchase_date.isoformat(),
+            "expires_at": purchase.expires_at.isoformat() if purchase.expires_at else None,
+            "is_active": purchase.is_active,
+            "cancel_at_period_end": False,
+            "current_period_end": None,
+            "cancel_at": None
+        }
+
+        # If it's a monthly subscription, fetch cancellation info from Stripe
+        # Check for both "monthly" and "subscription" (legacy naming)
+        if purchase.purchase_type in ("monthly", "subscription") and purchase.stripe_subscription_id and stripe_service.stripe:
+            try:
+                from datetime import datetime
+                logger.info(f"DEBUG: Fetching Stripe subscription for {purchase.stripe_subscription_id}, purchase_type={purchase.purchase_type}")
+                stripe_sub = stripe_lib.Subscription.retrieve(purchase.stripe_subscription_id)
+
+                # Get cancellation status
+                subscription_data["cancel_at_period_end"] = stripe_sub.cancel_at_period_end
+                logger.info(f"DEBUG: Stripe subscription {purchase.stripe_subscription_id} cancel_at_period_end={stripe_sub.cancel_at_period_end}")
+
+                # Get current period end (when subscription renews or ends)
+                # Try both dictionary and attribute access for compatibility
+                try:
+                    period_end = stripe_sub.get('current_period_end') if hasattr(stripe_sub, 'get') else stripe_sub.current_period_end
+                    if period_end:
+                        subscription_data["current_period_end"] = datetime.fromtimestamp(period_end).isoformat()
+                        logger.info(f"DEBUG: current_period_end={subscription_data['current_period_end']}")
+                except (AttributeError, KeyError) as e:
+                    logger.warning(f"Could not get current_period_end for {purchase.stripe_subscription_id}: {e}")
+
+                # Get cancel_at if subscription is set to cancel at specific time
+                try:
+                    cancel_at = stripe_sub.get('cancel_at') if hasattr(stripe_sub, 'get') else stripe_sub.cancel_at
+                    if cancel_at:
+                        subscription_data["cancel_at"] = datetime.fromtimestamp(cancel_at).isoformat()
+                except (AttributeError, KeyError):
+                    pass  # cancel_at is optional
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch Stripe subscription details for {purchase.stripe_subscription_id}: {e}")
+        else:
+            logger.info(f"DEBUG: Skipping Stripe fetch for {agent.name}: purchase_type={purchase.purchase_type}, has_subscription_id={purchase.stripe_subscription_id is not None}, stripe_enabled={stripe_service.stripe is not None}")
+
+        subscriptions.append(subscription_data)
+
+    return subscriptions
+
+
+@router.post("/subscriptions/{subscription_id}/cancel")
+async def cancel_agent_subscription(
+    subscription_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Cancel an agent subscription.
+    """
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
+    logger.info(f"DEBUG: Cancel agent subscription request - subscription_id: {subscription_id}, user_id: {current_user.id}")
+
+    if not stripe_service.stripe:
+        logger.error("DEBUG: Stripe not configured")
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    try:
+        # Find the purchase record with this subscription ID
+        query = select(UserPurchasedAgent).where(
+            and_(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.stripe_subscription_id == subscription_id
+            )
+        )
+        result = await db.execute(query)
+        purchase = result.scalar_one_or_none()
+
+        logger.info(f"DEBUG: Purchase record found: {purchase is not None}")
+        if purchase:
+            logger.info(f"DEBUG: Purchase details - id: {purchase.id}, agent_id: {purchase.agent_id}, stripe_subscription_id: {purchase.stripe_subscription_id}")
+
+        if not purchase:
+            logger.error(f"DEBUG: Subscription not found for subscription_id: {subscription_id}, user_id: {current_user.id}")
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Cancel the subscription in Stripe
+        subscription = stripe_lib.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=True
+        )
+
+        logger.info(f"Cancelled agent subscription {subscription_id} for user {current_user.id}")
+
+        return {
+            "success": True,
+            "message": "Subscription will be cancelled at the end of the billing period",
+            "cancel_at": subscription.cancel_at
+        }
+
+    except stripe_lib.error.StripeError as e:
+        logger.error(f"Stripe error during subscription cancellation: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to cancel subscription: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to cancel subscription: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to cancel subscription"
+        )
+
+
+@router.post("/subscriptions/{subscription_id}/renew")
+async def renew_agent_subscription(
+    subscription_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Renew a cancelled agent subscription (reactivate before it ends).
+    """
+    from ..services.stripe_service import stripe_service
+    import stripe as stripe_lib
+
+    logger.info(f"DEBUG: Renew agent subscription request - subscription_id: {subscription_id}, user_id: {current_user.id}")
+
+    if not stripe_service.stripe:
+        logger.error("DEBUG: Stripe not configured")
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    try:
+        # Find the purchase record with this subscription ID
+        query = select(UserPurchasedAgent).where(
+            and_(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.stripe_subscription_id == subscription_id
+            )
+        )
+        result = await db.execute(query)
+        purchase = result.scalar_one_or_none()
+
+        logger.info(f"DEBUG: Purchase record found: {purchase is not None}")
+        if purchase:
+            logger.info(f"DEBUG: Purchase details - id: {purchase.id}, agent_id: {purchase.agent_id}, stripe_subscription_id: {purchase.stripe_subscription_id}")
+
+        if not purchase:
+            logger.error(f"DEBUG: Subscription not found for subscription_id: {subscription_id}, user_id: {current_user.id}")
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Reactivate the subscription in Stripe by setting cancel_at_period_end to False
+        subscription = stripe_lib.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=False
+        )
+
+        logger.info(f"Renewed agent subscription {subscription_id} for user {current_user.id}")
+
+        return {
+            "success": True,
+            "message": "Subscription has been renewed and will continue after the current period"
+        }
+
+    except stripe_lib.error.StripeError as e:
+        logger.error(f"Stripe error during subscription renewal: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to renew subscription: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to renew subscription: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to renew subscription"
+        )
 
 
 @router.post("/agents/{agent_id}/fork")
@@ -782,7 +898,7 @@ async def fork_agent(
     system_prompt: Optional[str] = None,
     model: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Fork an open source agent to create a custom version with optional customizations.
@@ -864,10 +980,10 @@ async def create_custom_agent(
     system_prompt: str,
     mode: str = "stream",
     agent_type: str = "StreamAgent",
-    model: str = "cerebras/qwen-3-coder-480b",
+    model: str = "qwen-3-235b-a22b-thinking-2507",
     category: str = "custom",
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Create a custom agent from scratch.
@@ -938,7 +1054,7 @@ async def update_custom_agent(
     agent_id: str,
     update_data: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Update a custom or forked agent.
@@ -986,13 +1102,15 @@ async def update_custom_agent(
                 system_prompt=update_data.get('system_prompt', agent.system_prompt),
                 mode=agent.mode,
                 agent_type=agent.agent_type,
-                tools=agent.tools,
+                tools=update_data.get('tools', agent.tools),
+                tool_configs=update_data.get('tool_configs', agent.tool_configs),
                 model=update_data.get('model', agent.model),
                 is_forkable=False,
                 parent_agent_id=agent.id,
                 forked_by_user_id=current_user.id,
                 config={},
                 icon=agent.icon,
+                avatar_url=update_data.get('avatar_url', agent.avatar_url),
                 preview_image=agent.preview_image,
                 pricing_type="free",
                 price=0,
@@ -1053,6 +1171,13 @@ async def update_custom_agent(
         agent.system_prompt = update_data['system_prompt']
     if update_data.get('model'):
         agent.model = update_data['model']
+    if 'tools' in update_data:
+        agent.tools = update_data['tools']
+    if 'tool_configs' in update_data:
+        agent.tool_configs = update_data['tool_configs']
+    if 'avatar_url' in update_data:
+        agent.avatar_url = update_data['avatar_url']
+    if update_data.get('model'):
         agent.required_models = [update_data['model']]
 
     await db.commit()
@@ -1067,7 +1192,7 @@ async def update_custom_agent(
 @router.get("/my-agents")
 async def get_user_agents(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get all agents in the user's library.
@@ -1100,8 +1225,11 @@ async def get_user_agents(
             "is_forkable": agent.is_forkable,
             "system_prompt": agent.system_prompt,  # Include for editing
             "icon": agent.icon,
+            "avatar_url": agent.avatar_url,  # Custom logo/profile picture
             "pricing_type": agent.pricing_type,
             "features": agent.features,
+            "tools": agent.tools,  # List of enabled tool names
+            "tool_configs": agent.tool_configs,  # Custom tool descriptions/examples
             "purchase_date": purchase.purchase_date.isoformat(),
             "purchase_type": purchase.purchase_type,
             "expires_at": purchase.expires_at.isoformat() if purchase.expires_at else None,
@@ -1120,7 +1248,7 @@ async def toggle_agent(
     agent_id: str,
     enabled: bool,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Toggle an agent enabled/disabled in user's library.
@@ -1153,7 +1281,7 @@ async def toggle_agent(
 async def remove_agent_from_library(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Remove an agent from user's library (delete purchase record).
@@ -1197,7 +1325,7 @@ async def select_agent_model(
     agent_id: str,
     model: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Set the user's selected model for an agent in their library.
@@ -1247,7 +1375,7 @@ async def select_agent_model(
 async def publish_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Publish a user's custom/forked agent to the community marketplace.
@@ -1294,7 +1422,7 @@ async def publish_agent(
 async def unpublish_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Unpublish a user's agent from the community marketplace.
@@ -1332,7 +1460,7 @@ async def unpublish_agent(
 async def get_available_agents_for_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get agents that the user owns and can add to this project.
@@ -1392,7 +1520,7 @@ async def add_agent_to_project(
     project_id: str,
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Add an agent from user's library to a project.
@@ -1458,7 +1586,7 @@ async def remove_agent_from_project(
     project_id: str,
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Remove an agent from a project.
@@ -1498,7 +1626,7 @@ async def remove_agent_from_project(
 async def get_project_agents(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get all active agents for a project.
@@ -1557,7 +1685,7 @@ async def create_agent_review(
     rating: int = Query(ge=1, le=5),
     comment: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Create or update a review for an agent.
@@ -1631,7 +1759,7 @@ async def get_marketplace_bases(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Browse marketplace bases with filtering and sorting."""
     query = select(MarketplaceBase).where(MarketplaceBase.is_active == True)
@@ -1717,7 +1845,7 @@ async def get_marketplace_bases(
 async def get_base_details(
     slug: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get detailed information about a specific base."""
     result = await db.execute(
@@ -1787,7 +1915,7 @@ async def get_base_details(
 async def purchase_base(
     base_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Purchase or add a free base to user's library."""
     # Get base
@@ -1841,7 +1969,7 @@ async def purchase_base(
 @router.get("/my-bases")
 async def get_user_bases(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get all bases in the user's library."""
     result = await db.execute(
@@ -1875,3 +2003,228 @@ async def get_user_bases(
         })
 
     return {"bases": response}
+
+
+@router.get("/my-items")
+async def get_user_marketplace_items(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Get all marketplace items in the user's library.
+    Returns bases, services (container, external, hybrid), and workflows in a unified format.
+    """
+    from ..services.service_definitions import get_all_services, service_to_dict
+
+    # Fetch user's purchased bases
+    result = await db.execute(
+        select(MarketplaceBase, UserPurchasedBase)
+        .join(UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id)
+        .where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.is_active == True
+        )
+        .order_by(UserPurchasedBase.purchase_date.desc())
+    )
+
+    bases_data = result.fetchall()
+
+    # Build unified response
+    items = []
+
+    # Add bases
+    for base, purchase in bases_data:
+        items.append({
+            "id": str(base.id),
+            "name": base.name,
+            "slug": base.slug,
+            "description": base.description,
+            "icon": base.icon,
+            "category": base.category,
+            "tech_stack": base.tech_stack or [],
+            "features": base.features or [],
+            "type": "base",
+            # Base-specific fields
+            "git_repo_url": base.git_repo_url,
+            "default_branch": base.default_branch,
+            "pricing_type": base.pricing_type,
+            "purchase_date": purchase.purchase_date.isoformat(),
+            "purchase_type": purchase.purchase_type
+        })
+
+    # Add all services (available to all users by default)
+    services = get_all_services()
+    for service in services:
+        service_data = service_to_dict(service)
+        items.append({
+            "id": f"service-{service.slug}",  # Unique ID for services
+            "name": service.name,
+            "slug": service.slug,
+            "description": service.description,
+            "icon": service.icon,
+            "category": service.category,
+            "tech_stack": [service.docker_image] if service.docker_image else [],
+            "features": list(service.outputs.keys()) if service.outputs else [],
+            "type": "service",
+            # Service type (container, external, hybrid)
+            "service_type": service_data["service_type"],
+            # Container-specific fields
+            "docker_image": service.docker_image,
+            "default_port": service.default_port,
+            "internal_port": service.internal_port,
+            "environment_vars": service.environment_vars,
+            "volumes": service.volumes,
+            # External service fields
+            "credential_fields": service_data["credential_fields"],
+            "auth_type": service_data["auth_type"],
+            "docs_url": service.docs_url,
+            # Connection configuration
+            "connection_template": service.connection_template,
+            "outputs": service.outputs
+        })
+
+    # Add workflows (available to all users)
+    from ..models import WorkflowTemplate
+    workflow_result = await db.execute(
+        select(WorkflowTemplate).where(WorkflowTemplate.is_active == True)
+    )
+    workflows = workflow_result.scalars().all()
+
+    for workflow in workflows:
+        items.append({
+            "id": str(workflow.id),
+            "name": workflow.name,
+            "slug": workflow.slug,
+            "description": workflow.description,
+            "icon": workflow.icon,
+            "category": workflow.category,
+            "tech_stack": workflow.tags or [],
+            "features": workflow.required_credentials or [],
+            "type": "workflow",
+            # Workflow-specific fields
+            "template_definition": workflow.template_definition,
+            "required_credentials": workflow.required_credentials,
+            "preview_image": workflow.preview_image,
+            "pricing_type": workflow.pricing_type,
+            "downloads": workflow.downloads,
+            "is_featured": workflow.is_featured
+        })
+
+    return {"items": items}
+
+
+# ============================================================================
+# Workflow Template Endpoints
+# ============================================================================
+
+@router.get("/workflows")
+async def list_workflows(
+    category: Optional[str] = None,
+    is_featured: Optional[bool] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all workflow templates with optional filtering."""
+    from ..models import WorkflowTemplate
+
+    query = select(WorkflowTemplate).where(WorkflowTemplate.is_active == True)
+
+    if category:
+        query = query.where(WorkflowTemplate.category == category)
+    if is_featured is not None:
+        query = query.where(WorkflowTemplate.is_featured == is_featured)
+    if search:
+        query = query.where(
+            WorkflowTemplate.name.ilike(f"%{search}%") |
+            WorkflowTemplate.description.ilike(f"%{search}%")
+        )
+
+    query = query.order_by(WorkflowTemplate.downloads.desc())
+
+    result = await db.execute(query)
+    workflows = result.scalars().all()
+
+    return {
+        "workflows": [
+            {
+                "id": str(w.id),
+                "name": w.name,
+                "slug": w.slug,
+                "description": w.description,
+                "icon": w.icon,
+                "category": w.category,
+                "tags": w.tags,
+                "preview_image": w.preview_image,
+                "required_credentials": w.required_credentials,
+                "pricing_type": w.pricing_type,
+                "price": w.price,
+                "downloads": w.downloads,
+                "rating": w.rating,
+                "is_featured": w.is_featured
+            }
+            for w in workflows
+        ]
+    }
+
+
+@router.get("/workflows/{slug}")
+async def get_workflow(
+    slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a workflow template by slug, including full template definition."""
+    from ..models import WorkflowTemplate
+
+    result = await db.execute(
+        select(WorkflowTemplate).where(
+            WorkflowTemplate.slug == slug,
+            WorkflowTemplate.is_active == True
+        )
+    )
+    workflow = result.scalar_one_or_none()
+
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    return {
+        "id": str(workflow.id),
+        "name": workflow.name,
+        "slug": workflow.slug,
+        "description": workflow.description,
+        "long_description": workflow.long_description,
+        "icon": workflow.icon,
+        "category": workflow.category,
+        "tags": workflow.tags,
+        "preview_image": workflow.preview_image,
+        "template_definition": workflow.template_definition,
+        "required_credentials": workflow.required_credentials,
+        "pricing_type": workflow.pricing_type,
+        "price": workflow.price,
+        "downloads": workflow.downloads,
+        "rating": workflow.rating,
+        "reviews_count": workflow.reviews_count,
+        "is_featured": workflow.is_featured
+    }
+
+
+@router.post("/workflows/{slug}/increment-downloads")
+async def increment_workflow_downloads(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """Increment the download count for a workflow template."""
+    from ..models import WorkflowTemplate
+
+    result = await db.execute(
+        select(WorkflowTemplate).where(WorkflowTemplate.slug == slug)
+    )
+    workflow = result.scalar_one_or_none()
+
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    workflow.downloads += 1
+    await db.commit()
+
+    return {"success": True, "downloads": workflow.downloads}

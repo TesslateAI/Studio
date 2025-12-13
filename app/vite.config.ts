@@ -31,7 +31,7 @@ export default defineConfig({
     },
     hmr: {
       // HMR WebSocket configuration
-      // When behind Traefik (studio.localhost), use the proxied domain
+      // When behind Traefik (localhost), use the proxied domain
       // Otherwise use localhost for direct access
       host: process.env.APP_DOMAIN || 'localhost',
       // Use wss:// for HTTPS, ws:// for HTTP
@@ -41,9 +41,9 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        // In Docker, containers communicate via service names on internal network
-        // This proxies all /api/* requests to the orchestrator service
-        target: 'http://orchestrator:8000',
+        // Use environment variable or default to localhost for local dev
+        // In Docker, set VITE_BACKEND_URL to http://orchestrator:8000
+        target: process.env.VITE_BACKEND_URL || 'http://localhost:8000',
         changeOrigin: true,
         ws: true, // Enable WebSocket support for /api/chat/ws
         configure: (proxy, options) => {
@@ -60,7 +60,7 @@ export default defineConfig({
       },
       // Explicit WebSocket proxy for /ws path (if needed)
       '/ws': {
-        target: 'http://orchestrator:8000',
+        target: process.env.VITE_BACKEND_URL || 'http://localhost:8000',
         ws: true,
         changeOrigin: true,
       },

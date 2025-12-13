@@ -10,8 +10,8 @@ export default defineConfig({
     host: '0.0.0.0', // Allow external connections (required for Docker)
     port: 5173,
     strictPort: true,
-    // Allow wildcard subdomains for preview containers
-    allowedHosts: process.env.VITE_ALLOWED_HOSTS ? [process.env.VITE_ALLOWED_HOSTS] : 'all',
+    // Allow wildcard subdomains for preview containers (true for Vite 6+)
+    allowedHosts: true,
     // HMR works out of the box with subdomain routing
     // Browser auto-detects protocol and port from URL
     hmr: {

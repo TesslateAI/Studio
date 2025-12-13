@@ -51,7 +51,7 @@ const getToolColor = (toolName: string): string => {
   } else if (name.includes('read') || name.includes('get')) {
     return 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400';
   } else if (name.includes('write') || name.includes('edit') || name.includes('update')) {
-    return 'bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400';
+    return 'bg-[rgba(var(--primary-rgb),0.1)] border-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]';
   } else if (name.includes('list') || name.includes('directory')) {
     return 'bg-purple-500/10 border-purple-500/20 text-purple-600 dark:text-purple-400';
   } else if (name.includes('search') || name.includes('find')) {
@@ -76,6 +76,7 @@ const shouldTruncateOutput = (output: string): boolean => {
 
 export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   const [showFullOutput, setShowFullOutput] = useState(false);
+  const isDevelopment = import.meta.env.DEV;
 
   const { name, parameters, result } = toolCall;
   const hasResult = result !== undefined && result !== null;
@@ -242,8 +243,8 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         </div>
       )}
 
-      {/* Suggestion (for errors) */}
-      {suggestion && !success && (
+      {/* Suggestion (for errors) - Only shown in development mode */}
+      {suggestion && !success && isDevelopment && (
         <div className="border-t border-current/10">
           <div className="px-3 py-2 bg-yellow-500/10">
             <div className="text-xs font-medium text-yellow-700 dark:text-yellow-400 mb-1">

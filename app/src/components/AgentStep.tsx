@@ -1,6 +1,7 @@
 import React from 'react';
 import { Brain } from 'lucide-react';
 import ToolCallDisplay from './ToolCallDisplay';
+import AgentDebugPanel from './AgentDebugPanel';
 import { type AgentStep as AgentStepType } from '../types/agent';
 
 interface AgentStepProps {
@@ -20,13 +21,6 @@ const formatTime = (timestamp: string) => {
 export default function AgentStep({ step, totalSteps }: AgentStepProps) {
   return (
     <div className="agent-step bg-[var(--surface)]/30 rounded-lg p-3 border border-[var(--border-color)]">
-      {/* Step Header */}
-      <div className="flex justify-end items-center mb-3">
-        <span className="text-xs text-[var(--text)]/50">
-          {formatTime(step.timestamp)}
-        </span>
-      </div>
-
       {/* Thought Process - Only show if there ARE tool calls */}
       {step.thought && step.tool_calls && step.tool_calls.length > 0 && (
         <div className="flex items-start gap-2 p-2.5 bg-[var(--text)]/5 rounded-lg mb-3 border border-[var(--border-color)]">
@@ -54,6 +48,13 @@ export default function AgentStep({ step, totalSteps }: AgentStepProps) {
               <span className="text-xs text-[var(--text)]/90 leading-relaxed">{step.thought}</span>
             </div>
           </div>
+        ) : step._debug ? (
+          /* No visible content, but has debug data - show minimal placeholder */
+          <div className="p-2.5 bg-[var(--text)]/5 rounded-lg border border-[var(--border-color)]">
+            <span className="text-xs text-[var(--text)]/60 italic">
+              No visible output
+            </span>
+          </div>
         ) : (
           <div className="p-2.5 bg-[var(--text)]/5 rounded-lg border border-[var(--border-color)]">
             <span className="text-xs text-[var(--text)]/60 italic">
@@ -61,6 +62,15 @@ export default function AgentStep({ step, totalSteps }: AgentStepProps) {
             </span>
           </div>
         )
+      )}
+
+      {/* Debug Panel - Only shown in development mode */}
+      {step._debug && (
+        <AgentDebugPanel
+          iteration={step.iteration}
+          debugData={step._debug}
+          toolResults={step.tool_results}
+        />
       )}
     </div>
   );

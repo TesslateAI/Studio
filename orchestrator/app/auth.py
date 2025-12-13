@@ -4,13 +4,16 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import bcrypt
 import secrets
+import logging
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from .database import get_db
-from .models import User, RefreshToken
+from .models import User
 from .config import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -69,23 +72,37 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
+    logger.info(f"[AUTH] get_current_user called with token: {token[:20]}..." if token else "[AUTH] get_current_user called with no token")
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        logger.info("[AUTH] Attempting to decode JWT token")
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        logger.info(f"[AUTH] JWT decoded successfully. Payload: {payload}")
+
         username: str = payload.get("sub")
+        logger.info(f"[AUTH] Extracted username from token: {username}")
+
         if username is None:
+            logger.error("[AUTH] Username is None in token payload")
             raise credentials_exception
-    except JWTError:
+    except JWTError as e:
+        logger.error(f"[AUTH] JWT decode failed: {str(e)}")
         raise credentials_exception
-    
+
+    logger.info(f"[AUTH] Querying database for user: {username}")
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
+
     if user is None:
+        logger.error(f"[AUTH] User not found in database: {username}")
         raise credentials_exception
+
+    logger.info(f"[AUTH] User authenticated successfully: {username} (id: {user.id})")
     return user
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
@@ -94,97 +111,19 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     return current_user
 
 
-async def create_refresh_token(user: User, db: AsyncSession) -> str:
+async def verify_token_for_user(token: str, db: AsyncSession) -> Optional[User]:
     """
-    Create a new refresh token for a user.
-
-    Best practice: Refresh tokens should be:
-    - Long-lived (7-30 days)
-    - Stored securely in database
-    - Revocable
-    - Single-use (rotate on refresh)
+    Verify a JWT token and return the user (for WebSocket authentication).
+    Returns None if token is invalid.
     """
-    # Generate secure random token
-    token = secrets.token_urlsafe(32)
-
-    # Set expiration (14 days)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=14)
-
-    # Store in database
-    db_token = RefreshToken(
-        token=token,
-        user_id=user.id,
-        expires_at=expires_at
-    )
-    db.add(db_token)
-    await db.commit()
-
-    return token
-
-
-async def validate_refresh_token(token: str, db: AsyncSession) -> Optional[User]:
-    """
-    Validate a refresh token and return the associated user.
-
-    Returns None if token is invalid, expired, or revoked.
-    """
-    # Query for the refresh token
-    result = await db.execute(
-        select(RefreshToken).where(
-            RefreshToken.token == token,
-            RefreshToken.revoked == False
-        )
-    )
-    db_token = result.scalar_one_or_none()
-
-    if not db_token:
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+    except JWTError:
         return None
 
-    # Check if token is expired
-    current_time = datetime.now(timezone.utc)
-    if current_time > db_token.expires_at:
-        # Clean up expired token
-        db_token.revoked = True
-        await db.commit()
-        return None
-
-    # Get user
-    result = await db.execute(
-        select(User).where(User.id == db_token.user_id)
-    )
+    result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-
     return user
-
-
-async def revoke_refresh_token(token: str, db: AsyncSession) -> bool:
-    """
-    Revoke a refresh token (best practice: rotate on use).
-
-    Returns True if token was found and revoked, False otherwise.
-    """
-    result = await db.execute(
-        select(RefreshToken).where(RefreshToken.token == token)
-    )
-    db_token = result.scalar_one_or_none()
-
-    if db_token:
-        db_token.revoked = True
-        await db.commit()
-        return True
-
-    return False
-
-
-async def cleanup_expired_tokens(db: AsyncSession) -> int:
-    """Clean up expired refresh tokens (call periodically)."""
-    from sqlalchemy import delete
-
-    result = await db.execute(
-        delete(RefreshToken).where(
-            RefreshToken.expires_at < datetime.now(timezone.utc)
-        )
-    )
-    await db.commit()
-
-    return result.rowcount

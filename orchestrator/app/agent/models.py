@@ -12,7 +12,7 @@ Supported:
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from uuid import UUID
 import logging
 import asyncio
@@ -41,22 +41,18 @@ async def get_llm_client(
 
     This is the centralized routing function that handles:
     - OpenRouter models: Routes to OpenRouter API with user's stored key
-    - Ollama models: Routes to local Ollama server
-    - LM Studio models: Routes to local LM Studio server
-    - llama.cpp models: Routes to local llama.cpp server
-    - Custom models: Routes to user-configured OpenAI-compatible endpoint
     - Other models: Routes to LiteLLM proxy with user's LiteLLM key
 
     Args:
         user_id: The user ID
-        model_name: The model identifier (e.g., "gpt-5o", "openrouter/model", "ollama/llama2")
+        model_name: The model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
         db: Database session
 
     Returns:
         Configured AsyncOpenAI client ready to use
 
     Raises:
-        ValueError: If user not found or provider configuration not found
+        ValueError: If user not found or OpenRouter key not configured
     """
     from ..models import User, UserAPIKey
     from ..config import get_settings
@@ -70,111 +66,36 @@ async def get_llm_client(
     if not user:
         raise ValueError(f"User {user_id} not found")
 
-    # Helper function to get provider config
-    async def get_provider_config(provider: str):
+    # Check if this is an OpenRouter model
+    if model_name.startswith("openrouter/"):
+        logger.info(f"OpenRouter model detected: {model_name}, fetching user's API key")
+
+        # Get user's OpenRouter API key
         result = await db.execute(
             select(UserAPIKey).where(
                 UserAPIKey.user_id == user_id,
-                UserAPIKey.provider == provider,
+                UserAPIKey.provider == "openrouter",
                 UserAPIKey.is_active == True
             )
         )
-        return result.scalar_one_or_none()
-
-    # Check if this is an OpenRouter model
-    if model_name.startswith("openrouter/"):
-        logger.info(f"OpenRouter model detected: {model_name}")
-        api_key_record = await get_provider_config("openrouter")
+        api_key_record = result.scalar_one_or_none()
 
         if not api_key_record:
             raise ValueError(
                 "OpenRouter model selected but no OpenRouter API key configured. "
-                "Please add your OpenRouter API key in Library > API Keys."
+                "Please add your OpenRouter API key in Settings."
             )
 
+        # Decode the stored key
         openrouter_key = decode_key(api_key_record.encrypted_value)
-        base_url = api_key_record.provider_metadata.get("base_url", "https://openrouter.ai/api/v1")
 
-        logger.info(f"Using OpenRouter API at {base_url}")
-        return AsyncOpenAI(api_key=openrouter_key, base_url=base_url)
+        logger.info(f"Using OpenRouter API with user's key for model: {model_name}")
 
-    # Check if this is an Ollama model
-    elif model_name.startswith("ollama/"):
-        logger.info(f"Ollama model detected: {model_name}")
-        api_key_record = await get_provider_config("ollama")
-
-        if not api_key_record:
-            raise ValueError(
-                "Ollama model selected but Ollama is not configured. "
-                "Please configure Ollama in Library > Model Management."
-            )
-
-        base_url = api_key_record.provider_metadata.get("base_url", "http://localhost:11434")
-        logger.info(f"Using Ollama API at {base_url}")
-
+        # Return client configured for OpenRouter
         return AsyncOpenAI(
-            api_key="ollama",  # Ollama doesn't require real API key
-            base_url=f"{base_url}/v1"
+            api_key=openrouter_key,
+            base_url="https://openrouter.ai/api/v1"
         )
-
-    # Check if this is an LM Studio model
-    elif model_name.startswith("lmstudio/"):
-        logger.info(f"LM Studio model detected: {model_name}")
-        api_key_record = await get_provider_config("lmstudio")
-
-        if not api_key_record:
-            raise ValueError(
-                "LM Studio model selected but LM Studio is not configured. "
-                "Please configure LM Studio in Library > Model Management."
-            )
-
-        base_url = api_key_record.provider_metadata.get("base_url", "http://localhost:1234")
-        logger.info(f"Using LM Studio API at {base_url}")
-
-        return AsyncOpenAI(
-            api_key="lmstudio",  # LM Studio doesn't require real API key
-            base_url=base_url
-        )
-
-    # Check if this is a llama.cpp model
-    elif model_name.startswith("llamacpp/"):
-        logger.info(f"llama.cpp model detected: {model_name}")
-        api_key_record = await get_provider_config("llamacpp")
-
-        if not api_key_record:
-            raise ValueError(
-                "llama.cpp model selected but llama.cpp is not configured. "
-                "Please configure llama.cpp in Library > Model Management."
-            )
-
-        base_url = api_key_record.provider_metadata.get("base_url", "http://localhost:8080")
-        logger.info(f"Using llama.cpp API at {base_url}")
-
-        return AsyncOpenAI(
-            api_key="llamacpp",  # llama.cpp doesn't require real API key
-            base_url=base_url
-        )
-
-    # Check if this is a custom endpoint model
-    elif model_name.startswith("custom/"):
-        logger.info(f"Custom endpoint model detected: {model_name}")
-        api_key_record = await get_provider_config("custom")
-
-        if not api_key_record:
-            raise ValueError(
-                "Custom endpoint model selected but custom endpoint is not configured. "
-                "Please configure a custom endpoint in Library > Model Management."
-            )
-
-        base_url = api_key_record.provider_metadata.get("base_url")
-        if not base_url:
-            raise ValueError("Custom endpoint configured but no base URL found.")
-
-        api_key = decode_key(api_key_record.encrypted_value)
-        logger.info(f"Using custom endpoint at {base_url}")
-
-        return AsyncOpenAI(api_key=api_key, base_url=base_url)
-
     else:
         # Use LiteLLM proxy for system models
         logger.info(f"Using LiteLLM proxy for model: {model_name}")
@@ -192,20 +113,20 @@ class ModelAdapter(ABC):
     """
     Abstract base class for model adapters.
 
-    All adapters must implement the chat() method which returns the model's text response.
+    All adapters must implement the chat() method which streams the model's text response.
     """
 
     @abstractmethod
-    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
         """
-        Send messages to the model and get a text response.
+        Send messages to the model and stream text response chunks.
 
         Args:
             messages: List of message dicts with "role" and "content"
             **kwargs: Model-specific parameters (temperature, max_tokens, etc.)
 
-        Returns:
-            The model's response as a string
+        Yields:
+            Text chunks as they're generated by the model
         """
         pass
 
@@ -232,7 +153,7 @@ class OpenAIAdapter(ModelAdapter):
         Initialize OpenAI adapter with a pre-configured client.
 
         Args:
-            model_name: Model identifier (e.g., "gpt-5o", "openrouter/anthropic/claude-3.5-sonnet")
+            model_name: Model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
             client: Pre-configured AsyncOpenAI client (from get_llm_client())
             temperature: Sampling temperature (0-2)
             max_tokens: Maximum tokens in response
@@ -245,16 +166,16 @@ class OpenAIAdapter(ModelAdapter):
 
         logger.info(f"OpenAIAdapter initialized - model: {model_name}")
 
-    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
         """
-        Send messages to OpenAI API and get response.
+        Send messages to OpenAI API and stream response chunks.
 
         Args:
             messages: List of message dicts
             **kwargs: Override temperature, max_tokens, etc.
 
-        Returns:
-            Model response text
+        Yields:
+            Text chunks as they're generated by the model
         """
         temperature = kwargs.get("temperature", self.temperature)
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
@@ -264,7 +185,8 @@ class OpenAIAdapter(ModelAdapter):
 
         request_params = {
             "model": model_id,
-            "messages": messages
+            "messages": messages,
+            "stream": True  # Enable streaming
         }
 
         if max_tokens:
@@ -279,24 +201,22 @@ class OpenAIAdapter(ModelAdapter):
             }
 
         try:
-            logger.debug(f"Sending request to {self.model_name} with {len(messages)} messages")
+            logger.debug(f"Sending streaming request to {self.model_name} with {len(messages)} messages")
 
-            # Add 60 second timeout to prevent hanging
-            response = await asyncio.wait_for(
-                self.client.chat.completions.create(**request_params),
-                timeout=60.0
-            )
+            # Create streaming completion
+            stream = await self.client.chat.completions.create(**request_params)
 
-            content = response.choices[0].message.content or ""
-            logger.debug(f"Received response: {len(content)} characters")
+            # Stream chunks as they arrive
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        yield delta.content
 
-            return content
+            logger.debug(f"Streaming complete for {self.model_name}")
 
-        except asyncio.TimeoutError:
-            logger.error(f"Model API timeout after 60 seconds - model: {self.model_name}")
-            raise RuntimeError(f"Model API timeout: {self.model_name} did not respond within 60 seconds. Please check your API endpoint configuration.")
         except Exception as e:
-            logger.error(f"OpenAI API error: {e}", exc_info=True)
+            logger.error(f"OpenAI API streaming error: {e}", exc_info=True)
             raise RuntimeError(f"Model API error: {str(e)}") from e
 
     def get_model_name(self) -> str:
@@ -336,9 +256,9 @@ class AnthropicAdapter(ModelAdapter):
 
         logger.info(f"AnthropicAdapter initialized - model: {model_name}")
 
-    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
         """
-        Send messages to Anthropic API and get response.
+        Send messages to Anthropic API and stream response chunks.
 
         Note: Anthropic requires system message to be separate from messages list.
 
@@ -346,8 +266,8 @@ class AnthropicAdapter(ModelAdapter):
             messages: List of message dicts
             **kwargs: Override temperature, max_tokens, etc.
 
-        Returns:
-            Model response text
+        Yields:
+            Text chunks as they're generated by the model
         """
         temperature = kwargs.get("temperature", self.temperature)
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
@@ -366,27 +286,28 @@ class AnthropicAdapter(ModelAdapter):
                 })
 
         try:
-            logger.debug(f"Sending request to {self.model_name} with {len(conversation_messages)} messages")
+            logger.debug(f"Sending streaming request to {self.model_name} with {len(conversation_messages)} messages")
 
             request_params = {
                 "model": self.model_name,
                 "messages": conversation_messages,
                 "temperature": temperature,
-                "max_tokens": max_tokens
+                "max_tokens": max_tokens,
+                "stream": True  # Enable streaming
             }
 
             if system_message:
                 request_params["system"] = system_message
 
-            response = await self.client.messages.create(**request_params)
+            # Stream response chunks
+            async with self.client.messages.stream(**request_params) as stream:
+                async for text in stream.text_stream:
+                    yield text
 
-            content = response.content[0].text if response.content else ""
-            logger.debug(f"Received response: {len(content)} characters")
-
-            return content
+            logger.debug(f"Streaming complete for {self.model_name}")
 
         except Exception as e:
-            logger.error(f"Anthropic API error: {e}", exc_info=True)
+            logger.error(f"Anthropic API streaming error: {e}", exc_info=True)
             raise RuntimeError(f"Model API error: {str(e)}") from e
 
     def get_model_name(self) -> str:
@@ -407,7 +328,7 @@ async def create_model_adapter(
     Auto-detects provider from model name if not specified.
 
     Args:
-        model_name: Model identifier (e.g., "gpt-5o", "openrouter/anthropic/claude-3.5-sonnet")
+        model_name: Model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
         user_id: User ID for fetching API keys
         db: Database session
         provider: Force specific provider ("openai", "anthropic", etc.)
@@ -418,7 +339,7 @@ async def create_model_adapter(
 
     Examples:
         # OpenAI GPT-4 (via LiteLLM)
-        adapter = await create_model_adapter("gpt-5o", user_id=1, db=db)
+        adapter = await create_model_adapter("gpt-4o", user_id=1, db=db)
 
         # OpenRouter model (uses user's OpenRouter key)
         adapter = await create_model_adapter("openrouter/anthropic/claude-3.5-sonnet", user_id=1, db=db)

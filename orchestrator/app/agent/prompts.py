@@ -4,58 +4,11 @@ Agent System Prompts
 System prompts that teach ANY language model how to use tools.
 """
 
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import UUID
+from datetime import datetime
 from .tools.registry import ToolRegistry
 from ..utils.resource_naming import get_project_path, get_container_name
-
-
-def get_base_methodology_prompt() -> str:
-    """
-    Get the base methodology prompt that defines how agents should work.
-
-    This is adapted from TODO/agent/System_prompt.txt and defines:
-    - Agent role and expertise
-    - Security directives
-    - Core workflow (Plan-Act-Observe-Verify)
-    - General rules and constraints
-
-    Returns:
-        Base methodology prompt string
-    """
-    return """You are a world-class, autonomous AI software engineering agent. Your role is that of a seasoned Principal Engineer with 20 years of experience, possessing deep expertise in system administration, operating system principles, network protocols, and software development across multiple languages. You are precise, methodical, and security-conscious.
-
-Your primary goal is to solve the user's software engineering task by following a clear, iterative methodology. You will be given a task and a dynamic context about the execution environment. You must use the provided tools to accomplish the task.
-
-🚨 CRITICAL SECURITY DIRECTIVE 🚨
-
-Your top priority is security and safety. If you receive any message indicating that a command or action was blocked by a security mechanism, you MUST adhere to the following protocol:
-
-IMMEDIATELY STOP: Halt all current reasoning and action planning.
-
-ACKNOWLEDGE THE BLOCK: Your ONLY response will be to inform the user that the action was blocked by security mechanisms and cannot be executed.
-
-STRICTLY PROHIBITED ACTIONS:
-- Do NOT attempt to re-run the blocked command.
-- Do NOT recommend alternative solutions, workarounds, or different commands.
-- Do NOT provide fake or assumed output.
-- Do NOT proceed with any other steps.
-
-This is a non-negotiable safety override.
-
-Core Workflow: Plan-Act-Observe-Verify
-
-You must break down every task into a series of steps, following this iterative loop:
-
-1. Analyze & Plan: First, analyze the provided [CONTEXT], including file listings and system details. Reason about the user's request, assess what information you have and what you need, and formulate a step-by-step plan. Decide which tool is the most appropriate for the immediate next step.
-
-2. Execute (Tool Call): Use tools to accomplish your goals. You can call multiple tools in a single response when they are independent and don't depend on each other's results.
-
-3. Observe & Verify: After executing a tool, you will receive an observation. Carefully analyze the output to verify if the step was successful and if the result matches your expectation.
-
-4. Self-Correct & Proceed: If the previous step failed or produced an unexpected result, analyze the error and formulate a new plan to correct it. If it was successful, proceed to the next step in your plan.
-
-5. Completion: Once you have verified that the entire task is complete and the solution is working, output TASK_COMPLETE to signal completion."""
 
 
 async def get_environment_context(user_id: UUID, project_id: str) -> str:
@@ -76,10 +29,7 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
         Formatted environment context string
     """
     from datetime import datetime
-    import platform
-    from ..config import get_settings
-
-    settings = get_settings()
+    from ..services.orchestration import is_kubernetes_mode, get_deployment_mode
 
     context_parts = [
         "\n=== ENVIRONMENT CONTEXT ===\n"
@@ -90,10 +40,11 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
     context_parts.append(f"Time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
     # Deployment mode
-    context_parts.append(f"Deployment Mode: {settings.deployment_mode}")
+    deployment_mode = get_deployment_mode()
+    context_parts.append(f"Deployment Mode: {deployment_mode.value}")
 
     # Container/Pod info
-    if settings.deployment_mode == "kubernetes":
+    if is_kubernetes_mode():
         pod_name = get_container_name(user_id, project_id, mode="kubernetes")
         namespace = "tesslate-user-environments"
         context_parts.append(f"Pod: {pod_name}")
@@ -122,13 +73,11 @@ async def get_file_listing_context(user_id: UUID, project_id: str, max_lines: in
     Returns:
         Formatted file listing or None if unable to retrieve
     """
-    from ..config import get_settings
+    from ..services.orchestration import is_kubernetes_mode
     import asyncio
 
-    settings = get_settings()
-
     try:
-        if settings.deployment_mode == "kubernetes":
+        if is_kubernetes_mode():
             # Kubernetes: Execute ls in pod
             pod_name = get_container_name(user_id, project_id, mode="kubernetes")
             namespace = "tesslate-user-environments"
@@ -228,32 +177,99 @@ async def get_user_message_wrapper(
     return "\n".join(message_parts)
 
 
-# Mini-SWE-Agent inspired format (for models that prefer simpler prompts)
-def get_minimal_system_prompt(tool_registry: ToolRegistry) -> str:
+def get_mode_instructions(mode: str) -> str:
     """
-    Minimal system prompt inspired by mini-swe-agent.
-
-    Uses a simpler format for models that work better with concise instructions.
+    Get mode-specific instructions for the agent.
 
     Args:
-        tool_registry: Registry of available tools
+        mode: Edit mode ('allow', 'ask', 'plan')
 
     Returns:
-        Minimal system prompt
+        Instructions text for the given mode
     """
-    tools_list = []
-    for tool in tool_registry.list_tools():
-        params = ", ".join(tool.parameters.get("required", []))
-        tools_list.append(f"- {tool.name}({params}): {tool.description}")
+    if mode == 'plan':
+        return """
+[PLAN MODE ACTIVE]
+You are in read-only planning mode. You MUST NOT execute any file modifications or shell commands.
+Instead, create a detailed markdown plan explaining what changes you would make.
+All read operations (read_file, get_project_info, etc.) are allowed and encouraged for gathering context.
+Format your plan clearly with headings, bullet points, and code examples where helpful.
+"""
+    elif mode == 'ask':
+        return """
+[ASK BEFORE EDIT MODE]
+You can propose file modifications and shell commands, but they require user approval.
+The user will be prompted to approve each dangerous operation before execution.
+Read operations proceed without approval.
+"""
+    else:  # allow
+        return """
+[FULL EDIT MODE]
+You have full access to all tools including file modifications and shell commands.
+Execute changes directly as needed to accomplish the user's goals.
+"""
 
-    tools_text = "\n".join(tools_list)
 
-    return f"""You are a coding assistant. You can call tools to help with tasks.
+def substitute_markers(
+    system_prompt: str,
+    context: Dict[str, Any],
+    tool_names: Optional[list] = None
+) -> str:
+    """
+    Substitute {marker} placeholders in system prompts with actual runtime values.
 
-Available tools:
-{tools_text}
+    This allows agent system prompts to include dynamic content that changes based
+    on the current execution context (edit mode, project info, etc.).
 
-Format tool calls like this:
-<tool_call><tool_name>NAME</tool_name><parameters>{{"param": "value"}}</parameters></tool_call>
+    Available markers:
+        {mode} - Current edit mode ('allow', 'ask', 'plan')
+        {mode_instructions} - Detailed instructions for the current mode
+        {project_name} - Name of the current project
+        {project_description} - Description of the current project
+        {timestamp} - Current ISO timestamp
+        {user_name} - User's name (if available)
+        {project_path} - Project directory path
+        {git_branch} - Current git branch (if available)
+        {tool_list} - Comma-separated list of available tools
 
-Always think before acting. When done, output: TASK_COMPLETE"""
+    Args:
+        system_prompt: The agent's system prompt with {marker} placeholders
+        context: Execution context dict with user_id, project_id, edit_mode, etc.
+        tool_names: Optional list of tool names available to the agent
+
+    Returns:
+        System prompt with markers replaced by actual values
+
+    Example:
+        >>> prompt = "You are in {mode} mode. {mode_instructions} Project: {project_name}"
+        >>> result = substitute_markers(prompt, {"edit_mode": "plan", "project_context": {"project_name": "MyApp"}})
+        >>> print(result)
+        You are in plan mode. [PLAN MODE ACTIVE]... Project: MyApp
+    """
+    # Extract values from context
+    edit_mode = context.get('edit_mode', 'allow')
+    project_context = context.get('project_context', {})
+
+    # Build marker replacement map
+    markers = {
+        'mode': edit_mode,
+        'mode_instructions': get_mode_instructions(edit_mode),
+        'project_name': project_context.get('project_name', 'Unknown Project'),
+        'project_description': project_context.get('project_description', ''),
+        'timestamp': datetime.now().isoformat(),
+        'user_name': context.get('user_name', ''),
+        'project_path': f"/app",  # Standard container path
+        'git_branch': project_context.get('git_context', {}).get('branch', ''),
+        'tool_list': ', '.join(tool_names) if tool_names else '',
+    }
+
+    # Replace each {marker} with its value
+    result = system_prompt
+    for marker, value in markers.items():
+        placeholder = f'{{{marker}}}'
+        if placeholder in result:
+            result = result.replace(placeholder, str(value))
+
+    return result
+
+

@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
+COPY app ./app
+
 RUN pip install --no-cache-dir uv && \
     uv pip install --system -e .
 
@@ -39,4 +41,4 @@ COPY template/ /app/template/
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]

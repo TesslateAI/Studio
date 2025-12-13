@@ -10,63 +10,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 import base64
-import hashlib
 import logging
-from cryptography.fernet import Fernet
 
 from ..database import get_db
-from ..auth import get_current_active_user
 from ..models import User, UserAPIKey
-from ..config import get_settings
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# Initialize Fernet cipher for proper encryption
-def _get_cipher_suite():
-    """Get Fernet cipher suite for encryption/decryption."""
-    settings = get_settings()
-    # Derive a Fernet key from the secret key (ensure it's 32 bytes URL-safe base64)
-    hashed = hashlib.sha256(settings.secret_key.encode()).digest()
-    key = base64.urlsafe_b64encode(hashed)
-    return Fernet(key)
-
-
+# Simple encoding for now - in production, use proper encryption (e.g., Fernet, AWS KMS, etc.)
 def encode_key(key: str) -> str:
-    """
-    Encrypt API key for storage using Fernet symmetric encryption.
-
-    Args:
-        key: The plaintext API key to encrypt
-
-    Returns:
-        Base64-encoded encrypted key
-    """
-    cipher_suite = _get_cipher_suite()
-    encrypted = cipher_suite.encrypt(key.strip().encode())
-    return encrypted.decode()
+    """Encode API key for storage. In production, use proper encryption."""
+    # Strip whitespace before encoding to prevent issues
+    return base64.b64encode(key.strip().encode()).decode()
 
 
 def decode_key(encoded: str) -> str:
-    """
-    Decrypt API key from storage using Fernet symmetric encryption.
-
-    Args:
-        encoded: The encrypted key to decrypt
-
-    Returns:
-        Decrypted plaintext API key
-    """
-    cipher_suite = _get_cipher_suite()
-    decrypted = cipher_suite.decrypt(encoded.encode())
-    return decrypted.decode().strip()
+    """Decode API key from storage. In production, use proper decryption."""
+    # Strip whitespace after decoding to handle any encoding issues
+    return base64.b64decode(encoded.encode()).decode().strip()
 
 
 @router.get("/api-keys")
 async def list_api_keys(
     provider: Optional[str] = None,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -111,7 +81,7 @@ async def add_api_key(
     key_name: Optional[str] = Body(None, description="Optional name for this key"),
     provider_metadata: Optional[dict] = Body(default={}, description="Provider-specific metadata"),
     expires_at: Optional[str] = Body(None, description="Optional expiration date"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -178,7 +148,7 @@ async def update_api_key(
     key_name: Optional[str] = Body(None, description="New name for this key"),
     provider_metadata: Optional[dict] = Body(None, description="Updated metadata"),
     expires_at: Optional[str] = Body(None, description="Updated expiration date"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -218,7 +188,7 @@ async def update_api_key(
 @router.delete("/api-keys/{key_id}")
 async def delete_api_key(
     key_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -250,7 +220,7 @@ async def delete_api_key(
 async def get_api_key(
     key_id: str,
     reveal: bool = False,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -285,7 +255,7 @@ async def get_api_key(
 
 @router.get("/providers")
 async def list_supported_providers(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     List all supported providers and their configuration.
@@ -298,58 +268,7 @@ async def list_supported_providers(
             "auth_type": "api_key",
             "website": "https://openrouter.ai",
             "requires_key": True,
-            "supports_oauth": False,
-            "default_base_url": "https://openrouter.ai/api/v1",
-            "models_endpoint": "/models",
-            "config_fields": ["api_key"]
-        },
-        {
-            "id": "ollama",
-            "name": "Ollama",
-            "description": "Run large language models locally with Ollama",
-            "auth_type": "none",
-            "website": "https://ollama.ai",
-            "requires_key": False,
-            "supports_oauth": False,
-            "default_base_url": "http://localhost:11434",
-            "models_endpoint": "/api/tags",
-            "config_fields": ["base_url"]
-        },
-        {
-            "id": "lmstudio",
-            "name": "LM Studio",
-            "description": "Local LLM inference with LM Studio",
-            "auth_type": "none",
-            "website": "https://lmstudio.ai",
-            "requires_key": False,
-            "supports_oauth": False,
-            "default_base_url": "http://localhost:1234",
-            "models_endpoint": "/v1/models",
-            "config_fields": ["base_url"]
-        },
-        {
-            "id": "llamacpp",
-            "name": "llama.cpp",
-            "description": "Efficient local inference with llama.cpp server",
-            "auth_type": "none",
-            "website": "https://github.com/ggerganov/llama.cpp",
-            "requires_key": False,
-            "supports_oauth": False,
-            "default_base_url": "http://localhost:8080",
-            "models_endpoint": "/v1/models",
-            "config_fields": ["base_url"]
-        },
-        {
-            "id": "custom",
-            "name": "Custom Endpoint",
-            "description": "Connect to any OpenAI-compatible API endpoint",
-            "auth_type": "api_key",
-            "website": "",
-            "requires_key": True,
-            "supports_oauth": False,
-            "default_base_url": None,
-            "models_endpoint": "/v1/models",
-            "config_fields": ["base_url", "api_key"]
+            "supports_oauth": False
         },
         {
             "id": "google",

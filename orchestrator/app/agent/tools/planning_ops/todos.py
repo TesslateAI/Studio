@@ -87,24 +87,38 @@ async def todo_write_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     Returns:
         Dict with success status
     """
-    todos = params.get("todos", [])
+    todos = params.get("todos")
+
+    # Better validation with helpful error messages
+    if todos is None:
+        return error_output("Missing 'todos' parameter. Expected: {\"todos\": [{\"content\": \"...\", \"status\": \"pending\"}]}")
 
     if not isinstance(todos, list):
-        raise ValueError("todos must be a list")
+        return error_output(
+            f"Invalid 'todos' parameter type: expected array, got {type(todos).__name__}. "
+            f"Example: {{\"todos\": [{{\"content\": \"Read file\", \"status\": \"pending\"}}]}}"
+        )
+
+    if len(todos) == 0:
+        return error_output("Empty 'todos' array. Add at least one todo with 'content' and 'status' fields.")
 
     # Validate todo structure
     for i, todo in enumerate(todos):
         if not isinstance(todo, dict):
-            raise ValueError(f"Todo {i} must be an object")
+            return error_output(
+                f"Todo at index {i} must be an object with 'content' and 'status' fields. "
+                f"Got: {type(todo).__name__}. "
+                f"Example: {{\"content\": \"Task description\", \"status\": \"pending\"}}"
+            )
         if "content" not in todo:
-            raise ValueError(f"Todo {i} is missing 'content' field")
+            return error_output(f"Todo at index {i} is missing required 'content' field")
         if "status" not in todo:
-            raise ValueError(f"Todo {i} is missing 'status' field")
+            return error_output(f"Todo at index {i} is missing required 'status' field")
 
         # Validate status
         valid_statuses = ["pending", "in_progress", "completed"]
         if todo["status"] not in valid_statuses:
-            raise ValueError(f"Todo {i} has invalid status. Must be one of: {valid_statuses}")
+            return error_output(f"Todo at index {i} has invalid status '{todo['status']}'. Must be one of: {', '.join(valid_statuses)}")
 
         # Add default priority if missing
         if "priority" not in todo:
@@ -153,7 +167,7 @@ def register_planning_tools(registry):
         executor=todo_read_tool,
         category=ToolCategory.PROJECT,  # Using PROJECT category since there's no PLANNING category
         examples=[
-            '<tool_call><tool_name>todo_read</tool_name><parameters>{}</parameters></tool_call>'
+            '{"tool_name": "todo_read", "parameters": {}}'
         ]
     ))
 
@@ -193,7 +207,7 @@ def register_planning_tools(registry):
         executor=todo_write_tool,
         category=ToolCategory.PROJECT,
         examples=[
-            '<tool_call><tool_name>todo_write</tool_name><parameters>{"todos": [{"content": "Read package.json", "status": "completed"}, {"content": "Update dependencies", "status": "in_progress"}, {"content": "Run tests", "status": "pending", "priority": "high"}]}</parameters></tool_call>'
+            '{"tool_name": "todo_write", "parameters": {"todos": [{"content": "Read package.json", "status": "completed"}, {"content": "Update dependencies", "status": "in_progress"}, {"content": "Run tests", "status": "pending", "priority": "high"}]}}'
         ]
     ))
 

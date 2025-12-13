@@ -1,20 +1,28 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
-from .routers import auth, projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals
+from .routers import projects, chat, agent, agents, github, git, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth
 from .config import get_settings
+from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
+from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
+from .schemas_auth import UserRead, UserCreate, UserUpdate
+from .oauth import get_available_oauth_clients
 import os
 import logging
 import re
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 settings = get_settings()
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Application Builder API")
 
@@ -25,8 +33,8 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
     Custom CORS middleware that supports wildcard subdomain patterns.
 
     Validates origins against regex patterns to allow:
-    - Main frontend origins (localhost:3000, studio.localhost, APP_DOMAIN)
-    - User dev environment subdomains (*.studio.localhost, *.{APP_DOMAIN})
+    - Main frontend origins (localhost:3000, localhost, APP_DOMAIN)
+    - User dev environment subdomains (*.localhost, *.{APP_DOMAIN})
 
     The APP_DOMAIN setting controls which production domain to allow.
     """
@@ -75,7 +83,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                         "Access-Control-Allow-Origin": origin,
                         "Access-Control-Allow-Credentials": "true",
                         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token",
                         "Access-Control-Max-Age": "600",
                     }
                 )
@@ -91,13 +99,20 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token"
             response.headers["Access-Control-Expose-Headers"] = "Content-Length, X-Total-Count"
 
         return response
 
+# Add ProxyHeadersMiddleware first to handle X-Forwarded-* headers from Traefik
+# This ensures FastAPI generates correct URLs for OAuth redirects
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
 # Use custom dynamic CORS middleware
 app.add_middleware(DynamicCORSMiddleware)
+
+# Add CSRF protection middleware (must be after CORS)
+app.add_middleware(CSRFProtectionMiddleware)
 
 def load_agents_config():
     """Load agent definitions from agents_config.json file."""
@@ -160,40 +175,90 @@ async def shell_session_cleanup_loop():
     from .database import AsyncSessionLocal
 
     logger.info("Shell session cleanup task started")
+    error_count = 0
+    max_consecutive_errors = 5
 
     while True:
+        db = None
         try:
             async with AsyncSessionLocal() as db:
                 session_manager = get_shell_session_manager()
                 closed_count = await session_manager.cleanup_idle_sessions(db)
                 if closed_count > 0:
                     logger.info(f"Auto-closed {closed_count} idle shell sessions")
+
+                # Reset error count on success
+                error_count = 0
+
         except Exception as e:
-            logger.error(f"Session cleanup error: {e}", exc_info=True)
+            error_count += 1
+            logger.error(f"Session cleanup error ({error_count}/{max_consecutive_errors}): {e}", exc_info=True)
+
+            # If too many consecutive errors, use exponential backoff
+            if error_count >= max_consecutive_errors:
+                backoff_time = min(300, 60 * (2 ** (error_count - max_consecutive_errors)))
+                logger.warning(f"Too many cleanup errors, backing off for {backoff_time}s")
+                await asyncio.sleep(backoff_time)
+                continue
+        finally:
+            # Ensure DB session is always closed
+            if db is not None:
+                try:
+                    await db.close()
+                except:
+                    pass
 
         # Run every 5 minutes
         await asyncio.sleep(300)
 
 
 async def container_cleanup_loop():
-    """Background task to clean up idle project containers."""
-    import asyncio
-    from .dev_server_manager import get_container_manager
+    """
+    Background task to clean up idle project containers.
 
-    logger.info("Container cleanup task started - will shutdown idle containers after 5 minutes")
+    NOTE: Legacy single-container cleanup disabled. Multi-container projects
+    are managed via docker-compose and don't need this cleanup task.
+    """
+    import asyncio
+    logger.info("Container cleanup task disabled - legacy single-container system removed")
+
+    # Keep the task alive but do nothing
+    while True:
+        await asyncio.sleep(3600)  # Sleep for 1 hour
+        # Run cleanup at configured interval
+        await asyncio.sleep(settings.container_cleanup_interval_minutes * 60)
+
+
+async def stats_flush_loop():
+    """Background task to flush shell session stats to database."""
+    import asyncio
+    from .services.shell_session_manager import get_shell_session_manager
+    from .database import AsyncSessionLocal
+
+    logger.info("Stats flush task started - batches DB updates to prevent blocking")
 
     while True:
+        db = None
         try:
-            container_manager = get_container_manager()
-            # Clean up containers idle for 5 minutes
-            cleaned = await container_manager.cleanup_idle_environments(idle_timeout_minutes=5)
-            if cleaned:
-                logger.info(f"Auto-shutdown {len(cleaned)} idle project containers: {', '.join(cleaned)}")
-        except Exception as e:
-            logger.error(f"Container cleanup error: {e}", exc_info=True)
+            async with AsyncSessionLocal() as db:
+                session_manager = get_shell_session_manager()
+                updated_count = await session_manager.flush_pending_stats(db)
+                if updated_count > 0:
+                    logger.debug(f"Flushed stats for {updated_count} shell sessions")
 
-        # Run every 2 minutes to check for idle containers
-        await asyncio.sleep(120)
+        except Exception as e:
+            logger.error(f"Stats flush error: {e}", exc_info=True)
+        finally:
+            # Ensure DB session is always closed
+            if db is not None:
+                try:
+                    await db.close()
+                except:
+                    pass
+
+        # Flush every 5 seconds to keep stats reasonably fresh
+        # while avoiding blocking on every keystroke
+        await asyncio.sleep(5)
 
 
 # Add security headers middleware
@@ -237,6 +302,12 @@ async def add_security_headers(request: Request, call_next):
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
+    if request.url.path == "/api/users/me":
+        logger.info(f"Cookie header: {request.headers.get('cookie', 'NO COOKIE')}")
+    if "/api/tasks/" in request.url.path:
+        auth_header = request.headers.get('authorization', 'NO AUTH HEADER')
+        logger.info(f"[TASK_REQUEST] Authorization header: {auth_header[:50] if auth_header != 'NO AUTH HEADER' else auth_header}...")
+        logger.info(f"[TASK_REQUEST] All headers: {dict(request.headers)}")
     try:
         response = await call_next(request)
         logger.info(f"Response status: {response.status_code}")
@@ -273,44 +344,310 @@ async def startup():
     # Create users directory for Docker mode
     # In Docker mode, user project files are stored in the users directory
     # In K8s mode, files are stored on PVC and this is not needed
-    from .config import get_settings
-    settings = get_settings()
-    if settings.deployment_mode == "docker":
+    from .services.orchestration import is_docker_mode
+    if is_docker_mode():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
 
-    # Automatic database seeding (marketplace agents, bases, OSS agents)
-    if settings.auto_seed_database:
-        try:
-            from .seed_data import run_all_seeds
-            result = await run_all_seeds()
-
-            if result["total_created"] > 0:
-                logger.info(
-                    f"✨ Marketplace seeding complete! Created {result['total_created']} items: "
-                    f"{result['marketplace_agents']['created']} agents, "
-                    f"{result['marketplace_bases']['created']} bases, "
-                    f"{result['opensource_agents']['created']} OSS agents"
-                )
-            else:
-                logger.info(f"Marketplace already seeded ({result['total_existing']} existing items)")
-
-        except Exception as e:
-            logger.error(f"Error during automatic seeding: {e}", exc_info=True)
-            logger.warning("Continuing startup without seeding...")
-    else:
-        logger.info("Automatic database seeding disabled (AUTO_SEED_DATABASE=false)")
+    # Seed default agents if they don't exist
+    await seed_default_agents()
 
     # Start background cleanup tasks
     asyncio.create_task(shell_session_cleanup_loop())
     asyncio.create_task(container_cleanup_loop())
+    asyncio.create_task(stats_flush_loop())
+
+    # Initialize base cache (Docker mode only - async - doesn't block startup)
+    if is_docker_mode():
+        from .services.base_cache_manager import get_base_cache_manager
+        base_cache_manager = get_base_cache_manager()
+        asyncio.create_task(base_cache_manager.initialize_cache())
+        logger.info("Base cache manager initialized for Docker mode")
+    else:
+        logger.info("Skipping base cache manager initialization (Kubernetes mode)")
 
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods
 # app.mount("/preview", StaticFiles(directory="users"), name="preview")
 
-# Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+# ============================================================================
+# FastAPI-Users Authentication Routes
+# ============================================================================
+
+# Auth router with Bearer token (JWT) support
+app.include_router(
+    fastapi_users.get_auth_router(bearer_backend),
+    prefix="/api/auth/jwt",
+    tags=["auth"],
+)
+
+# Auth router with Cookie support
+app.include_router(
+    fastapi_users.get_auth_router(cookie_backend),
+    prefix="/api/auth/cookie",
+    tags=["auth"],
+)
+
+# Register router (user registration)
+app.include_router(
+    fastapi_users.get_register_router(UserRead, UserCreate),
+    prefix="/api/auth",
+    tags=["auth"],
+)
+
+# Reset password router
+app.include_router(
+    fastapi_users.get_reset_password_router(),
+    prefix="/api/auth",
+    tags=["auth"],
+)
+
+# Verify email router
+app.include_router(
+    fastapi_users.get_verify_router(UserRead),
+    prefix="/api/auth",
+    tags=["auth"],
+)
+
+# User management router (get/update current user)
+app.include_router(
+    fastapi_users.get_users_router(UserRead, UserUpdate),
+    prefix="/api/users",
+    tags=["users"],
+)
+
+# ============================================================================
+# Custom OAuth Authorize Endpoints
+# ============================================================================
+# These MUST be registered BEFORE the OAuth routers to take precedence
+# They force the redirect_uri to use localhost (Google doesn't accept .localhost domains)
+
+from fastapi import Query
+from fastapi.responses import JSONResponse
+
+@app.get("/api/auth/google/authorize", tags=["auth"])
+async def google_authorize(scopes: list[str] = Query(None)):
+    """
+    Custom Google OAuth authorize endpoint that forces redirect_uri to use localhost.
+    Google OAuth doesn't accept .localhost domains, so we force it to use localhost
+    regardless of what domain the user accessed the app from.
+    """
+    from .oauth import OAUTH_CLIENTS
+    from fastapi_users.router.oauth import generate_state_token, STATE_TOKEN_AUDIENCE
+
+    if "google" not in OAUTH_CLIENTS:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Google OAuth is not configured"}
+        )
+
+    oauth_client = OAUTH_CLIENTS["google"]
+
+    # Force the redirect_uri to use localhost (from environment variable)
+    redirect_uri = settings.google_oauth_redirect_uri
+    logger.info(f"Google OAuth redirect_uri: {redirect_uri}")
+
+    # Generate state token
+    state_data: dict[str, str] = {}
+    state = generate_state_token(state_data, settings.secret_key)
+
+    # Get authorization URL with forced redirect_uri
+    authorization_url = await oauth_client.get_authorization_url(
+        redirect_uri,
+        state,
+        scopes,
+    )
+
+    return {"authorization_url": authorization_url}
+
+@app.get("/api/auth/github/authorize", tags=["auth"])
+async def github_authorize(scopes: list[str] = Query(None)):
+    """
+    Custom GitHub OAuth authorize endpoint that forces redirect_uri to use localhost.
+    This matches the Google OAuth behavior for consistency.
+    """
+    from .oauth import OAUTH_CLIENTS
+    from fastapi_users.router.oauth import generate_state_token, STATE_TOKEN_AUDIENCE
+
+    if "github" not in OAUTH_CLIENTS:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "GitHub OAuth is not configured"}
+        )
+
+    oauth_client = OAUTH_CLIENTS["github"]
+
+    # Force the redirect_uri to use localhost (from environment variable)
+    redirect_uri = settings.github_oauth_redirect_uri
+    logger.info(f"GitHub OAuth redirect_uri: {redirect_uri}")
+
+    # Generate state token
+    state_data: dict[str, str] = {}
+    state = generate_state_token(state_data, settings.secret_key)
+
+    # Get authorization URL with forced redirect_uri
+    authorization_url = await oauth_client.get_authorization_url(
+        redirect_uri,
+        state,
+        scopes,
+    )
+
+    return {"authorization_url": authorization_url}
+
+# ============================================================================
+# Custom OAuth Callback Endpoints with Redirect
+# ============================================================================
+# We need custom callback endpoints to properly redirect to the frontend
+# after setting the authentication cookie
+
+from fastapi import HTTPException, status as http_status
+from fastapi.responses import RedirectResponse
+from httpx_oauth.integrations.fastapi import OAuth2AuthorizeCallback
+
+# Frontend callback URL where users will be redirected after authentication
+# Dynamically constructed from environment settings to support both local and production
+frontend_callback_url = f"{settings.get_app_base_url}/oauth/callback"
+
+def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redirect_uri: str):
+    """
+    Factory function to create OAuth callback endpoint with proper closure.
+
+    This is necessary because we're creating endpoints in a loop and need to
+    capture the provider-specific variables correctly.
+    """
+    # Create OAuth2AuthorizeCallback dependency with forced redirect_uri
+    oauth2_callback_dependency = OAuth2AuthorizeCallback(
+        oauth_client,
+        redirect_url=oauth_redirect_uri,
+    )
+
+    async def oauth_callback_handler(
+        request: Request,
+        access_token_state=Depends(oauth2_callback_dependency),
+        user_manager=Depends(get_user_manager),
+        strategy=Depends(cookie_backend.get_strategy),
+    ):
+        """
+        OAuth callback endpoint that handles authentication and redirects to frontend.
+
+        Flow:
+        1. Receive authorization code from OAuth provider
+        2. Exchange code for access token (handled by oauth2_callback_dependency)
+        3. Get user info from OAuth provider
+        4. Create/update user in database
+        5. Generate session token and set cookie
+        6. Redirect to frontend OAuth callback page
+        """
+        from fastapi_users.router.oauth import STATE_TOKEN_AUDIENCE
+        import jwt as jose_jwt
+
+        token, state = access_token_state
+
+        try:
+            # Get user ID and email from OAuth provider
+            account_id, account_email = await oauth_client.get_id_email(token["access_token"])
+
+            if account_email is None:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="OAUTH_NOT_AVAILABLE_EMAIL",
+                )
+
+            # Verify state token
+            from fastapi_users.jwt import decode_jwt
+            try:
+                decode_jwt(state, settings.secret_key, [STATE_TOKEN_AUDIENCE])
+            except jose_jwt.DecodeError:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="INVALID_STATE_TOKEN",
+                )
+            except jose_jwt.ExpiredSignatureError:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="STATE_TOKEN_EXPIRED",
+                )
+
+            # Create or get user via OAuth callback
+            user = await user_manager.oauth_callback(
+                provider_name,
+                token["access_token"],
+                account_id,
+                account_email,
+                token.get("expires_at"),
+                token.get("refresh_token"),
+                request,
+                associate_by_email=True,
+                is_verified_by_default=True,
+            )
+
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="LOGIN_BAD_CREDENTIALS",
+                )
+
+            # Generate authentication cookie using cookie backend
+            # Frontend is configured with withCredentials=true to send cookies
+            login_response = await cookie_backend.login(strategy, user)
+
+            # Call on_after_login hook to send webhook
+            await user_manager.on_after_login(user, request)
+
+            # Create redirect response to frontend callback page
+            redirect_response = RedirectResponse(url=frontend_callback_url, status_code=303)
+
+            # Copy Set-Cookie headers from login response to redirect response
+            set_cookie_headers = login_response.headers.getlist('set-cookie')
+            for cookie_header in set_cookie_headers:
+                redirect_response.headers.append('set-cookie', cookie_header)
+
+            logger.info(f"OAuth login successful for {provider_name}: {user.email}")
+            return redirect_response
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"OAuth callback error for {provider_name}: {e}")
+            # Redirect to login with error
+            error_url = f"{settings.get_app_base_url}/login?error=oauth_failed"
+            return RedirectResponse(url=error_url, status_code=303)
+
+    return oauth_callback_handler
+
+# Register OAuth callback endpoints for each provider
+for provider_name, oauth_client in get_available_oauth_clients().items():
+    # Get the correct redirect_uri for token exchange (from environment)
+    if provider_name == "google":
+        oauth_redirect_uri = settings.google_oauth_redirect_uri
+    elif provider_name == "github":
+        oauth_redirect_uri = settings.github_oauth_redirect_uri
+    else:
+        oauth_redirect_uri = None
+
+    # Create and register the callback endpoint
+    callback_handler = create_oauth_callback_endpoint(provider_name, oauth_client, oauth_redirect_uri)
+
+    app.add_api_route(
+        f"/api/auth/{provider_name}/callback",
+        callback_handler,
+        methods=["GET"],
+        name=f"oauth:{provider_name}.cookie.callback",
+        tags=["auth"],
+    )
+
+    logger.info(f"✅ Registered OAuth callback for {provider_name} (redirects to: {frontend_callback_url})")
+
+# CSRF token endpoint
+@app.get("/api/auth/csrf", tags=["auth"])
+async def get_csrf_token():
+    """Get CSRF token for cookie-based authentication."""
+    return get_csrf_token_response()
+
+# ============================================================================
+# Include Other Routers
+# ============================================================================
+
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
@@ -319,11 +656,18 @@ app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketp
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(shell.router, prefix="/api/shell", tags=["shell"])
 app.include_router(secrets.router, prefix="/api/secrets", tags=["secrets"])
-app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(kanban.router, tags=["kanban"])
 app.include_router(referrals.router, prefix="/api", tags=["referrals"])
+app.include_router(billing.router, prefix="/api", tags=["billing"])
+app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
+app.include_router(feedback.router, tags=["feedback"])
+app.include_router(tasks.router)
+app.include_router(deployments.router)
+app.include_router(deployment_credentials.router)
+app.include_router(deployment_oauth.router)
 
 @app.get("/")
 async def root():

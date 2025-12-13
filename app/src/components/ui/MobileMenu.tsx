@@ -1,5 +1,5 @@
-import { type ReactNode, useState } from 'react';
-import { List, X } from '@phosphor-icons/react';
+import { type ReactNode, useState, useEffect } from 'react';
+import { X } from '@phosphor-icons/react';
 
 interface MenuItem {
   icon: ReactNode;
@@ -34,27 +34,25 @@ export function MobileMenu({ leftItems, rightItems }: MobileMenuProps) {
     setIsOpen(false);
   };
 
+  // Listen for toggle events from the top bar
+  useEffect(() => {
+    const handleToggle = () => setIsOpen(prev => !prev);
+    window.addEventListener('toggleMobileMenu', handleToggle);
+    return () => window.removeEventListener('toggleMobileMenu', handleToggle);
+  }, []);
+
   return (
     <>
-      {/* Hamburger Button - Mobile only */}
-      <button
-        onClick={() => setIsOpen(true)}
-        className="md:hidden fixed top-4 right-4 z-50 w-12 h-12 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 flex items-center justify-center text-[var(--text)] transition-all"
-      >
-        <List size={24} weight="bold" />
-      </button>
-
       {/* Mobile Menu Overlay */}
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
-            onClick={() => setIsOpen(false)}
-          />
+      <div className={`mobile-menu-overlay ${isOpen ? '' : 'hidden'}`}>
+        {/* Backdrop */}
+        <div
+          className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
+          onClick={() => setIsOpen(false)}
+        />
 
-          {/* Menu Panel */}
-          <div className="md:hidden fixed top-0 right-0 h-full w-80 max-w-[85vw] bg-[var(--surface)] border-l border-white/10 z-[70] shadow-2xl overflow-y-auto">
+        {/* Menu Panel */}
+        <div className="md:hidden fixed top-0 right-0 h-full w-80 max-w-[85vw] bg-[var(--surface)] border-l border-white/10 z-[70] shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-300">
             {/* Header */}
             <div className="sticky top-0 bg-[var(--surface)] border-b border-white/10 p-4 flex items-center justify-between">
               <h2 className="font-heading text-lg font-bold text-[var(--text)]">Menu</h2>
@@ -127,8 +125,7 @@ export function MobileMenu({ leftItems, rightItems }: MobileMenuProps) {
               )}
             </div>
           </div>
-        </>
-      )}
-    </>
-  );
+        </div>
+      </>
+    );
 }

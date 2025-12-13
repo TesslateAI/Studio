@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 from ..database import get_db
 from ..models import User, ShellSession
-from ..auth import get_current_active_user
 from ..services.shell_session_manager import get_shell_session_manager
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -26,7 +26,7 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     project_id: UUID
     command: str = "/bin/bash"
-    cwd: str = "/app"
+    container_name: Optional[str] = None  # For multi-container projects: specify which container
 
 
 class CreateSessionResponse(BaseModel):
@@ -72,7 +72,7 @@ class SessionListResponse(BaseModel):
 @router.post("/sessions", response_model=CreateSessionResponse)
 async def create_shell_session(
     request: CreateSessionRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -84,10 +84,10 @@ async def create_shell_session(
 
     session_info = await session_manager.create_session(
         user_id=current_user.id,
-        project_id=request.project_id,
+        project_id=str(request.project_id),
         db=db,
         command=request.command,
-        cwd=request.cwd,
+        container_name=request.container_name,
     )
 
     return session_info
@@ -97,7 +97,7 @@ async def create_shell_session(
 async def write_to_session(
     session_id: str,
     request: WriteRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -121,9 +121,9 @@ async def write_to_session(
             detail="Session not found"
         )
 
-    # Write to PTY
+    # Write to PTY (with authorization check)
     data_bytes = request.data.encode('utf-8')
-    await session_manager.write_to_session(session_id, data_bytes, db)
+    await session_manager.write_to_session(session_id, data_bytes, db, user_id=current_user.id)
 
     return WriteResponse(
         success=True,
@@ -134,7 +134,7 @@ async def write_to_session(
 @router.get("/sessions/{session_id}/output", response_model=OutputResponse)
 async def read_session_output(
     session_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -159,8 +159,8 @@ async def read_session_output(
             detail="Session not found"
         )
 
-    # Read output
-    output_data = await session_manager.read_output(session_id, db)
+    # Read output (with authorization check)
+    output_data = await session_manager.read_output(session_id, db, user_id=current_user.id)
 
     return output_data
 
@@ -168,7 +168,7 @@ async def read_session_output(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_shell_sessions(
     project_id: Optional[UUID] = None,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all active shell sessions for the current user."""
@@ -186,7 +186,7 @@ async def list_shell_sessions(
 @router.delete("/sessions/{session_id}")
 async def close_shell_session(
     session_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Close a shell session."""
@@ -214,7 +214,7 @@ async def close_shell_session(
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_shell_session(
     session_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get shell session details."""

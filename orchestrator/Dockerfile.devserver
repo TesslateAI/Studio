@@ -16,7 +16,8 @@ RUN apk add --no-cache \
     make \
     g++ \
     go \
-    bash
+    bash \
+    tmux
 
 # Set up Go environment
 ENV GOPATH=/go
@@ -43,6 +44,13 @@ RUN npm ci --prefer-offline --no-audit --production=false
 
 # Copy rest of template files
 COPY template/ ./
+
+# Make helper scripts executable and fix line endings (Windows -> Unix)
+RUN chmod +x bin/dev-server 2>/dev/null || true && \
+    sed -i 's/\r$//' bin/dev-server 2>/dev/null || true
+
+# Add template bin directory to PATH for helper scripts
+ENV PATH="/template/bin:${PATH}"
 
 # Verify critical binaries are present
 RUN test -f node_modules/.bin/vite || (echo "ERROR: Vite not found" && exit 1)
