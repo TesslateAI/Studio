@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "Tesslate Studio",
+    "slug": "tesslate-studio",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "scheme": "tesslate",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tesslate.studio",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs access to your camera to upload photos.",
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload photos."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F172A"
+      },
+      "package": "com.tesslate.studio",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow Tesslate Studio to access your Face ID biometric data for secure authentication."
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0"
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "tesslate-studio"
+      }
+    }
+  }
+}

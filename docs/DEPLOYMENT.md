@@ -44,7 +44,7 @@ Tesslate Studio supports two deployment modes via `DEPLOYMENT_MODE` environment 
 1. **Docker Mode** (`DEPLOYMENT_MODE=docker`)
    - User dev environments run as Docker containers
    - Uses Traefik reverse proxy with subdomain routing
-   - Routing: `{project-slug}.studio.localhost` (e.g., `my-app-k3x8n2.studio.localhost`)
+   - Routing: `{project-slug}.localhost` (e.g., `my-app-k3x8n2.localhost`)
    - Storage: Volume mounts to `users/{user_id}/{project_id}/`
    - **Browser Requirement:** Chrome or Firefox recommended (auto-resolve `*.localhost`)
 
@@ -72,16 +72,16 @@ Even if you run main services natively (orchestrator, frontend), **Traefik must 
 │                                                               │
 │  ┌──────────────┐    ┌──────────────────────────────────────┐  │
 │  │   Traefik    │───▶│  User Dev Containers (dynamic)       │  │
-│  │  (required)  │    │  • my-app-k3x8n2.studio.localhost   │  │
-│  └──────────────┘    │  • blog-cms-h7y2k1.studio.localhost │  │
-│                      │  • todo-app-m9p3x5.studio.localhost │  │
+│  │  (required)  │    │  • my-app-k3x8n2.localhost   │  │
+│  └──────────────┘    │  • blog-cms-h7y2k1.localhost │  │
+│                      │  • todo-app-m9p3x5.localhost │  │
 │                      └──────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 **Why?**
 - Multiple user projects need isolated containers
-- Each needs unique subdomain routing (e.g., `my-app-k3x8n2.studio.localhost`)
+- Each needs unique subdomain routing (e.g., `my-app-k3x8n2.localhost`)
 - Can't all bind to port 5173 simultaneously
 - Traefik provides automatic service discovery and zero-port-conflict subdomain routing
 - **Note:** Chrome and Firefox auto-resolve `*.localhost` subdomains to 127.0.0.1
@@ -149,7 +149,7 @@ Docker:
    - Frontend: http://localhost:5173
    - Orchestrator API: http://localhost:8000
    - Traefik Dashboard: http://localhost:8080
-   - User Projects: http://{project-slug}.studio.localhost (subdomain routing)
+   - User Projects: http://{project-slug}.localhost (subdomain routing)
 
 ### Advantages ✅
 - Fastest hot reload for main services
@@ -210,10 +210,10 @@ All services in Docker containers:
    ```
 
 4. **Access the application**
-   - Frontend: http://studio.localhost
+   - Frontend: http://localhost
    - Orchestrator API: http://api.localhost
    - Traefik Dashboard: http://traefik.localhost:8080
-   - User Projects: http://{project-slug}.studio.localhost (subdomain routing)
+   - User Projects: http://{project-slug}.localhost (subdomain routing)
 
 ### Advantages ✅
 - Single command to start everything
@@ -379,8 +379,8 @@ sudo ufw status
 
 ```bash
 cd /opt
-sudo git clone https://github.com/TesslateAI/Studio.git
-cd Studio
+sudo git clone https://github.com/yourusername/tesslate-studio.git
+cd tesslate-studio
 ```
 
 ---
@@ -435,7 +435,7 @@ CF_DNS_API_TOKEN=<your-cloudflare-api-token-from-step-1c>
 # ----------------------------------------------------------------------------
 LITELLM_API_BASE=https://your-litellm-proxy.com/v1
 LITELLM_MASTER_KEY=<your-litellm-master-key>
-LITELLM_DEFAULT_MODELS=gpt-5o-mini,gpt-3.5-turbo
+LITELLM_DEFAULT_MODELS=gpt-4o-mini,gpt-3.5-turbo
 LITELLM_TEAM_ID=default
 LITELLM_EMAIL_DOMAIN=tesslate.com
 LITELLM_INITIAL_BUDGET=10.0
@@ -1075,7 +1075,7 @@ docker logs tesslate-{project-slug}
 # Open http://localhost:8080 and verify Host() rules for subdomains
 
 # Solution 5: Test with curl using Host header
-curl -H "Host: test.studio.localhost" http://localhost/
+curl -H "Host: test.localhost" http://localhost/
 ```
 
 **Problem:** Port already in use
