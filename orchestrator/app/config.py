@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""
-    litellm_default_models: str = "qwen-3-235b-a22b-thinking-2507"  # Comma-separated list
+    litellm_default_models: str = ""  # Comma-separated list, set via LITELLM_DEFAULT_MODELS
     litellm_team_id: str = "default"  # Team/access group for users
     litellm_email_domain: str = "localhost"  # Domain for internal emails
     litellm_initial_budget: float = 10.0  # Initial budget per user in USD

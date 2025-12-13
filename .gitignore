@@ -170,3 +170,10 @@ analysis-output/
 .env.tunnel
 .env.minikube
 k8s/.env.minikube
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfvars
