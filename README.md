@@ -602,3 +602,4 @@ Tesslate Studio wouldn't exist without these amazing open-source projects:
 [Star this repo](https://github.com/TesslateAI/Studio) · [Fork it](https://github.com/TesslateAI/Studio/fork) · [Share it](https://twitter.com/intent/tweet?text=Check%20out%20Tesslate%20Studio%20-%20Open%20source%20AI%20development%20platform%20for%20self-hosting!&url=https://github.com/TesslateAI/Studio)
 
 </div>
+ 
