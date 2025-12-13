@@ -21,10 +21,9 @@ from ..schemas import (
     AgentCommandLogSchema,
     AgentCommandStatsResponse
 )
-from ..auth import get_current_active_user
-from ..dev_server_manager import get_container_manager
 from ..services.command_validator import get_command_validator, CommandRisk
 from ..services.agent_audit import get_audit_service
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,7 +67,7 @@ def check_rate_limit(user_id: UUID) -> bool:
 @router.post("/execute", response_model=AgentCommandResponse)
 async def execute_command(
     request: AgentCommandRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -153,34 +152,28 @@ async def execute_command(
             )
 
         # 4. Check if container/pod is ready
-        from ..config import get_settings
-        settings = get_settings()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-        if settings.deployment_mode == "kubernetes":
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
-            pod_status = await k8s_manager.is_pod_ready(
+        if is_kubernetes_mode():
+            orchestrator = get_orchestrator()
+            container_status = await orchestrator.is_container_ready(
                 user_id=current_user.id,
-                project_id=str(request.project_id),
-                check_responsive=True
+                project_id=request.project_id,
+                container_name=None  # Use default container
             )
 
-            if not pod_status["ready"] or not pod_status.get("responsive", False):
+            if not container_status["ready"] or not container_status.get("responsive", False):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=f"Development environment not ready: {pod_status['message']}"
+                    detail=f"Development environment not ready: {container_status['message']}"
                 )
         else:
-            # Docker mode - check if container is running
-            from ..dev_server_manager import get_container_manager
-            docker_manager = get_container_manager()
-            status_info = await docker_manager.get_container_status(str(request.project_id), current_user.id)
-
-            if not status_info.get("running"):
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Development container is not running"
-                )
+            # Docker mode - not supported for agent commands
+            # All projects should use multi-container system
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Agent commands are only supported in Kubernetes mode."
+            )
 
         # 5. Execute command (or simulate if dry_run)
         start_time = time.time()
@@ -206,59 +199,17 @@ async def execute_command(
                     f"{request.command[:100]}..."
                 )
 
-                if settings.deployment_mode == "kubernetes":
-                    output = await k8s_manager.execute_command_in_pod(
-                        user_id=current_user.id,
-                        project_id=str(request.project_id),
-                        command=validation.sanitized_command,
-                        timeout=request.timeout
-                    )
-                    stdout = output
-                    success = True
-                    exit_code = 0
-                else:
-                    # Docker mode - execute command in container using container manager
-                    from ..dev_server_manager import get_container_manager
-                    container_manager = get_container_manager()
-
-                    # Get container name using slug
-                    project_key = f"user-{current_user.id}-project-{request.project_id}"
-                    container_info = container_manager.containers.get(project_key)
-
-                    if not container_info:
-                        # Try to find by labels as fallback
-                        import subprocess as sp
-                        result = sp.run(
-                            ["docker", "ps", "--filter", f"label=com.tesslate.devserver.project_id={request.project_id}",
-                             "--filter", f"label=com.tesslate.devserver.user_id={current_user.id}", "--format", "{{.Names}}"],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        if result.returncode == 0 and result.stdout.strip():
-                            container_name = result.stdout.strip().split('\n')[0]
-                        else:
-                            raise Exception(f"Container not found for project {request.project_id}")
-                    else:
-                        container_name = container_info["container_name"]
-
-                    import subprocess
-                    docker_cmd = [
-                        "docker", "exec",
-                        "-w", f"/app/{request.working_dir}" if request.working_dir != "." else "/app",
-                        container_name,
-                        "sh", "-c", validation.sanitized_command
-                    ]
-
-                    result = subprocess.run(
-                        docker_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=request.timeout
-                    )
-
-                    stdout = result.stdout
-                    stderr = result.stderr
-                    exit_code = result.returncode
-                    success = (exit_code == 0)
+                # Kubernetes mode - execute command in pod
+                output = await orchestrator.execute_command(
+                    user_id=current_user.id,
+                    project_id=request.project_id,
+                    container_name=request.container_name if hasattr(request, 'container_name') else None,
+                    command=validation.sanitized_command if isinstance(validation.sanitized_command, list) else ["/bin/sh", "-c", validation.sanitized_command],
+                    timeout=request.timeout
+                )
+                stdout = output
+                success = True
+                exit_code = 0
 
                 logger.info(
                     f"Command executed successfully for user {current_user.id}, "
@@ -334,7 +285,7 @@ async def execute_command(
 async def get_command_history(
     project_id: str,
     limit: int = 50,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -382,7 +333,7 @@ async def get_command_history(
 @router.get("/stats", response_model=AgentCommandStatsResponse)
 async def get_command_stats(
     days: int = 7,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """

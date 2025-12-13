@@ -1,47 +1,34 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectsApi, marketplaceApi } from '../lib/api';
-import { githubApi } from '../lib/github-api';
+import { projectsApi, authApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import {
-  FloatingSidebar,
   MobileMenu,
-  ProjectCard,
-  MarketplaceCard
+  ProjectCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
-import { GitHubConnectModal, ConfirmDialog } from '../components/modals';
+import { ConfirmDialog, CreateProjectModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { MobileWarning } from '../components/MobileWarning';
-import { DiscordSupport } from '../components/DiscordSupport';
 import toast from 'react-hot-toast';
 import {
-  Atom,
-  Database,
-  ShieldCheck,
-  Sparkle,
-  Lightning as LightningIcon,
   Folder,
   Storefront,
   Package,
   Gear,
   Sun,
   Moon,
-  Question,
   FilePlus,
-  FolderOpen,
-  GithubLogo,
-  GitBranch,
-  ShoppingCart,
-  DiscordLogo,
+  Books,
   SignOut,
   CaretDown,
-  Check,
-  ArrowSquareOut
+  Coins,
+  CreditCard,
+  User
 } from '@phosphor-icons/react';
 
 interface Project {
   id: string;
+  slug: string;
   name: string;
   description: string;
   created_at: string;
@@ -50,54 +37,42 @@ interface Project {
   agents?: Array<{ icon: any; name: string }>;
 }
 
-type TabFilter = 'all' | 'idea' | 'build' | 'launch';
-
 export default function Dashboard() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newProject, setNewProject] = useState({ name: '', description: '' });
-  const [activeTab, setActiveTab] = useState<TabFilter>('all');
   const [isCreating, setIsCreating] = useState(false);
-  const [sourceType, setSourceType] = useState<'template' | 'github' | 'base'>('template');
-  const [githubRepoUrl, setGithubRepoUrl] = useState('');
-  const [githubBranch, setGithubBranch] = useState('main');
-  const [githubConnected, setGithubConnected] = useState(false);
-  const [checkingGithub, setCheckingGithub] = useState(false);
-  const [showGithubConnectModal, setShowGithubConnectModal] = useState(false);
-  const [bases, setBases] = useState<any[]>([]);
-  const [selectedBase, setSelectedBase] = useState<number | null>(null);
-  const [isBaseDropdownOpen, setIsBaseDropdownOpen] = useState(false);
-  const [deletingProjectIds, setDeletingProjectIds] = useState<Set<number>>(new Set());
+  const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [userName, setUserName] = useState<string>('');
+  const [userCredits, setUserCredits] = useState<number>(0);
+  const [userTier, setUserTier] = useState<string>('free');
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
 
-  // Get user name from JWT token
+  // Fetch current user data
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
+    const fetchUserData = async () => {
       try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setUserName(payload.sub || 'there');
+        const user = await authApi.getCurrentUser();
+        setUserName(user.name || user.username || 'there');
+        setUserCredits(user.credits_balance || 0);
+        setUserTier(user.subscription_tier || 'free');
       } catch (e) {
+        console.error('Failed to fetch user data:', e);
         setUserName('there');
+        setUserCredits(0);
+        setUserTier('free');
       }
-    }
+    };
+    fetchUserData();
   }, []);
 
   useEffect(() => {
     loadProjects();
   }, []);
-
-  useEffect(() => {
-    if (showCreateModal) {
-      checkGithubConnection();
-      loadUserBases();
-    }
-  }, [showCreateModal]);
 
   const loadProjects = async () => {
     try {
@@ -116,81 +91,35 @@ export default function Dashboard() {
     }
   };
 
-  const checkGithubConnection = async () => {
-    setCheckingGithub(true);
-    try {
-      const status = await githubApi.getStatus();
-      setGithubConnected(status.connected);
-    } catch (error) {
-      setGithubConnected(false);
-    } finally {
-      setCheckingGithub(false);
-    }
-  };
-
-  const loadUserBases = async () => {
-    try {
-      const data = await marketplaceApi.getUserBases();
-      setBases(data.bases || []);
-    } catch (error) {
-      console.error('Failed to load bases:', error);
-      setBases([]);
-    }
-  };
-
-  const createProject = async () => {
-    if (!newProject.name.trim()) {
-      toast.error('Project name is required');
-      return;
-    }
-
-    if (sourceType === 'github') {
-      if (!githubRepoUrl.trim()) {
-        toast.error('GitHub repository URL is required');
-        return;
-      }
-      // GitHub connection is optional - works for public repos without authentication
-    }
-
-    if (sourceType === 'base') {
-      if (!selectedBase) {
-        toast.error('Please select a base');
-        return;
-      }
-    }
+  const handleCreateProject = async (projectName: string) => {
+    if (isCreating) return;
 
     setIsCreating(true);
-    const creatingToast = toast.loading(
-      sourceType === 'github'
-        ? 'Importing from GitHub...'
-        : sourceType === 'base'
-        ? 'Creating from base...'
-        : 'Creating your project...'
-    );
+    const creatingToast = toast.loading('Creating project...');
 
     try {
-      const project = await projectsApi.create(
-        newProject.name,
-        newProject.description,
-        sourceType,
-        githubRepoUrl || undefined,
-        githubBranch || 'main',
-        selectedBase || undefined
+      // Create empty project (containers with marketplace bases are added later in ProjectGraphCanvas)
+      const response = await projectsApi.create(
+        projectName,
+        '',
+        'template',  // Empty project - no base needed at project level
+        undefined,
+        'main',
+        undefined
       );
-      toast.success('Project created successfully!', { id: creatingToast });
-      setShowCreateModal(false);
-      setNewProject({ name: '', description: '' });
-      setSourceType('template');
-      setGithubRepoUrl('');
-      setGithubBranch('main');
-      setTimeout(() => {
-        navigate(`/project/${project.slug}`);
-      }, 500);
+
+      const project = response.project;
+
+      toast.success('Project created!', { id: creatingToast, duration: 2000 });
+      setShowCreateDialog(false);
+      setIsCreating(false);
+
+      // Navigate to project graph canvas
+      navigate(`/project/${project.slug}`);
     } catch (error: any) {
       const detail = error?.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to create project';
       toast.error(errorMessage, { id: creatingToast });
-    } finally {
       setIsCreating(false);
     }
   };
@@ -207,20 +136,58 @@ export default function Dashboard() {
     if (!projectToDelete) return;
 
     const projectId = projectToDelete.id;
+    const projectSlug = projectToDelete.slug;
     setShowDeleteDialog(false);
     setDeletingProjectIds(prev => new Set(prev).add(projectId));
     const deletingToast = toast.loading('Deleting project...');
 
     try {
-      await projectsApi.delete(projectId);
-      toast.success('Project deleted successfully', { id: deletingToast });
-      await loadProjects();
-      // Only remove from deleting state after project list is refreshed
-      setDeletingProjectIds(prev => {
-        const updated = new Set(prev);
-        updated.delete(projectId);
-        return updated;
-      });
+      const response = await projectsApi.delete(projectSlug);  // Use slug for API call
+      // Response now includes { task_id, status_endpoint }
+      const taskId = response.task_id;
+
+      toast.loading('Deleting project...', { id: deletingToast });
+
+      // Wait for deletion task to complete
+      if (taskId) {
+        try {
+          await tasksApi.pollUntilComplete(taskId);
+
+          // Task completed successfully - remove project from UI
+          toast.success('Project deleted successfully', { id: deletingToast });
+
+          // Remove project from state
+          setProjects(prev => prev.filter(p => p.id !== projectId));
+
+          setDeletingProjectIds(prev => {
+            const updated = new Set(prev);
+            updated.delete(projectId);
+            return updated;
+          });
+        } catch (taskError) {
+          // Task failed - show error and reload to get accurate state
+          console.error('Project deletion task failed:', taskError);
+          toast.error('Project deletion failed', { id: deletingToast });
+
+          setDeletingProjectIds(prev => {
+            const updated = new Set(prev);
+            updated.delete(projectId);
+            return updated;
+          });
+
+          // Reload to ensure UI matches backend state
+          await loadProjects();
+        }
+      } else {
+        // No task ID returned - reload to verify state
+        toast.success('Project deleted', { id: deletingToast });
+        await loadProjects();
+        setDeletingProjectIds(prev => {
+          const updated = new Set(prev);
+          updated.delete(projectId);
+          return updated;
+        });
+      }
     } catch (error) {
       toast.error('Failed to delete project', { id: deletingToast });
       // Remove from deleting state on error
@@ -268,11 +235,8 @@ export default function Dashboard() {
     navigate('/login');
   };
 
-  // Filter projects by tab
-  const filteredProjects = projects.filter(project => {
-    if (activeTab === 'all') return true;
-    return project.status === activeTab;
-  });
+  // Show all projects (no filtering)
+  const filteredProjects = projects;
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'Never';
@@ -310,51 +274,49 @@ export default function Dashboard() {
     }
   };
 
-  // Sidebar items
-  const leftSidebarItems = [
-    {
-      icon: <Folder className="w-5 h-5" weight="fill" />,
-      title: 'Projects',
-      onClick: () => {},
-      active: true,
-      dataTour: 'dashboard-link'
-    },
-    {
-      icon: <Storefront className="w-5 h-5" weight="fill" />,
-      title: 'Marketplace',
-      onClick: () => navigate('/marketplace'),
-      dataTour: 'marketplace-link'
-    },
-    {
-      icon: <ShoppingCart className="w-5 h-5" weight="fill" />,
-      title: 'Library',
-      onClick: () => navigate('/library'),
-      dataTour: 'library-link'
-    },
-    {
-      icon: <Package className="w-5 h-5" weight="fill" />,
-      title: 'Components',
-      onClick: () => toast('Components library coming soon!')
-    },
-    {
-      icon: <SignOut className="w-5 h-5" weight="fill" />,
-      title: 'Logout',
-      onClick: logout
-    }
-  ];
-
-  const rightSidebarItems = [
-    {
-      icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
-      title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
-      onClick: toggleTheme
-    },
-    {
-      icon: <Question className="w-5 h-5" weight="fill" />,
-      title: 'Help',
-      onClick: () => toast('Help & support coming soon!')
-    }
-  ];
+  // Sidebar items for mobile menu
+  const mobileMenuItems = {
+    left: [
+      {
+        icon: <Folder className="w-5 h-5" weight="fill" />,
+        title: 'Projects',
+        onClick: () => {},
+        active: true
+      },
+      {
+        icon: <Storefront className="w-5 h-5" weight="fill" />,
+        title: 'Marketplace',
+        onClick: () => navigate('/marketplace')
+      },
+      {
+        icon: <Books className="w-5 h-5" weight="fill" />,
+        title: 'Library',
+        onClick: () => navigate('/library')
+      },
+      {
+        icon: <Package className="w-5 h-5" weight="fill" />,
+        title: 'Components',
+        onClick: () => toast('Components library coming soon!')
+      }
+    ],
+    right: [
+      {
+        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
+        onClick: toggleTheme
+      },
+      {
+        icon: <Gear className="w-5 h-5" weight="fill" />,
+        title: 'Settings',
+        onClick: () => navigate('/settings')
+      },
+      {
+        icon: <SignOut className="w-5 h-5" weight="fill" />,
+        title: 'Logout',
+        onClick: logout
+      }
+    ]
+  };
 
   if (loading) {
     return (
@@ -365,450 +327,196 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24 relative flex flex-col">
-      {/* Mobile Warning */}
-      <MobileWarning />
-
+    <>
       {/* Mobile Menu - Shows on mobile only */}
-      <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
+      <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
 
-      {/* Floating Sidebars - Desktop only */}
-      <FloatingSidebar position="left" items={leftSidebarItems} />
-      <FloatingSidebar position="right" items={rightSidebarItems} />
-
-      {/* Main Content */}
-      <div className="flex-grow">
-        {/* Header */}
-        <div className="mb-6 md:mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="font-heading text-2xl sm:text-3xl md:text-4xl font-bold text-[var(--text)]">
-              Welcome, {userName}! 👋
-            </h1>
-            <p className="text-[var(--text)]/60 mt-2">Ready to build something amazing?</p>
+      {/* Top Bar */}
+      <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
+          <div className="flex items-center gap-4 md:gap-6">
+            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
           </div>
-        </div>
 
-        {/* Tab Navigation */}
-        <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-2">
-          {[
-            { key: 'all', label: 'All Projects', enabled: true },
-            { key: 'idea', label: 'Idea', enabled: false },
-            { key: 'build', label: 'Build', enabled: true },
-            { key: 'launch', label: 'Launch', enabled: false }
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => tab.enabled ? setActiveTab(tab.key as TabFilter) : toast('Coming soon!')}
-              className={`
-                font-heading text-sm sm:text-lg md:text-xl pb-2 border-b-2 transition-all whitespace-nowrap
-                ${activeTab === tab.key
-                  ? 'text-[var(--primary)] border-[var(--primary)]'
-                  : tab.enabled
-                    ? 'text-gray-400 border-transparent hover:text-[var(--text)]'
-                    : 'text-gray-600 border-transparent cursor-not-allowed opacity-50'
-                }
-              `}
-            >
-              {tab.label}{!tab.enabled && ' 🔒'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Marketplace Section */}
-      <div className="bg-white/[0.02] dark:bg-white/[0.02] border border-white/[0.08] rounded-2xl p-8 mb-8">
-        <div className="flex items-center justify-center">
-          <h2 className="font-heading text-xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Sparkle className="w-5 h-5 text-orange-400" weight="fill" />
-            Recommendations coming soon for your project
-          </h2>
-        </div>
-      </div>
-
-      {/* Projects Grid */}
-      <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"}>
-        {/* Create New Project Card */}
-        <button
-          onClick={() => setShowCreateModal(true)}
-          data-tour="create-project"
-          className={`
-            group bg-white/[0.01] dark:bg-white/[0.01] rounded-2xl p-6 sm:p-8
-            border-2 border-dashed border-[rgba(255,107,0,0.3)]
-            hover:border-[rgba(255,107,0,0.6)]
-            transition-all duration-300
-            hover:transform hover:-translate-y-1
-            flex flex-col items-center justify-center gap-3 sm:gap-4
-            ${filteredProjects.length === 0 ? 'w-full min-h-[300px] sm:min-h-[400px]' : 'min-h-[240px] sm:min-h-[280px]'}
-          `}
-        >
-          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(255,107,0,0.3)] transition-colors">
-            <FilePlus className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" weight="fill" />
-          </div>
-          <div className="text-center">
-            <h3 className="font-heading text-base sm:text-lg font-bold text-[var(--text)] mb-1.5 sm:mb-2">Create New Project</h3>
-            <p className="text-xs sm:text-sm text-gray-500">Start building something amazing</p>
-          </div>
-        </button>
-
-        {/* Project Cards */}
-        {filteredProjects.map((project) => (
-          <ProjectCard
-            key={project.id}
-            project={{
-              id: project.id,
-              name: project.name,
-              description: project.description || 'No description',
-              status: project.status || 'build',
-              agents: project.agents || [],
-              lastUpdated: formatDate(project.updated_at),
-              isLive: project.status === 'launch'
-            }}
-            onOpen={() => navigate(`/project/${project.slug}`)}
-            onDelete={() => deleteProject(project.id)}
-            onStatusChange={(status) => updateProjectStatus(project.id, status)}
-            onFork={() => handleForkProject(project.id)}
-            isDeleting={deletingProjectIds.has(project.id)}
-          />
-        ))}
-      </div>
-
-        {/* Empty State */}
-        {filteredProjects.length === 0 && (
-          <div className="text-center py-16">
-          </div>
-        )}
-      </div>
-
-      {/* Create Project Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => !isCreating && setShowCreateModal(false)}>
-          <div className="bg-[var(--surface)] p-8 rounded-3xl w-full max-w-lg shadow-2xl border border-white/10" onClick={(e) => e.stopPropagation()}>
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
-              </div>
-              <h2 className="font-heading text-2xl font-bold text-[var(--text)] mb-2">Create New Project</h2>
-              <p className="text-gray-500">Choose how to start your project</p>
+          {/* Right side - User Profile */}
+          <div className="flex items-center gap-3">
+            {/* Credits Display */}
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg">
+              <Coins size={16} className="text-[var(--primary)]" weight="fill" />
+              <span className="text-sm font-semibold text-[var(--primary)]">
+                {userCredits.toLocaleString()}
+              </span>
             </div>
 
-            <div className="space-y-4">
-              {/* Source Type Selection */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-3">Project Source</label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <button
-                    onClick={() => setSourceType('template')}
-                    disabled={isCreating}
-                    className={`
-                      p-4 rounded-xl border-2 transition-all
-                      ${sourceType === 'template'
-                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
-                        : theme === 'light'
-                          ? 'border-black/10 bg-black/5 hover:border-black/20'
-                          : 'border-white/10 bg-white/5 hover:border-white/20'
-                      }
-                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                    `}
-                  >
-                    <FilePlus className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
-                    <div className="text-sm font-semibold text-[var(--text)]">Template</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Frontend-only (Vite)</div>
-                  </button>
-                  <button
-                    onClick={() => setSourceType('base')}
-                    disabled={isCreating}
-                    className={`
-                      p-4 rounded-xl border-2 transition-all
-                      ${sourceType === 'base'
-                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
-                        : theme === 'light'
-                          ? 'border-black/10 bg-black/5 hover:border-black/20'
-                          : 'border-white/10 bg-white/5 hover:border-white/20'
-                      }
-                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                    `}
-                  >
-                    <Package className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
-                    <div className="text-sm font-semibold text-[var(--text)]">From Base</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Use template</div>
-                  </button>
-                  <button
-                    onClick={() => setSourceType('github')}
-                    disabled={isCreating}
-                    className={`
-                      p-4 rounded-xl border-2 transition-all
-                      ${sourceType === 'github'
-                        ? 'border-[var(--primary)] bg-[rgba(255,107,0,0.1)]'
-                        : theme === 'light'
-                          ? 'border-black/10 bg-black/5 hover:border-black/20'
-                          : 'border-white/10 bg-white/5 hover:border-white/20'
-                      }
-                      ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
-                    `}
-                  >
-                    <GithubLogo className="w-6 h-6 text-[var(--primary)] mx-auto mb-2" weight="fill" />
-                    <div className="text-sm font-semibold text-[var(--text)]">GitHub</div>
-                    <div className={`text-xs mt-1 ${theme === 'light' ? 'text-black/50' : 'text-gray-500'}`}>Import repository</div>
-                  </button>
-                </div>
-              </div>
+            {/* User Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowUserDropdown(!showUserDropdown)}
+                className="hidden md:flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 rounded-lg transition-colors"
+              >
+                <User size={18} className="text-[var(--text)]" weight="fill" />
+                <span className="text-sm font-medium text-[var(--text)]">{userName}</span>
+                {userTier === 'pro' && (
+                  <span className="px-2 py-0.5 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-xs font-bold rounded-md">
+                    PRO
+                  </span>
+                )}
+                <CaretDown
+                  size={14}
+                  className={`text-[var(--text)]/60 transition-transform ${showUserDropdown ? 'rotate-180' : ''}`}
+                />
+              </button>
 
-              {/* Base Selection */}
-              {sourceType === 'base' && (
-                <div className="space-y-3">
-                  <p className="text-sm text-white/60">
-                    Select a base from your library:
-                  </p>
-                  {bases.length === 0 ? (
-                    <div className="text-center py-6 bg-white/5 border border-white/10 rounded-xl">
-                      <Package className="w-12 h-12 text-white/40 mx-auto mb-3" weight="fill" />
-                      <p className="text-white/40 mb-3">No bases in your library</p>
+              {/* Dropdown Menu */}
+              {showUserDropdown && (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowUserDropdown(false)}
+                  />
+
+                  {/* Menu */}
+                  <div className="absolute right-0 mt-2 w-56 bg-[var(--surface)] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="py-2">
+                      {/* Credits Item */}
                       <button
                         onClick={() => {
-                          setShowCreateModal(false);
-                          navigate('/marketplace');
+                          setShowUserDropdown(false);
+                          navigate('/billing');
                         }}
-                        className="text-[var(--primary)] hover:text-orange-400 text-sm font-medium"
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
                       >
-                        Browse Marketplace
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => !isCreating && setIsBaseDropdownOpen(!isBaseDropdownOpen)}
-                        disabled={isCreating}
-                        className={`
-                          w-full px-3 py-3 border rounded-lg text-left
-                          flex items-center justify-between transition-all
-                          ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-                          ${isBaseDropdownOpen
-                            ? 'border-[var(--primary)]'
-                            : theme === 'light'
-                              ? 'border-black/20 hover:border-black/30'
-                              : 'border-white/10 hover:border-white/20'
-                          }
-                          ${isCreating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                        `}
-                      >
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {selectedBase ? (
-                            <>
-                              <span className="text-xl flex-shrink-0">
-                                {bases.find(b => b.id === selectedBase)?.icon}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-medium text-[var(--text)] truncate">
-                                  {bases.find(b => b.id === selectedBase)?.name}
-                                </div>
-                                <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                  {bases.find(b => b.id === selectedBase)?.description}
-                                </div>
-                              </div>
-                            </>
-                          ) : (
-                            <span className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>Choose a base...</span>
-                          )}
+                        <Coins size={18} className="text-[var(--primary)]" weight="fill" />
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-[var(--text)]">Credits</div>
+                          <div className="text-xs text-[var(--text)]/60">{userCredits.toLocaleString()} available</div>
                         </div>
-                        <CaretDown
-                          className={`flex-shrink-0 ml-2 transition-transform ${isBaseDropdownOpen ? 'rotate-180' : ''}`}
-                          size={16}
-                          weight="bold"
-                        />
                       </button>
 
-                      {isBaseDropdownOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setIsBaseDropdownOpen(false)}
-                          />
-                          <div className={`absolute z-20 w-full mt-1 bg-[var(--surface)] border rounded-lg shadow-xl max-h-60 overflow-y-auto ${theme === 'light' ? 'border-black/10' : 'border-white/10'}`}>
-                            {bases.map((base: any) => (
-                              <button
-                                key={base.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedBase(base.id);
-                                  setIsBaseDropdownOpen(false);
-                                }}
-                                className={`
-                                  w-full px-3 py-3 text-left transition-colors
-                                  flex items-center gap-3
-                                  ${selectedBase === base.id
-                                    ? 'bg-[rgba(255,107,0,0.1)]'
-                                    : theme === 'light' ? 'hover:bg-black/5' : 'hover:bg-white/5'
-                                  }
-                                `}
-                              >
-                                <span className="text-xl flex-shrink-0">{base.icon}</span>
-                                <div className="flex-1 min-w-0">
-                                  <div className={`font-medium truncate ${selectedBase === base.id ? 'text-[var(--primary)]' : 'text-[var(--text)]'}`}>
-                                    {base.name}
-                                  </div>
-                                  <div className={`text-xs truncate ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                                    {base.description}
-                                  </div>
-                                  <div className="flex gap-1 mt-1 flex-wrap">
-                                    {base.tech_stack?.slice(0, 3).map((tech: string, idx: number) => (
-                                      <span
-                                        key={idx}
-                                        className={`text-xs px-1.5 py-0.5 rounded ${theme === 'light' ? 'bg-black/10 text-black/70' : 'bg-white/10 text-white/70'}`}
-                                      >
-                                        {tech}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                                {selectedBase === base.id && (
-                                  <Check size={20} weight="bold" className="flex-shrink-0 text-[var(--primary)]" />
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                      <div className="h-px bg-white/10 my-2" />
 
-              {/* GitHub Connection Status */}
-              {sourceType === 'github' && (
-                <div className={`border rounded-xl p-3 ${theme === 'light' ? 'bg-black/5 border-black/10' : 'bg-white/5 border-white/10'}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <GithubLogo className="w-4 h-4" weight="fill" />
-                      <span className="text-sm font-medium text-[var(--text)]">GitHub Connection:</span>
-                      {checkingGithub ? (
-                        <span className="text-xs text-gray-500">Checking...</span>
-                      ) : githubConnected ? (
-                        <span className="text-xs text-green-400">✓ Connected</span>
-                      ) : (
-                        <span className="text-xs text-orange-400">Not Connected</span>
-                      )}
-                    </div>
-                    {!githubConnected && !checkingGithub && (
+                      {/* Subscriptions */}
                       <button
-                        onClick={() => setShowGithubConnectModal(true)}
-                        disabled={isCreating}
-                        className="text-xs bg-purple-500 hover:bg-purple-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg font-medium transition-all"
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          navigate('/billing/plans');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
                       >
-                        Connect
+                        <CreditCard size={18} className="text-[var(--text)]/80" />
+                        <span className="text-sm font-medium text-[var(--text)]">Subscriptions</span>
                       </button>
-                    )}
-                  </div>
-                  {!githubConnected && !checkingGithub && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      Connection optional for public repos. Required for private repos.
-                    </p>
-                  )}
-                  {githubConnected && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      You can import both public and private repositories.
-                    </p>
-                  )}
-                </div>
-              )}
 
-              {/* GitHub Repository URL */}
-              {sourceType === 'github' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Repository URL</label>
-                    <input
-                      type="text"
-                      value={githubRepoUrl}
-                      onChange={(e) => setGithubRepoUrl(e.target.value)}
-                      className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                      placeholder="https://github.com/username/repository"
-                      disabled={isCreating}
-                    />
-                  </div>
+                      {/* Settings */}
+                      <button
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          navigate('/settings');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                      >
+                        <Gear size={18} className="text-[var(--text)]/80" />
+                        <span className="text-sm font-medium text-[var(--text)]">Settings</span>
+                      </button>
 
-                  <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Branch</label>
-                    <div className="relative">
-                      <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                      <input
-                        type="text"
-                        value={githubBranch}
-                        onChange={(e) => setGithubBranch(e.target.value)}
-                        className={`w-full border text-[var(--text)] pl-10 pr-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                        placeholder="main"
-                        disabled={isCreating}
-                      />
+                      <div className="h-px bg-white/10 my-2" />
+
+                      {/* Logout */}
+                      <button
+                        onClick={() => {
+                          setShowUserDropdown(false);
+                          navigate('/logout');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-left group"
+                      >
+                        <SignOut size={18} className="text-red-400 group-hover:text-red-400" />
+                        <span className="text-sm font-medium text-red-400">Logout</span>
+                      </button>
                     </div>
                   </div>
                 </>
               )}
-
-              {/* Project Name & Description */}
-              <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-2">Project Name</label>
-                <input
-                  type="text"
-                  value={newProject.name}
-                  onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                  className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                  placeholder="My Awesome App"
-                  disabled={isCreating}
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-2">Description</label>
-                <textarea
-                  value={newProject.description}
-                  onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-                  className={`w-full border text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none ${theme === 'light' ? 'bg-black/5 border-black/20 placeholder-black/40' : 'bg-white/5 border-white/10 placeholder-gray-500'}`}
-                  rows={3}
-                  placeholder="Describe your project..."
-                  disabled={isCreating}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={createProject}
-                  disabled={
-                    isCreating ||
-                    !newProject.name.trim() ||
-                    (sourceType === 'github' && !githubRepoUrl.trim()) ||
-                    (sourceType === 'base' && !selectedBase)
-                  }
-                  className="flex-1 bg-[var(--primary)] hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
-                >
-                  {isCreating
-                    ? sourceType === 'github' ? 'Importing...' : sourceType === 'base' ? 'Creating...' : 'Creating...'
-                    : sourceType === 'github' ? 'Import & Create' : sourceType === 'base' ? 'Create from Base' : 'Create Project'
-                  }
-                </button>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  disabled={isCreating}
-                  className="flex-1 bg-white/5 border border-white/10 text-[var(--text)] py-3 rounded-xl font-semibold hover:bg-white/10 transition-all disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
+
+            {/* Mobile hamburger menu */}
+            <button
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+            >
+              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
           </div>
         </div>
-      )}
 
-      {/* GitHub Connect Modal */}
-      <GitHubConnectModal
-        isOpen={showGithubConnectModal}
-        onClose={() => setShowGithubConnectModal(false)}
-        onSuccess={() => {
-          checkGithubConnection();
-          setShowGithubConnectModal(false);
-        }}
-      />
+        {/* Tab Filters - Mobile */}
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-auto bg-[var(--bg)]">
+          <div className="p-4 md:p-6">
+            {/* Projects Grid */}
+            <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"}>
+              {/* Create New Project Card */}
+              <button
+                onClick={() => setShowCreateDialog(true)}
+                disabled={isCreating}
+                className={`
+                  group bg-white/[0.01] rounded-2xl p-6
+                  border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
+                  hover:border-[rgba(var(--primary-rgb),0.6)]
+                  transition-all duration-300
+                  hover:transform hover:-translate-y-1
+                  flex flex-col items-center justify-center gap-3
+                  ${filteredProjects.length === 0 ? 'w-full min-h-[400px]' : 'min-h-[240px]'}
+                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              >
+                <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
+                  <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
+                </div>
+                <div className="text-center">
+                  <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
+                    Create New Project
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    Start building something amazing
+                  </p>
+                </div>
+              </button>
+
+              {/* Project Cards */}
+              {filteredProjects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={{
+                    id: project.id,
+                    name: project.name,
+                    description: project.description || 'No description',
+                    status: project.status || 'build',
+                    agents: project.agents || [],
+                    lastUpdated: formatDate(project.updated_at),
+                    isLive: project.status === 'launch',
+                    slug: project.slug
+                  }}
+                  onOpen={() => navigate(`/project/${project.slug}`)}
+                  onDelete={() => deleteProject(project.id)}
+                  onStatusChange={(status) => updateProjectStatus(project.id, status)}
+                  onFork={() => handleForkProject(project.id)}
+                  isDeleting={deletingProjectIds.has(project.id)}
+                />
+              ))}
+            </div>
+
+            {/* Empty State */}
+            {filteredProjects.length === 0 && (
+              <div className="text-center py-16">
+                <p className="text-[var(--text)]/40 text-sm">No projects found. Create one to get started!</p>
+              </div>
+            )}
+          </div>
+        </div>
+
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
@@ -825,50 +533,14 @@ export default function Dashboard() {
         variant="danger"
       />
 
-      {/* Discord Support Bubble */}
-      <DiscordSupport />
+      {/* Create Project Modal */}
+      <CreateProjectModal
+        isOpen={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onConfirm={handleCreateProject}
+        isLoading={isCreating}
+      />
 
-      {/* Tesslate Footer */}
-      <div className="mt-16 pt-6 border-t border-white/5">
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-gray-400">
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
-              <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-              <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-              <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
-            </svg>
-            <span className="font-semibold text-[var(--text)]">Tesslate.</span>
-            <span className="text-[var(--primary)] font-semibold">Build beyond limits</span>
-          </div>
-          <span className="hidden sm:inline text-gray-600">•</span>
-          <span>We're committed to open sourcing AI to empower builders everywhere</span>
-          <span className="hidden sm:inline text-gray-600">•</span>
-          <a
-            href="https://tesslate.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-[var(--primary)] transition-colors flex items-center gap-1.5"
-          >
-            Learn more
-            <ArrowSquareOut className="w-4 h-4" weight="bold" />
-          </a>
-          <span className="hidden sm:inline text-gray-600">•</span>
-          <a
-            href="https://docs.tesslate.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-[var(--primary)] transition-colors flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
-              <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-              <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-              <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
-            </svg>
-            Documentation for <span className="font-semibold">Studio</span>
-            <ArrowSquareOut className="w-4 h-4" weight="bold" />
-          </a>
-        </div>
-      </div>
-    </div>
+    </>
   );
 }

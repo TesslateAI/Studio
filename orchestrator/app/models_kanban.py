@@ -88,8 +88,8 @@ class KanbanTask(Base):
     tags = Column(JSON, nullable=True)  # ["frontend", "api", "urgent"]
 
     # Task details
-    assignee_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # Who's working on it
-    reporter_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # Who created it
+    assignee_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Who's working on it
+    reporter_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Who created it
     estimate_hours = Column(Integer, nullable=True)  # Time estimate
     spent_hours = Column(Integer, nullable=True)  # Time tracked
 
@@ -121,7 +121,7 @@ class KanbanTaskComment(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     task_id = Column(UUID(as_uuid=True), ForeignKey("kanban_tasks.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     content = Column(Text, nullable=False)  # Markdown supported
 

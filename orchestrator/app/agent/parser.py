@@ -2,12 +2,12 @@
 Agent Response Parser
 
 Parses LLM responses to extract tool calls and completion signals.
-Uses regex pattern matching to work with ANY model (not just function-calling models).
+Uses JSON parsing to work with ANY model (not just function-calling models).
 
-Supports multiple formats:
-- XML-style: <tool_call><tool_name>...</tool_name><parameters>...</parameters></tool_call>
-- JSON-style: {"tool_call": {"name": "...", "parameters": {...}}}
-- Bash-style: ```bash\ncommand\n```
+Parses pure JSON tool calls:
+- Single tool: {"tool_name": "...", "parameters": {...}}
+- Multiple tools: [{"tool_name": "...", "parameters": {...}}, ...]
+- Parameters are JSON objects with tool-specific fields
 """
 
 import re
@@ -38,17 +38,8 @@ class AgentResponseParser:
     """
     Parses agent responses to extract tool calls and check for completion.
 
-    Uses multiple regex patterns to maximize compatibility with different models.
+    Parses pure JSON tool calls as instructed in the system prompt.
     """
-
-    # Pattern for XML-style tool calls (recommended format)
-    XML_PATTERN = r'<tool_call>\s*<tool_name>(.*?)</tool_name>\s*<parameters>(.*?)</parameters>\s*</tool_call>'
-
-    # Pattern for JSON-style tool calls (alternative format)
-    JSON_PATTERN = r'\{"tool_call":\s*\{\s*"name":\s*"(.*?)",\s*"parameters":\s*(\{.*?\})\s*\}\}'
-
-    # Pattern for bash code blocks (for backward compatibility)
-    BASH_PATTERN = r'```bash\s*\n(.*?)\n```'
 
     # Completion signals
     COMPLETION_SIGNALS = [
@@ -65,10 +56,8 @@ class AgentResponseParser:
         """
         Parse a model response to extract all tool calls.
 
-        Tries multiple formats in order of preference:
-        1. XML-style tool calls (most explicit)
-        2. JSON-style tool calls
-        3. Bash code blocks (for simple command execution)
+        Parses pure JSON tool calls as instructed in the system prompt.
+        Supports both single object and array formats.
 
         Args:
             response: Model's text response
@@ -76,18 +65,7 @@ class AgentResponseParser:
         Returns:
             List of ToolCall objects (empty if no tool calls found)
         """
-        tool_calls = []
-
-        # Try XML format first (most explicit and reliable)
-        tool_calls.extend(self._parse_xml_format(response))
-
-        # If no XML found, try JSON format
-        if not tool_calls:
-            tool_calls.extend(self._parse_json_format(response))
-
-        # If still no tools found, check for bash blocks (simple commands)
-        if not tool_calls:
-            tool_calls.extend(self._parse_bash_format(response))
+        tool_calls = self._parse_json_format(response)
 
         if tool_calls:
             logger.info(f"Parsed {len(tool_calls)} tool call(s) from response")
@@ -96,48 +74,122 @@ class AgentResponseParser:
 
         return tool_calls
 
-    def _parse_xml_format(self, response: str) -> List[ToolCall]:
-        """Parse XML-style tool calls."""
+    def _parse_json_format(self, response: str) -> List[ToolCall]:
+        """
+        Parse pure JSON tool calls from response.
+
+        Supports two formats:
+        1. Single tool call: {"tool_name": "...", "parameters": {...}}
+        2. Multiple tool calls: [{"tool_name": "...", "parameters": {...}}, ...]
+
+        Uses a balanced bracket approach to extract JSON blocks robustly.
+        """
         tool_calls = []
-        matches = re.findall(self.XML_PATTERN, response, re.DOTALL | re.IGNORECASE)
 
-        for tool_name, params_str in matches:
+        # Extract all potential JSON blocks (arrays and objects)
+        json_blocks = self._extract_json_blocks(response)
+
+        for block in json_blocks:
             try:
-                tool_name = tool_name.strip()
-                params_str = params_str.strip()
+                parsed = self._parse_json_with_fixes(block)
 
-                # Parse JSON parameters with robust error handling
-                parameters = self._parse_json_with_fixes(params_str)
-                if parameters is None:
-                    # If parsing failed, create an error tool call
-                    logger.error(f"Failed to parse parameters for tool '{tool_name}': {params_str[:200]}")
-                    tool_calls.append(ToolCall(
-                        name="__parse_error__",
-                        parameters={
-                            "error": "JSON parsing failed",
-                            "tool_name": tool_name,
-                            "raw_params": params_str[:500],
-                            "suggestion": "Ensure all string values have properly escaped quotes. Use \\\" for quotes inside strings."
-                        },
-                        raw_text=f"<tool_call><tool_name>{tool_name}</tool_name><parameters>{params_str[:200]}</parameters></tool_call>"
-                    ))
-                    continue
+                if parsed and isinstance(parsed, list):
+                    # It's an array of tool calls
+                    for item in parsed:
+                        if isinstance(item, dict) and "tool_name" in item:
+                            tool_name = item.get("tool_name", "").strip()
+                            parameters = item.get("parameters", {})
 
-                tool_calls.append(ToolCall(
-                    name=tool_name,
-                    parameters=parameters,
-                    raw_text=f"<tool_call><tool_name>{tool_name}</tool_name><parameters>{params_str}</parameters></tool_call>"
-                ))
+                            if tool_name:
+                                tool_calls.append(ToolCall(
+                                    name=tool_name,
+                                    parameters=parameters if isinstance(parameters, dict) else {},
+                                    raw_text=block[:200]
+                                ))
+                                logger.debug(f"Parsed JSON tool call from array: {tool_name}")
 
-                logger.debug(f"Parsed XML tool call: {tool_name}")
+                elif parsed and isinstance(parsed, dict) and "tool_name" in parsed:
+                    # It's a single tool call
+                    tool_name = parsed.get("tool_name", "").strip()
+                    parameters = parsed.get("parameters", {})
 
+                    if tool_name:
+                        tool_calls.append(ToolCall(
+                            name=tool_name,
+                            parameters=parameters if isinstance(parameters, dict) else {},
+                            raw_text=block[:200]
+                        ))
+                        logger.debug(f"Parsed JSON tool call from object: {tool_name}")
             except Exception as e:
-                logger.error(f"Failed to parse XML tool call: {e}", exc_info=True)
+                logger.debug(f"Failed to parse JSON block: {e}")
                 continue
 
         return tool_calls
 
-    def _parse_json_with_fixes(self, json_str: str) -> Optional[Dict[str, Any]]:
+    def _extract_json_blocks(self, text: str) -> List[str]:
+        """
+        Extract all JSON-like blocks (objects and arrays) from text using balanced bracket matching.
+
+        This is more robust than regex for nested structures.
+
+        Returns:
+            List of JSON string blocks
+        """
+        blocks = []
+        i = 0
+
+        while i < len(text):
+            # Look for start of JSON block ('{' or '[')
+            if text[i] in ['{', '[']:
+                start_char = text[i]
+                end_char = '}' if start_char == '{' else ']'
+
+                # Find matching closing bracket using balanced counting
+                start = i
+                depth = 0
+                in_string = False
+                escape_next = False
+
+                while i < len(text):
+                    char = text[i]
+
+                    # Handle string escape sequences
+                    if escape_next:
+                        escape_next = False
+                        i += 1
+                        continue
+
+                    if char == '\\':
+                        escape_next = True
+                        i += 1
+                        continue
+
+                    # Toggle string state
+                    if char == '"':
+                        in_string = not in_string
+                        i += 1
+                        continue
+
+                    # Only count brackets outside of strings
+                    if not in_string:
+                        if char == start_char:
+                            depth += 1
+                        elif char == end_char:
+                            depth -= 1
+
+                            # Found matching bracket
+                            if depth == 0:
+                                block = text[start:i+1]
+                                blocks.append(block)
+                                break
+
+                    i += 1
+            else:
+                i += 1
+
+        return blocks
+
+    def _parse_json_with_fixes(self, json_str: str) -> Optional[Any]:
         """
         Attempt to parse JSON with multiple fallback strategies for common errors.
 
@@ -145,7 +197,7 @@ class AgentResponseParser:
             json_str: JSON string to parse
 
         Returns:
-            Parsed dict or None if all attempts fail
+            Parsed object (dict, list, etc.) or None if all attempts fail
         """
         # Strategy 1: Try direct parsing
         try:
@@ -218,67 +270,6 @@ class AgentResponseParser:
             logger.debug(f"Quote fixing error: {e}")
             return json_str
 
-    def _parse_json_format(self, response: str) -> List[ToolCall]:
-        """Parse JSON-style tool calls."""
-        tool_calls = []
-        matches = re.findall(self.JSON_PATTERN, response, re.DOTALL)
-
-        for tool_name, params_str in matches:
-            try:
-                tool_name = tool_name.strip()
-                parameters = self._parse_json_with_fixes(params_str)
-
-                if parameters is None:
-                    logger.error(f"Failed to parse parameters for JSON tool '{tool_name}': {params_str[:200]}")
-                    tool_calls.append(ToolCall(
-                        name="__parse_error__",
-                        parameters={
-                            "error": "JSON parsing failed",
-                            "tool_name": tool_name,
-                            "raw_params": params_str[:500],
-                            "suggestion": "Ensure all string values have properly escaped quotes. Use \\\" for quotes inside strings."
-                        },
-                        raw_text=f'{{"tool_call": {{"name": "{tool_name}", "parameters": {params_str[:200]}}}}}'
-                    ))
-                    continue
-
-                tool_calls.append(ToolCall(
-                    name=tool_name,
-                    parameters=parameters,
-                    raw_text=f'{{"tool_call": {{"name": "{tool_name}", "parameters": {params_str}}}}}'
-                ))
-
-                logger.debug(f"Parsed JSON tool call: {tool_name}")
-
-            except Exception as e:
-                logger.error(f"Failed to parse JSON tool call: {e}", exc_info=True)
-                continue
-
-        return tool_calls
-
-    def _parse_bash_format(self, response: str) -> List[ToolCall]:
-        """
-        Parse bash code blocks as execute_command tool calls.
-
-        This provides backward compatibility and simple command execution.
-        """
-        tool_calls = []
-        matches = re.findall(self.BASH_PATTERN, response, re.DOTALL)
-
-        for command in matches:
-            command = command.strip()
-            if not command:
-                continue
-
-            tool_calls.append(ToolCall(
-                name="execute_command",
-                parameters={"command": command},
-                raw_text=f"```bash\n{command}\n```"
-            ))
-
-            logger.debug(f"Parsed bash command as tool call: {command[:50]}...")
-
-        return tool_calls
 
     def is_complete(self, response: str) -> bool:
         """
@@ -311,7 +302,7 @@ class AgentResponseParser:
             The thought text if found, None otherwise
         """
         # Pattern: THOUGHT: text (until next section or tool call)
-        pattern = r'THOUGHT:\s*(.+?)(?=\n(?:EXPLANATION:|<tool_call>|```|$))'
+        pattern = r'THOUGHT:\s*(.+?)(?=\n(?:EXPLANATION:|<tool_call>|$))'
         match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
 
         if match:
@@ -331,7 +322,7 @@ class AgentResponseParser:
         Returns:
             The explanation text if found, None otherwise
         """
-        pattern = r'EXPLANATION:\s*(.+?)(?=\n(?:THOUGHT:|<tool_call>|```|$))'
+        pattern = r'EXPLANATION:\s*(.+?)(?=\n(?:THOUGHT:|<tool_call>|$))'
         match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
 
         if match:
@@ -345,7 +336,7 @@ class AgentResponseParser:
         """
         Extract the conversational/explanatory text from the response.
 
-        Removes tool calls and returns just the text that should be shown to the user.
+        Removes tool calls (JSON objects/arrays) and returns just the text that should be shown to the user.
 
         Args:
             response: Model's text response
@@ -353,14 +344,20 @@ class AgentResponseParser:
         Returns:
             Clean text without tool call syntax
         """
-        # Remove XML tool calls
-        text = re.sub(self.XML_PATTERN, '', response, flags=re.DOTALL | re.IGNORECASE)
+        # Remove JSON tool calls (arrays first, then objects)
+        # Remove arrays: [ ... ]
+        text = re.sub(r'\[(?:[^\[\]]|\[(?:[^\[\]]|\[[^\[\]]*\])*\])*\]', '', response, flags=re.DOTALL)
+        # Remove objects: { ... }
+        text = re.sub(r'\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}', '', text, flags=re.DOTALL)
 
-        # Remove JSON tool calls
-        text = re.sub(self.JSON_PATTERN, '', text, flags=re.DOTALL)
-
-        # Remove bash blocks
-        text = re.sub(self.BASH_PATTERN, '', text, flags=re.DOTALL)
+        # Remove <think> and <thinking> tags (internal reasoning from models)
+        # First remove complete pairs
+        text = re.sub(r'<think(?:ing)?>.*?</think(?:ing)?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Then remove orphaned closing tags along with everything before them
+        # This handles cases where the opening tag was truncated/missing
+        text = re.sub(r'^.*?</think(?:ing)?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Finally remove any remaining orphaned opening tags
+        text = re.sub(r'<think(?:ing)?>', '', text, flags=re.IGNORECASE)
 
         # Remove completion signals
         for signal in self.COMPLETION_SIGNALS:

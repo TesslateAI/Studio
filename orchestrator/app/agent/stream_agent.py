@@ -80,11 +80,23 @@ class StreamAgent(AbstractAgent):
             }
             return
 
-        # Build the complete prompt
+        # Build the complete prompt starting with system message (with marker substitution)
+        processed_system_prompt = self.get_processed_system_prompt(context)
         messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"{project_context_str}\n\nUser request: {user_request}"}
+            {"role": "system", "content": processed_system_prompt}
         ]
+
+        # Include chat history if provided (for conversation continuity)
+        chat_history = context.get('chat_history', [])
+        if chat_history:
+            logger.info(f"[StreamAgent] Including {len(chat_history)} previous messages for context")
+            messages.extend(chat_history)
+
+        # Add current user message
+        messages.append({
+            "role": "user",
+            "content": f"{project_context_str}\n\nUser request: {user_request}"
+        })
 
         full_response = ""
         processed_files = set()
@@ -159,17 +171,19 @@ class StreamAgent(AbstractAgent):
                             await asyncio.sleep(0.2)
 
                 # Run npm install if package.json was modified (K8s only)
-                if package_json_modified and settings.deployment_mode == "kubernetes":
+                from ..services.orchestration import is_kubernetes_mode
+                if package_json_modified and is_kubernetes_mode():
                     logger.info("[StreamAgent] package.json modified, running npm install")
                     yield {'type': 'status', 'content': '📦 Installing dependencies...'}
 
                     try:
-                        from ..k8s_client import get_k8s_manager
-                        k8s_manager = get_k8s_manager()
+                        from ..services.orchestration import get_orchestrator
+                        orchestrator = get_orchestrator()
 
-                        await k8s_manager.execute_command_in_pod(
+                        await orchestrator.execute_command(
                             user_id=user.id,
-                            project_id=str(project_id),
+                            project_id=project_id,
+                            container_name=None,  # Use default container
                             command=["npm", "install"],
                             timeout=180
                         )
@@ -249,11 +263,9 @@ class StreamAgent(AbstractAgent):
         Returns:
             True if successful, False otherwise
         """
-        from ..config import get_settings
+        from ..services.orchestration import is_kubernetes_mode
         from ..models import ProjectFile
         from sqlalchemy import select
-
-        settings = get_settings()
 
         try:
             # 1. Save to database
@@ -283,28 +295,28 @@ class StreamAgent(AbstractAgent):
                 logger.error(f"[StreamAgent] Database error saving {file_path}: {e}")
                 # Continue to try writing to container
 
-            # 2. Write to dev container
-            if settings.deployment_mode == "kubernetes":
-                # Kubernetes: Write to pod
-                try:
-                    from ..dev_server_manager import get_container_manager
-                    k8s_manager = get_container_manager()
+            # 2. Write to dev container (unified for Docker/K8s)
+            try:
+                from ..services.orchestration import get_orchestrator
+                orchestrator = get_orchestrator()
 
-                    success = await k8s_manager.write_file_to_pod(
-                        user_id=user_id,
-                        project_id=str(project_id),
-                        file_path=file_path,
-                        content=code
-                    )
+                success = await orchestrator.write_file(
+                    user_id=user_id,
+                    project_id=project_id,
+                    container_name=None,  # Use default container
+                    file_path=file_path,
+                    content=code
+                )
 
-                    if success:
-                        logger.info(f"[StreamAgent] Wrote {file_path} to pod")
-                    else:
-                        logger.warning(f"[StreamAgent] Failed to write {file_path} to pod")
-                except Exception as e:
-                    logger.error(f"[StreamAgent] Error writing to pod: {e}")
-            else:
-                # Docker: Write to local filesystem
+                if success:
+                    logger.info(f"[StreamAgent] Wrote {file_path} to container")
+                else:
+                    logger.warning(f"[StreamAgent] Failed to write {file_path} to container")
+            except Exception as e:
+                logger.error(f"[StreamAgent] Error writing to container: {e}")
+
+            # Legacy Docker fallback for direct filesystem access
+            if not is_kubernetes_mode():
                 try:
                     project_dir = get_project_path(user_id, project_id)
                     full_path = os.path.join(project_dir, file_path)

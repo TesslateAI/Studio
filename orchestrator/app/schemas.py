@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from uuid import UUID
 
 class UserBase(BaseModel):
@@ -52,7 +52,7 @@ class ProjectCreate(ProjectBase):
     source_type: str = "template"  # "template", "github", or "base"
     github_repo_url: Optional[str] = None
     github_branch: Optional[str] = "main"
-    base_id: Optional[UUID] = None
+    base_id: Optional[Union[UUID, str]] = None  # UUID for marketplace bases, 'builtin' for built-in template
 
     @field_validator('source_type')
     @classmethod
@@ -77,17 +77,203 @@ class ProjectCreate(ProjectBase):
         if info.data.get('source_type') == 'base':
             if not v:
                 raise ValueError('base_id is required when source_type is "base"')
+            # Accept 'builtin' string or UUID
+            if isinstance(v, str) and v != 'builtin':
+                try:
+                    UUID(v)  # Validate it's a valid UUID string
+                except ValueError:
+                    raise ValueError('base_id must be a valid UUID or "builtin"')
         return v
 
 class Project(ProjectBase):
     id: UUID
     slug: str  # URL-safe identifier for routing
     owner_id: UUID
+    network_name: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True
+
+
+# Container Schemas
+
+class ContainerBase(BaseModel):
+    name: str
+    directory: Optional[str] = None
+
+class ContainerCreate(ContainerBase):
+    project_id: UUID
+    base_id: Union[UUID, str, None] = None  # UUID for marketplace bases, 'builtin' for built-in, None for services
+    position_x: float = 0
+    position_y: float = 0
+    container_type: str = "base"  # 'base' or 'service'
+    service_slug: Optional[str] = None  # For service containers: 'postgres', 'redis', etc.
+    # External service fields
+    deployment_mode: str = "container"  # 'container' or 'external'
+    external_endpoint: Optional[str] = None  # For external services
+    credentials: Optional[Dict[str, str]] = None  # Credentials for external services (will be stored encrypted)
+
+class ContainerUpdate(BaseModel):
+    name: Optional[str] = None
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
+    port: Optional[int] = None
+    environment_vars: Optional[Dict[str, Any]] = None
+    external_endpoint: Optional[str] = None
+    deployment_mode: Optional[str] = None
+
+
+class ContainerRename(BaseModel):
+    """Schema for renaming a container (includes folder rename)."""
+    new_name: str
+
+class Container(ContainerBase):
+    id: UUID
+    project_id: UUID
+    base_id: Optional[UUID] = None
+    container_name: str
+    directory: str
+    port: Optional[int] = None
+    internal_port: Optional[int] = None
+    environment_vars: Optional[Dict[str, Any]] = None
+    container_type: str = "base"
+    service_slug: Optional[str] = None
+    deployment_mode: str = "container"
+    external_endpoint: Optional[str] = None
+    credentials_id: Optional[UUID] = None
+    position_x: float
+    position_y: float
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Container Connection Schemas
+
+class ContainerConnectionCreate(BaseModel):
+    project_id: UUID
+    source_container_id: UUID
+    target_container_id: UUID
+    connection_type: str = "depends_on"  # Legacy field
+    connector_type: str = "env_injection"  # env_injection, http_api, database, etc.
+    config: Optional[Dict[str, Any]] = None  # Connection configuration
+    label: Optional[str] = None
+
+class ContainerConnectionUpdate(BaseModel):
+    connector_type: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    label: Optional[str] = None
+
+class ContainerConnection(BaseModel):
+    id: UUID
+    project_id: UUID
+    source_container_id: UUID
+    target_container_id: UUID
+    connection_type: str
+    connector_type: str = "env_injection"
+    config: Optional[Dict[str, Any]] = None
+    label: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Browser Preview Schemas
+
+class BrowserPreviewCreate(BaseModel):
+    """Create a browser preview node on the canvas."""
+    project_id: UUID
+    position_x: float = 0
+    position_y: float = 0
+    connected_container_id: Optional[UUID] = None
+
+class BrowserPreviewUpdate(BaseModel):
+    """Update a browser preview node (position, connection)."""
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
+    connected_container_id: Optional[UUID] = None
+    current_path: Optional[str] = None
+
+class BrowserPreview(BaseModel):
+    """Browser preview node response."""
+    id: UUID
+    project_id: UUID
+    connected_container_id: Optional[UUID] = None
+    position_x: float
+    position_y: float
+    current_path: str = "/"
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Workflow Template Schemas
+
+class WorkflowTemplateNode(BaseModel):
+    """A node in a workflow template"""
+    template_id: str  # Unique within template (e.g., "frontend", "database")
+    type: str  # "base", "service"
+    base_slug: Optional[str] = None  # For type="base"
+    service_slug: Optional[str] = None  # For type="service"
+    name: str  # Display name
+    position: Dict[str, float]  # {"x": 0, "y": 100}
+
+class WorkflowTemplateEdge(BaseModel):
+    """An edge/connection in a workflow template"""
+    source: str  # template_id of source node
+    target: str  # template_id of target node
+    connector_type: str = "env_injection"
+    config: Optional[Dict[str, Any]] = None
+
+class WorkflowTemplateDefinition(BaseModel):
+    """The full definition of a workflow template"""
+    nodes: List[WorkflowTemplateNode]
+    edges: List[WorkflowTemplateEdge]
+    required_credentials: Optional[List[str]] = None
+
+class WorkflowTemplateCreate(BaseModel):
+    name: str
+    slug: str
+    description: str
+    long_description: Optional[str] = None
+    icon: str = "🔗"
+    category: str
+    tags: Optional[List[str]] = None
+    template_definition: WorkflowTemplateDefinition
+    pricing_type: str = "free"
+    price: int = 0
+
+class WorkflowTemplateResponse(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+    description: str
+    long_description: Optional[str] = None
+    icon: str
+    preview_image: Optional[str] = None
+    category: str
+    tags: Optional[List[str]] = None
+    template_definition: Dict[str, Any]
+    required_credentials: Optional[List[str]] = None
+    pricing_type: str
+    price: float
+    downloads: int
+    rating: float
+    reviews_count: int
+    is_featured: bool
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 
 class ProjectFileBase(BaseModel):
     file_path: str
@@ -215,8 +401,10 @@ class AgentChatRequest(BaseModel):
     project_id: UUID
     message: str
     agent_id: Optional[UUID] = None  # ID of the agent to use
+    container_id: Optional[UUID] = None  # If set, agent is scoped to this container (files at root)
     max_iterations: Optional[int] = 20
     minimal_prompts: Optional[bool] = False
+    edit_mode: Optional[str] = 'ask'  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)
 
     @field_validator('message')
     @classmethod
@@ -226,6 +414,13 @@ class AgentChatRequest(BaseModel):
         if len(v) > 10000:
             raise ValueError('Message cannot exceed 10000 characters')
         return v.strip()
+
+    @field_validator('edit_mode')
+    @classmethod
+    def validate_edit_mode(cls, v):
+        if v not in ['allow', 'ask', 'plan']:
+            raise ValueError('edit_mode must be "allow", "ask", or "plan"')
+        return v
 
 
 class ToolCallDetail(BaseModel):

@@ -26,8 +26,8 @@ class ShellSessionManager:
     """Manages shell sessions with security and resource controls."""
 
     # Configuration
-    MAX_SESSIONS_PER_USER = 5  # Max concurrent shells per user (agents may need more)
-    MAX_SESSIONS_PER_PROJECT = 3  # Max concurrent shells per project
+    MAX_SESSIONS_PER_USER = 100  # Max concurrent shells per user
+    MAX_SESSIONS_PER_PROJECT = 100  # Max concurrent shells per project
     IDLE_TIMEOUT_MINUTES = 30  # Auto-close idle shells after 30 minutes
     MAX_SESSION_DURATION_HOURS = 8  # Force close after 8 hours
     MAX_OUTPUT_BUFFER_SIZE = 10 * 1024 * 1024  # 10MB max buffer per session
@@ -35,6 +35,9 @@ class ShellSessionManager:
     def __init__(self):
         self.pty_broker = get_pty_broker()
         self.active_sessions: Dict[str, PTYSession] = {}
+        # Track sessions that need stats updates (non-blocking batching)
+        self.pending_stats_updates: set = set()
+        self._stats_update_task = None
 
     async def create_session(
         self,
@@ -42,9 +45,17 @@ class ShellSessionManager:
         project_id: str,
         db: AsyncSession,
         command: str = "/bin/sh",
+        container_name: Optional[str] = None,  # For multi-container Docker: which container to connect to
     ) -> Dict[str, Any]:
         """
         Create a new shell session with validation and resource limits.
+
+        Args:
+            user_id: User UUID
+            project_id: Project ID
+            db: Database session
+            command: Shell command to run (default: /bin/sh)
+            container_name_hint: Optional container name for multi-container projects
 
         Returns session metadata including session_id.
         Raises HTTPException on validation failures.
@@ -82,10 +93,14 @@ class ShellSessionManager:
             )
 
         # 4. Get container/pod name based on deployment mode
-        container_name = self._get_container_name(user_id, project_id)
+        resolved_container_name = await self._get_container_name(
+            user_id, project_id, project.slug, container_name
+        )
 
-        # 5. Verify container is running
-        is_running = await self._is_container_running(user_id, project_id)
+        # 5. Verify container is running (use resolved name for accurate check)
+        is_running = await self._is_container_running(
+            user_id, project_id, project.slug, resolved_container_name
+        )
         if not is_running:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -97,7 +112,7 @@ class ShellSessionManager:
             pty_session = await self.pty_broker.create_session(
                 user_id=user_id,
                 project_id=project_id,
-                container_name=container_name,
+                container_name=resolved_container_name,
                 command=command,
             )
         except Exception as e:
@@ -112,7 +127,7 @@ class ShellSessionManager:
             session_id=pty_session.session_id,
             user_id=user_id,
             project_id=project_id,
-            container_name=container_name,
+            container_name=resolved_container_name,
             command=command,
             working_dir=pty_session.cwd,  # Get from PTYSession (already configured for deployment mode)
             status="active",
@@ -124,9 +139,14 @@ class ShellSessionManager:
         # 8. Track in memory
         self.active_sessions[pty_session.session_id] = pty_session
 
+        # Verify session is tracked in both manager and broker
+        assert pty_session.session_id in self.active_sessions, "Session not in manager dict"
+        assert pty_session.session_id in self.pty_broker.sessions, "Session not in broker dict"
+
         logger.info(
             f"Created shell session {pty_session.session_id} for user {user_id}, "
-            f"project {project_id}, container {container_name}"
+            f"project {project_id}, container {resolved_container_name}. "
+            f"Total active sessions: {len(self.active_sessions)}"
         )
 
         return {
@@ -140,25 +160,74 @@ class ShellSessionManager:
         session_id: str,
         data: bytes,
         db: AsyncSession,
+        user_id: Optional[UUID] = None,
     ) -> None:
-        """Write data to PTY stdin."""
+        """
+        Write data to PTY stdin.
 
+        Args:
+            session_id: Session ID to write to
+            data: Bytes to write
+            db: Database session
+            user_id: Optional user ID for authorization check
+        """
+
+        # Get session from memory
         session = self.active_sessions.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            # Try to recover session from PTY broker
+            session = self.pty_broker.sessions.get(session_id)
+            if session:
+                logger.warning(f"Session {session_id} found in broker but not in manager, recovering...")
+                self.active_sessions[session_id] = session
+            else:
+                # Check database for session info
+                result = await db.execute(
+                    select(ShellSession).where(
+                        ShellSession.session_id == session_id,
+                        ShellSession.status == "active"
+                    )
+                )
+                db_session = result.scalar_one_or_none()
+                if db_session:
+                    raise ValueError(
+                        f"Session {session_id} exists in database but PTY connection is lost. "
+                        f"Please close and create a new session."
+                    )
+                else:
+                    raise ValueError(
+                        f"Session {session_id} not found. Use shell_open to create a new session."
+                    )
+
+        # Authorization check: verify session belongs to requesting user
+        if user_id and session.user_id != user_id:
+            logger.warning(
+                f"User {user_id} attempted to access session {session_id} "
+                f"owned by user {session.user_id}"
+            )
+            raise PermissionError(
+                f"Session {session_id} does not belong to the requesting user"
+            )
 
         await self.pty_broker.write_to_pty(session_id, data)
 
-        # Update database stats
-        await self._update_session_stats(session_id, db)
+        # Queue stats update for batching (non-blocking)
+        # Stats will be flushed periodically by background task
+        self.pending_stats_updates.add(session_id)
 
     async def read_output(
         self,
         session_id: str,
         db: AsyncSession,
+        user_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """
         Read new output from session since last read.
+
+        Args:
+            session_id: Session ID to read from
+            db: Database session
+            user_id: Optional user ID for authorization check
 
         Returns:
             {
@@ -171,13 +240,32 @@ class ShellSessionManager:
 
         session = self.active_sessions.get(session_id)
         if not session:
-            raise ValueError(f"Session {session_id} not found")
+            # Try to recover session from PTY broker
+            session = self.pty_broker.sessions.get(session_id)
+            if session:
+                logger.warning(f"Session {session_id} found in broker but not in manager, recovering...")
+                self.active_sessions[session_id] = session
+            else:
+                raise ValueError(
+                    f"Session {session_id} not found. Use shell_open to create a new session."
+                )
+
+        # Authorization check: verify session belongs to requesting user
+        if user_id and session.user_id != user_id:
+            logger.warning(
+                f"User {user_id} attempted to access session {session_id} "
+                f"owned by user {session.user_id}"
+            )
+            raise PermissionError(
+                f"Session {session_id} does not belong to the requesting user"
+            )
 
         # Get new output
         new_data, is_eof = await session.read_new_output()
 
-        # Update database stats
-        await self._update_session_stats(session_id, db, read_count=1)
+        # Queue stats update for batching (non-blocking)
+        # Stats will be flushed periodically by background task
+        self.pending_stats_updates.add(session_id)
 
         return {
             "output": base64.b64encode(new_data).decode('utf-8'),
@@ -273,41 +361,133 @@ class ShellSessionManager:
 
     # Helper methods
 
-    def _get_container_name(self, user_id: UUID, project_id: str) -> str:
-        """Get container/pod name based on deployment mode."""
-        if settings.deployment_mode == "kubernetes":
-            # K8s pod name format
-            return get_container_name(user_id, project_id, mode="kubernetes")
+    async def _get_container_name(
+        self,
+        user_id: UUID,
+        project_id: str,
+        project_slug: str,
+        container_name: Optional[str] = None
+    ) -> str:
+        """
+        Get container/pod name based on deployment mode.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            project_slug: Project slug
+            container_name: For Docker multi-container: specific container name to connect to
+
+        Returns:
+            The Docker container name or K8s pod name
+        """
+        from .orchestration import get_orchestrator, is_kubernetes_mode
+        orchestrator = get_orchestrator()
+
+        if is_kubernetes_mode():
+            # K8s: Generate deployment name based on container_name for multi-container
+            # The k8s_client.generate_resource_names handles the sanitization
+            k8s_client = orchestrator.k8s_client
+            names = k8s_client.generate_resource_names(user_id, project_id, container_name=container_name)
+            return names["deployment"]
         else:
-            # Docker container name format - use slug from container manager
-            from ..dev_server_manager import get_container_manager
-            manager = get_container_manager()
-            project_key = f"user-{user_id}-project-{project_id}"
-            container_info = manager.containers.get(project_key)
-
-            if container_info:
-                return container_info["container_name"]
+            # Docker multi-container mode
+            # Container name format: {project_slug}-{service_name}
+            if container_name:
+                # Sanitize the container name to match docker-compose naming
+                # Note: Must match sanitization in projects.py container creation
+                sanitized = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+                sanitized = ''.join(c for c in sanitized if c.isalnum() or c == '-')
+                sanitized = sanitized.strip('-')
+                return f"{project_slug}-{sanitized}"
             else:
-                # Fallback: try to find container by labels
-                import subprocess
-                result = subprocess.run(
-                    ["docker", "ps", "--filter", f"label=com.tesslate.devserver.project_id={project_id}",
-                     "--filter", f"label=com.tesslate.devserver.user_id={user_id}", "--format", "{{.Names}}"],
-                    capture_output=True, text=True, timeout=10
+                # Default to the first container in the project
+                # We'll look this up from the docker-compose file
+                status = await orchestrator.get_project_status(project_slug, project_id)
+
+                if status.get('containers'):
+                    # Get the first running container, or first container if none running
+                    for service_name, info in status['containers'].items():
+                        if info.get('running'):
+                            return info.get('name', f"{project_slug}-{service_name}")
+                    # Fallback to first container
+                    first_service = next(iter(status['containers'].keys()))
+                    return status['containers'][first_service].get('name', f"{project_slug}-{first_service}")
+
+                raise ValueError(
+                    "No containers found for project. Please start the project first."
                 )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip().split('\n')[0]
-                else:
-                    # Last resort fallback (should not happen in production)
-                    return get_container_name(user_id, project_id, mode="docker")
 
-    async def _is_container_running(self, user_id: UUID, project_id: str) -> bool:
-        """Check if container/pod is running."""
-        from ..dev_server_manager import get_container_manager
+    async def _is_container_running(
+        self,
+        user_id: UUID,
+        project_id: str,
+        project_slug: str,
+        container_name: Optional[str] = None
+    ) -> bool:
+        """
+        Check if container/pod is running.
 
-        manager = get_container_manager()
-        status = await manager.get_container_status(str(project_id), user_id)
-        return status.get("running", False)
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            project_slug: Project slug
+            container_name: For Docker multi-container: specific container name to check
+
+        Returns:
+            True if the container is running
+        """
+        from .orchestration import get_orchestrator, is_kubernetes_mode
+        orchestrator = get_orchestrator()
+
+        if is_kubernetes_mode():
+            # Use orchestrator's is_container_ready method
+            status = await orchestrator.is_container_ready(user_id, project_id, container_name)
+            return status.get("ready", False)
+        else:
+            # Docker multi-container mode
+            status = await orchestrator.get_project_status(project_slug, project_id)
+            logger.info(f"[_is_container_running] project_slug={project_slug}, container_name={container_name}, status={status}")
+
+            if status.get('status') == 'not_found':
+                logger.warning(f"[_is_container_running] Project status not found for {project_slug}")
+                return False
+
+            if container_name:
+                # Check specific container
+                # container_name could be:
+                # - Full docker name: "project-slug-next-js-15"
+                # - Service name: "next-js-15"
+                containers = status.get('containers', {})
+                logger.info(f"[_is_container_running] Looking for '{container_name}' in containers: {containers}")
+
+                # First try: look up by 'name' field (matches full docker container name)
+                for service_name, info in containers.items():
+                    if info.get('name') == container_name:
+                        logger.info(f"[_is_container_running] Found by name field: running={info.get('running', False)}")
+                        return info.get('running', False)
+
+                # Second try: extract service name if full name (project-slug-service)
+                if container_name.startswith(f"{project_slug}-"):
+                    service_name = container_name[len(project_slug)+1:]
+                    container_info = containers.get(service_name)
+                    if container_info:
+                        logger.info(f"[_is_container_running] Found by extracted service name '{service_name}': running={container_info.get('running', False)}")
+                        return container_info.get('running', False)
+
+                # Third try: direct service name lookup
+                container_info = containers.get(container_name)
+                if container_info:
+                    logger.info(f"[_is_container_running] Found by direct lookup: running={container_info.get('running', False)}")
+                    return container_info.get('running', False)
+
+                logger.warning(f"[_is_container_running] Container '{container_name}' not found in containers dict")
+                return False
+            else:
+                # Check if any container is running
+                for info in status.get('containers', {}).values():
+                    if info.get('running'):
+                        return True
+                return False
 
     async def _get_user_active_sessions(
         self,
@@ -359,6 +539,51 @@ class ShellSessionManager:
             if read_count > 0:
                 db_session.total_reads += read_count
             await db.commit()
+
+    async def flush_pending_stats(self, db: AsyncSession) -> int:
+        """
+        Flush all pending stats updates to database in a single batch.
+        This is called periodically to avoid blocking on every keystroke.
+        Returns number of sessions updated.
+        """
+        if not self.pending_stats_updates:
+            return 0
+
+        # Get snapshot of pending updates and clear the set
+        session_ids_to_update = list(self.pending_stats_updates)
+        self.pending_stats_updates.clear()
+
+        updated_count = 0
+        for session_id in session_ids_to_update:
+            try:
+                session = self.active_sessions.get(session_id)
+                if not session:
+                    continue
+
+                result = await db.execute(
+                    select(ShellSession).where(ShellSession.session_id == session_id)
+                )
+                db_session = result.scalar_one_or_none()
+                if db_session:
+                    db_session.bytes_read = session.bytes_read
+                    db_session.bytes_written = session.bytes_written
+                    db_session.last_activity_at = datetime.utcnow()
+                    updated_count += 1
+
+            except Exception as e:
+                logger.error(f"Failed to update stats for session {session_id}: {e}")
+                # Re-queue for next flush attempt
+                self.pending_stats_updates.add(session_id)
+
+        if updated_count > 0:
+            try:
+                await db.commit()
+            except Exception as e:
+                logger.error(f"Failed to commit stats updates: {e}")
+                # Re-queue all for retry
+                self.pending_stats_updates.update(session_ids_to_update)
+
+        return updated_count
 
 
 # Singleton instance

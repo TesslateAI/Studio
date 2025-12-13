@@ -113,10 +113,10 @@ export function BrowserPreview({
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => closeTab(tab.id, e)}
-                  className="opacity-0 group-hover:opacity-100 hover:bg-[var(--text)]/10 rounded p-0.5 transition-opacity"
+                  className="hover:bg-[var(--text)]/10 rounded p-0.5 transition-colors"
                   aria-label="Close tab"
                 >
-                  <X size={14} className="text-[var(--text)]/60" />
+                  <X size={14} className="text-[var(--text)]/60 hover:text-[var(--text)]" />
                 </button>
               )}
             </div>
@@ -132,29 +132,24 @@ export function BrowserPreview({
       </div>
 
       {/* Browser Chrome */}
-      <div className="bg-[var(--surface)] border-b border-white/10 p-3 flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500" />
-          <div className="w-3 h-3 rounded-full bg-yellow-500" />
-          <div className="w-3 h-3 rounded-full bg-green-500" />
-        </div>
+      <div className="bg-[var(--surface)] border-b border-white/10 p-2 md:p-3 flex items-center gap-2 md:gap-3">
         <div className="flex items-center gap-1">
           <button
             onClick={onNavigateBack}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+            className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
             title="Go back"
           >
             <CaretLeft size={18} weight="bold" />
           </button>
           <button
             onClick={onNavigateForward}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+            className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
             title="Go forward"
           >
             <CaretRight size={18} weight="bold" />
           </button>
         </div>
-        <div className="flex-1">
+        <div className="hidden md:block flex-1">
           <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
             <span className="text-yellow-500 mr-2">🔒</span>
             <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
@@ -162,7 +157,7 @@ export function BrowserPreview({
         </div>
         <button
           onClick={onRefresh}
-          className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+          className="p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
           title="Refresh"
         >
           <ArrowsClockwise size={16} />

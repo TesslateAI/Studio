@@ -1,124 +1,112 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Sparkles, Zap } from 'lucide-react';
+import React from 'react';
+import { Zap } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import AgentStep from './AgentStep';
 import { type AgentMessageData } from '../types/agent';
 
 interface AgentMessageProps {
   agentData: AgentMessageData;
   finalResponse: string;
+  agentIcon?: string;
+  agentAvatarUrl?: string;
 }
 
-export default function AgentMessage({ agentData, finalResponse }: AgentMessageProps) {
-  const [visibleSteps, setVisibleSteps] = useState(0);
-  const [showAllSteps, setShowAllSteps] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true);
+export default function AgentMessage({ agentData, finalResponse, agentIcon, agentAvatarUrl }: AgentMessageProps) {
+  // In development, show all steps (to display debug panels)
+  // In production, only show steps with meaningful content
+  const isDevelopment = import.meta.env.DEV;
 
-  // Filter out steps with no meaningful content AND completion steps (shown in Result section)
-  const meaningfulSteps = agentData.steps.filter(step =>
-    !step.is_complete &&
-    ((step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim().length > 0))
-  );
+  const stepsToDisplay = agentData.steps.filter(step => {
+    if (step.is_complete) return false;
 
-  // Progressive display: show steps one by one with animation
-  useEffect(() => {
-    if (meaningfulSteps.length === 0) return;
+    // In dev mode, show steps that have debug data even if no tool calls/thoughts
+    if (isDevelopment && step._debug) return true;
 
-    // Reset when agentData changes
-    setVisibleSteps(0);
-    setShowAllSteps(false);
-    setIsExpanded(true);
-
-    // Show steps progressively with a slight delay
-    const showNextStep = (index: number) => {
-      if (index < meaningfulSteps.length) {
-        setTimeout(() => {
-          setVisibleSteps(index + 1);
-          showNextStep(index + 1);
-        }, 150); // 150ms delay between each step for smooth appearance
-      }
-    };
-
-    showNextStep(0);
-  }, [meaningfulSteps.length]);
-
-  const stepsToShow = showAllSteps ? meaningfulSteps : meaningfulSteps.slice(0, visibleSteps);
+    // Always show steps with tool calls or thoughts
+    return (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim());
+  });
 
   return (
     <div className="message my-4 flex gap-3">
-      {/* Avatar - matching streaming mode AI avatar */}
+      {/* Avatar - use agent logo, icon, or default */}
       <div className="message-avatar flex-shrink-0">
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[hsl(var(--hue2)_60%_50%)] to-[hsl(var(--hue2)_60%_70%)] flex items-center justify-center shadow-lg">
-          <Zap className="w-4 h-4 text-white" fill="currentColor" />
-        </div>
+        {agentAvatarUrl ? (
+          <img
+            src={agentAvatarUrl}
+            alt="Agent"
+            className="w-8 h-8 rounded-full object-cover border border-[var(--border-color)]"
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-[var(--surface)] border border-[var(--border-color)] flex items-center justify-center p-1.5">
+            <img src="/favicon.svg" alt="Tesslate" className="w-full h-full" />
+          </div>
+        )}
       </div>
 
       {/* Content */}
       <div className="flex-1 max-w-[75%]">
-        {/* Agent mode indicator banner */}
-        <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-gradient-to-r from-[hsl(var(--hue2)_60%_50%)]/10 to-[hsl(var(--hue2)_60%_70%)]/10 border border-[hsl(var(--hue2)_60%_50%)]/20">
-          <Sparkles size={14} className="text-[hsl(var(--hue2)_60%_50%)]" />
-          <span className="text-xs font-semibold text-[var(--text)]">
-            Agent Mode
-          </span>
-          <span className="text-xs text-[var(--text)]/60">•</span>
-          <span className="text-xs text-[var(--text)]/70">
-            {agentData.iterations} iteration{agentData.iterations !== 1 ? 's' : ''}
-          </span>
-          <span className="text-xs text-[var(--text)]/60">•</span>
-          <span className="text-xs text-[var(--text)]/70">
-            {agentData.tool_calls_made} tool call{agentData.tool_calls_made !== 1 ? 's' : ''}
-          </span>
-        </div>
-
-        {/* Execution Steps - Progressive Display */}
-        {meaningfulSteps && meaningfulSteps.length > 0 && (
-          <div className="mb-3">
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="flex items-center gap-2 text-xs font-semibold text-[var(--text)]/70 hover:text-[var(--text)] transition-colors mb-2 px-2 py-1 rounded hover:bg-[var(--text)]/5"
-            >
-              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              {isExpanded ? 'Hide' : 'Show'} execution details
-            </button>
-
-            {isExpanded && (
-              <div className="space-y-2 animate-in fade-in duration-200">
-                {stepsToShow.map((step, index) => (
-                  <div
-                    key={index}
-                    className="animate-in slide-in-from-top-2 fade-in duration-300"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <AgentStep
-                      step={step}
-                      totalSteps={agentData.iterations}
-                    />
-                  </div>
-                ))}
-
-                {/* Show More button if there are hidden steps */}
-                {!showAllSteps && visibleSteps < meaningfulSteps.length && (
-                  <button
-                    onClick={() => setShowAllSteps(true)}
-                    className="w-full text-xs font-medium text-[var(--text)]/60 hover:text-[var(--text)] transition-colors py-2 border border-dashed border-[var(--border-color)] rounded-lg hover:bg-[var(--text)]/5"
-                  >
-                    Show all {meaningfulSteps.length} steps
-                  </button>
-                )}
-              </div>
-            )}
+        {/* Execution Steps */}
+        {stepsToDisplay && stepsToDisplay.length > 0 && (
+          <div className="space-y-2">
+            {stepsToDisplay.map((step, index) => (
+              <AgentStep
+                key={index}
+                step={step}
+                totalSteps={agentData.iterations}
+              />
+            ))}
           </div>
         )}
 
-        {/* Final Response */}
-        <div className="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]">
-          <div className="text-xs font-semibold text-[var(--text)]/60 mb-2 uppercase tracking-wide">
-            Result
+        {/* In Progress Indicator - Just animated dots */}
+        {agentData.completion_reason === 'in_progress' && stepsToDisplay.length === 0 && (
+          <div className="inline-flex gap-1 px-3 py-2 bg-white/5 rounded-2xl">
+            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing"></div>
+            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-200"></div>
+            <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-400"></div>
           </div>
-          <div className="whitespace-pre-wrap">
-            {finalResponse}
+        )}
+
+        {/* Final Response - Only shown when task is complete */}
+        {finalResponse && finalResponse.trim() && (
+          <div className="mt-2">
+            <div className="message-bubble px-4 py-3 rounded-2xl text-sm leading-relaxed bg-[var(--text)]/5 text-[var(--text)] border border-[var(--border-color)]">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  // Style paragraphs
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  // Style lists
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                  li: ({ children }) => <li className="ml-2">{children}</li>,
+                  // Style code
+                  code: ({ children, ...props }) => {
+                    const inline = !String(children).includes('\n');
+                    return inline ? (
+                      <code className="bg-black/20 px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>
+                    ) : (
+                      <code className="block bg-black/20 px-3 py-2 rounded my-2 text-xs font-mono overflow-x-auto">{children}</code>
+                    );
+                  },
+                  // Style links
+                  a: ({ href, children }) => (
+                    <a href={href} className="underline hover:opacity-80" target="_blank" rel="noopener noreferrer">
+                      {children}
+                    </a>
+                  ),
+                  // Style headings
+                  h1: ({ children }) => <h1 className="text-xl font-bold mb-2 mt-3">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 mt-3">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 mt-2">{children}</h3>,
+                }}
+              >
+                {finalResponse}
+              </ReactMarkdown>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

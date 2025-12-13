@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   CaretLeft,
@@ -19,11 +19,15 @@ import {
   ShareNetwork,
   ArrowsClockwise,
   Kanban,
-  FlowArrow
+  FlowArrow,
+  List,
+  Article,
+  Terminal
 } from '@phosphor-icons/react';
-import { FloatingSidebar } from '../components/ui/FloatingSidebar';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
+import { Tooltip } from '../components/ui/Tooltip';
+import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
@@ -35,15 +39,20 @@ import {
   NotesPanel,
   SettingsPanel,
   AssetsPanel,
-  KanbanPanel
+  KanbanPanel,
+  TerminalPanel
 } from '../components/panels';
+import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
+import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
-import { projectsApi, marketplaceApi } from '../lib/api';
+import { projectsApi, marketplaceApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
+import { fileEvents } from '../utils/fileEvents';
+import { motion, AnimatePresence } from 'framer-motion';
 
-type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | 'assets' | null;
-type MainViewType = 'preview' | 'code' | 'kanban';
+type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
+type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 
 interface UIAgent {
   id: string;
@@ -56,9 +65,13 @@ interface UIAgent {
 export default function Project() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const containerId = searchParams.get('container');
+
   const { theme, toggleTheme } = useTheme();
   const [project, setProject] = useState<any>(null);
   const [files, setFiles] = useState<any[]>([]);
+  const [container, setContainer] = useState<any>(null);
   const [agents, setAgents] = useState<UIAgent[]>([]);
   const [activeView, setActiveView] = useState<MainViewType>('preview');
   const [activePanel, setActivePanel] = useState<PanelType>(null);
@@ -66,28 +79,16 @@ export default function Project() {
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
   const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
-  const [initialChatMessage, setInitialChatMessage] = useState<string>('');
+  const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
+    const saved = localStorage.getItem('projectSidebarExpanded');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
+  const [showDeployModal, setShowDeployModal] = useState(false);
   // Note: We still have projectId for internal use, but it comes from the loaded project object
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
-
-  // Load initial prompt from terminal landing page (once)
-  useEffect(() => {
-    const storedPrompt = sessionStorage.getItem('project_prompt');
-    if (storedPrompt) {
-      setInitialChatMessage(storedPrompt);
-      // Clear it from sessionStorage after loading
-      sessionStorage.removeItem('project_prompt');
-      sessionStorage.removeItem('terminal_theme');
-
-      // Show a toast to let the user know their prompt is ready
-      toast.success('Your prompt from the landing page is ready!', {
-        duration: 4000,
-        icon: '✨'
-      });
-    }
-  }, []);
 
   useEffect(() => {
     if (slug) {
@@ -97,6 +98,24 @@ export default function Project() {
       loadAgents(); // Load user's enabled agents from library
     }
   }, [slug]);
+
+  // Load container when containerId changes
+  useEffect(() => {
+    if (containerId && slug) {
+      loadContainer();
+    }
+  }, [containerId, slug]);
+
+  // Reload files when container changes (to apply filtering)
+  useEffect(() => {
+    if (container) {
+      loadFiles();
+    }
+  }, [container]);
+
+  useEffect(() => {
+    localStorage.setItem('projectSidebarExpanded', JSON.stringify(isLeftSidebarExpanded));
+  }, [isLeftSidebarExpanded]);
 
   const loadSettings = async () => {
     if (!slug) return;
@@ -164,18 +183,146 @@ export default function Project() {
     }
   }, [devServerUrl]);
 
+  // Listen for file change events from Assets panel and other components
+  useEffect(() => {
+    const unsubscribe = fileEvents.on((detail) => {
+      console.log('File event received:', detail.type, detail.filePath);
+      // Refresh the file list when any file changes
+      loadFiles();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [slug]);
+
+  // Smart polling to catch file changes from agents using bash/exec commands
+  // This is a backup mechanism since agents can modify files via shell commands
+  useEffect(() => {
+    if (!slug) return;
+
+    let pollInterval: NodeJS.Timeout | null = null;
+    let isTabVisible = true;
+
+    // Only poll when tab is visible to minimize server load
+    const handleVisibilityChange = () => {
+      isTabVisible = !document.hidden;
+
+      if (isTabVisible && !pollInterval) {
+        // Resume polling when tab becomes visible
+        startPolling();
+      } else if (!isTabVisible && pollInterval) {
+        // Stop polling when tab is hidden
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
+    const startPolling = () => {
+      // Poll every 30 seconds - events handle most changes, this catches edge cases
+      pollInterval = setInterval(() => {
+        if (isTabVisible && slug) {
+          loadFiles();
+        }
+      }, 30000);
+    };
+
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Start polling if tab is visible
+    if (isTabVisible) {
+      startPolling();
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [slug, container]);  // Re-create interval when container changes to use fresh loadFiles
+
+  // Refresh files when switching to code view
+  useEffect(() => {
+    if (activeView === 'code' && slug) {
+      loadFiles();
+    }
+  }, [activeView, slug, container]);  // Include container to use correct filter
+
   const loadProject = async () => {
     if (!slug) return;
     try {
-      const [projectData, filesData] = await Promise.all([
-        projectsApi.get(slug),
-        projectsApi.getFiles(slug),
-      ]);
+      const projectData = await projectsApi.get(slug);
       setProject(projectData);
-      setFiles(filesData);
+
+      // Only load files here if NOT viewing a specific container
+      // When viewing a container, loadFiles() will be called after container loads
+      // to properly filter files for that container's directory
+      if (!containerId) {
+        const filesData = await projectsApi.getFiles(slug);
+        setFiles(filesData);
+      }
     } catch (error) {
       console.error('Failed to load project:', error);
       toast.error('Failed to load project');
+    }
+  };
+
+  const loadFiles = async () => {
+    if (!slug) return;
+    try {
+      const filesData = await projectsApi.getFiles(slug);
+
+      // If viewing a specific container, filter files to that container's directory
+      // Each container has its own directory (e.g., next-js-15/, vite-react-fastapi/)
+      // Strip the container directory prefix so paths are relative to container root
+      if (containerId && container && container.directory) {
+        const containerDir = container.directory;
+        const filteredFiles = filesData
+          .filter((file: any) => file.file_path.startsWith(containerDir + '/'))
+          .map((file: any) => ({
+            ...file,
+            // Strip container directory prefix for display (e.g., "next-js-15/app/page.tsx" -> "app/page.tsx")
+            file_path: file.file_path.slice(containerDir.length + 1)
+          }));
+        setFiles(filteredFiles);
+      } else {
+        // No container selected - show all files
+        setFiles(filesData);
+      }
+    } catch (error) {
+      console.error('Failed to load files:', error);
+    }
+  };
+
+  const loadContainer = async () => {
+    if (!slug || !containerId) return;
+    try {
+      const containers = await projectsApi.getContainers(slug);
+      const foundContainer = containers.find((c: any) => c.id === containerId);
+      if (foundContainer) {
+        setContainer(foundContainer);
+
+        // Auto-start the container when opening builder
+        try {
+          toast.loading(`Starting container ${foundContainer.name}...`, { id: 'container-start' });
+          const response = await projectsApi.startContainer(slug, containerId);
+          toast.success(`Container ${foundContainer.name} started!`, { id: 'container-start', duration: 2000 });
+
+          // Set container-specific preview URL for multi-container projects
+          if (response.url) {
+            setDevServerUrl(response.url);
+            setDevServerUrlWithAuth(response.url);
+            setCurrentPreviewUrl(response.url);
+          }
+        } catch (error) {
+          console.error('Failed to start container:', error);
+          toast.error('Failed to start container', { id: 'container-start' });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load container:', error);
     }
   };
 
@@ -204,8 +351,17 @@ export default function Project() {
   const handleFileUpdate = useCallback(async (filePath: string, content: string) => {
     if (!slug) return;
 
+    // For container-scoped views, prepend container directory when saving
+    // (we stripped it for display, now add it back for the API)
+    const saveFilePath = (containerId && container?.directory)
+      ? `${container.directory}/${filePath}`
+      : filePath;
+
+    // Track if this is a new file or an update
+    let isNewFile = false;
     setFiles(prev => {
       const existing = prev.find(f => f.file_path === filePath);
+      isNewFile = !existing;
       if (existing) {
         return prev.map(f =>
           f.file_path === filePath ? { ...f, content } : f
@@ -215,7 +371,10 @@ export default function Project() {
     });
 
     try {
-      await projectsApi.saveFile(slug, filePath, content);
+      await projectsApi.saveFile(slug, saveFilePath, content);
+
+      // Emit file event to refresh the code editor file tree
+      fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
     } catch (error) {
       console.error('Failed to save file:', error);
       toast.error(`Failed to save ${filePath}`);
@@ -238,7 +397,7 @@ export default function Project() {
         }
       }, 5000);
     }
-  }, [slug]);
+  }, [slug, containerId, container]);
 
   const loadDevServerUrl = async () => {
     if (!slug) return;
@@ -246,6 +405,14 @@ export default function Project() {
       const response = await projectsApi.getDevServerUrl(slug);
       const token = localStorage.getItem('token');
       const deploymentMode = import.meta.env.DEPLOYMENT_MODE || 'docker';
+
+      // Handle multi-container projects (no single dev server)
+      if (response.status === 'multi_container') {
+        toast.dismiss('dev-server');
+        setDevServerUrl(null);
+        setDevServerUrlWithAuth(null);
+        return;
+      }
 
       if (response.status === 'ready' && response.url) {
         toast.dismiss('dev-server');
@@ -320,35 +487,47 @@ export default function Project() {
 
   const leftSidebarItems = [
     {
-      icon: <Monitor size={20} />,
+      icon: <Monitor size={18} />,
       title: 'Preview',
       onClick: () => setActiveView('preview'),
       active: activeView === 'preview'
     },
     {
-      icon: <Code size={20} />,
+      icon: <Code size={18} />,
       title: 'Code',
       onClick: () => setActiveView('code'),
       active: activeView === 'code'
     },
     {
-      icon: <Kanban size={20} />,
+      icon: <Kanban size={18} />,
       title: 'Kanban Board',
       onClick: () => setActiveView('kanban'),
       active: activeView === 'kanban'
     },
     {
-      icon: <Folder size={20} />,
+      icon: <Image size={18} />,
+      title: 'Assets',
+      onClick: () => setActiveView('assets'),
+      active: activeView === 'assets'
+    },
+    {
+      icon: <Terminal size={18} />,
+      title: 'Terminal',
+      onClick: () => setActiveView('terminal'),
+      active: activeView === 'terminal'
+    },
+    {
+      icon: <Folder size={18} />,
       title: 'Files',
       onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
     },
     {
-      icon: <Cube size={20} />,
+      icon: <Cube size={18} />,
       title: 'Components',
       onClick: () => toast('Components library coming soon!', { icon: '🧩' })
     },
     {
-      icon: <FlowArrow size={20} />,
+      icon: <FlowArrow size={18} />,
       title: 'Architecture',
       onClick: () => togglePanel('architecture'),
       active: activePanel === 'architecture'
@@ -357,90 +536,261 @@ export default function Project() {
 
   const rightSidebarItems = [
     {
-      icon: theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />,
+      icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
       title: 'Toggle Theme',
       onClick: toggleTheme
     },
     {
-      icon: <BookOpen size={20} />,
+      icon: <BookOpen size={18} />,
       title: 'Notes',
       onClick: () => togglePanel('notes'),
       active: activePanel === 'notes'
     },
     {
-      icon: <GitBranch size={20} />,
+      icon: <GitBranch size={18} />,
       title: 'GitHub Sync',
       onClick: () => togglePanel('github'),
       active: activePanel === 'github'
     },
     {
-      icon: <Image size={20} />,
-      title: 'Assets',
-      onClick: () => togglePanel('assets'),
-      active: activePanel === 'assets'
-    },
-    {
-      icon: <Storefront size={20} />,
-      title: 'Agent Marketplace',
+      icon: <Storefront size={18} />,
+      title: 'Agents',
       onClick: () => navigate('/marketplace')
     },
     {
-      icon: <Gear size={20} />,
+      icon: <Article size={18} />,
+      title: 'Documentation',
+      onClick: () => window.open('https://docs.tesslate.com', '_blank')
+    },
+    {
+      icon: <Gear size={18} />,
       title: 'Settings',
       onClick: () => togglePanel('settings'),
       active: activePanel === 'settings'
     },
     {
-      icon: <Rocket size={20} />,
-      title: 'Deploy',
-      onClick: () => toast('Deploy feature coming soon!', { icon: '🚀' })
-    },
-    {
-      icon: <ShareNetwork size={20} />,
+      icon: <ShareNetwork size={18} />,
       title: 'Share',
       onClick: () => toast('Share feature coming soon!', { icon: '🔗' })
     }
   ];
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden relative">
+    <div className="h-screen flex overflow-hidden bg-[var(--bg)]">
       {/* Mobile Warning */}
       <MobileWarning />
 
       {/* Mobile Menu - Shows on mobile only */}
       <MobileMenu leftItems={leftSidebarItems} rightItems={rightSidebarItems} />
 
-      {/* Back Button */}
-      <div className="absolute top-4 left-4 md:top-6 md:left-6 z-50">
-        <button
-          onClick={() => navigate('/dashboard')}
-          className="flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-[var(--text)]/80 hover:text-[var(--text)] transition-all"
-        >
-          <ArrowLeft size={18} className="md:w-5 md:h-5" />
-          <span className="font-medium text-sm md:text-base hidden sm:inline">Back to Projects</span>
-        </button>
-      </div>
+      {/* Fixed Left Sidebar */}
+      <motion.div
+        initial={false}
+        animate={{ width: isLeftSidebarExpanded ? 192 : 48 }}
+        transition={{
+          type: "spring",
+          stiffness: 700,
+          damping: 28,
+          mass: 0.4
+        }}
+        className="hidden md:flex flex-col bg-[var(--surface)] border-r border-[var(--sidebar-border)] overflow-x-hidden"
+      >
+        {/* Tesslate Logo */}
+        <div className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}>
+          <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
+            <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
+            <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
+            <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+          </svg>
+          {isLeftSidebarExpanded && (
+            <span className="text-lg font-bold text-[var(--text)]">Tesslate</span>
+          )}
+        </div>
 
-      {/* Project Title - Hidden on mobile */}
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 hidden md:flex items-center gap-3">
-        <h1 className="font-heading text-xl lg:text-2xl font-bold text-[var(--text)]">{project.name}</h1>
-      </div>
+        <div className="py-3 gap-1 flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
 
-      {/* Left Sidebar - Desktop only */}
-      <FloatingSidebar
-        position="left"
-        items={leftSidebarItems}
-      />
+        {/* Back Button */}
+        {isLeftSidebarExpanded ? (
+          <button
+            onClick={() => navigate(`/project/${slug}`)}
+            className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
+          >
+            <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+            <span className="text-sm font-medium text-[var(--text)]">Back to Project</span>
+          </button>
+        ) : (
+          <Tooltip content="Back to Project" side="right" delay={200}>
+            <button
+              onClick={() => navigate(`/project/${slug}`)}
+              className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
+            >
+              <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+            </button>
+          </Tooltip>
+        )}
 
-      {/* Right Sidebar - Desktop only */}
-      <FloatingSidebar
-        position="right"
-        items={rightSidebarItems}
-      />
+        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
 
-      {/* Main Preview/Code Container */}
-      <div className="h-screen w-screen flex items-center justify-center px-2 sm:px-8 md:px-20 lg:px-32 py-16 sm:py-20 md:py-24 transition-all duration-500 relative z-10">
-        <div className="w-full h-full relative bg-[var(--surface)] rounded-[20px] overflow-hidden border border-white/8 transition-all duration-500 shadow-2xl">
+        {/* Main View Toggles */}
+        {leftSidebarItems.map((item, index) => (
+          isLeftSidebarExpanded ? (
+            <button
+              key={index}
+              onClick={item.onClick}
+              className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
+                item.active
+                  ? 'bg-[var(--sidebar-active)]'
+                  : 'hover:bg-[var(--sidebar-hover)]'
+              }`}
+            >
+              {React.cloneElement(item.icon, {
+                className: `transition-colors ${
+                  item.active
+                    ? 'text-[var(--text)]'
+                    : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                }`
+              })}
+              <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
+            </button>
+          ) : (
+            <Tooltip key={index} content={item.title} side="right" delay={200}>
+              <button
+                onClick={item.onClick}
+                className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
+                  item.active
+                    ? 'bg-[var(--sidebar-active)]'
+                    : 'hover:bg-[var(--sidebar-hover)]'
+                }`}
+              >
+                {React.cloneElement(item.icon, {
+                  className: `transition-colors ${
+                    item.active
+                      ? 'text-[var(--text)]'
+                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                  }`
+                })}
+              </button>
+            </Tooltip>
+          )
+        ))}
+
+        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+
+        {/* Settings & Tools */}
+        {rightSidebarItems.map((item, index) => (
+          isLeftSidebarExpanded ? (
+            <button
+              key={index}
+              onClick={item.onClick}
+              className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
+                item.active
+                  ? 'bg-[var(--sidebar-active)]'
+                  : 'hover:bg-[var(--sidebar-hover)]'
+              }`}
+            >
+              {React.cloneElement(item.icon, {
+                className: `transition-colors ${
+                  item.active
+                    ? 'text-[var(--text)]'
+                    : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                }`
+              })}
+              <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
+            </button>
+          ) : (
+            <Tooltip key={index} content={item.title} side="right" delay={200}>
+              <button
+                onClick={item.onClick}
+                className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
+                  item.active
+                    ? 'bg-[var(--sidebar-active)]'
+                    : 'hover:bg-[var(--sidebar-hover)]'
+                }`}
+              >
+                {React.cloneElement(item.icon, {
+                  className: `transition-colors ${
+                    item.active
+                      ? 'text-[var(--text)]'
+                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                  }`
+                })}
+              </button>
+            </Tooltip>
+          )
+        ))}
+
+        {/* Spacer to push collapse button to bottom */}
+        <div className="flex-1" />
+
+        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+
+        {/* Collapse/Expand Toggle */}
+        {isLeftSidebarExpanded ? (
+          <button
+            onClick={() => setIsLeftSidebarExpanded(false)}
+            className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
+          >
+            <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+            <span className="text-sm font-medium text-[var(--text)]">Collapse</span>
+          </button>
+        ) : (
+          <Tooltip content="Expand" side="right" delay={200}>
+            <button
+              onClick={() => setIsLeftSidebarExpanded(true)}
+              className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
+            >
+              <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+            </button>
+          </Tooltip>
+        )}
+        </div>
+      </motion.div>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top Bar with Project Title */}
+        <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center justify-between px-4 md:px-6">
+          <Breadcrumbs
+            items={[
+              { label: 'Projects', href: '/dashboard' },
+              { label: project.name, href: `/project/${slug}` },
+              { label: 'Builder' }
+            ]}
+          />
+
+          <div className="flex items-center gap-3">
+            {/* Deploy Button with Dropdown */}
+            <div className="relative hidden md:block">
+              <button
+                onClick={() => setShowDeploymentsDropdown(!showDeploymentsDropdown)}
+                className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg font-semibold transition-all text-sm"
+              >
+                <Rocket size={16} weight="bold" />
+                Deploy
+              </button>
+              <DeploymentsDropdown
+                projectSlug={slug!}
+                isOpen={showDeploymentsDropdown}
+                onClose={() => setShowDeploymentsDropdown(false)}
+                onOpenDeployModal={() => setShowDeployModal(true)}
+              />
+            </div>
+
+            {/* Mobile hamburger menu */}
+            <button
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors"
+              aria-label="Open menu"
+            >
+              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Main View Container */}
+        <div className="flex-1 overflow-hidden bg-[var(--bg)]">
           {/* Preview View */}
           <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
             {devServerUrl ? (
@@ -457,29 +807,24 @@ export default function Project() {
               ) : (
                 <>
                   {/* Browser-style chrome */}
-                  <div className="bg-[var(--surface)] border-b border-white/10 p-3 flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-red-500" />
-                      <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                      <div className="w-3 h-3 rounded-full bg-green-500" />
-                    </div>
+                  <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={navigateBack}
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
                         title="Go back"
                       >
                         <CaretLeft size={18} weight="bold" />
                       </button>
                       <button
                         onClick={navigateForward}
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                        className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
                         title="Go forward"
                       >
                         <CaretRight size={18} weight="bold" />
                       </button>
                     </div>
-                    <div className="flex-1">
+                    <div className="hidden md:block flex-1">
                       <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
                         <span className="text-yellow-500 mr-2">🔒</span>
                         <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
@@ -487,7 +832,7 @@ export default function Project() {
                     </div>
                     <button
                       onClick={refreshPreview}
-                      className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                      className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
                       title="Refresh"
                     >
                       <ArrowsClockwise size={16} />
@@ -524,6 +869,16 @@ export default function Project() {
           {/* Kanban View */}
           <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
             <KanbanPanel projectId={project?.id} />
+          </div>
+
+          {/* Assets View */}
+          <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
+            <AssetsPanel projectSlug={slug!} />
+          </div>
+
+          {/* Terminal View */}
+          <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
+            <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
           </div>
         </div>
       </div>
@@ -567,30 +922,22 @@ export default function Project() {
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
 
-      <FloatingPanel
-        title="Assets"
-        icon={<Image size={20} />}
-        isOpen={activePanel === 'assets'}
-        onClose={() => setActivePanel(null)}
-      >
-        <AssetsPanel projectId={project?.id} />
-      </FloatingPanel>
-
       {/* Chat Interface or Empty State */}
       {agents.length > 0 ? (
         <ChatContainer
           projectId={project?.id}
+          containerId={containerId || undefined}
           agents={agents}
           currentAgent={agents[0]}
           onSelectAgent={(agent) => console.log('Selected agent:', agent)}
           onFileUpdate={handleFileUpdate}
           projectFiles={files}
           projectName={project?.name}
-          initialMessage={initialChatMessage}
+          sidebarExpanded={isLeftSidebarExpanded}
         />
       ) : (
         <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">
-          <div className="bg-[var(--surface)] border border-white/10 rounded-2xl shadow-2xl p-8 max-w-md pointer-events-auto">
+          <div className="bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-2xl shadow-2xl p-8 max-w-md pointer-events-auto">
             <div className="text-center">
               <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <Storefront className="w-8 h-8 text-[var(--primary)]" weight="fill" />
@@ -604,14 +951,14 @@ export default function Project() {
               <div className="flex flex-col gap-3">
                 <button
                   onClick={() => navigate('/library')}
-                  className="w-full bg-[var(--primary)] hover:bg-orange-600 text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                  className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
                 >
                   <Storefront size={20} weight="fill" />
                   Go to Library
                 </button>
                 <button
                   onClick={() => navigate('/marketplace')}
-                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-[var(--text)] py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                  className="w-full bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] border border-[var(--sidebar-border)] text-[var(--text)] py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
                 >
                   <Storefront size={20} weight="fill" />
                   Browse Marketplace
@@ -624,6 +971,19 @@ export default function Project() {
 
       {/* Discord Support */}
       <DiscordSupport />
+
+      {/* Deployment Modal */}
+      {showDeployModal && (
+        <DeploymentModal
+          projectSlug={slug!}
+          isOpen={showDeployModal}
+          onClose={() => setShowDeployModal(false)}
+          onSuccess={() => {
+            setShowDeployModal(false);
+            toast.success('Deployment started successfully!');
+          }}
+        />
+      )}
     </div>
   );
 }

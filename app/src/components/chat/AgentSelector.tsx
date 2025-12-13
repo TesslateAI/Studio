@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 interface Agent {
   id: string;
   name: string;
-  icon: ReactNode;
+  icon: string;  // Emoji string from backend
   active?: boolean;
+  backendId?: number;  // Link to backend agent ID
+  mode?: 'stream' | 'agent';
 }
 
 interface AgentSelectorProps {
@@ -70,21 +72,24 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
         }}
         className="
           agent-pill
-          bg-[var(--primary)] text-white
-          px-3.5 py-2.5
+          bg-[var(--text)]/10 text-[var(--text)]
           flex items-center gap-1.5
           transition-all
           text-xs font-medium
           flex-shrink-0
-          rounded-l-2xl
-          -ml-px -my-px
-          hover:bg-orange-600
+          hover:bg-[var(--text)]/20
+          active:bg-[var(--text)]/30
           relative z-[10000]
+          h-8
+          md:px-3.5 md:rounded-xl
+          px-2.5 rounded-xl
+          border-2 border-[var(--border-color)]
         "
+        title={currentAgent.name}
       >
         <span className="text-sm">{currentAgent.icon}</span>
-        <span>{currentAgent.name}</span>
-        <svg className="w-3 h-3 ml-0.5" fill="currentColor" viewBox="0 0 256 256">
+        <span className="hidden md:inline">{currentAgent.name}</span>
+        <svg className="w-3 h-3 ml-0.5 hidden md:block" fill="currentColor" viewBox="0 0 256 256">
           <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
         </svg>
       </button>

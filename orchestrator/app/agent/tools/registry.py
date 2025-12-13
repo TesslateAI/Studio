@@ -33,6 +33,7 @@ class Tool:
         executor: Async function that executes the tool
         category: Tool category
         examples: Example usage patterns
+        system_prompt: Optional additional instructions for this tool
     """
     name: str
     description: str
@@ -40,6 +41,7 @@ class Tool:
     executor: Callable
     category: ToolCategory
     examples: Optional[List[str]] = None
+    system_prompt: Optional[str] = None
 
     def to_prompt_format(self) -> str:
         """Convert tool to format suitable for LLM system prompt."""
@@ -57,10 +59,14 @@ class Tool:
         if self.examples:
             examples_text = "\n  Examples:\n    " + "\n    ".join(self.examples)
 
+        system_prompt_text = ""
+        if self.system_prompt:
+            system_prompt_text = f"\n  Instructions: {self.system_prompt}"
+
         return f"""
 {self.name}: {self.description}
   Parameters:
-{params_text}{examples_text}
+{params_text}{examples_text}{system_prompt_text}
 """.strip()
 
 
@@ -131,7 +137,7 @@ class ToolRegistry:
         Args:
             tool_name: Name of tool to execute
             parameters: Tool parameters
-            context: Execution context (user_id, project_id, db session, etc.)
+            context: Execution context (user_id, project_id, db session, edit_mode, etc.)
 
         Returns:
             Dict with success status and result/error
@@ -145,15 +151,71 @@ class ToolRegistry:
                 "error": f"Unknown tool '{tool_name}'. Available tools: {', '.join(self._tools.keys())}"
             }
 
+        # ============================================================================
+        # Edit Mode Control - Applies to ALL agents
+        # ============================================================================
+        edit_mode = context.get('edit_mode', 'ask')  # Default to 'ask' mode
+
+        # Define dangerous tools that require special handling
+        DANGEROUS_TOOLS = {
+            'write_file', 'patch_file', 'multi_edit',  # File modifications
+            'bash_exec', 'shell_exec', 'shell_open',   # Shell operations
+            'web_fetch',                                # Web operations (can leak data)
+            # 'todo_write' excluded - safe planning operation
+        }
+
+        is_dangerous = tool_name in DANGEROUS_TOOLS
+
+        # Plan Mode: Block all dangerous operations
+        if edit_mode == 'plan' and is_dangerous:
+            logger.warning(f"[PLAN MODE] Blocked tool execution: {tool_name}")
+            return {
+                "success": False,
+                "tool": tool_name,
+                "error": f"Plan mode active - {tool_name} is disabled. You can only read files and gather information. Explain what changes you would make instead."
+            }
+
+        # Ask Mode: Check if approval needed (unless explicitly skipped)
+        skip_approval = context.get('skip_approval_check', False)
+        if edit_mode == 'ask' and is_dangerous and not skip_approval:
+            from .approval_manager import get_approval_manager
+            approval_mgr = get_approval_manager()
+
+            # Get session_id from context (use chat_id)
+            session_id = context.get('chat_id', 'default')
+
+            # Check if tool type already approved for this session
+            if not approval_mgr.is_tool_approved(session_id, tool_name):
+                # Need approval - return special result
+                logger.info(f"[ASK MODE] Approval required for {tool_name} in session {session_id}")
+                return {
+                    "approval_required": True,
+                    "tool": tool_name,
+                    "parameters": parameters,
+                    "session_id": session_id
+                }
+            else:
+                logger.info(f"[ASK MODE] Tool {tool_name} already approved for session {session_id}")
+        elif edit_mode == 'ask' and is_dangerous and skip_approval:
+            logger.info(f"[ASK MODE] Skipping approval check for {tool_name} (approval granted)")
+
         try:
-            logger.info(f"Executing tool: {tool_name} with params: {parameters}")
+            logger.info(f"Executing tool: {tool_name} with params: {parameters} [edit_mode={edit_mode}]")
 
             # Execute the tool
             result = await tool.executor(parameters, context)
 
-            logger.info(f"Tool {tool_name} executed successfully")
+            # Check if the tool itself reported success/failure
+            # Tools return dicts with "success" field to indicate operation status
+            tool_succeeded = result.get("success", True) if isinstance(result, dict) else True
+
+            if tool_succeeded:
+                logger.info(f"Tool {tool_name} executed successfully")
+            else:
+                logger.warning(f"Tool {tool_name} executed but reported failure: {result.get('message', 'Unknown error')}")
+
             return {
-                "success": True,
+                "success": tool_succeeded,
                 "tool": tool_name,
                 "result": result
             }
@@ -199,31 +261,57 @@ def _register_all_tools(registry: ToolRegistry):
     logger.info(f"Registered {len(registry._tools)} essential tools total")
 
 
-def create_scoped_tool_registry(tool_names: List[str]) -> ToolRegistry:
+def create_scoped_tool_registry(
+    tool_names: List[str],
+    tool_configs: Optional[Dict[str, Dict[str, Any]]] = None
+) -> ToolRegistry:
     """
-    Create a ToolRegistry containing only the specified tools.
+    Create a ToolRegistry containing only the specified tools with optional custom configurations.
 
-    This enables agents to have restricted tool access, improving security
-    and making agents more focused on their specific tasks.
+    This enables agents to have restricted tool access with customized tool descriptions
+    and examples, improving security and making agents more focused on their specific tasks.
 
     Args:
         tool_names: List of tool names to include in the scoped registry
+        tool_configs: Optional dict mapping tool names to custom configs
+                     Example: {"read_file": {"description": "...", "examples": [...]}}
 
     Returns:
         A new ToolRegistry instance with only the specified tools
 
     Example:
-        >>> registry = create_scoped_tool_registry(["read_file", "write_file"])
-        >>> # This registry only has file reading/writing tools
+        >>> configs = {"read_file": {"description": "Read project files"}}
+        >>> registry = create_scoped_tool_registry(["read_file", "write_file"], configs)
+        >>> # This registry has file tools with customized descriptions
     """
+    from dataclasses import replace
+
     scoped_registry = ToolRegistry()
     global_registry = get_tool_registry()
+    tool_configs = tool_configs or {}
 
     missing_tools = []
     for name in tool_names:
         tool = global_registry.get(name)
         if tool:
-            scoped_registry.register(tool)
+            # Apply custom configuration if provided
+            if name in tool_configs:
+                config = tool_configs[name]
+                custom_description = config.get("description", tool.description)
+                custom_examples = config.get("examples", tool.examples)
+                custom_system_prompt = config.get("system_prompt", tool.system_prompt)
+
+                # Create a copy of the tool with custom description, examples, and system_prompt
+                custom_tool = replace(
+                    tool,
+                    description=custom_description,
+                    examples=custom_examples,
+                    system_prompt=custom_system_prompt
+                )
+                scoped_registry.register(custom_tool)
+                logger.info(f"Registered tool '{name}' with custom configuration")
+            else:
+                scoped_registry.register(tool)
         else:
             missing_tools.append(name)
             logger.warning(f"Tool '{name}' not found in global registry")

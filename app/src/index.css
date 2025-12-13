@@ -9,37 +9,92 @@
       transform: rotate(360deg);
     }
   }
+
+  @keyframes typing {
+    0%, 60%, 100% {
+      transform: translateY(0);
+      opacity: 0.5;
+    }
+    30% {
+      transform: translateY(-10px);
+      opacity: 1;
+    }
+  }
 }
 
 :root {
-  --primary: #FF6B00;
+  /* Brand Colors */
+  --primary: #F89521;
+  --primary-hover: #fa9f35;
+  --primary-rgb: 248, 149, 33;
   --accent: #00D9FF;
+
+  /* Background Colors */
+  --bg-dark: #111113;
+  --surface: #0a0a0a;
+  --text: #ffffff;
+  --border-color: hsl(var(--hue2), 12%, 20%);
+
+  /* Sidebar Colors - Dark Mode */
+  --sidebar-bg: #0a0a0a;
+  --sidebar-text: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active: rgba(255, 255, 255, 0.1);
+
+  /* Status Colors */
+  --status-purple: #a855f7;
+  --status-purple-rgb: 168, 85, 247;
+  --status-yellow: #F89521;
+  --status-yellow-rgb: 248, 149, 33;
+  --status-green: #22c55e;
+  --status-green-rgb: 34, 197, 94;
+  --status-blue: #3b82f6;
+  --status-blue-rgb: 59, 130, 246;
+  --status-red: #ef4444;
+  --status-red-rgb: 239, 68, 68;
+  --status-gray: #6b7280;
+  --status-gray-rgb: 107, 114, 128;
+
+  /* Utility */
   --hue1: 25;
   --hue2: 240;
-  --bg-dark: #0a0a0a;
-  --surface: #1a1a1a;
-  --text: #e2e2e2;
-  --border-color: hsl(var(--hue2), 12%, 20%);
   --radius: 22px;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Dark Mode (default) */
 body.dark-mode {
-  --bg-dark: #0a0a0a;
-  --surface: #1a1a1a;
-  --text: #e2e2e2;
+  --bg-dark: #111113;
+  --surface: #0a0a0a;
+  --text: #ffffff;
   --border-color: hsl(var(--hue2), 12%, 20%);
+
+  /* Sidebar Colors - Dark Mode */
+  --sidebar-bg: #0a0a0a;
+  --sidebar-text: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active: rgba(255, 255, 255, 0.1);
+
   background-color: var(--bg-dark);
   color: var(--text);
 }
 
 /* Light Mode */
 body.light-mode {
-  --bg-dark: #f8f9fa;
+  --bg-dark: #F5F6F6;
   --surface: #ffffff;
   --text: #1a1a1a;
   --border-color: hsl(var(--hue2), 12%, 80%);
+
+  /* Sidebar Colors - Light Mode */
+  --sidebar-bg: #ffffff;
+  --sidebar-text: #38383A;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-active: rgba(248, 149, 33, 0.1);
+
   background-color: var(--bg-dark);
   color: var(--text);
 }
@@ -115,6 +170,19 @@ body {
 /* Ensure Tailwind's animate-spin works */
 .animate-spin {
   animation: spin 1s linear infinite !important;
+}
+
+/* Typing indicator animation */
+.animate-typing {
+  animation: typing 1.4s ease-in-out infinite;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
 }
 
 @keyframes fade-in {
@@ -281,7 +349,7 @@ button, a, input, select, textarea {
 }
 
 .diagram-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: #ff8533;
+  background: #fa9f35;
 }
 
 .diagram-scroll-container::-webkit-scrollbar-corner {
@@ -391,8 +459,8 @@ button, a, input, select, textarea {
 }
 
 .tiptap-editor .ProseMirror code {
-  background-color: rgba(255, 107, 0, 0.1);
-  color: #ff6b00;
+  background-color: rgba(248, 149, 33, 0.1);
+  color: #F89521;
   padding: 0.2em 0.4em;
   border-radius: 4px;
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
@@ -444,5 +512,20 @@ button, a, input, select, textarea {
 }
 
 .tiptap-editor .ProseMirror a:hover {
-  color: #ff8533;
+  color: #fa9f35;
+}
+
+/* Prevent mobile zoom on input focus while maintaining accessibility */
+/* Mobile browsers zoom if font-size < 16px, so we ensure inputs are at least 16px on mobile */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="search"],
+  input[type="url"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }

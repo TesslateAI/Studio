@@ -12,26 +12,16 @@ from sqlalchemy.orm import selectinload
 import logging
 
 from ..database import get_db
-from ..auth import get_current_active_user
 from ..models import (
     User, Project, Chat, Message, AgentCommandLog,
     MarketplaceAgent, UserPurchasedAgent, ProjectAgent,
     MarketplaceBase, UserPurchasedBase
 )
 from ..services.litellm_service import litellm_service
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-
-def admin_required(current_user: User = Depends(get_current_active_user)) -> User:
-    """Dependency to ensure user is an admin."""
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
-        )
-    return current_user
 
 
 # ============================================================================
@@ -41,7 +31,7 @@ def admin_required(current_user: User = Depends(get_current_active_user)) -> Use
 @router.get("/metrics/users")
 async def get_user_metrics(
     days: int = 30,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -158,7 +148,7 @@ async def get_user_metrics(
 @router.get("/metrics/projects")
 async def get_project_metrics(
     days: int = 30,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -231,7 +221,7 @@ async def get_project_metrics(
 @router.get("/metrics/sessions")
 async def get_session_metrics(
     days: int = 30,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -322,7 +312,7 @@ async def get_session_metrics(
 @router.get("/metrics/tokens")
 async def get_token_metrics(
     days: int = 30,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -435,7 +425,7 @@ async def get_token_metrics(
 @router.get("/metrics/marketplace")
 async def get_marketplace_metrics(
     days: int = 30,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -618,7 +608,7 @@ async def get_marketplace_metrics(
 
 @router.get("/metrics/summary")
 async def get_metrics_summary(
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -745,7 +735,7 @@ async def list_agents(
     source_type: Optional[str] = None,
     pricing_type: Optional[str] = None,
     is_active: Optional[bool] = None,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -813,7 +803,7 @@ async def list_agents(
 @router.get("/agents/{agent_id}")
 async def get_agent(
     agent_id: str,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get detailed information about a specific agent."""
@@ -875,7 +865,7 @@ async def get_agent(
 @router.post("/agents")
 async def create_agent(
     agent_data: AgentCreate,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -954,7 +944,7 @@ async def create_agent(
 async def update_agent(
     agent_id: str,
     agent_data: AgentUpdate,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1007,7 +997,7 @@ async def update_agent(
 @router.delete("/agents/{agent_id}")
 async def delete_agent(
     agent_id: str,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1051,7 +1041,7 @@ async def delete_agent(
 @router.patch("/agents/{agent_id}/remove-from-marketplace")
 async def remove_from_marketplace(
     agent_id: str,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1092,7 +1082,7 @@ async def remove_from_marketplace(
 async def toggle_featured(
     agent_id: str,
     is_featured: bool,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1132,7 +1122,7 @@ async def toggle_featured(
 
 @router.get("/models")
 async def get_available_models(
-    admin: User = Depends(admin_required),
+    admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1156,7 +1146,7 @@ async def get_available_models(
             models = [m.strip() for m in models_str.split(",") if m.strip()]
 
         if not models:
-            models = ["cerebras/qwen-3-coder-480b"]  # Final fallback
+            models = ["qwen-3-235b-a22b-thinking-2507"]  # Final fallback
 
         return {
             "models": models
@@ -1170,5 +1160,5 @@ async def get_available_models(
         models_str = settings.litellm_default_models
         models = [m.strip() for m in models_str.split(",") if m.strip()]
         return {
-            "models": models if models else ["cerebras/qwen-3-coder-480b"]
+            "models": models if models else ["qwen-3-235b-a22b-thinking-2507"]
         }

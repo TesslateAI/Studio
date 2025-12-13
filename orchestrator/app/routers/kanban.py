@@ -12,11 +12,11 @@ from typing import List, Optional
 from datetime import datetime
 
 from ..database import get_db
-from ..auth import get_current_user
 from ..models import User, Project
 from ..models_kanban import (
-    KanbanBoard, KanbanColumn, KanbanTask, KanbanTaskComment, ProjectNote
+KanbanBoard, KanbanColumn, KanbanTask, KanbanTaskComment, ProjectNote
 )
+from ..users import current_active_user, current_superuser
 from pydantic import BaseModel
 from uuid import UUID
 
@@ -202,7 +202,7 @@ async def reorder_tasks_in_column(db: AsyncSession, column_id: UUID, exclude_tas
 async def get_board(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get complete kanban board with all columns and tasks."""
     resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
@@ -279,7 +279,7 @@ async def create_column(
     project_id: str,
     column_data: KanbanColumnCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Create a new column in the board."""
     resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
@@ -308,7 +308,7 @@ async def update_column(
     column_id: UUID,
     column_data: KanbanColumnUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Update a column."""
     result = await db.execute(select(KanbanColumn).where(KanbanColumn.id == column_id))
@@ -331,7 +331,7 @@ async def update_column(
 async def delete_column(
     column_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Delete a column and all its tasks."""
     result = await db.execute(select(KanbanColumn).where(KanbanColumn.id == column_id))
@@ -358,7 +358,7 @@ async def create_task(
     project_id: str,
     task_data: KanbanTaskCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Create a new task in a column."""
     resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
@@ -397,7 +397,7 @@ async def create_task(
 async def get_task(
     task_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get task details with comments."""
     result = await db.execute(
@@ -470,7 +470,7 @@ async def update_task(
     task_id: UUID,
     task_data: KanbanTaskUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Update a task."""
     result = await db.execute(select(KanbanTask).where(KanbanTask.id == task_id))
@@ -520,7 +520,7 @@ async def move_task(
     task_id: UUID,
     move_data: KanbanTaskMove,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Move a task to a different column and/or position."""
     result = await db.execute(select(KanbanTask).where(KanbanTask.id == task_id))
@@ -573,7 +573,7 @@ async def move_task(
 async def delete_task(
     task_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Delete a task."""
     result = await db.execute(select(KanbanTask).where(KanbanTask.id == task_id))
@@ -603,7 +603,7 @@ async def search_tasks(
     assignee_id: Optional[UUID] = Query(None),
     tags: Optional[str] = Query(None, description="Comma-separated tags"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Search and filter tasks."""
     resolved_project_id = await get_project_id_from_slug_or_id(project_id, db, current_user)
@@ -666,7 +666,7 @@ async def add_comment(
     task_id: UUID,
     comment_data: TaskCommentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Add a comment to a task."""
     result = await db.execute(select(KanbanTask).where(KanbanTask.id == task_id))
@@ -699,7 +699,7 @@ async def add_comment(
 async def get_notes(
     project_slug_or_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get project notes."""
     project_id = await get_project_id_from_slug_or_id(project_slug_or_id, db, current_user)
@@ -734,7 +734,7 @@ async def update_notes(
     project_slug_or_id: str,
     notes_data: ProjectNoteUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Update project notes."""
     project_id = await get_project_id_from_slug_or_id(project_slug_or_id, db, current_user)

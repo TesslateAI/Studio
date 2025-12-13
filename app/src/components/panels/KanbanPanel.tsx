@@ -15,7 +15,7 @@ import {
   ChatCircle
 } from '@phosphor-icons/react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import axios from 'axios';
+import api from '../../lib/api';
 import toast from 'react-hot-toast';
 
 interface KanbanPanelProps {
@@ -87,7 +87,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 const priorityColors = {
   low: 'text-blue-400',
   medium: 'text-yellow-400',
-  high: 'text-orange-400',
+  high: 'text-[var(--primary)]',
   critical: 'text-red-400'
 };
 
@@ -126,10 +126,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
   const loadBoard = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE}/api/kanban/projects/${projectId}/board`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/api/kanban/projects/${projectId}/board`);
       setBoard(response.data);
     } catch (error: any) {
       console.error('Failed to load board:', error);
@@ -141,10 +138,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
   const loadTaskDetails = async (taskId: string) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE}/api/kanban/tasks/${taskId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/api/kanban/tasks/${taskId}`);
       setSelectedTask(response.data);
       setShowTaskDetails(true);
     } catch (error: any) {
@@ -156,14 +150,12 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!newTask.title.trim() || !newTaskColumnId) return;
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE}/api/kanban/projects/${projectId}/tasks`,
+      await api.post(
+        `/api/kanban/projects/${projectId}/tasks`,
         {
           column_id: newTaskColumnId,
           ...newTask
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
+        }
       );
       toast.success('Task created successfully');
       setShowNewTaskModal(false);
@@ -183,11 +175,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
   const updateTask = async (taskId: string, updates: Partial<Task>) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(
-        `${API_BASE}/api/kanban/tasks/${taskId}`,
-        updates,
-        { headers: { Authorization: `Bearer ${token}` } }
+      await api.patch(
+        `/api/kanban/tasks/${taskId}`,
+        updates
       );
       toast.success('Task updated');
       await loadBoard();
@@ -203,10 +193,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!confirm('Are you sure you want to delete this task?')) return;
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${API_BASE}/api/kanban/tasks/${taskId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.delete(`/api/kanban/tasks/${taskId}`);
       toast.success('Task deleted');
       setShowTaskDetails(false);
       await loadBoard();
@@ -219,11 +206,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!selectedTask || !newComment.trim()) return;
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE}/api/kanban/tasks/${selectedTask.id}/comments`,
-        { content: newComment },
-        { headers: { Authorization: `Bearer ${token}` } }
+      await api.post(
+        `/api/kanban/tasks/${selectedTask.id}/comments`,
+        { content: newComment }
       );
       setNewComment('');
       await loadTaskDetails(selectedTask.id);
@@ -288,14 +273,12 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
     // Send to backend
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE}/api/kanban/tasks/${taskId}/move`,
+      await api.post(
+        `/api/kanban/tasks/${taskId}/move`,
         {
           column_id: destination.droppableId.replace('column-', ''),
           position: destination.index
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
+        }
       );
     } catch (error: any) {
       toast.error('Failed to move task');
@@ -334,7 +317,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
               onClick={() => setShowFilters(!showFilters)}
               className={`p-2 rounded-lg transition-colors ${
                 showFilters
-                  ? 'bg-orange-500/20 text-orange-400'
+                  ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]'
                   : 'hover:bg-white/10 text-[var(--text)]/60'
               }`}
               title="Filters"
@@ -356,7 +339,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
             placeholder="Search tasks..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:border-orange-500"
+            className="w-full pl-10 pr-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:border-[var(--primary)]"
           />
         </div>
 
@@ -366,7 +349,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
             <select
               value={filterPriority}
               onChange={(e) => setFilterPriority(e.target.value)}
-              className="px-3 py-1.5 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:border-orange-500 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+              className="px-3 py-1.5 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
             >
               <option value="">All Priorities</option>
               <option value="low">Low</option>
@@ -377,7 +360,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="px-3 py-1.5 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:border-orange-500 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+              className="px-3 py-1.5 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
             >
               <option value="">All Types</option>
               <option value="feature">Feature</option>
@@ -413,7 +396,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                         setNewTaskColumnId(column.id);
                         setShowNewTaskModal(true);
                       }}
-                      className="p-1 hover:bg-white/10 rounded transition-colors text-[var(--text)]/60 hover:text-orange-400"
+                      className="p-1 hover:bg-white/10 rounded transition-colors text-[var(--text)]/60 hover:text-[var(--primary)]"
                       title="Add task"
                     >
                       <Plus size={18} weight="bold" />
@@ -431,7 +414,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                       ref={provided.innerRef}
                       {...provided.droppableProps}
                       className={`p-3 space-y-2 min-h-[200px] ${
-                        snapshot.isDraggingOver ? 'bg-orange-500/5' : ''
+                        snapshot.isDraggingOver ? 'bg-[rgba(var(--primary-rgb),0.05)]' : ''
                       }`}
                     >
                       {column.tasks.map((task, index) => (
@@ -442,8 +425,8 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
                               onClick={() => loadTaskDetails(task.id)}
-                              className={`p-3 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg cursor-pointer transition-all hover:border-orange-500/50 hover:shadow-lg ${
-                                snapshot.isDragging ? 'shadow-2xl border-orange-500' : ''
+                              className={`p-3 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg cursor-pointer transition-all hover:border-[rgba(var(--primary-rgb),0.5)] hover:shadow-lg ${
+                                snapshot.isDragging ? 'shadow-2xl border-[var(--primary)]' : ''
                               }`}
                             >
                               {/* Task Header */}
@@ -471,7 +454,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                                     {task.tags.slice(0, 2).map((tag, idx) => (
                                       <span
                                         key={idx}
-                                        className="px-1.5 py-0.5 bg-orange-500/20 text-orange-400 rounded text-[10px]"
+                                        className="px-1.5 py-0.5 bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)] rounded text-[10px]"
                                       >
                                         {tag}
                                       </span>
@@ -528,7 +511,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   type="text"
                   value={newTask.title}
                   onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-                  className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500"
+                  className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
                   placeholder="Task title..."
                   autoFocus
                 />
@@ -539,7 +522,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   value={newTask.description}
                   onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
                   rows={4}
-                  className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500 resize-none"
+                  className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)] resize-none"
                   placeholder="Add details..."
                 />
               </div>
@@ -549,7 +532,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <select
                     value={newTask.priority}
                     onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as any })}
-                    className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                    className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -562,7 +545,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <select
                     value={newTask.task_type}
                     onChange={(e) => setNewTask({ ...newTask, task_type: e.target.value as any })}
-                    className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                    className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="task">Task</option>
                     <option value="feature">Feature</option>
@@ -575,7 +558,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                 <button
                   onClick={createTask}
                   disabled={!newTask.title.trim()}
-                  className="flex-1 px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+                  className="flex-1 px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                 >
                   Create Task
                 </button>
@@ -634,7 +617,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <select
                     value={selectedTask.priority || 'medium'}
                     onChange={(e) => updateTask(selectedTask.id, { priority: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-orange-500 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -647,7 +630,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <select
                     value={selectedTask.task_type || 'task'}
                     onChange={(e) => updateTask(selectedTask.id, { task_type: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-orange-500 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                    className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="task">Task</option>
                     <option value="feature">Feature</option>
@@ -683,7 +666,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                     {selectedTask.tags.map((tag, idx) => (
                       <span
                         key={idx}
-                        className="px-2 py-1 bg-orange-500/20 text-orange-400 rounded text-sm"
+                        className="px-2 py-1 bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)] rounded text-sm"
                       >
                         {tag}
                       </span>
@@ -715,12 +698,12 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                     onChange={(e) => setNewComment(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addComment()}
                     placeholder="Add a comment..."
-                    className="flex-1 px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-orange-500"
+                    className="flex-1 px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)]"
                   />
                   <button
                     onClick={addComment}
                     disabled={!newComment.trim()}
-                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+                    className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                   >
                     <ChatCircle size={18} weight="bold" />
                   </button>

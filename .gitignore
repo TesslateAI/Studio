@@ -92,6 +92,9 @@ orchestrator/backend/users/
 orchestrator/template/node_modules/
 orchestrator/backend/template/node_modules/
 
+# Base cache (pre-installed marketplace bases)
+base-cache/
+
 # Traefik
 traefik/acme.json
 traefik/dynamic/*
@@ -141,6 +144,8 @@ registry.crt
 **/docr-secret.yaml
 k8s/manifests/**/secrets.yaml
 k8s/manifests/security/app-secrets.yaml
+k8s/manifests/security/s3-credentials.yaml
+k8s/manifests/secrets/s3-credentials.yaml
 k8s/manifests/database/postgres-secret.yaml
 k8s/.env
 
@@ -155,4 +160,13 @@ k8s/.env
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
-# uv.lock
+# uv.lockbackups/
+nul
+
+# Code Analysis Output
+analysis-output/
+
+# Tunnel and Minikube env files
+.env.tunnel
+.env.minikube
+k8s/.env.minikube

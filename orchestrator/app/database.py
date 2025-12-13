@@ -1,12 +1,12 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import declarative_base
 from .config import get_settings
 
 settings = get_settings()
 
 engine = create_async_engine(
     settings.database_url,
-    echo=True,
+    echo=False,  # Disable SQL query logging to reduce noise
     future=True,
     pool_pre_ping=True,  # Validate connections before use
     pool_recycle=3600,   # Recycle connections every hour
@@ -19,7 +19,7 @@ engine = create_async_engine(
     } if settings.database_url.startswith("postgresql") else {}
 )
 
-AsyncSessionLocal = sessionmaker(
+AsyncSessionLocal = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
 )
 

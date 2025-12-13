@@ -5,14 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
 from ..models import MarketplaceAgent, User
-from ..auth import get_current_active_user
+from ..users import current_active_user, current_superuser
+from ..agent.tools.registry import get_tool_registry
 
 router = APIRouter()
 
 @router.get("/")
 async def get_agents(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """
     Get all active marketplace agents.
@@ -47,7 +48,7 @@ async def get_agents(
 async def get_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(current_active_user)
 ):
     """Get a specific marketplace agent by ID."""
     result = await db.execute(
@@ -68,6 +69,7 @@ async def get_agent(
         "mode": agent.mode,
         "system_prompt": agent.system_prompt,
         "tools": agent.tools,
+        "tool_configs": agent.tool_configs,
         "icon": agent.icon,
         "category": agent.category,
         "features": agent.features,
@@ -78,3 +80,29 @@ async def get_agent(
 # Note: Create, Update, Delete endpoints removed
 # Marketplace agents should be managed through the marketplace system
 # For development, create agents directly in the database or via migration scripts
+
+
+@router.get("/tools/available")
+async def get_available_tools(
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Get all available tools with their default descriptions and parameters.
+
+    This endpoint returns information about all tools that can be assigned to agents,
+    including their descriptions, parameter schemas, categories, and examples.
+    """
+    registry = get_tool_registry()
+    tools_list = registry.list_tools()
+
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "category": tool.category.value,
+            "parameters": tool.parameters,
+            "examples": tool.examples or [],
+            "system_prompt": tool.system_prompt or ""
+        }
+        for tool in tools_list
+    ]

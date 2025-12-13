@@ -92,7 +92,7 @@ export function ToolDropdown({ icon, tools }: ToolDropdownProps) {
 
           {toolItems.length > 0 && (
             <>
-              <div className="px-3 pb-1 text-xs text-gray-400">
+              <div className="px-3 pt-2 pb-1 text-xs text-gray-400">
                 TOOLS
               </div>
               {toolItems.map((tool, idx) => (

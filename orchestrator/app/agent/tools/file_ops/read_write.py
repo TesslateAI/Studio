@@ -2,33 +2,41 @@
 File Read/Write Tools
 
 Tools for reading and writing files in user development environments.
-Deployment-aware: supports both Docker (local filesystem) and Kubernetes (pod API) modes.
+Deployment-aware: supports both Docker (shared volume) and Kubernetes (pod API) modes.
+
+Architecture (Docker mode):
+- Uses shared tesslate-projects-data volume mounted at /projects
+- Each project has files at /projects/{project-slug}/
+- Multi-container: /projects/{project-slug}/{container-directory}/
+- Direct filesystem access via orchestrator - no temp containers needed
+
+Retry Strategy:
+- Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
+- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
+- Non-retryable errors (FileNotFoundError, PermissionError) fail immediately
 """
 
 import logging
-import os
 from typing import Dict, Any
-from uuid import UUID
 
 from ..registry import Tool, ToolCategory
-from ....config import get_settings
 from ..output_formatter import success_output, error_output, format_file_size, pluralize
-from ....utils.resource_naming import get_project_path
+from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
+@tool_retry
 async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Read a file from the user's development environment.
 
-    Deployment-aware:
-    - Docker mode: Reads from local filesystem at users/{user_id}/{project_id}/
-    - Kubernetes mode: Reads from pod via K8s API
+    Uses the unified orchestrator which handles both Docker and Kubernetes modes.
+    Filesystem is the source of truth - no database fallback.
 
     Args:
         params: {file_path: str}
-        context: {user_id: UUID, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, project_slug: str, container_directory: str}
 
     Returns:
         Dict with file content or error
@@ -39,52 +47,26 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
-    settings = get_settings()
+    project_slug = context.get("project_slug")
+    container_directory = context.get("container_directory")  # Container subdir for scoped agents
+    container_name = context.get("container_name")
 
-    if settings.deployment_mode == "kubernetes":
-        # Kubernetes mode: Read from pod
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
-        content = await k8s_manager.read_file_from_pod(
+    logger.info(f"[READ-FILE] Reading '{file_path}' - project_slug: {project_slug}, subdir: {container_directory}")
+
+    from ....services.orchestration import get_orchestrator
+
+    try:
+        orchestrator = get_orchestrator()
+        content = await orchestrator.read_file(
             user_id=user_id,
             project_id=project_id,
-            file_path=file_path
-        )
-
-        if content is None:
-            return error_output(
-                message=f"File '{file_path}' does not exist",
-                suggestion="Use list_files to browse available files in the directory",
-                exists=False,
-                file_path=file_path
-            )
-
-        return success_output(
-            message=f"Read {format_file_size(len(content))} from '{file_path}'",
+            container_name=container_name,
             file_path=file_path,
-            content=content,
-            details={
-                "size_bytes": len(content),
-                "lines": len(content.split('\n'))
-            }
+            project_slug=project_slug,
+            subdir=container_directory
         )
-    else:
-        # Docker mode: Read from local filesystem
-        project_dir = get_project_path(user_id, project_id)
-        full_path = os.path.join(project_dir, file_path)
 
-        if not os.path.exists(full_path):
-            return error_output(
-                message=f"File '{file_path}' does not exist",
-                suggestion="Use list_files to browse available files in the directory",
-                exists=False,
-                file_path=file_path
-            )
-
-        try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
+        if content is not None:
             return success_output(
                 message=f"Read {format_file_size(len(content))} from '{file_path}'",
                 file_path=file_path,
@@ -94,26 +76,29 @@ async def read_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
                     "lines": len(content.split('\n'))
                 }
             )
-        except Exception as e:
-            return error_output(
-                message=f"Could not read '{file_path}': {str(e)}",
-                suggestion="Check if the file has read permissions or is a binary file",
-                file_path=file_path,
-                details={"error": str(e)}
-            )
+
+    except Exception as e:
+        logger.error(f"[READ-FILE] Failed to read '{file_path}': {e}")
+
+    return error_output(
+        message=f"File '{file_path}' does not exist",
+        suggestion="Use execute_command with 'ls' or 'find' to browse available files in the directory",
+        exists=False,
+        file_path=file_path
+    )
 
 
+@tool_retry
 async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """
     Write content to a file in the user's development environment.
 
-    Deployment-aware:
-    - Docker mode: Writes to local filesystem at users/{user_id}/{project_id}/
-    - Kubernetes mode: Writes to pod via K8s API
+    Uses the unified orchestrator which handles both Docker and Kubernetes modes.
+    Writes directly to filesystem - no database storage.
 
     Args:
         params: {file_path: str, content: str}
-        context: {user_id: UUID, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, project_slug: str, container_directory: str}
 
     Returns:
         Dict with success status
@@ -128,7 +113,9 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     user_id = context["user_id"]
     project_id = str(context["project_id"])
-    settings = get_settings()
+    project_slug = context.get("project_slug")
+    container_directory = context.get("container_directory")  # Container subdir for scoped agents
+    container_name = context.get("container_name")
 
     # Show a preview of what was written (first and last few lines)
     lines = content.split('\n')
@@ -139,52 +126,23 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
     else:
         preview = '\n'.join(lines[:preview_lines]) + '\n\n... (' + str(len(lines) - preview_lines * 2) + ' lines omitted) ...\n\n' + '\n'.join(lines[-preview_lines:])
 
-    if settings.deployment_mode == "kubernetes":
-        # Kubernetes mode: Write to pod
-        from ....k8s_client import get_k8s_manager
-        k8s_manager = get_k8s_manager()
-        success = await k8s_manager.write_file_to_pod(
+    logger.info(f"[WRITE-FILE] Writing '{file_path}' - project_slug: {project_slug}, subdir: {container_directory}")
+
+    from ....services.orchestration import get_orchestrator
+
+    try:
+        orchestrator = get_orchestrator()
+        success = await orchestrator.write_file(
             user_id=user_id,
             project_id=project_id,
+            container_name=container_name,
             file_path=file_path,
-            content=content
+            content=content,
+            project_slug=project_slug,
+            subdir=container_directory
         )
 
-        if not success:
-            return error_output(
-                message=f"Failed to write to '{file_path}' in pod",
-                suggestion="Check if the pod has write permissions and sufficient disk space",
-                file_path=file_path
-            )
-
-        return success_output(
-            message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
-            file_path=file_path,
-            preview=preview,
-            details={
-                "size_bytes": len(content),
-                "line_count": len(lines)
-            }
-        )
-    else:
-        # Docker mode: Write to local filesystem
-        project_dir = get_project_path(user_id, project_id)
-        full_path = os.path.join(project_dir, file_path)
-
-        try:
-            # Create parent directory (with safety check for Windows Docker volumes)
-            parent_dir = os.path.dirname(full_path)
-            if parent_dir:
-                try:
-                    os.makedirs(parent_dir, exist_ok=True)
-                except FileExistsError:
-                    # Handle race condition on Windows Docker volumes - verify it exists
-                    if not os.path.exists(parent_dir):
-                        raise
-
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-
+        if success:
             return success_output(
                 message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
                 file_path=file_path,
@@ -194,13 +152,21 @@ async def write_file_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
                     "line_count": len(lines)
                 }
             )
-        except Exception as e:
-            return error_output(
-                message=f"Could not write to '{file_path}': {str(e)}",
-                suggestion="Check if the directory exists and you have write permissions",
-                file_path=file_path,
-                details={"error": str(e)}
-            )
+
+    except Exception as e:
+        logger.error(f"[WRITE-FILE] Failed to write '{file_path}': {e}")
+        return error_output(
+            message=f"Could not write to '{file_path}': {str(e)}",
+            suggestion="Check if the directory exists and you have write permissions",
+            file_path=file_path,
+            details={"error": str(e)}
+        )
+
+    return error_output(
+        message=f"Failed to write to '{file_path}'",
+        suggestion="Check if the container has write permissions and sufficient disk space",
+        file_path=file_path
+    )
 
 
 def register_read_write_tools(registry):
@@ -222,8 +188,8 @@ def register_read_write_tools(registry):
         executor=read_file_tool,
         category=ToolCategory.FILE_OPS,
         examples=[
-            '<tool_call><tool_name>read_file</tool_name><parameters>{"file_path": "package.json"}</parameters></tool_call>',
-            '<tool_call><tool_name>read_file</tool_name><parameters>{"file_path": "src/components/Header.jsx"}</parameters></tool_call>'
+            '{"tool_name": "read_file", "parameters": {"file_path": "package.json"}}',
+            '{"tool_name": "read_file", "parameters": {"file_path": "src/components/Header.jsx"}}'
         ]
     ))
 
@@ -247,7 +213,7 @@ def register_read_write_tools(registry):
         executor=write_file_tool,
         category=ToolCategory.FILE_OPS,
         examples=[
-            '<tool_call><tool_name>write_file</tool_name><parameters>{"file_path": "src/NewComponent.jsx", "content": "import React from \'react\'..."}</parameters></tool_call>'
+            '{"tool_name": "write_file", "parameters": {"file_path": "src/NewComponent.jsx", "content": "import React from \'react\'..."}}'
         ]
     ))
 

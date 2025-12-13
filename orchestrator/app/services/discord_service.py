@@ -136,5 +136,5 @@ class DiscordWebhookService:
 
 # Global instance with the webhook URL
 discord_service = DiscordWebhookService(
-    webhook_url=""
+    webhook_url="https://discordapp.com/api/webhooks/1431914022621548676/QXXwUS-QcylxtC51S5vxAgA7YzjmMEasoYMs00wt2g-3qkYBDT-M-syl3-UukY1memHH"
 )

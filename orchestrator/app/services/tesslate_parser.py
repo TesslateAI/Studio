@@ -52,6 +52,11 @@ class TesslateParser:
             port=3000,
             start_command="npm install\nnpm start"
         ),
+        "expo": TesslateConfig(
+            framework="expo",
+            port=19006,
+            start_command="npm install\nnpx expo start --web"
+        ),
     }
 
     @staticmethod
@@ -110,6 +115,8 @@ class TesslateParser:
 
             if "next" in framework_lower or "nextjs" in framework_lower:
                 return "nextjs"
+            elif "expo" in framework_lower:
+                return "expo"
             elif "vite" in framework_lower:
                 return "vite"
             elif "react" in framework_lower:
@@ -122,7 +129,9 @@ class TesslateParser:
             return framework_lower.split()[0]  # First word
 
         # Fallback: try to detect from content
-        if "Next.js" in content or "nextjs" in content.lower():
+        if "Expo" in content or "expo" in content.lower() or "React Native" in content:
+            return "expo"
+        elif "Next.js" in content or "nextjs" in content.lower():
             return "nextjs"
         elif "Vite" in content or "vite" in content.lower():
             return "vite"

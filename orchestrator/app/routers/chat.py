@@ -1,15 +1,14 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
-from ..models import User, Chat, Message, Project, ProjectFile, MarketplaceAgent, UserPurchasedAgent
+from ..models import User, Chat, Message, Project, ProjectFile, MarketplaceAgent, UserPurchasedAgent, Container
 from ..schemas import (
     Chat as ChatSchema, Message as MessageSchema, MessageCreate,
     AgentChatRequest, AgentChatResponse, AgentStepResponse
 )
-from ..auth import get_current_active_user
 from ..config import get_settings
 from ..utils.resource_naming import get_project_path
 from openai import AsyncOpenAI
@@ -19,11 +18,13 @@ import aiofiles
 import re
 import asyncio
 import logging
+import jwt
 
 # Agent imports - new factory-based system
 from ..agent import create_agent_from_db_model
 from ..agent.models import create_model_adapter
 from ..agent.iterative_agent import _convert_uuids_to_strings
+from ..users import current_active_user, current_superuser
 
 settings = get_settings()
 router = APIRouter()
@@ -96,12 +97,164 @@ async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) 
         return None
 
 
-async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSession) -> Optional[str]:
+async def _get_chat_history(
+    chat_id: UUID,
+    db: AsyncSession,
+    limit: int = 10
+) -> List[Dict[str, str]]:
+    """
+    Fetch recent chat history for context.
+
+    Args:
+        chat_id: Chat ID to fetch messages from
+        db: Database session
+        limit: Maximum number of message pairs to fetch (default 10, max 20)
+
+    Returns:
+        List of message dictionaries with 'role' and 'content' keys
+    """
+    try:
+        # Limit to prevent token overflow
+        limit = min(limit, 20)
+
+        # Fetch recent messages, excluding the current one (it will be added separately)
+        messages_result = await db.execute(
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit * 2)  # *2 to account for user+assistant pairs
+        )
+        messages = list(messages_result.scalars().all())
+
+        # Reverse to get chronological order (oldest first)
+        messages.reverse()
+
+        # Format messages for LLM
+        formatted_messages = []
+        for msg in messages:
+            # Skip system messages or empty content
+            if not msg.content or msg.role not in ['user', 'assistant']:
+                continue
+
+            # For user messages, just add the content
+            if msg.role == 'user':
+                formatted_messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+            # For assistant messages, check if there are agent iterations in metadata
+            elif msg.role == 'assistant':
+                metadata = msg.message_metadata or {}
+                steps = metadata.get('steps', [])
+
+                if steps:
+                    # Agent message with iterations - reconstruct full conversation
+                    # Include each iteration's response as a separate assistant message
+                    # to preserve the full context of the agent's thought process
+                    for step in steps:
+                        # Build a detailed response for each iteration
+                        thought = step.get('thought', '')
+                        response_text = step.get('response_text', '')
+                        tool_calls = step.get('tool_calls', [])
+
+                        iteration_content = ""
+
+                        # Add thought if present
+                        if thought:
+                            iteration_content += f"THOUGHT: {thought}\n\n"
+
+                        # Add tool calls if present
+                        if tool_calls:
+                            iteration_content += "Tool Calls:\n"
+                            for tc in tool_calls:
+                                tool_name = tc.get('name', 'unknown')
+                                tool_result = tc.get('result', {})
+                                success = tool_result.get('success', False)
+
+                                iteration_content += f"- {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
+
+                                # Add brief result summary
+                                if success and tool_result.get('result'):
+                                    result_data = tool_result['result']
+                                    if isinstance(result_data, dict):
+                                        if 'message' in result_data:
+                                            iteration_content += f"  {result_data['message']}\n"
+                                    else:
+                                        iteration_content += f"  {str(result_data)[:200]}\n"
+
+                            iteration_content += "\n"
+
+                        # Add response text
+                        if response_text:
+                            iteration_content += response_text
+
+                        if iteration_content.strip():
+                            formatted_messages.append({
+                                "role": "assistant",
+                                "content": iteration_content
+                            })
+
+                            # Add tool results as user feedback (simulating the iterative flow)
+                            if tool_calls:
+                                tool_results_feedback = "Tool Results:\n"
+                                for idx, tc in enumerate(tool_calls):
+                                    tool_name = tc.get('name', 'unknown')
+                                    tool_result = tc.get('result', {})
+                                    success = tool_result.get('success', False)
+
+                                    tool_results_feedback += f"\n{idx + 1}. {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
+
+                                    if tool_result.get('result'):
+                                        result_data = tool_result['result']
+                                        if isinstance(result_data, dict):
+                                            # Add key result fields
+                                            for key in ['message', 'content', 'stdout', 'output']:
+                                                if key in result_data:
+                                                    content = str(result_data[key])[:500]  # Limit content length
+                                                    tool_results_feedback += f"   {key}: {content}\n"
+                                                    break
+                                        else:
+                                            tool_results_feedback += f"   {str(result_data)[:500]}\n"
+
+                                formatted_messages.append({
+                                    "role": "user",
+                                    "content": tool_results_feedback
+                                })
+                else:
+                    # Regular assistant message without iterations
+                    formatted_messages.append({
+                        "role": msg.role,
+                        "content": msg.content
+                    })
+
+        logger.info(f"[CHAT-HISTORY] Fetched {len(formatted_messages)} messages for chat {chat_id}")
+        return formatted_messages
+
+    except Exception as e:
+        logger.error(f"[CHAT-HISTORY] Failed to fetch chat history: {e}", exc_info=True)
+        return []
+
+
+async def _build_tesslate_context(
+    project: Project,
+    user_id: UUID,
+    db: AsyncSession,
+    container_name: Optional[str] = None,
+    container_directory: Optional[str] = None
+) -> Optional[str]:
     """
     Build TESSLATE.md context for agent.
 
-    Reads TESSLATE.md from the user's project container. If it doesn't exist,
-    copies the generic template from orchestrator/template/TESSLATE.md.
+    Reads TESSLATE.md from the user's project container. For container-scoped agents,
+    reads from the container's directory. If it doesn't exist, copies the generic
+    template from orchestrator/template/TESSLATE.md.
+
+    Args:
+        project: Project model
+        user_id: User UUID
+        db: Database session
+        container_name: Optional container name for multi-container projects
+        container_directory: Optional container directory for file path resolution
 
     Returns the TESSLATE.md content as a formatted string, or None if unable to read.
     """
@@ -109,15 +262,18 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
         # Read TESSLATE.md from the user's project (deployment-aware)
         tesslate_content = None
 
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes mode: Read from pod
-            from ..k8s_client import get_k8s_manager
-            k8s_manager = get_k8s_manager()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-            tesslate_content = await k8s_manager.read_file_from_pod(
+        # Try unified orchestrator first
+        try:
+            orchestrator = get_orchestrator()
+            tesslate_content = await orchestrator.read_file(
                 user_id=user_id,
-                project_id=str(project.id),
-                file_path="TESSLATE.md"
+                project_id=project.id,
+                container_name=container_name,  # Use specific container if provided
+                file_path="TESSLATE.md",
+                project_slug=project.slug,
+                subdir=container_directory  # Read from container's subdirectory
             )
 
             # If TESSLATE.md doesn't exist, copy the template
@@ -130,24 +286,31 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
                     async with aiofiles.open(template_path, 'r', encoding='utf-8') as f:
                         template_content = await f.read()
 
-                    # Write template to pod
-                    success = await k8s_manager.write_file_to_pod(
+                    # Write template to container's subdirectory
+                    success = await orchestrator.write_file(
                         user_id=user_id,
-                        project_id=str(project.id),
+                        project_id=project.id,
+                        container_name=container_name,
                         file_path="TESSLATE.md",
-                        content=template_content
+                        content=template_content,
+                        project_slug=project.slug,
+                        subdir=container_directory  # Write to container's subdirectory
                     )
 
                     if success:
                         tesslate_content = template_content
                         logger.info(f"[TESSLATE-CONTEXT] Successfully copied template to project {project.id}")
                     else:
-                        logger.warning(f"[TESSLATE-CONTEXT] Failed to write template to pod")
+                        logger.warning(f"[TESSLATE-CONTEXT] Failed to write template to container")
 
                 except Exception as e:
                     logger.error(f"[TESSLATE-CONTEXT] Failed to read template file: {e}")
 
-        else:
+        except Exception as e:
+            logger.debug(f"[TESSLATE-CONTEXT] Could not read via orchestrator: {e}")
+
+        # Fallback: Docker mode - read from local filesystem
+        if tesslate_content is None and not is_kubernetes_mode():
             # Docker mode: Read from local filesystem
             project_dir = get_project_path(user_id, project.id)
             tesslate_path = os.path.join(project_dir, "TESSLATE.md")
@@ -192,7 +355,7 @@ async def _build_tesslate_context(project: Project, user_id: UUID, db: AsyncSess
 
 @router.get("/", response_model=List[ChatSchema])
 async def get_chats(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
@@ -204,7 +367,7 @@ async def get_chats(
 @router.post("/", response_model=ChatSchema)
 async def create_chat(
     chat_data: dict,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     project_id = chat_data.get('project_id')
@@ -233,7 +396,7 @@ async def create_chat(
 @router.get("/{project_id}/messages", response_model=List[MessageSchema])
 async def get_project_messages(
     project_id: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all messages for a specific project's chat."""
@@ -260,10 +423,63 @@ async def get_project_messages(
     return messages
 
 
+@router.delete("/{project_id}/messages")
+async def delete_project_messages(
+    project_id: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete all messages for a specific project's chat (clear chat history)."""
+    try:
+        # Get the chat for this user and project
+        result = await db.execute(
+            select(Chat).where(
+                Chat.user_id == current_user.id,
+                Chat.project_id == project_id
+            )
+        )
+        chat = result.scalar_one_or_none()
+
+        if not chat:
+            # No chat exists, nothing to delete
+            return {"success": True, "message": "No chat history found", "deleted_count": 0}
+
+        # Clear approval tracking for this session
+        from ..agent.tools.approval_manager import get_approval_manager
+        approval_mgr = get_approval_manager()
+        approval_mgr.clear_session_approvals(chat.id)
+        logger.info(f"[CHAT] Cleared approvals for chat session {chat.id}")
+
+        # Delete all messages for this chat
+        from sqlalchemy import delete as sql_delete
+        delete_result = await db.execute(
+            sql_delete(Message).where(Message.chat_id == chat.id)
+        )
+        deleted_count = delete_result.rowcount
+
+        await db.commit()
+
+        logger.info(f"[CHAT] Deleted {deleted_count} messages for project {project_id}, user {current_user.id}")
+
+        return {
+            "success": True,
+            "message": f"Deleted {deleted_count} messages",
+            "deleted_count": deleted_count
+        }
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CHAT] Failed to delete messages for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete chat history: {str(e)}"
+        )
+
+
 @router.post("/agent", response_model=AgentChatResponse)
 async def agent_chat(
     request: AgentChatRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -430,11 +646,93 @@ async def agent_chat(
 
         logger.info(f"[HTTP-AGENT] Agent created successfully with max_iterations={request.max_iterations}")
 
+        # Get or create chat for message history
+        try:
+            chat_result = await db.execute(
+                select(Chat).where(
+                    Chat.user_id == current_user.id,
+                    Chat.project_id == request.project_id
+                )
+            )
+            chat = chat_result.scalar_one_or_none()
+
+            if not chat:
+                chat = Chat(user_id=current_user.id, project_id=request.project_id)
+                db.add(chat)
+                await db.commit()
+                await db.refresh(chat)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Database error during chat setup: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database error while setting up chat: {str(e)}"
+            )
+
+        # Fetch chat history for context
+        chat_history = await _get_chat_history(chat.id, db, limit=10)
+
+        # Fetch container info for multi-container project support
+        # If container_id is provided, agent is scoped to that container (files at root)
+        # If not, agent defaults to first container but at project level
+        container_id = None
+        container_name = None
+        container_directory = None
+
+        if request.container_id:
+            logger.info(f"[AGENT-CHAT] Looking up container_id: {request.container_id} for project: {request.project_id}")
+            try:
+                from uuid import UUID
+                # Convert string to UUID if needed
+                container_uuid = UUID(str(request.container_id)) if not isinstance(request.container_id, UUID) else request.container_id
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.id == container_uuid,
+                        Container.project_id == request.project_id
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+                if container:
+                    container_id = container.id
+                    # Use directory as service name for shell ops (it's already sanitized)
+                    # This gets prefixed with project_slug in _get_container_name()
+                    container_name = container.directory if container.directory and container.directory != '.' else None
+                    # Set container directory for scoped file operations
+                    if container.directory and container.directory != '.':
+                        container_directory = container.directory
+                        logger.info(f"[AGENT-CHAT] Container-scoped agent: {container_name} ({container_id}), directory: {container_directory}")
+                    else:
+                        logger.info(f"[AGENT-CHAT] Using specified container: {container_name} ({container_id})")
+                else:
+                    logger.warning(f"[AGENT-CHAT] Container not found: {request.container_id}")
+            except Exception as e:
+                logger.warning(f"[AGENT-CHAT] Could not get container: {e}", exc_info=True)
+        else:
+            # Default to first container in project
+            container_result = await db.execute(
+                select(Container).where(Container.project_id == request.project_id).limit(1)
+            )
+            container = container_result.scalar_one_or_none()
+            if container:
+                container_id = container.id
+                # Use directory as service name for shell ops (it's already sanitized)
+                container_name = container.directory if container.directory and container.directory != '.' else None
+                logger.info(f"[AGENT-CHAT] Using default container: {container_name} ({container_id})")
+
         # Prepare context for tool execution
         context = {
             "user_id": current_user.id,
             "project_id": request.project_id,
-            "db": db
+            "project_slug": project.slug,  # For shared volume file access
+            "container_directory": container_directory,  # Container subdirectory for file ops
+            "chat_id": chat.id,
+            "db": db,
+            "chat_history": chat_history,
+            "edit_mode": request.edit_mode,
+            # Multi-container support
+            "container_id": container_id,
+            "container_name": container_name,
         }
 
         # Get project context
@@ -444,7 +742,11 @@ async def agent_chat(
         }
 
         # Build TESSLATE.md context (project-specific documentation for AI agents)
-        tesslate_context = await _build_tesslate_context(project, current_user.id, db)
+        tesslate_context = await _build_tesslate_context(
+            project, current_user.id, db,
+            container_name=container_name,
+            container_directory=container_directory
+        )
         if tesslate_context:
             project_context["tesslate_context"] = tesslate_context
             logger.info(f"[AGENT-CHAT] Added TESSLATE.md context for project {project.id}")
@@ -524,23 +826,8 @@ async def agent_chat(
         )
 
 
-        # Save to chat history
-        # Get or create chat for this project
+        # Save to chat history (chat was already created/fetched earlier)
         try:
-            chat_result = await db.execute(
-                select(Chat).where(
-                    Chat.user_id == current_user.id,
-                    Chat.project_id == request.project_id
-                )
-            )
-            chat = chat_result.scalar_one_or_none()
-
-            if not chat:
-                chat = Chat(user_id=current_user.id, project_id=request.project_id)
-                db.add(chat)
-                await db.commit()
-                await db.refresh(chat)
-
             # Save user message
             user_message = Message(
                 chat_id=chat.id,
@@ -600,6 +887,16 @@ async def agent_chat(
         db.add(assistant_message)
         await db.commit()
 
+        # Cleanup: Close any bash session that was opened during this agent run
+        if context.get("_bash_session_id"):
+            try:
+                from ..services.shell_session_manager import get_shell_session_manager
+                shell_manager = get_shell_session_manager()
+                await shell_manager.close_session(context["_bash_session_id"])
+                logger.info(f"[HTTP-AGENT] Cleaned up bash session {context['_bash_session_id']}")
+            except Exception as cleanup_err:
+                logger.warning(f"[HTTP-AGENT] Failed to cleanup bash session: {cleanup_err}")
+
         logger.info(
             f"[HTTP-AGENT] Agent chat completed - success: {success}, "
             f"iterations: {iterations}, tool_calls: {tool_calls_made}"
@@ -628,6 +925,353 @@ async def agent_chat(
         )
 
 
+@router.post("/agent/approval")
+async def handle_agent_approval(
+    approval_data: dict,
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Handle approval response for agent tool execution.
+
+    This endpoint allows the frontend to respond to approval requests
+    when using SSE streaming (which is one-way communication).
+
+    Args:
+        approval_data: {approval_id: str, response: str}
+        current_user: Authenticated user
+
+    Returns:
+        Success confirmation
+    """
+    from ..agent.tools.approval_manager import get_approval_manager
+
+    approval_id = approval_data.get("approval_id")
+    response = approval_data.get("response")  # 'allow_once', 'allow_all', 'stop'
+
+    if not approval_id or not response:
+        raise HTTPException(
+            status_code=400,
+            detail="approval_id and response are required"
+        )
+
+    logger.info(f"[APPROVAL] Received approval response: {response} for {approval_id}")
+
+    approval_mgr = get_approval_manager()
+    approval_mgr.respond_to_approval(approval_id, response)
+
+    return {"success": True, "message": "Approval response processed"}
+
+
+@router.post("/agent/stream")
+async def agent_chat_stream(
+    request: AgentChatRequest,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    SSE Streaming Agent Chat - uses IterativeAgent with real-time event streaming.
+
+    This endpoint streams agent execution events in real-time using Server-Sent Events (SSE).
+    Prevents Cloudflare timeouts by continuously sending data during long-running tasks.
+
+    **Event Types:**
+    - text_chunk: LLM text generation as it happens
+    - agent_step: Tool calls and results when iteration completes
+    - approval_required: Tool needs user approval (SSE is one-way, use /agent/approval endpoint to respond)
+    - complete: Final response when task finishes
+    - error: Error information if execution fails
+
+    Args:
+        request: Agent chat request with project_id, message, agent_id
+        current_user: Authenticated user
+        db: Database session
+
+    Returns:
+        StreamingResponse with SSE format events
+    """
+    from fastapi.responses import StreamingResponse
+    import json
+
+    logger.info(f"[SSE-AGENT] Starting streaming agent chat - user: {current_user.id}, project: {request.project_id}, container_id: {request.container_id}")
+
+    async def event_generator():
+        try:
+            # Verify project ownership
+            result = await db.execute(
+                select(Project).where(
+                    Project.id == request.project_id,
+                    Project.owner_id == current_user.id
+                )
+            )
+            project = result.scalar_one_or_none()
+
+            if not project:
+                error_event = {
+                    'type': 'error',
+                    'data': {'message': 'Project not found or access denied'}
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                return
+
+            # Fetch container info for multi-container project support
+            container_id = None
+            container_name = None
+            container_directory = None
+            project_slug = project.slug
+
+            if request.container_id:
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.id == request.container_id,
+                        Container.project_id == request.project_id
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+                if container:
+                    container_id = container.id
+                    # Use directory as service name for shell ops (it's already sanitized)
+                    container_name = container.directory if container.directory and container.directory != '.' else None
+                    # Capture container directory for scoped file operations
+                    if container.directory and container.directory != '.':
+                        container_directory = container.directory
+                    logger.info(f"[SSE-AGENT] Using container: {container_name} (id: {container_id}), directory: {container_directory}")
+
+            # Get or create chat for message history persistence
+            chat_result = await db.execute(
+                select(Chat).where(
+                    Chat.user_id == current_user.id,
+                    Chat.project_id == request.project_id
+                )
+            )
+            chat = chat_result.scalar_one_or_none()
+
+            if not chat:
+                chat = Chat(user_id=current_user.id, project_id=request.project_id)
+                db.add(chat)
+                await db.commit()
+                await db.refresh(chat)
+
+            # Fetch chat history BEFORE saving current message to avoid duplication
+            chat_history = await _get_chat_history(chat.id, db, limit=10)
+
+            # Save user message after fetching history
+            user_message = Message(
+                chat_id=chat.id,
+                role="user",
+                content=request.message
+            )
+            db.add(user_message)
+            await db.commit()
+
+            # Create agent using same pattern as HTTP endpoint
+            from ..agent.factory import create_agent_from_db_model
+            from ..agent.models import create_model_adapter
+            from ..config import get_settings
+
+            settings = get_settings()
+
+            # 1. Fetch agent from database
+            agent_model = None
+            if request.agent_id:
+                agent_result = await db.execute(
+                    select(MarketplaceAgent).where(
+                        MarketplaceAgent.id == request.agent_id,
+                        MarketplaceAgent.is_active == True
+                    )
+                )
+                agent_model = agent_result.scalar_one_or_none()
+
+                if not agent_model:
+                    error_event = {
+                        'type': 'error',
+                        'data': {'message': f'Agent with ID {request.agent_id} not found or inactive'}
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
+            else:
+                # Default: Use first IterativeAgent available
+                agent_result = await db.execute(
+                    select(MarketplaceAgent).where(
+                        MarketplaceAgent.is_active == True,
+                        MarketplaceAgent.agent_type == 'IterativeAgent'
+                    ).limit(1)
+                )
+                agent_model = agent_result.scalar_one_or_none()
+
+                if not agent_model:
+                    error_event = {
+                        'type': 'error',
+                        'data': {'message': 'No IterativeAgent found. Please configure an agent.'}
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
+
+            # 2. Get user's selected model
+            user_purchase_result = await db.execute(
+                select(UserPurchasedAgent).where(
+                    UserPurchasedAgent.user_id == current_user.id,
+                    UserPurchasedAgent.agent_id == agent_model.id
+                )
+            )
+            user_purchase = user_purchase_result.scalar_one_or_none()
+
+            model_name = (user_purchase.selected_model if user_purchase and user_purchase.selected_model
+                         else agent_model.model or settings.litellm_default_models.split(",")[0])
+
+            # 3. Create model adapter
+            model_adapter = await create_model_adapter(
+                model_name=model_name,
+                user_id=current_user.id,
+                db=db
+            )
+
+            # 4. Create agent via factory
+            agent_instance = await create_agent_from_db_model(
+                agent_model=agent_model,
+                model_adapter=model_adapter
+            )
+
+            # Set max_iterations
+            if hasattr(agent_instance, 'max_iterations'):
+                agent_instance.max_iterations = request.max_iterations or 20
+
+            # Build project context with TESSLATE.md and Git info
+            project_context = {
+                "project_name": project.name,
+                "project_description": project.description
+            }
+
+            # Build TESSLATE.md context
+            tesslate_context = await _build_tesslate_context(
+                project, current_user.id, db,
+                container_name=container_name,
+                container_directory=container_directory
+            )
+            if tesslate_context:
+                project_context["tesslate_context"] = tesslate_context
+                logger.info(f"[SSE-AGENT] Added TESSLATE.md context for project {project.id}")
+
+            # Build Git context
+            git_context = await _build_git_context(project, current_user.id, db)
+            if git_context:
+                project_context["git_context"] = git_context
+                logger.info(f"[SSE-AGENT] Added Git context for project {project.id}")
+
+            # Prepare execution context
+            # Note: container_directory was already captured during initial container lookup above
+            context = {
+                "user_id": current_user.id,
+                "project_id": request.project_id,
+                "project_slug": project.slug,  # For shared volume file access
+                "container_directory": container_directory,  # Container subdirectory for file ops
+                "chat_id": chat.id,
+                "db": db,
+                "chat_history": chat_history,
+                "project_context": project_context,
+                "edit_mode": request.edit_mode,
+                "container_id": container_id,
+                "container_name": container_name,
+                "project_slug": project_slug
+            }
+
+            # Accumulate results for database persistence
+            collected_steps = []
+            final_response = ""
+            iterations = 0
+            tool_calls_made = 0
+            completion_reason = "task_complete"
+
+            # Stream events from agent and collect metadata
+            async for event in agent_instance.run(request.message, context):
+                # Collect step data for persistence
+                if event['type'] == 'agent_step':
+                    collected_steps.append(event['data'])
+                elif event['type'] == 'complete':
+                    final_response = event['data'].get('final_response', '')
+                    iterations = event['data'].get('iterations', iterations)
+                    tool_calls_made = event['data'].get('tool_calls_made', tool_calls_made)
+                    completion_reason = event['data'].get('completion_reason', completion_reason)
+
+                # Send event in SSE format
+                yield f"data: {json.dumps(event)}\n\n"
+
+            # Increment usage_count for the agent
+            if agent_model:
+                agent_model.usage_count = (agent_model.usage_count or 0) + 1
+                db.add(agent_model)
+                logger.info(f"[USAGE-TRACKING] Incremented usage_count for agent {agent_model.name} to {agent_model.usage_count}")
+
+            # Save agent response with metadata (same format as HTTP endpoint)
+            agent_metadata = {
+                "agent_mode": True,
+                "agent_type": agent_model.agent_type,
+                "iterations": iterations,
+                "tool_calls_made": tool_calls_made,
+                "completion_reason": completion_reason,
+                "steps": [
+                    {
+                        "iteration": step.get('iteration'),
+                        "thought": step.get('thought'),
+                        "tool_calls": [
+                            {
+                                "name": tc.get('name'),
+                                "parameters": _convert_uuids_to_strings(tc.get('parameters', {})),
+                                "result": _convert_uuids_to_strings(step.get('tool_results', [])[idx] if idx < len(step.get('tool_results', [])) else {})
+                            }
+                            for idx, tc in enumerate(step.get('tool_calls', []))
+                        ],
+                        "response_text": step.get('response_text', ''),
+                        "is_complete": step.get('is_complete', False),
+                        "timestamp": step.get('timestamp', '')
+                    }
+                    for step in collected_steps
+                ]
+            }
+
+            assistant_message = Message(
+                chat_id=chat.id,
+                role="assistant",
+                content=final_response,
+                message_metadata=agent_metadata
+            )
+            db.add(assistant_message)
+            await db.commit()
+
+            # Cleanup: Close any bash session that was opened during this agent run
+            if context.get("_bash_session_id"):
+                try:
+                    from ..services.shell_session_manager import get_shell_session_manager
+                    shell_manager = get_shell_session_manager()
+                    await shell_manager.close_session(context["_bash_session_id"])
+                    logger.info(f"[SSE-AGENT] Cleaned up bash session {context['_bash_session_id']}")
+                except Exception as cleanup_err:
+                    logger.warning(f"[SSE-AGENT] Failed to cleanup bash session: {cleanup_err}")
+
+            logger.info(f"[SSE-AGENT] Streaming complete - user: {current_user.id}, project: {request.project_id}, saved to database")
+
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"SSE Agent error: {e}")
+            logger.error(f"Full traceback:\n{error_traceback}")
+
+            error_event = {
+                'type': 'error',
+                'data': {'message': str(e)}
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Connection": "keep-alive"
+        }
+    )
+
+
 class ConnectionManager:
     def __init__(self):
         # Use (user_id, project_id) tuple as key to support multiple projects per user
@@ -652,12 +1296,26 @@ async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession 
     project_id = None
     try:
         # Verify token and get user
-        from ..auth import jwt, settings, JWTError
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        username = payload.get("sub")
+        # Accept both old tokens (no audience) and new fastapi-users tokens (audience: ["fastapi-users:auth"])
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+            options={"verify_aud": False}  # Don't verify audience for backward compatibility
+        )
+        user_id_or_username = payload.get("sub")
 
-        result = await db.execute(select(User).where(User.username == username))
-        user = result.scalar_one_or_none()
+        # Try to find user by ID (UUID) first (fastapi-users), then by username (old system)
+        try:
+            from uuid import UUID
+            user_uuid = UUID(user_id_or_username)
+            result = await db.execute(select(User).where(User.id == user_uuid))
+            user = result.scalar_one_or_none()
+        except (ValueError, TypeError):
+            # Not a valid UUID, try username lookup
+            result = await db.execute(select(User).where(User.username == user_id_or_username))
+            user = result.scalar_one_or_none()
+
         if not user:
             await websocket.close(code=1008)
             return
@@ -732,31 +1390,32 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     # Handle heartbeat ping
     if data.get("type") == "ping":
         await websocket.send_json({"type": "pong"})
+        return
 
-        # Track activity on heartbeat to keep container alive
-        project_id = data.get("project_id")
-        if project_id:
-            try:
-                from ..dev_server_manager import get_container_manager
-                container_manager = get_container_manager()
-                container_manager.track_activity(user.id, str(project_id))
-            except Exception as e:
-                logger.debug(f"Could not track heartbeat activity: {e}")
+    # Handle approval response (Ask Before Edit mode)
+    if data.get("type") == "approval_response":
+        from ..agent.tools.approval_manager import get_approval_manager
+        approval_mgr = get_approval_manager()
+
+        approval_id = data.get("approval_id")
+        response = data.get("response")  # 'allow_once', 'allow_all', 'stop'
+
+        logger.info(f"[WebSocket] Received approval response: {response} for {approval_id}")
+
+        if approval_id and response:
+            approval_mgr.respond_to_approval(approval_id, response)
+        else:
+            logger.warning(f"[WebSocket] Invalid approval response: missing approval_id or response")
 
         return
 
     message_content = data.get("message")
     project_id = data.get("project_id")
     agent_id = data.get("agent_id")  # Get agent_id from request
+    container_id = data.get("container_id")  # Get container_id for container-scoped agents
+    edit_mode = data.get("edit_mode", "ask")  # Get edit_mode from request, default to ask
 
-    # Track activity when user sends a message
-    if project_id:
-        try:
-            from ..dev_server_manager import get_container_manager
-            container_manager = get_container_manager()
-            container_manager.track_activity(user.id, str(project_id))
-        except Exception as e:
-            logger.debug(f"Could not track message activity: {e}")
+    logger.info(f"[WebSocket] Received message - project_id: {project_id}, container_id: {container_id}, agent_id: {agent_id}")
 
     try:
         # Get or create chat for this user and project
@@ -781,7 +1440,10 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             # Fallback to chat_id from frontend (for backwards compatibility)
             chat_id = data.get("chat_id", 1)
 
-        # Save user message
+        # Fetch chat history BEFORE saving current message to avoid duplication
+        chat_history = await _get_chat_history(chat_id, db, limit=10)
+
+        # Save user message after fetching history
         user_message = Message(
             chat_id=chat_id,
             role="user",
@@ -933,10 +1595,39 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             project_result = await db.execute(select(Project).where(Project.id == project_id))
             project = project_result.scalar_one_or_none()
 
+        # Get container info for file operations (container-scoped agents)
+        container_directory = None
+        container_name = None  # Need this for TESSLATE context
+        if container_id and project_id:
+            try:
+                # Container is already imported at module level (line 7)
+                container_result = await db.execute(
+                    select(Container).where(
+                        Container.id == container_id,
+                        Container.project_id == project_id
+                    )
+                )
+                container = container_result.scalar_one_or_none()
+                if container:
+                    # Use directory as service name for shell ops (it's already sanitized)
+                    container_name = container.directory if container.directory and container.directory != '.' else None
+                    if container.directory and container.directory != '.':
+                        container_directory = container.directory
+                    logger.info(f"[UNIFIED-CHAT] Container-scoped agent: {container_name}, directory: {container_directory}")
+            except Exception as e:
+                logger.warning(f"[UNIFIED-CHAT] Could not get container info: {e}")
+
+        if not container_id:
+            logger.info(f"[UNIFIED-CHAT] Project-level agent (no container_id)")
+
         # Build TESSLATE context
         tesslate_context = None
         if project:
-            tesslate_context = await _build_tesslate_context(project, user.id, db)
+            tesslate_context = await _build_tesslate_context(
+                project, user.id, db,
+                container_name=container_name,
+                container_directory=container_directory
+            )
 
         # Build Git context
         git_context = None
@@ -1018,18 +1709,37 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         'user': user,
         'user_id': user.id,
         'project_id': project_id,
+        'project_slug': project.slug if project else None,  # For shared volume file access
+        'container_directory': container_directory,  # Container subdirectory for file ops
+        'chat_id': chat_id,
         'db': db,
         'project_context_str': project_context_str,
         'has_existing_files': has_existing_files,
         'model': model_name,  # Use the resolved model name (user's selection or agent's default)
-        'api_base': settings.litellm_api_base
+        'api_base': settings.litellm_api_base,
+        'chat_history': chat_history,
+        'edit_mode': edit_mode
     }
 
-    if project:
-        execution_context['project_context'] = {
-            "project_name": project.name,
-            "project_description": project.description
-        }
+    # Add project context if available
+    try:
+        if project:
+            execution_context['project_context'] = {
+                "project_name": project.name,
+                "project_description": project.description
+            }
+
+            # Add tesslate_context if available
+            if tesslate_context:
+                execution_context['project_context']["tesslate_context"] = tesslate_context
+                logger.info(f"[UNIFIED-CHAT] Added TESSLATE.md context for project {project.id}")
+
+            # Add git_context if available
+            if git_context:
+                execution_context['project_context']["git_context"] = git_context
+                logger.info(f"[UNIFIED-CHAT] Added Git context for project {project.id}")
+    except NameError as e:
+        logger.warning(f"[UNIFIED-CHAT] Context variables not available: {e}")
 
     # 5. Run the agent and stream events back to the client
     full_response = ""
@@ -1194,30 +1904,32 @@ async def save_file(file_path: str, code: str, project_id: UUID, user_id: UUID, 
             # Continue to try writing to container even if DB save fails
 
         # 2. Write file to dev container (deployment mode aware)
-        if settings.deployment_mode == "kubernetes":
-            # Kubernetes: Write to pod via K8s API
-            try:
-                from ..dev_server_manager import get_container_manager
-                k8s_manager = get_container_manager()
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-                success = await k8s_manager.write_file_to_pod(
-                    user_id=user_id,
-                    project_id=str(project_id),
-                    file_path=file_path,
-                    content=code
-                )
+        # Try unified orchestrator first
+        orchestrator_success = False
+        try:
+            orchestrator = get_orchestrator()
+            success = await orchestrator.write_file(
+                user_id=user_id,
+                project_id=project_id,
+                container_name=None,  # Use default container
+                file_path=file_path,
+                content=code
+            )
 
-                if not success:
-                    raise RuntimeError("Failed to write file to pod")
+            if success:
+                print(f"[ORCHESTRATOR] ✅ Wrote {file_path} to container - Vite HMR will trigger")
+                orchestrator_success = True
+            else:
+                print(f"[ORCHESTRATOR] ⚠️ Warning: Failed to write to container")
 
-                print(f"[K8S] ✅ Wrote {file_path} to pod - Vite HMR will trigger")
+        except Exception as e:
+            print(f"[ORCHESTRATOR] ⚠️ Warning: Failed to write via orchestrator: {e}")
+            # Don't fail the entire operation - file is in DB
 
-            except Exception as e:
-                print(f"[K8S] ⚠️ Warning: Failed to write to pod: {e}")
-                print(f"[K8S] File saved to DB but pod not updated - HMR won't trigger")
-                # Don't fail the entire operation - file is in DB
-
-        else:
+        # Fallback: Docker mode - write to local filesystem
+        if not orchestrator_success and not is_kubernetes_mode():
             # Docker: Write to local filesystem
             try:
                 project_dir = get_project_path(user_id, project_id)

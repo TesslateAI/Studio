@@ -13,17 +13,35 @@ export interface AgentStep {
   iteration: number;
   thought?: string;
   tool_calls: ToolCallDetail[];
+  tool_results?: Array<{
+    success: boolean;
+    tool: string;
+    result?: any;
+    error?: string;
+  }>;
   response_text: string;
   is_complete: boolean;
   timestamp: string;
+  _debug?: {
+    full_response?: string;
+    context_messages_count?: number;
+    context_messages?: Array<{ role: string; content: string }>;
+    raw_tool_calls?: Array<{ name: string; params: any }>;
+    raw_thought?: string;
+    is_complete?: boolean;
+    conversational_text?: string;
+    display_text?: string;
+  };
 }
 
 export interface AgentChatRequest {
   project_id: string;
   message: string;
   agent_id?: string;  // ID of the agent to use
+  container_id?: string;  // If set, agent is scoped to this container (files at root)
   max_iterations?: number;
   minimal_prompts?: boolean;
+  edit_mode?: 'allow' | 'ask' | 'plan';  // Edit control mode
 }
 
 export interface AgentChatResponse {
@@ -57,6 +75,22 @@ export interface DBMessage {
     completion_reason?: string;
   };
   created_at: string;
+}
+
+export interface ApprovalRequestData {
+  approval_id: string;
+  tool_name: string;
+  tool_parameters: any;
+  tool_description: string;
+}
+
+export interface ApprovalMessage {
+  id: string;
+  type: 'approval_request';
+  approvalId: string;
+  toolName: string;
+  toolParameters: any;
+  toolDescription: string;
 }
 
 export interface Agent {

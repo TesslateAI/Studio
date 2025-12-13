@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package,
   Pencil,
@@ -9,7 +9,6 @@ import {
   LockSimpleOpen,
   LockKey,
   Sparkle,
-  ArrowLeft,
   Check,
   XCircle,
   Rocket,
@@ -29,16 +28,25 @@ import {
   Globe,
   ListChecks,
   Wrench,
-  Desktop,
-  ArrowsClockwise,
-  X,
-  Link
+  Folder,
+  Storefront,
+  Books,
+  Sun,
+  Moon,
+  Gear,
+  SignOut,
+  CreditCard,
+  Repeat,
+  Coins
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { DiscordSupport } from '../components/DiscordSupport';
+import { MobileMenu, MarkerEditor, MarkerPalette, type MarkerEditorHandle } from '../components/ui';
 import { ConfirmDialog } from '../components/modals';
-import { marketplaceApi, secretsApi, usersApi } from '../lib/api';
+import { ToolManagement } from '../components/ToolManagement';
+import { ImageUpload } from '../components/ImageUpload';
+import { marketplaceApi, secretsApi, usersApi, billingApi } from '../lib/api';
 import toast from 'react-hot-toast';
+import { useTheme } from '../theme/ThemeContext';
 
 interface LibraryAgent {
   id: string;
@@ -53,9 +61,11 @@ interface LibraryAgent {
   source_type: 'open' | 'closed';
   is_forkable: boolean;
   icon: string;
+  avatar_url?: string | null;
   pricing_type: string;
   features: string[];
   tools?: string[] | null;
+  tool_configs?: Record<string, { description?: string; examples?: string[]; system_prompt?: string }> | null;
   purchase_date: string;
   purchase_type: string;
   expires_at: string | null;
@@ -108,7 +118,7 @@ interface Provider {
   requires_key: boolean;
 }
 
-type TabType = 'agents' | 'models' | 'api-keys';
+type TabType = 'agents' | 'models' | 'api-keys' | 'subscriptions' | 'credits';
 
 // All available tools in the system
 const ALL_TOOLS = [
@@ -147,11 +157,63 @@ const getToolIcon = (toolName: string): { icon: React.ReactNode; label: string }
 
 export default function Library() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<TabType>('agents');
+  const { theme, toggleTheme } = useTheme();
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab') as TabType | null;
+  const [activeTab, setActiveTab] = useState<TabType>(tabParam || 'agents');
   const [agents, setAgents] = useState<LibraryAgent[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [externalProviders, setExternalProviders] = useState<ExternalProvider[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    navigate('/login');
+  };
+
+  // Sidebar items for mobile menu
+  const mobileMenuItems = {
+    left: [
+      {
+        icon: <Folder className="w-5 h-5" weight="fill" />,
+        title: 'Projects',
+        onClick: () => navigate('/dashboard')
+      },
+      {
+        icon: <Storefront className="w-5 h-5" weight="fill" />,
+        title: 'Marketplace',
+        onClick: () => navigate('/marketplace')
+      },
+      {
+        icon: <Books className="w-5 h-5" weight="fill" />,
+        title: 'Library',
+        onClick: () => {},
+        active: true
+      },
+      {
+        icon: <Package className="w-5 h-5" weight="fill" />,
+        title: 'Components',
+        onClick: () => toast('Components library coming soon!')
+      }
+    ],
+    right: [
+      {
+        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
+        onClick: toggleTheme
+      },
+      {
+        icon: <Gear className="w-5 h-5" weight="fill" />,
+        title: 'Settings',
+        onClick: () => navigate('/settings')
+      },
+      {
+        icon: <SignOut className="w-5 h-5" weight="fill" />,
+        title: 'Logout',
+        onClick: logout
+      }
+    ]
+  };
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
@@ -268,87 +330,97 @@ export default function Library() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+      <div className="h-screen flex items-center justify-center bg-[var(--bg)]">
         <LoadingSpinner message="Loading..." size={80} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen px-4 sm:px-8 md:px-20 lg:px-32 py-6 sm:py-12 md:py-20 lg:py-24">
-      {/* Header */}
-      <div className="mb-10">
-        <div className="flex items-center justify-between mb-8">
-          {/* Back Button */}
-          <button
-            onClick={() => navigate('/dashboard')}
-            data-tour="dashboard-link"
-            className="flex items-center gap-2 text-[var(--text)]/60 hover:text-[var(--text)] transition-colors"
-          >
-            <ArrowLeft size={20} weight="bold" />
-            <span className="font-medium">Back</span>
-          </button>
+    <>
+      {/* Mobile Menu */}
+      <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
+        {/* Top Bar with Tabs */}
+        <div className="bg-[var(--surface)] border-b border-white/10">
+          <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
+            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Library</h1>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-3">
+            {/* Mobile hamburger menu */}
             <button
-              onClick={() => navigate('/marketplace')}
-              className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 rounded-xl text-white font-semibold transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-105"
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
             >
-              <Sparkle size={20} weight="fill" />
-              Browse Marketplace
+              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
             </button>
+          </div>
+
+          {/* Tabs */}
+          <div className="px-4 md:px-6 pb-3 pt-2">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <button
+                onClick={() => setActiveTab('agents')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'agents'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Package size={16} weight={activeTab === 'agents' ? 'fill' : 'regular'} />
+                Agents ({agents.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('models')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'models'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Cpu size={16} weight={activeTab === 'models' ? 'fill' : 'regular'} />
+                Model Management
+              </button>
+              <button
+                onClick={() => setActiveTab('api-keys')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'api-keys'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Key size={16} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
+                API Keys ({apiKeys.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('subscriptions')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'subscriptions'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Repeat size={16} weight={activeTab === 'subscriptions' ? 'fill' : 'regular'} />
+                Subscriptions
+              </button>
+              <button
+                onClick={() => setActiveTab('credits')}
+                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === 'credits'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                }`}
+              >
+                <Coins size={16} weight={activeTab === 'credits' ? 'fill' : 'regular'} />
+                Credits
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Main Title */}
-        <div className="mb-8">
-          <h1 className="font-heading text-4xl md:text-5xl font-bold text-[var(--text)] mb-3">
-            My Library
-          </h1>
-          <p className="text-[var(--text)]/60 text-lg">Manage your agents, models, and API keys</p>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setActiveTab('agents')}
-            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-              activeTab === 'agents'
-                ? 'bg-[var(--primary)] text-white shadow-lg'
-                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-            }`}
-          >
-            <Package size={20} weight={activeTab === 'agents' ? 'fill' : 'regular'} />
-            Agents ({agents.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('models')}
-            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-              activeTab === 'models'
-                ? 'bg-[var(--primary)] text-white shadow-lg'
-                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-            }`}
-          >
-            <Cpu size={20} weight={activeTab === 'models' ? 'fill' : 'regular'} />
-            Model Management
-          </button>
-          <button
-            onClick={() => setActiveTab('api-keys')}
-            className={`px-5 py-2.5 font-semibold transition-all rounded-xl flex items-center gap-2 ${
-              activeTab === 'api-keys'
-                ? 'bg-[var(--primary)] text-white shadow-lg'
-                : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-            }`}
-          >
-            <Key size={20} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
-            API Keys ({apiKeys.length})
-          </button>
-        </div>
-      </div>
-
-      {/* Tab Content */}
-      <div>
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-auto bg-[var(--bg)]">
+          <div className="p-4 md:p-6">
         {activeTab === 'agents' && (
           <AgentsTab
             agents={agents}
@@ -376,7 +448,16 @@ export default function Library() {
             onReload={loadApiKeys}
           />
         )}
-      </div>
+
+        {activeTab === 'subscriptions' && (
+          <SubscriptionsTab />
+        )}
+
+        {activeTab === 'credits' && (
+          <CreditsTab />
+        )}
+          </div>
+        </div>
 
       {/* Edit Agent Modal */}
       {editingAgent && (
@@ -386,25 +467,49 @@ export default function Library() {
           onClose={() => setEditingAgent(null)}
           onSave={async (updatedData) => {
             try {
-              const response = await marketplaceApi.updateAgent(editingAgent.id, updatedData);
-              if (response.forked) {
-                toast.success('Created a custom fork with your changes!');
+              let response;
+              if (!editingAgent.id || editingAgent.id === '') {
+                // Creating a new agent
+                const createData = {
+                  name: updatedData.name || '',
+                  description: updatedData.description || '',
+                  system_prompt: updatedData.system_prompt || '',
+                  mode: 'agent',
+                  agent_type: 'IterativeAgent',
+                  model: updatedData.model || (models.length > 0 ? models[0].id : ''),
+                };
+                response = await marketplaceApi.createCustomAgent(createData);
+
+                // Update with additional fields (tools, tool_configs, avatar_url)
+                if (updatedData.tools || updatedData.tool_configs || updatedData.avatar_url) {
+                  await marketplaceApi.updateAgent(response.id, {
+                    tools: updatedData.tools,
+                    tool_configs: updatedData.tool_configs,
+                    avatar_url: updatedData.avatar_url,
+                  });
+                }
+
+                toast.success('Agent created successfully!');
               } else {
-                toast.success('Agent updated successfully');
+                // Updating existing agent
+                response = await marketplaceApi.updateAgent(editingAgent.id, updatedData);
+                if (response.forked) {
+                  toast.success('Created a custom fork with your changes!');
+                } else {
+                  toast.success('Agent updated successfully');
+                }
               }
               setEditingAgent(null);
               loadLibraryAgents();
             } catch (error: any) {
-              console.error('Update failed:', error);
-              toast.error(error.response?.data?.detail || 'Failed to update agent');
+              console.error('Save failed:', error);
+              toast.error(error.response?.data?.detail || 'Failed to save agent');
             }
           }}
         />
       )}
 
-      {/* Discord Support */}
-      <DiscordSupport />
-    </div>
+    </>
   );
 }
 
@@ -490,6 +595,46 @@ function AgentsTab({
         </div>
       </div>
 
+      {/* Create New Agent Button */}
+      <div className="mb-6">
+        <button
+          onClick={() => {
+            const newAgent: LibraryAgent = {
+              id: '',
+              name: '',
+              slug: '',
+              description: '',
+              category: 'general',
+              mode: 'agent',
+              agent_type: 'IterativeAgent',
+              model: models.length > 0 ? models[0].id : '',
+              source_type: 'open',
+              is_forkable: false,
+              icon: '🤖',
+              avatar_url: null,
+              pricing_type: 'free',
+              features: [],
+              tools: [],
+              tool_configs: {},
+              purchase_date: new Date().toISOString(),
+              purchase_type: 'free',
+              expires_at: null,
+              is_custom: true,
+              parent_agent_id: null,
+              system_prompt: '',
+              is_enabled: true,
+              is_published: false,
+              usage_count: 0
+            };
+            setEditingAgent(newAgent);
+          }}
+          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors flex items-center gap-2"
+        >
+          <Plus size={18} />
+          Create New Agent
+        </button>
+      </div>
+
       {/* Agents Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {agents.map(agent => (
@@ -535,7 +680,6 @@ function ModelsTab({
   onSetupProvider: (provider: string) => void;
 }) {
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
-  const [addModelProvider, setAddModelProvider] = useState<string>('openrouter');
   const [showAddApiKey, setShowAddApiKey] = useState(false);
   const [customModels, setCustomModels] = useState<Model[]>([]);
   const [systemModels, setSystemModels] = useState<Model[]>([]);
@@ -544,24 +688,6 @@ function ModelsTab({
   const [openRouterKeys, setOpenRouterKeys] = useState<ApiKey[]>([]);
   const [loadingKeys, setLoadingKeys] = useState(true);
   const [providers, setProviders] = useState<Provider[]>([]);
-
-  // State for 4 new providers
-  const [ollamaConfig, setOllamaConfig] = useState<ApiKey | null>(null);
-  const [lmstudioConfig, setLmstudioConfig] = useState<ApiKey | null>(null);
-  const [llamacppConfig, setLlamacppConfig] = useState<ApiKey | null>(null);
-  const [customConfigs, setCustomConfigs] = useState<ApiKey[]>([]);
-
-  // Modal states for provider configuration
-  const [showOllamaConfig, setShowOllamaConfig] = useState(false);
-  const [showLMStudioConfig, setShowLMStudioConfig] = useState(false);
-  const [showLlamaCppConfig, setShowLlamaCppConfig] = useState(false);
-  const [showCustomConfig, setShowCustomConfig] = useState(false);
-
-  // Modal state for fetching models
-  const [showFetchModels, setShowFetchModels] = useState(false);
-  const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
-  const [fetchedModels, setFetchedModels] = useState<any[]>([]);
-  const [fetchingModels, setFetchingModels] = useState(false);
 
   useEffect(() => {
     // Separate custom and system models
@@ -574,7 +700,6 @@ function ModelsTab({
     loadUserPreferences();
     loadOpenRouterKeys();
     loadProviders();
-    loadProviderConfigs();
   }, []);
 
   const loadUserPreferences = async () => {
@@ -605,70 +730,6 @@ function ModelsTab({
       setProviders(data.providers || []);
     } catch (error) {
       console.error('Failed to load providers:', error);
-    }
-  };
-
-  const loadProviderConfigs = async () => {
-    try {
-      const [ollama, lmstudio, llamacpp, custom] = await Promise.all([
-        secretsApi.listApiKeys('ollama'),
-        secretsApi.listApiKeys('lmstudio'),
-        secretsApi.listApiKeys('llamacpp'),
-        secretsApi.listApiKeys('custom'),
-      ]);
-
-      setOllamaConfig(ollama.api_keys[0] || null);
-      setLmstudioConfig(lmstudio.api_keys[0] || null);
-      setLlamacppConfig(llamacpp.api_keys[0] || null);
-      setCustomConfigs(custom.api_keys || []);
-    } catch (error) {
-      console.error('Failed to load provider configs:', error);
-    }
-  };
-
-  const handleFetchProviderModels = async (provider: string) => {
-    setFetchingProvider(provider);
-    setFetchingModels(true);
-    setShowFetchModels(true);
-    setFetchedModels([]);
-
-    try {
-      const response = await marketplaceApi.fetchModels(provider);
-      setFetchedModels(response.models || []);
-
-      if (response.count === 0) {
-        toast.info(`No models found on ${provider}`);
-      } else {
-        toast.success(`Found ${response.count} models from ${provider}`);
-      }
-    } catch (error: any) {
-      console.error(`Failed to fetch ${provider} models:`, error);
-      toast.error(error.response?.data?.detail || `Failed to fetch models from ${provider}`);
-      setShowFetchModels(false);
-    } finally {
-      setFetchingModels(false);
-    }
-  };
-
-  const handleImportModels = async (provider: string, selectedModels: any[]) => {
-    try {
-      const response = await marketplaceApi.importBatchModels({
-        provider,
-        models: selectedModels
-      });
-
-      toast.success(`Imported ${response.imported} models from ${provider}`);
-
-      if (response.skipped > 0) {
-        toast.info(`Skipped ${response.skipped} duplicate models`);
-      }
-
-      // Reload models
-      await loadModels();
-      setShowFetchModels(false);
-    } catch (error: any) {
-      console.error('Failed to import models:', error);
-      toast.error(error.response?.data?.detail || 'Failed to import models');
     }
   };
 
@@ -708,7 +769,12 @@ function ModelsTab({
           </div>
           <div className="flex-1">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">OpenRouter Integration</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-bold text-[var(--text)]">OpenRouter Integration</h2>
+                <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+                  FREE (Limited Time)
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowAddApiKey(true)}
@@ -729,7 +795,7 @@ function ModelsTab({
               </div>
             </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
-              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more.
+              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more. <span className="text-orange-400 font-medium">Currently free for all users</span> — this will become a premium subscription feature in the future.
             </p>
 
             {/* API Keys List */}
@@ -786,355 +852,6 @@ function ModelsTab({
         </div>
       </div>
 
-      {/* Ollama Integration Section */}
-      <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/20 rounded-xl p-6">
-        <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-green-500/20 rounded-lg">
-            <Terminal size={24} className="text-green-400" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">Ollama Integration</h2>
-              <div className="flex items-center gap-2">
-                {!ollamaConfig && (
-                  <button
-                    onClick={() => setShowOllamaConfig(true)}
-                    className="px-4 py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400 rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <Plus size={16} />
-                    Connect Ollama
-                  </button>
-                )}
-                {ollamaConfig && (
-                  <>
-                    <button
-                      onClick={() => handleFetchProviderModels('ollama')}
-                      className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <ArrowsClockwise size={16} />
-                      Fetch All Models
-                    </button>
-                    <button
-                      onClick={() => {
-                        setAddModelProvider('ollama');
-                        setShowAddCustomModel(true);
-                      }}
-                      className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <Plus size={16} />
-                      Add Model Manually
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            <p className="text-[var(--text)]/60 text-sm mb-4">
-              Run large language models locally with Ollama. Configure your Ollama server URL and fetch available models.
-            </p>
-
-            {/* Configuration Status */}
-            {ollamaConfig ? (
-              <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-green-500/10 rounded-lg">
-                      <CheckCircle size={16} className="text-green-400" weight="fill" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-[var(--text)]">Connected</div>
-                      <div className="text-xs text-[var(--text)]/40">{ollamaConfig.provider_metadata?.base_url || 'http://localhost:11434'}</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await secretsApi.deleteApiKey(ollamaConfig.id);
-                        toast.success('Ollama configuration removed');
-                        await loadProviderConfigs();
-                      } catch (error) {
-                        console.error('Delete failed:', error);
-                        toast.error('Failed to remove configuration');
-                      }
-                    }}
-                    className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
-                  >
-                    <Trash size={16} />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="px-4 py-3 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center gap-2">
-                <Circle size={16} className="text-orange-400" />
-                <span className="text-sm text-orange-400">Not configured. Connect to get started.</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* LM Studio Integration Section */}
-      <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl p-6">
-        <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-purple-500/20 rounded-lg">
-            <Desktop size={24} className="text-purple-400" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">LM Studio Integration</h2>
-              <div className="flex items-center gap-2">
-                {!lmstudioConfig && (
-                  <button
-                    onClick={() => setShowLMStudioConfig(true)}
-                    className="px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-purple-400 rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <Plus size={16} />
-                    Connect LM Studio
-                  </button>
-                )}
-                {lmstudioConfig && (
-                  <>
-                    <button
-                      onClick={() => handleFetchProviderModels('lmstudio')}
-                      className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <ArrowsClockwise size={16} />
-                      Fetch All Models
-                    </button>
-                    <button
-                      onClick={() => {
-                        setAddModelProvider('lmstudio');
-                        setShowAddCustomModel(true);
-                      }}
-                      className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <Plus size={16} />
-                      Add Model Manually
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            <p className="text-[var(--text)]/60 text-sm mb-4">
-              Local LLM inference with LM Studio. Connect to your LM Studio server and access loaded models.
-            </p>
-
-            {/* Configuration Status */}
-            {lmstudioConfig ? (
-              <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-500/10 rounded-lg">
-                      <CheckCircle size={16} className="text-purple-400" weight="fill" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-[var(--text)]">Connected</div>
-                      <div className="text-xs text-[var(--text)]/40">{lmstudioConfig.provider_metadata?.base_url || 'http://localhost:1234'}</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await secretsApi.deleteApiKey(lmstudioConfig.id);
-                        toast.success('LM Studio configuration removed');
-                        await loadProviderConfigs();
-                      } catch (error) {
-                        console.error('Delete failed:', error);
-                        toast.error('Failed to remove configuration');
-                      }
-                    }}
-                    className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
-                  >
-                    <Trash size={16} />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="px-4 py-3 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center gap-2">
-                <Circle size={16} className="text-orange-400" />
-                <span className="text-sm text-orange-400">Not configured. Connect to get started.</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* llama.cpp Integration Section */}
-      <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/20 rounded-xl p-6">
-        <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-yellow-500/20 rounded-lg">
-            <Cpu size={24} className="text-yellow-400" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">llama.cpp Integration</h2>
-              <div className="flex items-center gap-2">
-                {!llamacppConfig && (
-                  <button
-                    onClick={() => setShowLlamaCppConfig(true)}
-                    className="px-4 py-2 bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/20 text-yellow-400 rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <Plus size={16} />
-                    Connect llama.cpp
-                  </button>
-                )}
-                {llamacppConfig && (
-                  <>
-                    <button
-                      onClick={() => handleFetchProviderModels('llamacpp')}
-                      className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <ArrowsClockwise size={16} />
-                      Fetch All Models
-                    </button>
-                    <button
-                      onClick={() => {
-                        setAddModelProvider('llamacpp');
-                        setShowAddCustomModel(true);
-                      }}
-                      className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <Plus size={16} />
-                      Add Model Manually
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            <p className="text-[var(--text)]/60 text-sm mb-4">
-              Efficient local inference with llama.cpp server. Connect to your llama.cpp server instance.
-            </p>
-
-            {/* Configuration Status */}
-            {llamacppConfig ? (
-              <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-yellow-500/10 rounded-lg">
-                      <CheckCircle size={16} className="text-yellow-400" weight="fill" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-[var(--text)]">Connected</div>
-                      <div className="text-xs text-[var(--text)]/40">{llamacppConfig.provider_metadata?.base_url || 'http://localhost:8080'}</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await secretsApi.deleteApiKey(llamacppConfig.id);
-                        toast.success('llama.cpp configuration removed');
-                        await loadProviderConfigs();
-                      } catch (error) {
-                        console.error('Delete failed:', error);
-                        toast.error('Failed to remove configuration');
-                      }
-                    }}
-                    className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
-                  >
-                    <Trash size={16} />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="px-4 py-3 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center gap-2">
-                <Circle size={16} className="text-orange-400" />
-                <span className="text-sm text-orange-400">Not configured. Connect to get started.</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Custom Endpoint Integration Section */}
-      <div className="bg-gradient-to-r from-gray-500/10 to-slate-500/10 border border-gray-500/20 rounded-xl p-6">
-        <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-gray-500/20 rounded-lg">
-            <Wrench size={24} className="text-gray-400" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">Custom API Endpoint</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowCustomConfig(true)}
-                  className="px-4 py-2 bg-gray-500/10 hover:bg-gray-500/20 border border-gray-500/20 text-gray-400 rounded-lg transition-colors flex items-center gap-2"
-                >
-                  <Plus size={16} />
-                  Add Custom Endpoint
-                </button>
-                {customConfigs.length > 0 && (
-                  <>
-                    <button
-                      onClick={() => handleFetchProviderModels('custom')}
-                      className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <ArrowsClockwise size={16} />
-                      Fetch All Models
-                    </button>
-                    <button
-                      onClick={() => {
-                        setAddModelProvider('custom');
-                        setShowAddCustomModel(true);
-                      }}
-                      className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center gap-2"
-                    >
-                      <Plus size={16} />
-                      Add Model Manually
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            <p className="text-[var(--text)]/60 text-sm mb-4">
-              Connect to any OpenAI-compatible API endpoint. Configure your custom server URL and API key.
-            </p>
-
-            {/* Configuration Status */}
-            {customConfigs.length > 0 ? (
-              <div className="space-y-2">
-                {customConfigs.map((config) => (
-                  <div
-                    key={config.id}
-                    className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-3 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-gray-500/10 rounded-lg">
-                        <CheckCircle size={16} className="text-gray-400" weight="fill" />
-                      </div>
-                      <div>
-                        {config.key_name && (
-                          <div className="text-sm font-medium text-[var(--text)]">{config.key_name}</div>
-                        )}
-                        <div className="text-xs text-[var(--text)]/40">{config.provider_metadata?.base_url || 'Custom endpoint'}</div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await secretsApi.deleteApiKey(config.id);
-                          toast.success('Custom endpoint removed');
-                          await loadProviderConfigs();
-                        } catch (error) {
-                          console.error('Delete failed:', error);
-                          toast.error('Failed to remove configuration');
-                        }
-                      }}
-                      className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
-                    >
-                      <Trash size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="px-4 py-3 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center gap-2">
-                <Circle size={16} className="text-orange-400" />
-                <span className="text-sm text-orange-400">No custom endpoints configured.</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Diagram Model Selection */}
       <div className="bg-gradient-to-r from-orange-500/10 to-purple-500/10 border border-orange-500/20 rounded-xl p-6">
         <div className="flex items-start gap-4 mb-4">
@@ -1142,10 +859,15 @@ function ModelsTab({
             <ChartLine size={24} className="text-orange-400" />
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold text-[var(--text)] mb-2">Architecture Diagram Generation</h2>
+            <div className="flex items-center gap-3 mb-2">
+              <h2 className="text-xl font-bold text-[var(--text)]">Architecture Diagram Generation</h2>
+              <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+                FREE (Limited Time)
+              </span>
+            </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
               Select which AI model to use for generating architecture diagrams of your projects.
-              This model will analyze your code and create Mermaid diagrams showing component relationships.
+              This model will analyze your code and create Mermaid diagrams showing component relationships. <span className="text-orange-400 font-medium">Currently free for all users</span> — this feature will become paid in the future.
             </p>
           </div>
         </div>
@@ -1254,8 +976,15 @@ function ModelsTab({
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-2xl font-bold text-[var(--text)] mb-1">Available Models</h2>
-            <p className="text-[var(--text)]/60">Models you can use right now</p>
+            <div className="flex items-center gap-3 mb-1">
+              <h2 className="text-2xl font-bold text-[var(--text)]">Available Models</h2>
+              <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+                FREE (Limited Time)
+              </span>
+            </div>
+            <p className="text-[var(--text)]/60">
+              <span className="text-orange-400 font-medium">Currently free for all users</span> — these models will become paid features in the future. Use them now while they're complimentary!
+            </p>
           </div>
           <div className="text-sm text-[var(--text)]/40">
             {systemModels.length} models available
@@ -1373,72 +1102,12 @@ function ModelsTab({
       {/* Add Custom Model Modal */}
       {showAddCustomModel && (
         <AddCustomModelModal
-          provider={addModelProvider}
           onClose={() => setShowAddCustomModel(false)}
           onSuccess={() => {
             setShowAddCustomModel(false);
             toast.success('Custom model added successfully');
             window.location.reload();
           }}
-        />
-      )}
-
-      {/* Ollama Configuration Modal */}
-      {showOllamaConfig && (
-        <OllamaConfigModal
-          onClose={() => setShowOllamaConfig(false)}
-          onSuccess={() => {
-            setShowOllamaConfig(false);
-            loadProviderConfigs();
-          }}
-        />
-      )}
-
-      {/* LM Studio Configuration Modal */}
-      {showLMStudioConfig && (
-        <LMStudioConfigModal
-          onClose={() => setShowLMStudioConfig(false)}
-          onSuccess={() => {
-            setShowLMStudioConfig(false);
-            loadProviderConfigs();
-          }}
-        />
-      )}
-
-      {/* llama.cpp Configuration Modal */}
-      {showLlamaCppConfig && (
-        <LlamaCppConfigModal
-          onClose={() => setShowLlamaCppConfig(false)}
-          onSuccess={() => {
-            setShowLlamaCppConfig(false);
-            loadProviderConfigs();
-          }}
-        />
-      )}
-
-      {/* Custom Endpoint Configuration Modal */}
-      {showCustomConfig && (
-        <CustomEndpointConfigModal
-          onClose={() => setShowCustomConfig(false)}
-          onSuccess={() => {
-            setShowCustomConfig(false);
-            loadProviderConfigs();
-          }}
-        />
-      )}
-
-      {/* Fetch Models Result Modal */}
-      {showFetchModels && fetchingProvider && (
-        <FetchModelsResultModal
-          provider={fetchingProvider}
-          models={fetchedModels}
-          loading={fetchingModels}
-          onClose={() => {
-            setShowFetchModels(false);
-            setFetchingProvider(null);
-            setFetchedModels([]);
-          }}
-          onImport={(selectedModels) => handleImportModels(fetchingProvider, selectedModels)}
         />
       )}
     </div>
@@ -1778,7 +1447,17 @@ function AgentCard({
 
       {/* Header */}
       <div className="flex items-start gap-4 mb-4 pr-20">
-        <div className="text-4xl">{agent.icon}</div>
+        {agent.avatar_url ? (
+          <img
+            src={agent.avatar_url}
+            alt={agent.name}
+            className="w-16 h-16 rounded-xl object-cover border-2 border-[var(--text)]/10"
+          />
+        ) : (
+          <div className="w-16 h-16 rounded-xl bg-[var(--surface)] border-2 border-[var(--text)]/10 flex items-center justify-center p-3">
+            <img src="/favicon.svg" alt="Tesslate" className="w-full h-full" />
+          </div>
+        )}
         <div className="flex-1">
           <h3 className="font-heading font-bold text-[var(--text)] text-xl mb-2">{agent.name}</h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -1841,7 +1520,9 @@ function AgentCard({
         ) : (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg w-fit">
             <Cpu size={14} className="text-blue-400" />
-            <span className="text-xs text-blue-400 font-medium">{currentModel}</span>
+            <span className="text-xs text-blue-400 font-medium">
+              {currentModel || 'Model not disclosed (closed source)'}
+            </span>
           </div>
         )}
       </div>
@@ -1849,26 +1530,33 @@ function AgentCard({
       {/* Tools */}
       <div className="mb-4">
         <div className="flex flex-wrap gap-1.5">
-          {(agent.tools && agent.tools.length > 0 ? agent.tools : ALL_TOOLS).map((toolName, idx) => {
-            const tool = getToolIcon(toolName);
-            if (!tool) return null;
-            return (
-              <div
-                key={idx}
-                className="flex items-center gap-1 px-2 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs rounded-md font-medium"
-                title={tool.label}
-              >
-                {tool.icon}
-                <span>{tool.label}</span>
-              </div>
-            );
-          })}
+          {!agent.tools || agent.tools.length === 0 ? (
+            <div className="flex items-center gap-1 px-2 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs rounded-md font-medium">
+              <Wrench size={12} />
+              <span>All Tools</span>
+            </div>
+          ) : (
+            agent.tools.map((toolName, idx) => {
+              const tool = getToolIcon(toolName);
+              if (!tool) return null;
+              return (
+                <div
+                  key={idx}
+                  className="flex items-center gap-1 px-2 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs rounded-md font-medium"
+                  title={tool.label}
+                >
+                  {tool.icon}
+                  <span>{tool.label}</span>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
       {/* Features */}
       <div className="flex flex-wrap gap-2 mb-4">
-        {agent.features.slice(0, 3).map((feature, idx) => (
+        {(agent.features || []).slice(0, 3).map((feature, idx) => (
           <span
             key={idx}
             className="px-2 py-1 bg-white/5 text-[var(--text)]/60 text-xs rounded"
@@ -1962,7 +1650,7 @@ function EditAgentModal({
   agent: LibraryAgent;
   availableModels: string[];
   onClose: () => void;
-  onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string }) => void;
+  onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string; tools?: string[]; tool_configs?: Record<string, { description?: string; examples?: string[]; system_prompt?: string }>; avatar_url?: string | null }) => void;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description);
@@ -1970,10 +1658,18 @@ function EditAgentModal({
   const currentModel = agent.selected_model || agent.model;
   const [model, setModel] = useState(currentModel);
   const [originalPrompt] = useState(agent.system_prompt || '');
+  const [tools, setTools] = useState<string[]>(agent.tools || []);
+  const [toolConfigs, setToolConfigs] = useState<Record<string, { description?: string; examples?: string[]; system_prompt?: string }>>(agent.tool_configs || {});
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(agent.avatar_url || null);
+  const editorRef = useRef<MarkerEditorHandle>(null);
 
   const handleReset = () => {
     setSystemPrompt(originalPrompt);
     toast.success('Reset to original system prompt');
+  };
+
+  const insertMarker = (marker: string) => {
+    editorRef.current?.insertMarker(marker);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1982,13 +1678,16 @@ function EditAgentModal({
       name,
       description,
       system_prompt: systemPrompt,
-      model
+      model,
+      tools,
+      tool_configs: toolConfigs,
+      avatar_url: avatarUrl
     });
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-3xl lg:max-w-6xl w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
             <Pencil size={24} />
@@ -2003,84 +1702,127 @@ function EditAgentModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Agent Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
-              required
-            />
-          </div>
+          {/* Two-column layout on desktop */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column: Basic Info & System Prompt */}
+            <div className="space-y-4">
+              {/* Logo Upload */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Agent Logo
+                </label>
+                <ImageUpload
+                  value={avatarUrl}
+                  onChange={setAvatarUrl}
+                  maxSizeKB={200}
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Description
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
-              required
-            />
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Agent Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                  required
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Model
-            </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-              disabled={agent.source_type !== 'open' && !agent.is_custom}
-            >
-              {availableModels.length > 0 ? (
-                availableModels.map((modelName) => (
-                  <option key={modelName} value={modelName}>
-                    {modelName}
-                  </option>
-                ))
-              ) : (
-                <option value={model}>{model}</option>
-              )}
-            </select>
-            {agent.source_type !== 'open' && !agent.is_custom && (
-              <p className="mt-1 text-xs text-[var(--text)]/40">
-                Model can only be changed for open source agents
-              </p>
-            )}
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                  required
+                />
+              </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-[var(--text)]">
-                System Prompt
-              </label>
-              {systemPrompt !== originalPrompt && (
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 text-xs rounded transition-colors"
+              <div>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Model
+                </label>
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                  disabled={agent.source_type !== 'open' && !agent.is_custom}
                 >
-                  Reset to Default
-                </button>
-              )}
+                  {availableModels.length > 0 ? (
+                    availableModels.map((modelName) => (
+                      <option key={modelName} value={modelName}>
+                        {modelName}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={model}>{model}</option>
+                  )}
+                </select>
+                {agent.source_type !== 'open' && !agent.is_custom && (
+                  <p className="mt-1 text-xs text-[var(--text)]/40">
+                    Model can only be changed for open source agents
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-[var(--text)]">
+                    System Prompt
+                  </label>
+                  {systemPrompt !== originalPrompt && (
+                    <button
+                      type="button"
+                      onClick={handleReset}
+                      className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 text-xs rounded transition-colors"
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+
+                {/* Rich text editor with inline marker pills */}
+                <MarkerEditor
+                  ref={editorRef}
+                  value={systemPrompt}
+                  onChange={setSystemPrompt}
+                  rows={12}
+                  placeholder="Enter your agent's system prompt..."
+                />
+                <p className="mt-1 text-xs text-[var(--text)]/40">
+                  {systemPrompt.length} characters • Markers appear as pills and show descriptions on hover
+                </p>
+
+                {/* Marker Palette */}
+                <div className="mt-4 p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
+                  <h3 className="text-sm font-semibold text-[var(--text)] mb-3">
+                    Available Markers
+                  </h3>
+                  <MarkerPalette onInsertMarker={insertMarker} />
+                </div>
+              </div>
             </div>
-            <textarea
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={10}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm resize-y"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              {systemPrompt.length} characters
-            </p>
+
+            {/* Right Column: Tool Management */}
+            <div className="space-y-4">
+              <div className="p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
+                <ToolManagement
+                  selectedTools={tools}
+                  toolConfigs={toolConfigs}
+                  onToolsChange={(newTools, newConfigs) => {
+                    setTools(newTools);
+                    setToolConfigs(newConfigs);
+                  }}
+                  availableModels={availableModels}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
@@ -2107,11 +1849,9 @@ function EditAgentModal({
 
 // Add Custom Model Modal Component
 function AddCustomModelModal({
-  provider = 'openrouter',
   onClose,
   onSuccess
 }: {
-  provider?: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -2121,22 +1861,6 @@ function AddCustomModelModal({
   const [pricingOutput, setPricingOutput] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const providerLabels: Record<string, string> = {
-    openrouter: 'OpenRouter',
-    ollama: 'Ollama',
-    lmstudio: 'LM Studio',
-    llamacpp: 'llama.cpp',
-    custom: 'Custom Endpoint'
-  };
-
-  const providerPlaceholders: Record<string, string> = {
-    openrouter: 'openrouter/model-name',
-    ollama: 'llama2:latest',
-    lmstudio: 'local-model',
-    llamacpp: 'model-name',
-    custom: 'custom/model-name'
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -2145,7 +1869,6 @@ function AddCustomModelModal({
       await marketplaceApi.addCustomModel({
         model_id: modelId,
         model_name: modelName,
-        provider: provider, // Pass provider to API
         pricing_input: pricingInput ? parseFloat(pricingInput) : undefined,
         pricing_output: pricingOutput ? parseFloat(pricingOutput) : undefined
       });
@@ -2164,7 +1887,7 @@ function AddCustomModelModal({
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
             <Plus size={24} />
-            Add {providerLabels[provider] || provider} Model
+            Add Custom OpenRouter Model
           </h2>
           <button
             onClick={onClose}
@@ -2184,11 +1907,11 @@ function AddCustomModelModal({
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
               className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm"
-              placeholder={providerPlaceholders[provider] || 'model-name'}
+              placeholder="openrouter/model-name"
               required
             />
             <p className="mt-1 text-xs text-[var(--text)]/40">
-              {provider === 'openrouter' ? 'Find model IDs at openrouter.ai' : `Enter the model ID from your ${providerLabels[provider] || provider} instance`}
+              Find model IDs at openrouter.ai
             </p>
           </div>
 
@@ -2265,607 +1988,480 @@ function AddCustomModelModal({
   );
 }
 
-// Ollama Configuration Modal Component
-function OllamaConfigModal({
-  onClose,
-  onSuccess
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [baseUrl, setBaseUrl] = useState('http://localhost:11434');
-  const [loading, setLoading] = useState(false);
+// Subscriptions Tab Component
+function SubscriptionsTab() {
+  const [loading, setLoading] = useState(true);
+  const [premiumSubscription, setPremiumSubscription] = useState<any>(null);
+  const [agentSubscriptions, setAgentSubscriptions] = useState<any[]>([]);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    loadSubscriptions();
+  }, []);
+
+  const loadSubscriptions = async () => {
     setLoading(true);
-
     try {
-      await secretsApi.addApiKey({
-        provider: 'ollama',
-        api_key: 'ollama', // Ollama doesn't require authentication
-        auth_type: 'none',
-        provider_metadata: {
-          base_url: baseUrl.trim()
-        }
+      // Load premium subscription status
+      const subscription = await billingApi.getSubscription();
+      console.log('DEBUG: Premium subscription data:', subscription);
+      console.log('DEBUG: cancel_at_period_end:', subscription?.cancel_at_period_end);
+      console.log('DEBUG: current_period_start:', subscription?.current_period_start);
+      console.log('DEBUG: current_period_end:', subscription?.current_period_end);
+      setPremiumSubscription(subscription);
+
+      // Load agent subscriptions
+      const agents = await marketplaceApi.getUserSubscriptions();
+      console.log('DEBUG: Agent subscriptions loaded:', agents);
+      agents.forEach((agent, idx) => {
+        console.log(`DEBUG: Agent ${idx}:`, {
+          name: agent.name,
+          purchase_type: agent.purchase_type,
+          subscription_id: agent.subscription_id,
+        });
       });
-      toast.success('Ollama connected successfully');
-      onSuccess();
-    } catch (error: any) {
-      console.error('Ollama connection failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to connect to Ollama');
+      setAgentSubscriptions(agents);
+    } catch (error) {
+      console.error('Failed to load subscriptions:', error);
+      toast.error('Failed to load subscriptions');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Terminal size={24} className="text-green-400" />
-            Connect to Ollama
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text)]/60"
-          >
-            <X size={20} />
-          </button>
-        </div>
+  const handleCancelSubscription = async (subscriptionId: string, type: 'premium' | 'agent') => {
+    console.log('DEBUG: handleCancelSubscription called:', { subscriptionId, type });
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Ollama API URL
-            </label>
-            <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-green-500/50 font-mono text-sm"
-              placeholder="http://localhost:11434"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              Default Ollama server URL. Modify if running on a different host or port.
-            </p>
-          </div>
+    if (!subscriptionId) {
+      console.error('DEBUG: No subscription ID provided!');
+      toast.error('Cannot cancel: Missing subscription ID');
+      return;
+    }
 
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-green-500 hover:bg-green-600 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? (
-                <>Connecting...</>
-              ) : (
-                <>
-                  <Link size={18} />
-                  Connect
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+    if (!confirm(`Are you sure you want to cancel this subscription? You'll continue to have access until the end of your billing period.`)) {
+      return;
+    }
 
-// LM Studio Configuration Modal Component
-function LMStudioConfigModal({
-  onClose,
-  onSuccess
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [baseUrl, setBaseUrl] = useState('http://localhost:1234');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
+    setCancelingId(subscriptionId);
     try {
-      await secretsApi.addApiKey({
-        provider: 'lmstudio',
-        api_key: 'lmstudio', // LM Studio doesn't require authentication
-        auth_type: 'none',
-        provider_metadata: {
-          base_url: baseUrl.trim()
-        }
-      });
-      toast.success('LM Studio connected successfully');
-      onSuccess();
+      if (type === 'premium') {
+        console.log('DEBUG: Cancelling premium subscription');
+        await billingApi.cancelSubscription();
+        toast.success('Premium subscription cancelled');
+      } else {
+        console.log('DEBUG: Cancelling agent subscription:', subscriptionId);
+        await marketplaceApi.cancelAgentSubscription(subscriptionId);
+        toast.success('Agent subscription cancelled');
+      }
+      await loadSubscriptions();
     } catch (error: any) {
-      console.error('LM Studio connection failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to connect to LM Studio');
+      console.error('Failed to cancel subscription:', error);
+      toast.error(error.response?.data?.detail || 'Failed to cancel subscription');
     } finally {
-      setLoading(false);
+      setCancelingId(null);
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Desktop size={24} className="text-purple-400" />
-            Connect to LM Studio
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text)]/60"
-          >
-            <X size={20} />
-          </button>
-        </div>
+  const handleRenewSubscription = async (subscriptionId: string, type: 'premium' | 'agent') => {
+    console.log('DEBUG: handleRenewSubscription called:', { subscriptionId, type });
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              LM Studio API URL
-            </label>
-            <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-purple-500/50 font-mono text-sm"
-              placeholder="http://localhost:1234"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              Default LM Studio server URL. Modify if using a different configuration.
-            </p>
-          </div>
+    if (!subscriptionId) {
+      console.error('DEBUG: No subscription ID provided!');
+      toast.error('Cannot renew: Missing subscription ID');
+      return;
+    }
 
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-purple-500 hover:bg-purple-600 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? (
-                <>Connecting...</>
-              ) : (
-                <>
-                  <Link size={18} />
-                  Connect
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+    if (!confirm(`Are you sure you want to renew this subscription? It will continue automatically after the current period.`)) {
+      return;
+    }
 
-// llama.cpp Configuration Modal Component
-function LlamaCppConfigModal({
-  onClose,
-  onSuccess
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [baseUrl, setBaseUrl] = useState('http://localhost:8080');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
+    setCancelingId(subscriptionId);
     try {
-      await secretsApi.addApiKey({
-        provider: 'llamacpp',
-        api_key: 'llamacpp', // llama.cpp doesn't require authentication
-        auth_type: 'none',
-        provider_metadata: {
-          base_url: baseUrl.trim()
-        }
-      });
-      toast.success('llama.cpp connected successfully');
-      onSuccess();
+      if (type === 'premium') {
+        console.log('DEBUG: Renewing premium subscription');
+        await billingApi.renewSubscription();
+        toast.success('Premium subscription renewed');
+      } else {
+        console.log('DEBUG: Renewing agent subscription:', subscriptionId);
+        await marketplaceApi.renewAgentSubscription(subscriptionId);
+        toast.success('Agent subscription renewed');
+      }
+      await loadSubscriptions();
     } catch (error: any) {
-      console.error('llama.cpp connection failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to connect to llama.cpp');
+      console.error('Failed to renew subscription:', error);
+      toast.error(error.response?.data?.detail || 'Failed to renew subscription');
     } finally {
-      setLoading(false);
+      setCancelingId(null);
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Cpu size={24} className="text-yellow-400" />
-            Connect to llama.cpp
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text)]/60"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              llama.cpp Server URL
-            </label>
-            <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-yellow-500/50 font-mono text-sm"
-              placeholder="http://localhost:8080"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              Default llama.cpp server URL. Adjust if running on a custom port.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-yellow-500 hover:bg-yellow-600 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? (
-                <>Connecting...</>
-              ) : (
-                <>
-                  <Link size={18} />
-                  Connect
-                </>
-              )}
-            </button>
-          </div>
-        </form>
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner />
       </div>
-    </div>
-  );
-}
-
-// Custom Endpoint Configuration Modal Component
-function CustomEndpointConfigModal({
-  onClose,
-  onSuccess
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [displayName, setDisplayName] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      await secretsApi.addApiKey({
-        provider: 'custom',
-        api_key: apiKey.trim(),
-        auth_type: 'api_key',
-        key_name: displayName.trim(),
-        provider_metadata: {
-          base_url: baseUrl.trim()
-        }
-      });
-      toast.success('Custom endpoint connected successfully');
-      onSuccess();
-    } catch (error: any) {
-      console.error('Custom endpoint connection failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to connect to custom endpoint');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Wrench size={24} className="text-gray-400" />
-            Add Custom Endpoint
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text)]/60"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Display Name
-            </label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-gray-500/50"
-              placeholder="My Custom API"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              A friendly name to identify this endpoint
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              API Base URL
-            </label>
-            <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-gray-500/50 font-mono text-sm"
-              placeholder="https://api.example.com/v1"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              The base URL for your OpenAI-compatible API endpoint
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              API Key
-            </label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-gray-500/50 font-mono text-sm"
-              placeholder="sk-..."
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              Your API key for authentication (stored encrypted)
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-gray-500 hover:bg-gray-600 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? (
-                <>Connecting...</>
-              ) : (
-                <>
-                  <Link size={18} />
-                  Connect
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Fetch Models Result Modal Component
-function FetchModelsResultModal({
-  provider,
-  models,
-  loading,
-  onClose,
-  onImport
-}: {
-  provider: string;
-  models: any[];
-  loading: boolean;
-  onClose: () => void;
-  onImport: (selectedModels: any[]) => void;
-}) {
-  const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set());
-  const [selectAll, setSelectAll] = useState(true);
-
-  // Initialize with all models selected
-  React.useEffect(() => {
-    if (models.length > 0 && selectedModels.size === 0) {
-      setSelectedModels(new Set(models.map(m => m.id || m.model_id)));
-      setSelectAll(true);
-    }
-  }, [models]);
-
-  const toggleModel = (modelId: string) => {
-    const newSelected = new Set(selectedModels);
-    if (newSelected.has(modelId)) {
-      newSelected.delete(modelId);
-    } else {
-      newSelected.add(modelId);
-    }
-    setSelectedModels(newSelected);
-    setSelectAll(newSelected.size === models.length);
-  };
-
-  const toggleSelectAll = () => {
-    if (selectAll) {
-      setSelectedModels(new Set());
-      setSelectAll(false);
-    } else {
-      setSelectedModels(new Set(models.map(m => m.id || m.model_id)));
-      setSelectAll(true);
-    }
-  };
-
-  const handleImport = () => {
-    const modelsToImport = models.filter(m =>
-      selectedModels.has(m.id || m.model_id)
     );
-    onImport(modelsToImport);
-  };
-
-  const providerColors = {
-    ollama: 'green',
-    lmstudio: 'purple',
-    llamacpp: 'yellow',
-    custom: 'gray',
-    openrouter: 'orange'
-  };
-
-  const color = providerColors[provider as keyof typeof providerColors] || 'gray';
+  }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
-        <div className="p-6 border-b border-[var(--text)]/15">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
-                <ArrowsClockwise size={24} className={`text-${color}-400`} />
-                Models from {provider}
-              </h2>
-              <p className="text-sm text-[var(--text)]/60 mt-1">
-                {loading ? 'Fetching models...' : `Found ${models.length} models`}
-              </p>
-            </div>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text)]/60"
-            >
-              <X size={20} />
-            </button>
+    <div className="space-y-6">
+      {/* Premium Subscription */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          <div className="flex items-center gap-2">
+            <Sparkle size={20} weight="fill" className="text-orange-500" />
+            Premium Subscription
           </div>
-        </div>
+        </h2>
 
-        <div className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
-            </div>
-          ) : models.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-[var(--text)]/60">No models found</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-[var(--text)]/15">
-                <button
-                  onClick={toggleSelectAll}
-                  className="flex items-center gap-2 text-sm font-medium text-[var(--text)] hover:text-orange-400 transition-colors"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectAll}
-                    onChange={toggleSelectAll}
-                    className="w-4 h-4 rounded border-[var(--text)]/30 bg-white/5"
-                  />
-                  {selectAll ? 'Deselect All' : 'Select All'}
-                </button>
-                <span className="text-sm text-[var(--text)]/60">
-                  {selectedModels.size} of {models.length} selected
-                </span>
+        {premiumSubscription?.tier === 'pro' ? (
+          <div
+            className="rounded-xl p-6 border"
+            style={{
+              backgroundColor: 'var(--surface)',
+              borderColor: 'rgba(255, 107, 0, 0.2)'
+            }}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle size={20} weight="fill" className="text-green-500" />
+                  <span className="font-medium" style={{ color: 'var(--text)' }}>
+                    Active Premium Subscription
+                  </span>
+                </div>
+
+                {/* Subscription dates */}
+                <div className="mb-3 text-sm space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                  {premiumSubscription.current_period_start && (
+                    <div>Started: {new Date(premiumSubscription.current_period_start).toLocaleDateString()}</div>
+                  )}
+                  {premiumSubscription.cancel_at_period_end && premiumSubscription.current_period_end ? (
+                    <div className="text-orange-500">
+                      Cancels on: {new Date(premiumSubscription.current_period_end).toLocaleDateString()} ({Math.ceil((new Date(premiumSubscription.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days remaining)
+                    </div>
+                  ) : premiumSubscription.current_period_end ? (
+                    <div>Renews: {new Date(premiumSubscription.current_period_end).toLocaleDateString()}</div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2 text-sm" style={{ color: 'var(--text)', opacity: 0.8 }}>
+                  <div className="flex items-center gap-2">
+                    <Check size={16} className="text-green-500" />
+                    <span>5 projects & deploys</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check size={16} className="text-green-500" />
+                    <span>24/7 running mode</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check size={16} className="text-green-500" />
+                    <span>Use your own API keys</span>
+                  </div>
+                </div>
               </div>
 
-              {models.map((model) => {
-                const modelId = model.id || model.model_id;
-                const modelName = model.name || model.model_name || modelId;
-                const isSelected = selectedModels.has(modelId);
-
-                return (
-                  <label
-                    key={modelId}
-                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                      isSelected
-                        ? `border-${color}-500/50 bg-${color}-500/10`
-                        : 'border-[var(--text)]/15 hover:border-[var(--text)]/30 bg-white/5'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleModel(modelId)}
-                      className="mt-1 w-4 h-4 rounded border-[var(--text)]/30 bg-white/5"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-[var(--text)]">{modelName}</div>
-                      <div className="text-sm font-mono text-[var(--text)]/60 truncate">
-                        {modelId}
-                      </div>
-                      {model.description && (
-                        <div className="text-xs text-[var(--text)]/40 mt-1 line-clamp-2">
-                          {model.description}
-                        </div>
-                      )}
-                    </div>
-                  </label>
-                );
-              })}
+              {!premiumSubscription.cancel_at_period_end ? (
+                <button
+                  onClick={() => handleCancelSubscription(premiumSubscription.subscription_id, 'premium')}
+                  disabled={cancelingId === premiumSubscription.subscription_id}
+                  className="px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+                >
+                  {cancelingId === premiumSubscription.subscription_id ? 'Canceling...' : 'Cancel'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleRenewSubscription(premiumSubscription.subscription_id, 'premium')}
+                  disabled={cancelingId === premiumSubscription.subscription_id}
+                  className="px-4 py-2 text-sm font-medium text-green-500 hover:bg-green-500/10 rounded-lg transition disabled:opacity-50"
+                >
+                  {cancelingId === premiumSubscription.subscription_id ? 'Renewing...' : 'Renew'}
+                </button>
+              )}
             </div>
-          )}
-        </div>
-
-        <div className="p-6 border-t border-[var(--text)]/15">
-          <div className="flex items-center gap-3 justify-end">
+          </div>
+        ) : (
+          <div
+            className="rounded-xl p-6 border text-center"
+            style={{
+              backgroundColor: 'var(--surface)',
+              borderColor: 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
+              You're on the free plan
+            </p>
             <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors"
-              disabled={loading}
+              onClick={() => window.location.href = '/billing/plans'}
+              className="px-6 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition font-medium text-sm"
             >
-              Cancel
-            </button>
-            <button
-              onClick={handleImport}
-              className={`px-6 py-2 bg-${color}-500 hover:bg-${color}-600 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50`}
-              disabled={loading || selectedModels.size === 0}
-            >
-              <Plus size={18} />
-              Import {selectedModels.size > 0 ? `${selectedModels.size} ` : ''}Models
+              Upgrade to Premium - $5/month
             </button>
           </div>
+        )}
+      </div>
+
+      {/* Agent Subscriptions & Purchases */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          <div className="flex items-center gap-2">
+            <Package size={20} weight="fill" />
+            Purchased Agents & Subscriptions
+          </div>
+        </h2>
+
+        {agentSubscriptions.length === 0 ? (
+          <div
+            className="rounded-xl p-8 border text-center"
+            style={{
+              backgroundColor: 'var(--surface)',
+              borderColor: 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            <Package size={48} weight="fill" style={{ color: 'var(--text)', opacity: 0.3 }} className="mx-auto mb-3" />
+            <p className="text-sm" style={{ color: 'var(--text)', opacity: 0.7 }}>
+              No purchased agents yet
+            </p>
+            <button
+              onClick={() => window.location.href = '/marketplace'}
+              className="mt-4 px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition font-medium text-sm"
+            >
+              Browse Marketplace
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {agentSubscriptions.map((sub) => {
+              const isSubscription = (sub.purchase_type === 'monthly' || sub.purchase_type === 'subscription') && sub.subscription_id;
+              const isOneTime = sub.purchase_type === 'onetime' || sub.purchase_type === 'one_time';
+
+              return (
+                <div
+                  key={sub.id}
+                  className="rounded-xl p-4 border"
+                  style={{
+                    backgroundColor: 'var(--surface)',
+                    borderColor: 'rgba(255, 255, 255, 0.1)'
+                  }}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl">{sub.icon || '🤖'}</div>
+                      <div>
+                        <h3 className="font-medium" style={{ color: 'var(--text)' }}>
+                          {sub.name}
+                        </h3>
+                        <p className="text-xs" style={{ color: 'var(--text)', opacity: 0.6 }}>
+                          {isSubscription
+                            ? `$${(sub.price / 100).toFixed(2)}/month`
+                            : `$${(sub.price / 100).toFixed(2)} (One-time)`
+                          }
+                        </p>
+                      </div>
+                    </div>
+                    {isSubscription && !sub.cancel_at_period_end && (
+                      <button
+                        onClick={() => handleCancelSubscription(sub.subscription_id, 'agent')}
+                        disabled={cancelingId === sub.subscription_id}
+                        className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+                        title="Cancel subscription"
+                      >
+                        <XCircle size={20} />
+                      </button>
+                    )}
+                    {isSubscription && sub.cancel_at_period_end && (
+                      <button
+                        onClick={() => handleRenewSubscription(sub.subscription_id, 'agent')}
+                        disabled={cancelingId === sub.subscription_id}
+                        className="p-2 text-green-500 hover:bg-green-500/10 rounded-lg transition disabled:opacity-50"
+                        title="Renew subscription"
+                      >
+                        <CheckCircle size={20} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="text-xs space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                    <div>Purchased: {new Date(sub.purchase_date).toLocaleDateString()}</div>
+                    <div className="flex items-center gap-1">
+                      <CheckCircle size={12} className="text-green-500" />
+                      <span>{isSubscription ? 'Active Subscription' : 'Owned'}</span>
+                    </div>
+                    {/* Show cancellation info for monthly subscriptions */}
+                    {isSubscription && sub.cancel_at_period_end && sub.current_period_end && (
+                      <div className="text-orange-500 font-medium">
+                        Cancels: {new Date(sub.current_period_end).toLocaleDateString()}
+                        ({Math.ceil((new Date(sub.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days left)
+                      </div>
+                    )}
+                    {/* Show renewal date for active monthly subscriptions */}
+                    {isSubscription && !sub.cancel_at_period_end && sub.current_period_end && (
+                      <div>Renews: {new Date(sub.current_period_end).toLocaleDateString()}</div>
+                    )}
+                    {isOneTime && sub.expires_at && (
+                      <div className="text-xs" style={{ color: 'var(--text)', opacity: 0.6 }}>
+                        Access until: {new Date(sub.expires_at).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Credits Tab Component
+function CreditsTab() {
+  const [loading, setLoading] = useState(true);
+  const [credits, setCredits] = useState<any>(null);
+  const [purchasing, setPurchasing] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadCredits();
+  }, []);
+
+  const loadCredits = async () => {
+    setLoading(true);
+    try {
+      const balance = await billingApi.getCreditsBalance();
+      setCredits(balance);
+    } catch (error) {
+      console.error('Failed to load credits:', error);
+      toast.error('Failed to load credits balance');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePurchaseCredits = async (packageType: 'small' | 'medium' | 'large') => {
+    setPurchasing(packageType);
+    try {
+      const response = await billingApi.purchaseCredits(packageType);
+      if (response.url) {
+        window.location.href = response.url;
+      }
+    } catch (error: any) {
+      console.error('Failed to initiate credit purchase:', error);
+      toast.error(error.response?.data?.detail || 'Failed to start checkout');
+      setPurchasing(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  const packages = [
+    {
+      id: 'small' as const,
+      amount: 5,
+      credits: 500,
+      popular: false
+    },
+    {
+      id: 'medium' as const,
+      amount: 15,
+      credits: 1500,
+      popular: true
+    },
+    {
+      id: 'large' as const,
+      amount: 25,
+      credits: 2500,
+      popular: false
+    }
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Current Balance */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          <div className="flex items-center gap-2">
+            <Coins size={20} weight="fill" className="text-yellow-500" />
+            Credits Balance
+          </div>
+        </h2>
+
+        <div
+          className="rounded-xl p-6 border"
+          style={{
+            backgroundColor: 'var(--surface)',
+            borderColor: 'rgba(255, 107, 0, 0.2)'
+          }}
+        >
+          <div className="text-center">
+            <div className="text-4xl font-bold mb-2" style={{ color: 'var(--primary)' }}>
+              {credits?.balance_cents ? (credits.balance_cents / 100).toFixed(2) : '0.00'}
+            </div>
+            <p className="text-sm" style={{ color: 'var(--text)', opacity: 0.7 }}>
+              Available Credits (${credits?.balance_usd?.toFixed(2) || '0.00'} USD)
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Purchase Options */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
+          Top Up Credits
+        </h2>
+        <p className="text-sm mb-6" style={{ color: 'var(--text)', opacity: 0.7 }}>
+          Credits are used to purchase API-based agents from the marketplace
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {packages.map((pkg) => (
+            <div
+              key={pkg.id}
+              className={`rounded-xl p-6 border relative ${pkg.popular ? 'ring-2' : ''}`}
+              style={{
+                backgroundColor: 'var(--surface)',
+                borderColor: pkg.popular ? 'var(--primary)' : 'rgba(255, 255, 255, 0.1)',
+                ringColor: pkg.popular ? 'var(--primary)' : undefined
+              }}
+            >
+              {pkg.popular && (
+                <div
+                  className="absolute -top-3 left-1/2 transform -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
+                  style={{
+                    backgroundColor: 'var(--primary)',
+                    color: 'white'
+                  }}
+                >
+                  Most Popular
+                </div>
+              )}
+
+              <div className="text-center">
+                <div className="text-3xl font-bold mb-2" style={{ color: 'var(--text)' }}>
+                  ${pkg.amount}
+                </div>
+                <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                  {pkg.credits} credits
+                </p>
+                <button
+                  onClick={() => handlePurchaseCredits(pkg.id)}
+                  disabled={purchasing !== null}
+                  className={`w-full px-6 py-3 rounded-lg font-medium text-sm transition ${
+                    pkg.popular
+                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white'
+                      : 'bg-white/5 hover:bg-white/10 text-white'
+                  } disabled:opacity-50`}
+                >
+                  {purchasing === pkg.id ? 'Processing...' : 'Purchase'}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

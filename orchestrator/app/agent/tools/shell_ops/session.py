@@ -16,30 +16,54 @@ logger = logging.getLogger(__name__)
 async def shell_open_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """Open a new shell session in the dev container."""
     from ....services.shell_session_manager import get_shell_session_manager
+    from fastapi import HTTPException
 
     project_id = context["project_id"]
     command = params.get("command", "/bin/sh")  # Alpine-based containers use sh, not bash
     user_id = context["user_id"]
     db = context["db"]
 
+    # Get container info for multi-container projects
+    container_name = context.get("container_name")
+
     session_manager = get_shell_session_manager()
 
-    session_info = await session_manager.create_session(
-        user_id=user_id,
-        project_id=project_id,
-        db=db,
-        command=command,
-    )
+    try:
+        session_info = await session_manager.create_session(
+            user_id=user_id,
+            project_id=project_id,
+            db=db,
+            command=command,
+            container_name=container_name,
+        )
 
-    session_id = session_info["session_id"]
+        session_id = session_info["session_id"]
 
-    return success_output(
-        message=f"Opened shell session {truncate_session_id(session_id)}",
-        session_id=session_id,
-        details={
-            "command": command
-        }
-    )
+        return success_output(
+            message=f"Opened shell session {session_id}",
+            session_id=session_id,
+            details={
+                "command": command
+            }
+        )
+    except HTTPException as e:
+        if e.status_code == 429:  # Too many sessions
+            # Get existing sessions to help the LLM
+            existing_sessions = await session_manager.list_sessions(user_id, project_id, db)
+
+            session_list = "\n".join([
+                f"  - {s['session_id']} (created: {s['created_at']}, last active: {s['last_activity_at']})"
+                for s in existing_sessions
+            ])
+
+            error_msg = (
+                f"Session limit reached. {len(existing_sessions)} active session(s):\n{session_list}\n\n"
+                f"Options: 1) Use existing session_id with shell_exec, or 2) Close old session with shell_close."
+            )
+
+            raise ValueError(error_msg)
+        else:
+            raise
 
 
 async def shell_close_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -53,7 +77,7 @@ async def shell_close_executor(params: Dict[str, Any], context: Dict[str, Any]) 
     await session_manager.close_session(session_id, db)
 
     return success_output(
-        message=f"Closed shell session {truncate_session_id(session_id)}",
+        message=f"Closed shell session {session_id}",
         session_id=session_id
     )
 
@@ -77,8 +101,8 @@ def register_session_tools(registry):
         },
         executor=shell_open_executor,
         examples=[
-            'shell_open({})',
-            'shell_open({"command": "/bin/sh"})'
+            '{"tool_name": "shell_open", "parameters": {}}',
+            '{"tool_name": "shell_open", "parameters": {"command": "/bin/sh"}}'
         ]
     ))
 
@@ -98,7 +122,7 @@ def register_session_tools(registry):
         },
         executor=shell_close_executor,
         examples=[
-            'shell_close({"session_id": "abc123"})'
+            '{"tool_name": "shell_close", "parameters": {"session_id": "abc123"}}'
         ]
     ))
 
