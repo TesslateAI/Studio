@@ -163,6 +163,9 @@ def create_file_manager_deployment(
     - Executes git clone when containers are added to graph
     - Keeps the PVC mounted so it doesn't become unbound
 
+    NOTE: S3 operations are handled by the backend pod (not here) for security.
+    No AWS credentials are exposed to user-accessible namespaces.
+
     Args:
         namespace: Kubernetes namespace
         project_id: Project UUID
@@ -182,6 +185,7 @@ def create_file_manager_deployment(
     labels["app"] = "file-manager"
 
     # File manager container - just keeps alive
+    # NO AWS credentials here - S3 ops handled securely by backend
     container = client.V1Container(
         name="file-manager",
         image=image,
@@ -313,9 +317,10 @@ def create_container_deployment(
         image=image,
         image_pull_policy=image_pull_policy,
         command=["sh", "-c"],
-        # Check for node_modules before starting - if missing, run npm install first
-        # This prevents crashes when container restarts before npm install completes
-        args=[f"cd {working_dir} && ([ -d node_modules ] || npm install) && exec {startup_command}"],
+        # Run dev server in tmux session so agent can stop/restart without crashing container
+        # PID 1 is immortal tail -f, dev server runs in tmux session "main"
+        # Agent can: tmux send-keys -t main C-c (stop), tmux send-keys -t main 'npm run dev' Enter (start)
+        args=[f"cd {working_dir} && ([ -d node_modules ] || npm install) && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"],
         ports=[
             client.V1ContainerPort(
                 container_port=port,

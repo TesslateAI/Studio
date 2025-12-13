@@ -25,6 +25,8 @@ Key Concepts:
 import asyncio
 import logging
 import time
+import tempfile
+import os
 from typing import Dict, List, Any, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,8 +43,6 @@ from .kubernetes.helpers import (
     create_ingress_manifest,
     create_network_policy_manifest,
     generate_git_clone_script,
-    generate_s3_upload_script,
-    generate_s3_download_script,
 )
 
 logger = logging.getLogger(__name__)
@@ -147,8 +147,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
             )
             await self.k8s_client.create_pvc(pvc, namespace)
 
-            # 4. Copy S3 credentials secret (needed for hibernation operations)
-            await self.k8s_client.copy_s3_credentials_secret(namespace)
+            # 4. S3 credentials NOT copied to project namespace (security)
+            # All S3 operations are handled by the backend pod using boto3
 
             # 5. Copy wildcard TLS secret (needed for HTTPS ingress)
             if self.settings.k8s_wildcard_tls_secret:
@@ -208,8 +208,12 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         try:
             if save_to_s3:
-                # Hibernate: Save to S3 first
-                await self._save_to_s3(project_id, user_id, namespace)
+                # Hibernate: Save to S3 first - CRITICAL: Must succeed before deleting
+                s3_success = await self._save_to_s3(project_id, user_id, namespace)
+                if not s3_success:
+                    # S3 save failed - DO NOT delete namespace to preserve data
+                    logger.error(f"[K8S] ❌ S3 save failed - NOT deleting namespace to preserve data")
+                    raise RuntimeError(f"Cannot hibernate project {project_id_str}: S3 save failed")
 
             # Delete namespace (cascades all resources)
             await asyncio.to_thread(
@@ -293,6 +297,36 @@ class KubernetesOrchestrator(BaseOrchestrator):
             if not pod_name:
                 raise RuntimeError("File manager pod not found after waiting 30 seconds")
 
+            # Check if directory already exists with actual content (not just empty dir)
+            # This prevents skipping git clone when directory exists but is empty
+            check_script = f"""
+if [ -d '{target_dir}' ] && [ -f '{target_dir}/package.json' ]; then
+    file_count=$(ls -1 '{target_dir}' 2>/dev/null | wc -l)
+    echo "EXISTS:$file_count"
+else
+    echo "NOT_EXISTS"
+fi
+"""
+            check_result = await asyncio.to_thread(
+                self.k8s_client._exec_in_pod,
+                pod_name,
+                namespace,
+                "file-manager",
+                ["/bin/sh", "-c", check_script],
+                30
+            )
+            check_result = check_result.strip()
+            logger.info(f"[K8S] Directory check result for {target_dir}: '{check_result}'")
+
+            if check_result.startswith("EXISTS:"):
+                file_count = int(check_result.split(":")[1]) if ":" in check_result else 0
+                if file_count >= 3:  # At least package.json, README.md, and one more file
+                    logger.info(f"[K8S] Directory {target_dir} already exists with {file_count} files, skipping git clone")
+                    return True
+                else:
+                    logger.warning(f"[K8S] Directory {target_dir} exists but only has {file_count} files, will re-clone")
+                    # Fall through to clone
+
             # CRITICAL: git_url is REQUIRED - containers must have a marketplace base with git repo
             if not git_url:
                 raise RuntimeError(
@@ -368,25 +402,39 @@ class KubernetesOrchestrator(BaseOrchestrator):
         logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
 
         try:
+            # Check if project was hibernated (needs S3 restoration)
+            is_hibernated = project.environment_status == 'hibernated'
+
             # Ensure environment exists (check K8s namespace)
             namespace_exists = await self.k8s_client.namespace_exists(namespace)
             if not namespace_exists:
-                await self.ensure_project_environment(project.id, user_id)
+                await self.ensure_project_environment(project.id, user_id, is_hibernated=is_hibernated)
+
+                # Update environment_status to 'active' after restore
+                if is_hibernated:
+                    project.environment_status = 'active'
+                    project.hibernated_at = None
+                    await db.commit()
+                    logger.info(f"[K8S] Restored hibernated project {project.slug} from S3")
 
             # CRITICAL: Initialize container files BEFORE starting
-            # This clones from git or sets up the project directory
-            git_url = None
-            if container.base and hasattr(container.base, 'git_repo_url'):
-                git_url = container.base.git_repo_url
+            # Skip if project was restored from S3 (files already exist)
+            if is_hibernated:
+                logger.info(f"[K8S] Skipping git clone - project restored from S3")
+            else:
+                # This clones from git or sets up the project directory
+                git_url = None
+                if container.base and hasattr(container.base, 'git_repo_url'):
+                    git_url = container.base.git_repo_url
 
-            logger.info(f"[K8S] Initializing files for container {container_directory} (git_url={git_url})")
-            await self.initialize_container_files(
-                project_id=project.id,
-                user_id=user_id,
-                container_id=container.id,
-                container_directory=container_directory,
-                git_url=git_url
-            )
+                logger.info(f"[K8S] Initializing files for container {container_directory} (git_url={git_url})")
+                await self.initialize_container_files(
+                    project_id=project.id,
+                    user_id=user_id,
+                    container_id=container.id,
+                    container_directory=container_directory,
+                    git_url=git_url
+                )
 
             # Get base config for port and startup command
             base_config = None
@@ -591,8 +639,18 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         logger.info(f"[K8S] Starting project {project.slug} with {len(containers)} containers")
 
-        # Ensure environment exists
-        namespace = await self.ensure_project_environment(project.id, user_id)
+        # Check if project was hibernated (needs S3 restoration)
+        is_hibernated = project.environment_status == 'hibernated'
+
+        # Ensure environment exists (with S3 restoration if hibernated)
+        namespace = await self.ensure_project_environment(project.id, user_id, is_hibernated=is_hibernated)
+
+        # Update environment_status to 'active' after restore
+        if is_hibernated:
+            project.environment_status = 'active'
+            project.hibernated_at = None
+            await db.commit()
+            logger.info(f"[K8S] Restored hibernated project {project.slug} from S3")
 
         # Start each container
         container_urls = {}
@@ -785,7 +843,15 @@ class KubernetesOrchestrator(BaseOrchestrator):
             return {"status": "error", "error": str(e)}
 
     # =========================================================================
-    # S3 HIBERNATION/RESTORATION
+    # S3 HIBERNATION/RESTORATION (Secure Backend-Side Operations)
+    # =========================================================================
+    #
+    # SECURITY: S3 credentials NEVER leave the backend pod.
+    # Flow:
+    #   Save:    Pod zip → Backend (via k8s stream) → S3 (via boto3)
+    #   Restore: S3 (via boto3) → Backend → Pod (via k8s stream) → unzip
+    #
+    # This prevents exposing AWS credentials to user-accessible namespaces.
     # =========================================================================
 
     async def _save_to_s3(
@@ -794,39 +860,114 @@ class KubernetesOrchestrator(BaseOrchestrator):
         user_id: UUID,
         namespace: str
     ) -> bool:
-        """Save project files to S3 (for hibernation)."""
-        s3_key = f"{self.settings.s3_projects_prefix}/{user_id}/{project_id}/latest.zip"
+        """
+        Save project files to S3 (for hibernation) - SECURE VERSION.
 
-        logger.info(f"[K8S:HIBERNATE] Saving project to S3: {s3_key}")
+        Flow:
+        1. Execute zip in file-manager pod (creates /tmp/project.zip)
+        2. Copy zip from pod to backend temp directory (via k8s stream API)
+        3. Upload to S3 using boto3 (credentials stay in backend)
+        4. Cleanup temp files
+        """
+        logger.info(f"[K8S:HIBERNATE] Saving project {project_id} to S3 (secure)")
 
+        temp_zip = None
         try:
+            # 1. Get file-manager pod
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
             if not pod_name:
                 logger.warning("[K8S:HIBERNATE] No file-manager pod, skipping S3 save")
                 return False
 
-            script = generate_s3_upload_script(
-                s3_bucket=self.settings.s3_bucket_name,
-                s3_key=s3_key,
-                s3_endpoint=self.settings.s3_endpoint_url,
-                s3_region=self.settings.s3_region
-            )
-
+            # 2. Create zip in pod (excluding node_modules, .git, etc.)
+            # Use */pattern/* to match in subdirectories (e.g., next-js-15/node_modules)
+            zip_script = '''
+cd /app
+rm -f /tmp/project.zip
+zip -r -q /tmp/project.zip . \
+    -x "*/node_modules/*" \
+    -x "node_modules/*" \
+    -x "*/.git/*" \
+    -x ".git/*" \
+    -x "*/__pycache__/*" \
+    -x "__pycache__/*" \
+    -x "*/.next/*" \
+    -x ".next/*" \
+    -x "*.pyc" \
+    -x ".DS_Store" \
+    -x "*.log"
+echo "ZIP_SIZE=$(stat -f%z /tmp/project.zip 2>/dev/null || stat -c%s /tmp/project.zip)"
+'''
             result = await asyncio.to_thread(
                 self.k8s_client._exec_in_pod,
                 pod_name,
                 namespace,
                 "file-manager",
-                ["/bin/sh", "-c", script],
+                ["/bin/sh", "-c", zip_script],
                 timeout=120
             )
+            logger.info(f"[K8S:HIBERNATE] Zip created in pod: {result.strip()}")
 
-            logger.info(f"[K8S:HIBERNATE] ✅ Project saved to S3")
+            # 3. Copy zip from pod to backend temp directory
+            temp_fd, temp_zip = tempfile.mkstemp(suffix='.zip', prefix='tesslate-hibernate-')
+            os.close(temp_fd)
+
+            await self.k8s_client.copy_file_from_pod(
+                pod_name=pod_name,
+                namespace=namespace,
+                container_name="file-manager",
+                pod_path="/tmp/project.zip",
+                local_path=temp_zip,
+                timeout=300  # 5 min for large projects
+            )
+
+            file_size_mb = os.path.getsize(temp_zip) / (1024 * 1024)
+            logger.info(f"[K8S:HIBERNATE] Copied zip to backend: {file_size_mb:.2f} MB")
+
+            # 4. Upload to S3 using s3_manager (boto3 - credentials in backend only)
+            from ..s3_manager import get_s3_manager
+            s3_manager = get_s3_manager()
+            s3_key = s3_manager._get_project_key(user_id, project_id)
+
+            await asyncio.to_thread(
+                s3_manager.s3_client.upload_file,
+                temp_zip,
+                s3_manager.bucket_name,
+                s3_key,
+                ExtraArgs={
+                    'ContentType': 'application/zip',
+                    'Metadata': {
+                        'user_id': str(user_id),
+                        'project_id': str(project_id),
+                    }
+                }
+            )
+
+            logger.info(f"[K8S:HIBERNATE] ✅ Project saved to S3: {s3_key} ({file_size_mb:.2f} MB)")
+
+            # 5. Cleanup zip in pod
+            await asyncio.to_thread(
+                self.k8s_client._exec_in_pod,
+                pod_name,
+                namespace,
+                "file-manager",
+                ["/bin/sh", "-c", "rm -f /tmp/project.zip"],
+                timeout=10
+            )
+
             return True
 
         except Exception as e:
-            logger.error(f"[K8S:HIBERNATE] Error saving to S3: {e}")
+            logger.error(f"[K8S:HIBERNATE] Error saving to S3: {e}", exc_info=True)
             return False
+
+        finally:
+            # Cleanup local temp file
+            if temp_zip and os.path.exists(temp_zip):
+                try:
+                    os.remove(temp_zip)
+                except Exception:
+                    pass
 
     async def _restore_from_s3(
         self,
@@ -834,38 +975,89 @@ class KubernetesOrchestrator(BaseOrchestrator):
         user_id: UUID,
         namespace: str
     ) -> bool:
-        """Restore project files from S3 (after hibernation)."""
-        s3_key = f"{self.settings.s3_projects_prefix}/{user_id}/{project_id}/latest.zip"
+        """
+        Restore project files from S3 (after hibernation) - SECURE VERSION.
 
-        logger.info(f"[K8S:RESTORE] Restoring project from S3: {s3_key}")
+        Flow:
+        1. Download from S3 to backend temp directory (via boto3)
+        2. Copy zip from backend to pod (via k8s stream API)
+        3. Execute unzip in file-manager pod
+        4. Cleanup temp files
+        """
+        logger.info(f"[K8S:RESTORE] Restoring project {project_id} from S3 (secure)")
 
+        temp_zip = None
         try:
+            # 1. Check if project exists in S3
+            from ..s3_manager import get_s3_manager
+            s3_manager = get_s3_manager()
+
+            if not await s3_manager.project_exists(user_id, project_id):
+                logger.warning(f"[K8S:RESTORE] No S3 archive found for project {project_id}")
+                return False
+
+            # 2. Download from S3 to backend temp directory
+            temp_fd, temp_zip = tempfile.mkstemp(suffix='.zip', prefix='tesslate-restore-')
+            os.close(temp_fd)
+
+            s3_key = s3_manager._get_project_key(user_id, project_id)
+            await asyncio.to_thread(
+                s3_manager.s3_client.download_file,
+                s3_manager.bucket_name,
+                s3_key,
+                temp_zip
+            )
+
+            file_size_mb = os.path.getsize(temp_zip) / (1024 * 1024)
+            logger.info(f"[K8S:RESTORE] Downloaded from S3: {file_size_mb:.2f} MB")
+
+            # 3. Get file-manager pod
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
             if not pod_name:
                 raise RuntimeError("File manager pod not found")
 
-            script = generate_s3_download_script(
-                s3_bucket=self.settings.s3_bucket_name,
-                s3_key=s3_key,
-                s3_endpoint=self.settings.s3_endpoint_url,
-                s3_region=self.settings.s3_region
+            # 4. Copy zip from backend to pod
+            await self.k8s_client.copy_file_to_pod(
+                pod_name=pod_name,
+                namespace=namespace,
+                container_name="file-manager",
+                local_path=temp_zip,
+                pod_path="/tmp/project.zip",
+                timeout=300  # 5 min for large projects
             )
+            logger.info(f"[K8S:RESTORE] Copied zip to pod")
 
+            # 5. Extract zip in pod
+            unzip_script = '''
+cd /app
+unzip -o -q /tmp/project.zip
+rm -f /tmp/project.zip
+echo "FILES_RESTORED=$(ls -1 /app | wc -l)"
+'''
             result = await asyncio.to_thread(
                 self.k8s_client._exec_in_pod,
                 pod_name,
                 namespace,
                 "file-manager",
-                ["/bin/sh", "-c", script],
+                ["/bin/sh", "-c", unzip_script],
                 timeout=120
             )
+            logger.info(f"[K8S:RESTORE] Extracted in pod: {result.strip()}")
 
             logger.info(f"[K8S:RESTORE] ✅ Project restored from S3")
             return True
 
         except Exception as e:
-            logger.error(f"[K8S:RESTORE] Error restoring from S3: {e}")
+            logger.error(f"[K8S:RESTORE] Error restoring from S3: {e}", exc_info=True)
             return False
+
+        finally:
+            # Cleanup local temp file
+            if temp_zip and os.path.exists(temp_zip):
+                try:
+                    os.remove(temp_zip)
+                except Exception:
+                    pass
 
     async def hibernate_project(
         self,
@@ -1210,7 +1402,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         Projects are considered idle if last_activity is older than threshold.
         """
         from datetime import datetime, timedelta, timezone
-        from sqlalchemy import select
+        from sqlalchemy import select, or_
         from ...database import AsyncSessionLocal
         from ...models import Project
 
@@ -1226,10 +1418,14 @@ class KubernetesOrchestrator(BaseOrchestrator):
             async with AsyncSessionLocal() as db:
                 # Find projects with running K8s environments that are idle
                 # environment_status='active' means K8s resources exist
+                # Include projects where last_activity is NULL (never tracked) or older than cutoff
                 result = await db.execute(
                     select(Project).where(
                         Project.environment_status == 'active',
-                        Project.last_activity < cutoff_time
+                        or_(
+                            Project.last_activity < cutoff_time,
+                            Project.last_activity.is_(None)
+                        )
                     )
                 )
                 idle_projects = result.scalars().all()
@@ -1237,12 +1433,15 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 logger.info(f"[K8S:CLEANUP] Found {len(idle_projects)} idle projects")
 
                 for project in idle_projects:
-                    idle_minutes = (datetime.now(timezone.utc) - project.last_activity).total_seconds() / 60
-                    logger.info(f"[K8S:CLEANUP] Hibernating project {project.slug} (idle {idle_minutes:.1f} min)")
+                    if project.last_activity:
+                        idle_minutes = (datetime.now(timezone.utc) - project.last_activity).total_seconds() / 60
+                        logger.info(f"[K8S:CLEANUP] Hibernating project {project.slug} (idle {idle_minutes:.1f} min)")
+                    else:
+                        logger.info(f"[K8S:CLEANUP] Hibernating project {project.slug} (no activity tracked)")
 
                     try:
                         # Hibernate project (S3 upload + delete namespace)
-                        await self.hibernate_project(project.id, project.user_id)
+                        await self.hibernate_project(project.id, project.owner_id)
 
                         # Update database status
                         project.environment_status = 'hibernated'

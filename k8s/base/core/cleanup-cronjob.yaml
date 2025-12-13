@@ -28,7 +28,7 @@ spec:
           containers:
           - name: cleanup
             image: tesslate-backend:latest  # Overridden by kustomization images
-            imagePullPolicy: IfNotPresent
+            imagePullPolicy: Always  # Always pull to get latest code changes
             command: ["python", "-c"]
             args:
               - |

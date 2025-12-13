@@ -776,6 +776,205 @@ class KubernetesClient:
             logger.error(f"[K8S:EXEC] Command failed in pod {pod_name}: {e}", exc_info=True)
             raise RuntimeError(f"Failed to execute command in pod: {str(e)}") from e
 
+    def _copy_from_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        pod_path: str,
+        local_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """
+        Copy a file from a pod to local filesystem using tar stream.
+
+        This is a secure alternative to putting AWS credentials in pods.
+        The file is streamed directly to the backend without using kubectl CLI.
+
+        Args:
+            pod_name: Name of the pod
+            namespace: Namespace
+            container_name: Container name within pod
+            pod_path: Path to file in the pod (e.g., /tmp/project.zip)
+            local_path: Local destination path
+            timeout: Command timeout in seconds
+
+        Returns:
+            True if successful
+        """
+        import base64
+
+        try:
+            logger.info(f"[K8S:COPY] Copying from pod: {pod_path} -> {local_path}")
+
+            stream_client = self._get_stream_client()
+
+            # Use base64 encoding to safely transfer binary data over WebSocket
+            # This avoids all encoding issues with the kubernetes stream API
+            command = ['sh', '-c', f'base64 < {pod_path}']
+
+            resp = stream(
+                stream_client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container_name,
+                command=command,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+                _request_timeout=timeout
+            )
+
+            # Read base64-encoded data (safe ASCII text)
+            base64_data = ''
+            while resp.is_open():
+                resp.update(timeout=timeout)
+                if resp.peek_stdout():
+                    chunk = resp.read_stdout()
+                    if chunk:
+                        base64_data += chunk
+                if resp.peek_stderr():
+                    stderr = resp.read_stderr()
+                    if stderr:
+                        logger.debug(f"[K8S:COPY] stderr: {stderr}")
+            resp.close()
+
+            if not base64_data:
+                raise RuntimeError(f"No data received from pod for {pod_path}")
+
+            # Decode base64 and write to file
+            local_dir = os.path.dirname(local_path)
+            os.makedirs(local_dir, exist_ok=True)
+
+            # Remove any whitespace from base64 data
+            base64_data = base64_data.replace('\n', '').replace('\r', '').strip()
+            file_data = base64.b64decode(base64_data)
+
+            with open(local_path, 'wb') as f:
+                f.write(file_data)
+
+            logger.info(f"[K8S:COPY] ✅ Copied from pod: {pod_path} ({os.path.getsize(local_path)} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"[K8S:COPY] Failed to copy from pod: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to copy file from pod: {str(e)}") from e
+
+    def _copy_to_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        local_path: str,
+        pod_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """
+        Copy a file from local filesystem to a pod using tar stream.
+
+        This is a secure alternative to putting AWS credentials in pods.
+        The file is streamed directly from the backend without using kubectl CLI.
+
+        Args:
+            pod_name: Name of the pod
+            namespace: Namespace
+            container_name: Container name within pod
+            local_path: Local source file path
+            pod_path: Destination path in the pod
+            timeout: Command timeout in seconds
+
+        Returns:
+            True if successful
+        """
+        import tarfile
+        import io
+
+        try:
+            logger.info(f"[K8S:COPY] Copying to pod: {local_path} -> {pod_path}")
+
+            if not os.path.exists(local_path):
+                raise RuntimeError(f"Local file does not exist: {local_path}")
+
+            stream_client = self._get_stream_client()
+
+            # Create tar archive in memory
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                tar.add(local_path, arcname=os.path.basename(pod_path))
+            tar_stream.seek(0)
+            tar_data = tar_stream.read()
+
+            # Use tar to extract file in pod
+            pod_dir = os.path.dirname(pod_path)
+            command = ['tar', 'xf', '-', '-C', pod_dir]
+
+            resp = stream(
+                stream_client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container_name,
+                command=command,
+                stderr=True,
+                stdin=True,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+                _request_timeout=timeout
+            )
+
+            # Send tar data to stdin
+            resp.write_stdin(tar_data)
+            resp.close()
+
+            logger.info(f"[K8S:COPY] ✅ Copied to pod: {pod_path} ({len(tar_data)} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"[K8S:COPY] Failed to copy to pod: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to copy file to pod: {str(e)}") from e
+
+    async def copy_file_from_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        pod_path: str,
+        local_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """Async wrapper for _copy_from_pod."""
+        return await asyncio.to_thread(
+            self._copy_from_pod,
+            pod_name,
+            namespace,
+            container_name,
+            pod_path,
+            local_path,
+            timeout
+        )
+
+    async def copy_file_to_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        local_path: str,
+        pod_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """Async wrapper for _copy_to_pod."""
+        return await asyncio.to_thread(
+            self._copy_to_pod,
+            pod_name,
+            namespace,
+            container_name,
+            local_path,
+            pod_path,
+            timeout
+        )
+
     async def get_pod_for_deployment(
         self,
         deployment_name: str,

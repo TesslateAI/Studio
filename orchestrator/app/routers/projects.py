@@ -1302,7 +1302,22 @@ async def _perform_project_deletion(
             # Kubernetes mode: Delete K8s resources and S3 archive
             logger.info(f"[DELETE] Kubernetes mode: Cleaning up K8s resources and S3...")
 
-            # 4a. Delete Kubernetes namespace and all resources
+            # 4a. Copy S3 archive to deleted/ prefix for backup retention
+            if settings.k8s_use_s3_storage:
+                try:
+                    from ..services.s3_manager import get_s3_manager
+                    s3_manager = get_s3_manager()
+
+                    success, error = await s3_manager.copy_to_deleted(user_id, project_id)
+                    if success:
+                        logger.info(f"[DELETE] Archived project {project_id} to deleted/ prefix")
+                    else:
+                        logger.warning(f"[DELETE] Failed to archive to deleted/: {error}")
+                except Exception as e:
+                    logger.warning(f"[DELETE] Error archiving to deleted/: {e}")
+                    # Continue with deletion even if archive fails
+
+            # 4b. Delete Kubernetes namespace and all resources
             try:
                 # Delete entire namespace (cascades to all pods, services, ingresses, PVCs)
                 await orchestrator.delete_project_namespace(
@@ -1313,9 +1328,9 @@ async def _perform_project_deletion(
             except Exception as e:
                 logger.warning(f"[DELETE] Error deleting K8s resources: {e}")
 
-            task.update_progress(85, 100, "Deleting S3 archive...")
+            task.update_progress(85, 100, "Cleaning up active S3 archive...")
 
-            # 4b. Delete S3 archive (permanent storage)
+            # 4c. Delete active S3 archive (backup already saved to deleted/ prefix)
             if settings.k8s_use_s3_storage:
                 try:
                     from ..services.s3_manager import get_s3_manager
@@ -4313,7 +4328,12 @@ async def stop_single_container(
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
-        await orchestrator.stop_container(project.slug, container.name)
+        await orchestrator.stop_container(
+            project_slug=project.slug,
+            project_id=project.id,
+            container_name=container.name,
+            user_id=current_user.id
+        )
 
         logger.info(f"[ORCHESTRATION] Stopped container {container.name} in project {project.slug}")
 
