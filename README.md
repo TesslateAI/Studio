@@ -6,7 +6,7 @@
 
 **The Open-Source AI Development Platform Built for Self-Hosting**
 
-AI-powered development environment with advanced agent orchestration - designed for complete data sovereignty and infrastructure control.
+AI-powered development environment with advanced agent orchestration, designed for complete data sovereignty and infrastructure control.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
