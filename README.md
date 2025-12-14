@@ -263,37 +263,37 @@ So we built Tesslate Studio as infrastructure-first: Docker for simple deploymen
 Tesslate Studio creates **isolated containerized environments** for each project:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Your Machine / Your Cloud / Your Datacenter       │
-├─────────────────────────────────────────────────────┤
-│                                                     │
+┌───────────────────────────────────────────────────┐
+│  Your Machine / Your Cloud / Your Datacenter      │
+├───────────────────────────────────────────────────┤
+│                                                   │
 │  ┌──────────────────────────────────────────┐     │
-│  │  Tesslate Studio (You control this)     │     │
-│  │                                           │     │
+│  │  Tesslate Studio (You control this)      │     │
+│  │                                          │     │
 │  │  • FastAPI Orchestrator (Python)         │     │
 │  │  • React Frontend (TypeScript)           │     │
-│  │  • PostgreSQL Database                    │     │
-│  │  • AI Agent Marketplace                   │     │
+│  │  • PostgreSQL Database                   │     │
+│  │  • AI Agent Marketplace                  │     │
 │  └───────────┬──────────────────────────────┘     │
-│              │                                      │
-│              ▼                                      │
+│              │                                    │
+│              ▼                                    │
 │  ┌──────────────────────────────────────────┐     │
 │  │  Project Containers (Isolated)           │     │
-│  │                                           │     │
+│  │                                          │     │
 │  │  todo-app.studio.localhost               │     │
 │  │  dashboard.studio.localhost              │     │
 │  │  prototype.studio.localhost              │     │
 │  └──────────────────────────────────────────┘     │
-│                                                     │
+│                                                   │
 │  ┌──────────────────────────────────────────┐     │
 │  │  Your AI Models (You choose)             │     │
-│  │                                           │     │
+│  │                                          │     │
 │  │  • OpenAI GPT-5 (API)                    │     │
 │  │  • Anthropic Claude (API)                │     │
 │  │  • Local LLMs via Ollama                 │     │
 │  │  • Or any LiteLLM-compatible provider    │     │
 │  └──────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────┘
 ```
 
 **Key Architecture Principles:**
