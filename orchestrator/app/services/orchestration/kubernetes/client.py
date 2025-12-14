@@ -104,6 +104,27 @@ class KubernetesClient:
             else:
                 raise
 
+    async def namespace_exists(self, namespace: str) -> bool:
+        """
+        Check if a Kubernetes namespace exists.
+
+        Args:
+            namespace: Namespace name to check
+
+        Returns:
+            True if namespace exists, False otherwise
+        """
+        try:
+            await asyncio.to_thread(
+                self.core_v1.read_namespace,
+                name=namespace
+            )
+            return True
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            raise
+
     async def create_network_policy(self, namespace: str, project_id: str) -> None:
         """
         Create NetworkPolicy for project isolation.
@@ -219,6 +240,194 @@ class KubernetesClient:
             body=network_policy
         )
         logger.info(f"[K8S] ✅ Created NetworkPolicy: {policy_name} in {namespace}")
+
+    async def apply_network_policy(
+        self,
+        network_policy: client.V1NetworkPolicy,
+        namespace: str
+    ) -> None:
+        """
+        Apply a NetworkPolicy manifest (create or update).
+
+        Args:
+            network_policy: NetworkPolicy manifest
+            namespace: Namespace to apply to
+        """
+        if not self.settings.k8s_enable_network_policies:
+            logger.debug(f"[K8S] NetworkPolicy creation disabled, skipping")
+            return
+
+        policy_name = network_policy.metadata.name
+
+        try:
+            await asyncio.to_thread(
+                self.networking_v1.create_namespaced_network_policy,
+                namespace=namespace,
+                body=network_policy
+            )
+            logger.info(f"[K8S] ✅ Created NetworkPolicy: {policy_name}")
+        except ApiException as e:
+            if e.status == 409:
+                logger.debug(f"[K8S] NetworkPolicy {policy_name} exists, updating...")
+                await asyncio.to_thread(
+                    self.networking_v1.patch_namespaced_network_policy,
+                    name=policy_name,
+                    namespace=namespace,
+                    body=network_policy
+                )
+                logger.info(f"[K8S] ✅ Updated NetworkPolicy: {policy_name}")
+            else:
+                raise
+
+    async def copy_s3_credentials_secret(
+        self,
+        target_namespace: str,
+        source_namespace: str = None,
+        secret_name: str = None
+    ) -> None:
+        """
+        Copy S3 credentials secret from source namespace to target namespace.
+
+        This is required for the S3 Sandwich pattern - user project pods need
+        access to S3/MinIO credentials for hydration/dehydration.
+
+        Args:
+            target_namespace: Namespace to copy the secret to
+            source_namespace: Namespace to copy from (defaults to tesslate)
+            secret_name: Name of the secret (defaults to k8s_s3_credentials_secret)
+        """
+        if source_namespace is None:
+            source_namespace = self.settings.k8s_default_namespace
+        if secret_name is None:
+            secret_name = self.settings.k8s_s3_credentials_secret
+
+        # Check if secret already exists in target namespace
+        try:
+            await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=target_namespace
+            )
+            logger.debug(f"[K8S] Secret {secret_name} already exists in {target_namespace}")
+            return
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+        # Read secret from source namespace
+        try:
+            source_secret = await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=source_namespace
+            )
+        except ApiException as e:
+            if e.status == 404:
+                logger.warning(f"[K8S] S3 credentials secret {secret_name} not found in {source_namespace}")
+                return
+            raise
+
+        # Create new secret in target namespace (copy data, new metadata)
+        new_secret = client.V1Secret(
+            metadata=client.V1ObjectMeta(
+                name=secret_name,
+                namespace=target_namespace,
+                labels={
+                    "app": "tesslate",
+                    "managed-by": "tesslate-backend",
+                    "copied-from": source_namespace
+                }
+            ),
+            type=source_secret.type,
+            data=source_secret.data
+        )
+
+        await asyncio.to_thread(
+            self.core_v1.create_namespaced_secret,
+            namespace=target_namespace,
+            body=new_secret
+        )
+        logger.info(f"[K8S] ✅ Copied S3 credentials secret to {target_namespace}")
+
+    async def copy_wildcard_tls_secret(
+        self,
+        target_namespace: str,
+        source_namespace: str = None,
+        secret_name: str = None
+    ) -> bool:
+        """
+        Copy wildcard TLS secret from source namespace to target namespace.
+
+        This is required for HTTPS ingress in project namespaces - the wildcard
+        certificate needs to be available in each project namespace for TLS termination.
+
+        Args:
+            target_namespace: Namespace to copy the secret to
+            source_namespace: Namespace to copy from (defaults to tesslate)
+            secret_name: Name of the secret (defaults to k8s_wildcard_tls_secret)
+
+        Returns:
+            True if copied successfully, False if secret doesn't exist in source
+        """
+        if source_namespace is None:
+            source_namespace = self.settings.k8s_default_namespace
+        if secret_name is None:
+            secret_name = self.settings.k8s_wildcard_tls_secret
+
+        # Skip if no TLS secret configured (e.g., local dev without TLS)
+        if not secret_name:
+            logger.debug(f"[K8S] No wildcard TLS secret configured, skipping copy")
+            return False
+
+        # Check if secret already exists in target namespace
+        try:
+            await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=target_namespace
+            )
+            logger.debug(f"[K8S] TLS secret {secret_name} already exists in {target_namespace}")
+            return True
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+        # Read secret from source namespace
+        try:
+            source_secret = await asyncio.to_thread(
+                self.core_v1.read_namespaced_secret,
+                name=secret_name,
+                namespace=source_namespace
+            )
+        except ApiException as e:
+            if e.status == 404:
+                logger.warning(f"[K8S] Wildcard TLS secret {secret_name} not found in {source_namespace}")
+                return False
+            raise
+
+        # Create new secret in target namespace (copy data, new metadata)
+        # TLS secrets have type kubernetes.io/tls
+        new_secret = client.V1Secret(
+            metadata=client.V1ObjectMeta(
+                name=secret_name,
+                namespace=target_namespace,
+                labels={
+                    "app": "tesslate",
+                    "managed-by": "tesslate-backend",
+                    "copied-from": source_namespace
+                }
+            ),
+            type=source_secret.type,
+            data=source_secret.data
+        )
+
+        await asyncio.to_thread(
+            self.core_v1.create_namespaced_secret,
+            namespace=target_namespace,
+            body=new_secret
+        )
+        logger.info(f"[K8S] ✅ Copied wildcard TLS secret to {target_namespace}")
+        return True
 
     def get_project_namespace(self, project_id: str) -> str:
         """
@@ -502,6 +711,21 @@ class KubernetesClient:
     # POD OPERATIONS
     # =========================================================================
 
+    def _get_stream_client(self) -> client.CoreV1Api:
+        """
+        Create a fresh CoreV1Api client for stream operations.
+
+        IMPORTANT: The kubernetes-python `stream()` function temporarily patches
+        the api_client.request method to use WebSocket. If we use the shared
+        self.core_v1 client, concurrent regular API calls (like read_namespace)
+        will accidentally use the WebSocket-patched method, causing errors like:
+        "WebSocketBadStatusException: Handshake status 200 OK"
+
+        By creating a fresh client for each stream operation, we isolate the
+        WebSocket patching and prevent it from affecting other concurrent calls.
+        """
+        return client.CoreV1Api()
+
     def _exec_in_pod(
         self,
         pod_name: str,
@@ -526,8 +750,13 @@ class KubernetesClient:
         try:
             logger.debug(f"[K8S:EXEC] Executing in pod {pod_name}: {' '.join(command[:3])}...")
 
+            # Use a fresh client for stream operations to avoid concurrency issues
+            # The stream() function patches api_client.request to use WebSocket,
+            # which would break concurrent regular API calls if using shared client
+            stream_client = self._get_stream_client()
+
             resp = stream(
-                self.core_v1.connect_get_namespaced_pod_exec,
+                stream_client.connect_get_namespaced_pod_exec,
                 pod_name,
                 namespace,
                 container=container_name,
@@ -547,18 +776,238 @@ class KubernetesClient:
             logger.error(f"[K8S:EXEC] Command failed in pod {pod_name}: {e}", exc_info=True)
             raise RuntimeError(f"Failed to execute command in pod: {str(e)}") from e
 
+    def _copy_from_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        pod_path: str,
+        local_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """
+        Copy a file from a pod to local filesystem using tar stream.
+
+        This is a secure alternative to putting AWS credentials in pods.
+        The file is streamed directly to the backend without using kubectl CLI.
+
+        Args:
+            pod_name: Name of the pod
+            namespace: Namespace
+            container_name: Container name within pod
+            pod_path: Path to file in the pod (e.g., /tmp/project.zip)
+            local_path: Local destination path
+            timeout: Command timeout in seconds
+
+        Returns:
+            True if successful
+        """
+        import base64
+
+        try:
+            logger.info(f"[K8S:COPY] Copying from pod: {pod_path} -> {local_path}")
+
+            stream_client = self._get_stream_client()
+
+            # Use base64 encoding to safely transfer binary data over WebSocket
+            # This avoids all encoding issues with the kubernetes stream API
+            command = ['sh', '-c', f'base64 < {pod_path}']
+
+            resp = stream(
+                stream_client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container_name,
+                command=command,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+                _request_timeout=timeout
+            )
+
+            # Read base64-encoded data (safe ASCII text)
+            base64_data = ''
+            while resp.is_open():
+                resp.update(timeout=timeout)
+                if resp.peek_stdout():
+                    chunk = resp.read_stdout()
+                    if chunk:
+                        base64_data += chunk
+                if resp.peek_stderr():
+                    stderr = resp.read_stderr()
+                    if stderr:
+                        logger.debug(f"[K8S:COPY] stderr: {stderr}")
+            resp.close()
+
+            if not base64_data:
+                raise RuntimeError(f"No data received from pod for {pod_path}")
+
+            # Decode base64 and write to file
+            local_dir = os.path.dirname(local_path)
+            os.makedirs(local_dir, exist_ok=True)
+
+            # Remove any whitespace from base64 data
+            base64_data = base64_data.replace('\n', '').replace('\r', '').strip()
+            file_data = base64.b64decode(base64_data)
+
+            with open(local_path, 'wb') as f:
+                f.write(file_data)
+
+            logger.info(f"[K8S:COPY] ✅ Copied from pod: {pod_path} ({os.path.getsize(local_path)} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"[K8S:COPY] Failed to copy from pod: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to copy file from pod: {str(e)}") from e
+
+    def _copy_to_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        local_path: str,
+        pod_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """
+        Copy a file from local filesystem to a pod using tar stream.
+
+        This is a secure alternative to putting AWS credentials in pods.
+        The file is streamed directly from the backend without using kubectl CLI.
+
+        Args:
+            pod_name: Name of the pod
+            namespace: Namespace
+            container_name: Container name within pod
+            local_path: Local source file path
+            pod_path: Destination path in the pod
+            timeout: Command timeout in seconds
+
+        Returns:
+            True if successful
+        """
+        import tarfile
+        import io
+
+        try:
+            logger.info(f"[K8S:COPY] Copying to pod: {local_path} -> {pod_path}")
+
+            if not os.path.exists(local_path):
+                raise RuntimeError(f"Local file does not exist: {local_path}")
+
+            stream_client = self._get_stream_client()
+
+            # Create tar archive in memory
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                tar.add(local_path, arcname=os.path.basename(pod_path))
+            tar_stream.seek(0)
+            tar_data = tar_stream.read()
+
+            # Use tar to extract file in pod
+            pod_dir = os.path.dirname(pod_path)
+            command = ['tar', 'xf', '-', '-C', pod_dir]
+
+            resp = stream(
+                stream_client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container_name,
+                command=command,
+                stderr=True,
+                stdin=True,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+                _request_timeout=timeout
+            )
+
+            # Send tar data to stdin
+            resp.write_stdin(tar_data)
+            resp.close()
+
+            logger.info(f"[K8S:COPY] ✅ Copied to pod: {pod_path} ({len(tar_data)} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"[K8S:COPY] Failed to copy to pod: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to copy file to pod: {str(e)}") from e
+
+    async def copy_file_from_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        pod_path: str,
+        local_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """Async wrapper for _copy_from_pod."""
+        return await asyncio.to_thread(
+            self._copy_from_pod,
+            pod_name,
+            namespace,
+            container_name,
+            pod_path,
+            local_path,
+            timeout
+        )
+
+    async def copy_file_to_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        local_path: str,
+        pod_path: str,
+        timeout: int = 120
+    ) -> bool:
+        """Async wrapper for _copy_to_pod."""
+        return await asyncio.to_thread(
+            self._copy_to_pod,
+            pod_name,
+            namespace,
+            container_name,
+            local_path,
+            pod_path,
+            timeout
+        )
+
     async def get_pod_for_deployment(
         self,
         deployment_name: str,
-        namespace: str
+        namespace: str,
+        use_prefix_match: bool = False
     ) -> Optional[str]:
-        """Get a ready pod name for a deployment."""
+        """Get a ready pod name for a deployment.
+
+        Args:
+            deployment_name: Deployment name or prefix if use_prefix_match=True
+            namespace: Kubernetes namespace
+            use_prefix_match: If True, match any pod whose app label starts with deployment_name
+        """
         try:
-            pods = await asyncio.to_thread(
-                self.core_v1.list_namespaced_pod,
-                namespace=namespace,
-                label_selector=f"app={deployment_name}"
-            )
+            if use_prefix_match:
+                # Get all pods in namespace and filter by prefix
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace
+                )
+                # Filter by app label prefix
+                matching_pods = []
+                for pod in pods.items:
+                    app_label = pod.metadata.labels.get("app", "") if pod.metadata.labels else ""
+                    if app_label.startswith(deployment_name):
+                        matching_pods.append(pod)
+                pods.items = matching_pods
+            else:
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace,
+                    label_selector=f"app={deployment_name}"
+                )
 
             for pod in pods.items:
                 if pod.status.phase == "Running":
@@ -581,6 +1030,45 @@ class KubernetesClient:
             if condition.type == "Ready":
                 return condition.status == "True"
         return False
+
+    async def get_file_manager_pod(self, namespace: str) -> Optional[str]:
+        """
+        Get the file-manager pod name in a namespace.
+
+        The file-manager pod is the always-running pod that handles
+        file operations when no dev containers are running.
+
+        Args:
+            namespace: Namespace to search
+
+        Returns:
+            Pod name if found, None otherwise
+        """
+        try:
+            pods = await asyncio.to_thread(
+                self.core_v1.list_namespaced_pod,
+                namespace=namespace,
+                label_selector="app=file-manager"
+            )
+
+            for pod in pods.items:
+                if pod.status.phase == "Running":
+                    if pod.status.container_statuses:
+                        for cs in pod.status.container_statuses:
+                            if cs.ready:
+                                return pod.metadata.name
+
+            logger.debug(f"[K8S] No ready file-manager pod found in {namespace}")
+            return None
+
+        except ApiException as e:
+            if e.status == 404:
+                return None
+            logger.error(f"[K8S] Error getting file-manager pod: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[K8S] Error getting file-manager pod: {e}")
+            return None
 
     async def wait_for_deployment_ready(
         self,
@@ -620,20 +1108,27 @@ class KubernetesClient:
         project_id: str,
         file_path: str,
         container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
+        project_slug: Optional[str] = None,
+        subdir: Optional[str] = None
     ) -> Optional[str]:
         """Read a file from a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
             safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/{safe_path}"
+            # Include subdir for multi-container projects
+            if subdir:
+                full_path = f"/app/{subdir}/{safe_path}"
+            else:
+                full_path = f"/app/{safe_path}"
 
             # Check if file exists
             check_cmd = ["/bin/sh", "-c", f"test -f {shlex.quote(full_path)} && echo exists || echo notfound"]
@@ -676,20 +1171,27 @@ class KubernetesClient:
         file_path: str,
         content: str,
         container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
+        project_slug: Optional[str] = None,
+        subdir: Optional[str] = None
     ) -> bool:
         """Write a file to a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
             safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/{safe_path}"
+            # Include subdir for multi-container projects
+            if subdir:
+                full_path = f"/app/{subdir}/{safe_path}"
+            else:
+                full_path = f"/app/{safe_path}"
 
             # Ensure parent directory exists
             dir_path = os.path.dirname(full_path)
@@ -742,7 +1244,9 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
@@ -782,7 +1286,9 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace)
+            # Use prefix match if no specific container, to find any pod for this project
+            use_prefix = container_name is None
+            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
@@ -793,9 +1299,10 @@ class KubernetesClient:
             else:
                 full_path = f"/app/{safe_dir}"
 
+            # Use ls -la instead of find -printf (BusyBox find doesn't support -printf)
             list_cmd = [
                 "/bin/sh", "-c",
-                f"cd {shlex.quote(full_path)} && find . -maxdepth 1 -mindepth 1 -printf '%y %s %p\\n' | sort"
+                f"cd {shlex.quote(full_path)} && ls -la"
             ]
 
             output = await asyncio.to_thread(
@@ -812,13 +1319,19 @@ class KubernetesClient:
                 if not line:
                     continue
 
-                parts = line.split(' ', 2)
-                if len(parts) < 3:
+                # Parse ls -la output: drwxr-xr-x 2 user group 4096 Dec 10 12:00 filename
+                parts = line.split()
+                if len(parts) < 9:
                     continue
 
-                file_type = "directory" if parts[0] == 'd' else "file"
-                size = int(parts[1]) if parts[1].isdigit() else 0
-                name = parts[2].lstrip('./')
+                # Skip total line and . / .. entries
+                name = parts[-1]
+                if name in ('.', '..', 'total') or line.startswith('total'):
+                    continue
+
+                perms = parts[0]
+                file_type = "directory" if perms.startswith('d') else "file"
+                size = int(parts[4]) if parts[4].isdigit() else 0
 
                 # Skip hidden files and node_modules
                 if name.startswith('.') or name == 'node_modules':
@@ -865,9 +1378,10 @@ class KubernetesClient:
             else:
                 full_path = f"/app/{safe_dir}"
 
+            # Use find with -exec stat for BusyBox compatibility (no -printf support)
             glob_cmd = [
                 "/bin/sh", "-c",
-                f"cd {shlex.quote(full_path)} && find . -type f -name {shlex.quote(pattern)} -printf '%s %T@ %p\\n' | sort -rn -k2"
+                f"cd {shlex.quote(full_path)} && find . -type f -name {shlex.quote(pattern)} 2>/dev/null"
             ]
 
             output = await asyncio.to_thread(
@@ -884,13 +1398,13 @@ class KubernetesClient:
                 if not line:
                     continue
 
-                parts = line.split(' ', 2)
-                if len(parts) < 3:
+                path = line.lstrip('./')
+                if not path:
                     continue
 
-                size = int(parts[0]) if parts[0].isdigit() else 0
-                modified = float(parts[1]) if parts[1].replace('.', '').isdigit() else 0
-                path = parts[2].lstrip('./')
+                # Default values since we can't easily get size/mtime with BusyBox
+                size = 0
+                modified = 0
 
                 matches.append({
                     "path": path,
@@ -1069,11 +1583,34 @@ class KubernetesClient:
         namespace = names["namespace"]
 
         try:
+            # If no specific container_name, find ANY pod in the project namespace
+            # This handles multi-container projects where we don't care which container
+            if container_name:
+                label_selector = f"app={names['deployment']}"
+            else:
+                # Match any pod with the user-project prefix (e.g., dev-976599df-7745b013-*)
+                user_short = str(user_id)[:8]
+                project_short = str(project_id)[:8]
+                # List all pods in namespace and filter by app label prefix
+                label_selector = None  # Will filter manually
+
             pods = await asyncio.to_thread(
                 self.core_v1.list_namespaced_pod,
                 namespace=namespace,
-                label_selector=f"app={names['deployment']}"
+                label_selector=label_selector
             )
+
+            # If no specific container, filter pods by prefix
+            if not container_name and pods.items:
+                user_short = str(user_id)[:8]
+                project_short = str(project_id)[:8]
+                prefix = f"dev-{user_short}-{project_short}"
+                filtered_pods = []
+                for pod in pods.items:
+                    app_label = pod.metadata.labels.get("app", "")
+                    if app_label.startswith(prefix):
+                        filtered_pods.append(pod)
+                pods.items = filtered_pods
 
             if not pods.items:
                 return {

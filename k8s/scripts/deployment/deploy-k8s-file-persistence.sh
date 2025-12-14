@@ -40,7 +40,7 @@ echo "=========================================="
 cd "$REPO_ROOT/orchestrator"
 
 echo "Building tesslate-backend:latest..."
-docker build -t registry.digitalocean.com/finetune/tesslate-backend:latest .
+docker build -t registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-backend:latest .
 
 if [ $? -ne 0 ]; then
     echo "❌ Docker build failed"
@@ -64,7 +64,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Pushing image..."
-docker push registry.digitalocean.com/finetune/tesslate-backend:latest
+docker push registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-backend:latest
 
 if [ $? -ne 0 ]; then
     echo "❌ Docker push failed"

@@ -1,0 +1,38 @@
+# Main Ingress for Tesslate Platform
+# Routes traffic to frontend and backend services
+# Domain and TLS are patched by overlays
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tesslate-ingress
+  namespace: tesslate
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    # SSL redirect disabled by default, enabled in production overlays
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  # Default rule (patched by overlays to add host)
+  - http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-backend-service
+            port:
+              number: 8000
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-frontend-service
+            port:
+              number: 80

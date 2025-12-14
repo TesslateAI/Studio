@@ -676,3 +676,15 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "tesslate-backend"}
+
+
+@app.get("/api/config")
+async def get_app_config():
+    """
+    Get public application configuration for frontend.
+    Returns app_domain and deployment_mode for dynamic URL generation.
+    """
+    return {
+        "app_domain": settings.app_domain,
+        "deployment_mode": settings.deployment_mode,
+    }

@@ -1,0 +1,16 @@
+# Frontend Patches for Minikube
+# Uses local image with NGINX (from Dockerfile.prod)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-frontend
+  namespace: tesslate
+spec:
+  replicas: 1
+  template:
+    spec:
+      imagePullSecrets: []
+      containers:
+      - name: frontend
+        imagePullPolicy: Never

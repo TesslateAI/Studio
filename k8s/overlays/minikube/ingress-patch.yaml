@@ -1,0 +1,30 @@
+# Ingress Patches for Minikube
+# Configures ingress for local domain
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tesslate-ingress
+  namespace: tesslate
+  annotations:
+    # Disable SSL redirect for local dev
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: localhost
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-backend-service
+            port:
+              number: 8000
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tesslate-frontend-service
+            port:
+              number: 80

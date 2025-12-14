@@ -4,14 +4,22 @@
 
 # Tesslate Studio
 
-**The Open-Source AI Development Platform Built for Self-Hosting**
+**AI Coding Across Your Entire Stack — Frontend, Backend, Infrastructure & Mobile**
 
 AI-powered development environment with advanced agent orchestration, designed for complete data sovereignty and infrastructure control.
+The open-source platform where AI agents build complete applications: React frontends, FastAPI/Go backends, Kubernetes deployments, and Expo mobile apps — all from natural language.
+
+🚀 **Multi-Container Architecture** | 🔒 **Self-Hosted & Private** | 🤖 **Autonomous AI Agents**
+
+[![GitHub Stars](https://img.shields.io/github/stars/TesslateAI/Studio?style=social)](https://github.com/TesslateAI/Studio/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/TesslateAI/Studio?style=social)](https://github.com/TesslateAI/Studio/fork)
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-Ready-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Go](https://img.shields.io/badge/Go-Backend-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Ready-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
 [Quick Start](#quick-start) · [Features](#key-features) · [Documentation](https://docs.tesslate.com) · [Contributing](#contributing)
@@ -59,7 +67,7 @@ AI-powered development environment with advanced agent orchestration, designed f
 
 ### Community & Resources
 
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YOUR_DISCORD_INVITE)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YR5aKPyMuW)
 [![Website](https://img.shields.io/badge/Website-tesslate.com-FF6B6B?style=for-the-badge&logo=google-chrome&logoColor=white)](https://tesslate.com)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97-Models-FFD21E?style=for-the-badge)](https://huggingface.co/Tesslate)
 
@@ -81,13 +89,19 @@ AI-powered development environment with advanced agent orchestration, designed f
 
 ## What Makes Tesslate Studio Different?
 
-**Infrastructure-first AI development platform designed for complete ownership and control.**
+**AI coding across your entire stack — not just frontend snippets.**
 
-Tesslate Studio isn't just another code generation tool - it's a complete development platform architected from the ground up for self-hosting and data sovereignty:
+Most AI coding tools generate UI components. Tesslate builds **complete systems**: React frontends talking to FastAPI backends, Go microservices with WebSocket support, Kubernetes deployments with proper networking, and cross-platform Expo mobile apps. One AI agent, full-stack applications.
 
-### Self-Hosted Architecture
+### Multi-Container Architecture (New!)
+- **Beyond single-container**: Run frontend + backend + database as separate services
+- **Real microservices**: Each container has its own process, ports, and environment
+- **Inter-service communication**: Containers discover each other automatically
+- **Production-ready patterns**: The same architecture you'd deploy to production
+
+### Self-Hosted & Private
 - **Run anywhere**: Your machine, your cloud, your datacenter
-- **Container isolation**: Each project runs in its own sandboxed Docker container
+- **Container isolation**: Each project runs in its own sandboxed environment
 - **Subdomain routing**: Clean URLs (`project.studio.localhost`) for easy project access
 - **Data sovereignty**: Your code never leaves your infrastructure
 
@@ -113,8 +127,8 @@ Tesslate Studio isn't just another code generation tool - it's a complete develo
 - **Database integration**: PostgreSQL with migration scripts and schema management
 
 ### Extensibility & Customization
-- **Tesslate Forge**: Train, fine-tune, and deploy custom models as agents
-- **Open source agents**: All 10 marketplace agents are forkable and modifiable
+- **Open source agent**: The Tesslate Agent is fully forkable and customizable
+- **Create your own agents**: Build specialized agents for your workflow
 - **Model flexibility**: OpenAI, Anthropic, Google, local LLMs via Ollama/LM Studio
 - **Platform customization**: Fork the entire platform for proprietary workflows
 
@@ -146,9 +160,25 @@ docker compose up -d
 
 **That's it!** Open http://studio.localhost
 
-**What's included:**
-- 10 AI agents ready to use
-- 3 project templates pre-loaded
+### Seed the Marketplace (Optional)
+
+After starting, seed the marketplace with project templates and the Tesslate Agent:
+
+```bash
+# Copy seed script into container
+docker cp scripts/seed/seed_marketplace.py tesslate-orchestrator:/tmp/
+
+# Run the seeder
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace.py
+```
+
+This adds:
+- **4 Project Templates**: Next.js 15, Vite+React+FastAPI, Vite+React+Go, Expo
+- **Tesslate Agent**: The official AI agent with full Plan-Act-Observe-Verify methodology
+
+**What's included after setup:**
+- Tesslate Agent ready to use (autonomous coding agent)
+- 4 project templates for different stack combinations
 - Live preview with hot reload
 - Authentication system ready
 
@@ -174,20 +204,30 @@ python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
 
 ## Key Features
 
-### AI-Powered Code Generation
-Natural language to full-stack applications. Describe what you want, watch it build in real-time with streaming responses.
+### AI-Powered Full-Stack Development
+Natural language to complete applications. Not just UI components — entire systems with frontends, backends, databases, and APIs. Watch AI write across your entire stack in real-time.
+
+### Multi-Container Projects
+Build real microservices architectures:
+- **Vite + React + FastAPI**: Frontend + Python backend in separate containers
+- **Vite + React + Go**: Frontend + high-performance Go backend
+- **Next.js 15**: Integrated fullstack with API routes
+- **Expo**: Cross-platform mobile (iOS/Android/Web)
+
+Each service runs independently with proper inter-container networking.
 
 ### Live Preview with Real URLs
 Every project gets its own subdomain (`your-app.studio.localhost`) with hot module replacement. See changes instantly as AI writes code.
 
-### Customizable AI Agents Marketplace
-10 pre-built, open-source agents: Stream Builder, Full Stack Agent, Code Analyzer, Test Generator, API Designer, and more. Fork them, swap models (GPT-5, Claude, local LLMs), edit prompts - it's your code.
+### The Tesslate Agent
+The official open-source AI agent using Plan-Act-Observe-Verify methodology. Autonomous coding with:
+- Multi-step task planning
+- File operations (read/write/edit)
+- Command execution with security controls
+- Git integration
+- Self-correction and error recovery
 
-### Project Templates
-Start fast with ready templates:
-- Next.js 15 (App Router, SSR, API routes)
-- Vite + React + FastAPI (Python backend)
-- Vite + React + Go (high-performance backend)
+Fork it, customize the prompt, swap models — it's fully open source.
 
 ### Docker-Based Architecture
 - **One command deployment**: `docker compose up -d`
@@ -500,11 +540,19 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 
 ## Roadmap
 
+**What we've shipped:**
+- [x] Multi-container architecture (frontend + backend + db)
+- [x] Tesslate Agent with Plan-Act-Observe-Verify methodology
+- [x] 4 project templates (Next.js, FastAPI, Go, Expo)
+- [x] Kubernetes support for production deployments
+- [x] Full Git integration with GitHub push/pull
+
 **Coming soon:**
-- [ ] Multi Multi Agent ;)
-- [ ] Local to Cloud Agent marketplace
-- [ ] Two Way Git Sync
+- [ ] Multi-agent orchestration (agents collaborating on complex tasks)
+- [ ] Model Context Protocol (MCP) for inter-agent communication
+- [ ] Two-way Git sync (pull external changes)
 - [ ] Plugin system for custom integrations
+- [ ] Agent marketplace for community-created agents
 
 **Have an idea?** [Open a feature request](https://github.com/TesslateAI/Studio/issues/new?template=feature_request.md)
 
@@ -534,9 +582,9 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 </details>
 
 <details>
-<summary><b>Q: Can I modify the AI agents?</b></summary>
+<summary><b>Q: Can I modify the AI agent?</b></summary>
 
-**A:** Absolutely! All 10 agents are open source. Fork them, edit prompts, swap models (GPT → Claude → local LLM), or create entirely new agents.
+**A:** Absolutely! The Tesslate Agent is fully open source. Fork it, edit the system prompt, swap models (GPT → Claude → local LLM), or create entirely new agents from scratch.
 
 </details>
 
@@ -575,10 +623,6 @@ This project uses open-source software. Full attributions in [THIRD-PARTY-NOTICE
 
 Contributions are **welcome and encouraged**! See our **[Development Guide](https://docs.tesslate.com/development/guide)** for setup instructions and contribution guidelines.
 
-**Special thanks to our contributors:**
-
-[![Contributors](https://contrib.rocks/image?repo=TesslateAI/Studio)](https://github.com/TesslateAI/Studio/graphs/contributors)
-
 ---
 
 ## Acknowledgments
@@ -597,9 +641,13 @@ Tesslate Studio wouldn't exist without these amazing open-source projects:
 
 <div align="center">
 
-**Built by developers who believe critical infrastructure should be open**
+**Built by developers who believe AI coding tools should work across your entire stack**
 
-[Star this repo](https://github.com/TesslateAI/Studio) · [Fork it](https://github.com/TesslateAI/Studio/fork) · [Share it](https://twitter.com/intent/tweet?text=Check%20out%20Tesslate%20Studio%20-%20Open%20source%20AI%20development%20platform%20for%20self-hosting!&url=https://github.com/TesslateAI/Studio)
+### If you find this useful, please star the repo!
+
+[![Star on GitHub](https://img.shields.io/badge/Star%20on%20GitHub-⭐-yellow?style=for-the-badge&logo=github)](https://github.com/TesslateAI/Studio)
+
+[Star this repo](https://github.com/TesslateAI/Studio) · [Fork it](https://github.com/TesslateAI/Studio/fork) · [Share it](https://twitter.com/intent/tweet?text=Check%20out%20Tesslate%20Studio%20-%20Open%20source%20AI%20coding%20across%20your%20entire%20stack%20(frontend,%20backend,%20infra,%20mobile)!&url=https://github.com/TesslateAI/Studio)
 
 </div>
  

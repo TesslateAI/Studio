@@ -1,0 +1,21 @@
+# Tesslate Backend Service
+# Exposes the FastAPI backend within the cluster
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: tesslate-backend-service
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: tesslate-backend
+    component: backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http

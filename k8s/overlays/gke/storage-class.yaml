@@ -1,0 +1,27 @@
+# =============================================================================
+# GKE Persistent Disk SSD StorageClass
+# =============================================================================
+# Maps the abstract 'tesslate-block-storage' class to GKE PD-SSD.
+# PD-SSD is:
+# - ReadWriteOnce (RWO) only
+# - SSD-backed
+# - Regional or zonal provisioning
+# - Higher IOPS than standard PD
+# =============================================================================
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tesslate-block-storage
+  labels:
+    app.kubernetes.io/name: tesslate
+    app.kubernetes.io/component: storage
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-ssd
+  fsType: ext4
+  # For regional clusters, use regional-pd for HA
+  # replication-type: regional-pd
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

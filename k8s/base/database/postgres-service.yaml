@@ -1,0 +1,20 @@
+# PostgreSQL Service
+# Exposes PostgreSQL within the cluster
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: tesslate
+  labels:
+    app: postgres
+    component: database
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres

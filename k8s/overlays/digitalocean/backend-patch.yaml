@@ -1,0 +1,82 @@
+# =============================================================================
+# DigitalOcean Backend Deployment Patch
+# =============================================================================
+# Production configuration for DigitalOcean Kubernetes
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend
+          env:
+            # Deployment mode
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+
+            # DigitalOcean-specific settings
+            - name: K8S_STORAGE_CLASS
+              value: "tesslate-block-storage"
+            - name: K8S_DEVSERVER_IMAGE
+              value: "registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest"
+            - name: K8S_REGISTRY_URL
+              value: "registry.digitalocean.com/tesslate-container-registry-nyc3"
+            - name: K8S_IMAGE_PULL_SECRET
+              value: "tesslate-container-registry-nyc3"
+            - name: K8S_WILDCARD_TLS_SECRET
+              value: "tesslate-wildcard-tls"
+
+            # S3 Sandwich settings (DigitalOcean Spaces)
+            # Configure via secrets for production
+            - name: S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: S3_ENDPOINT_URL
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: S3_SECRET_ACCESS_KEY
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: S3_BUCKET_NAME
+            - name: S3_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: S3_REGION
+
+            # Pod Affinity enabled
+            - name: K8S_ENABLE_POD_AFFINITY
+              value: "true"
+            - name: K8S_AFFINITY_TOPOLOGY_KEY
+              value: "kubernetes.io/hostname"
+
+            # Hibernation settings
+            - name: K8S_HIBERNATION_IDLE_MINUTES
+              value: "30"
+            - name: K8S_HIBERNATION_GRACE_SECONDS
+              value: "120"
+
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+      imagePullSecrets:
+        - name: tesslate-container-registry-nyc3
