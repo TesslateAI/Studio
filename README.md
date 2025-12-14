@@ -59,7 +59,7 @@ AI-powered development environment with advanced agent orchestration - designed 
 
 ### Community & Resources
 
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YOUR_DISCORD_INVITE)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YR5aKPyMuW)
 [![Website](https://img.shields.io/badge/Website-tesslate.com-FF6B6B?style=for-the-badge&logo=google-chrome&logoColor=white)](https://tesslate.com)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97-Models-FFD21E?style=for-the-badge)](https://huggingface.co/Tesslate)
 
