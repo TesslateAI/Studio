@@ -1,0 +1,13 @@
+# Minikube Storage Class
+# Maps tesslate-block-storage to Minikube's standard provisioner
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tesslate-block-storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: k8s.io/minikube-hostpath
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true

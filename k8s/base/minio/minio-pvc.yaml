@@ -1,0 +1,18 @@
+# MinIO Persistent Volume Claim
+# Storage for MinIO data
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: minio-system
+  labels:
+    app: minio
+    component: storage
+spec:
+  storageClassName: tesslate-block-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

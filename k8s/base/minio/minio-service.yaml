@@ -1,0 +1,22 @@
+# MinIO Services
+# Exposes MinIO API and Console within the cluster
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio-system
+  labels:
+    app: minio
+    component: storage
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+  - port: 9000
+    targetPort: 9000
+    name: api
+  - port: 9001
+    targetPort: 9001
+    name: console

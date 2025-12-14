@@ -122,8 +122,8 @@ const GraphCanvasComponent = ({
         </p>
       </Panel>
 
-      {/* Mobile hint */}
-      <Panel position="top-center" className="md:hidden bg-[var(--surface)] px-3 py-1.5 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
+      {/* Mobile hint - positioned below floating buttons */}
+      <Panel position="top-center" className="md:hidden !top-16 bg-[var(--surface)] px-3 py-1.5 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
         <p className="text-[10px] text-[var(--text)]/60 flex items-center gap-1.5">
           <Hand size={12} className="text-[var(--primary)]" />
           Pinch to zoom - Drag to pan

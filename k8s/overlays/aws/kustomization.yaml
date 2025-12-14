@@ -1,0 +1,47 @@
+# AWS EKS Overlay for saipriya.org
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+resources:
+  - ../../base
+  - storage-class.yaml
+
+# Patch backend and replace ingress
+patchesStrategicMerge:
+  - backend-patch.yaml
+  - ingress-patch.yaml
+
+images:
+  - name: tesslate-backend
+    newName: 859561299901.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend
+    newTag: latest
+  - name: tesslate-frontend
+    newName: 859561299901.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend
+    newTag: latest
+  - name: tesslate-devserver
+    newName: 859561299901.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver
+    newTag: latest
+
+configMapGenerator:
+  - name: tesslate-config
+    behavior: merge
+    literals:
+      - DEPLOYMENT_MODE=kubernetes
+      - K8S_NAMESPACE_PER_PROJECT=true
+      - K8S_ENABLE_NETWORK_POLICIES=true
+      - K8S_STORAGE_CLASS=tesslate-block-storage
+      - K8S_INGRESS_CLASS=nginx
+      - K8S_INGRESS_DOMAIN=saipriya.org
+      - devserver_image=859561299901.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
+      - registry_url=859561299901.dkr.ecr.us-east-1.amazonaws.com
+      - s3_bucket_name=tesslate-projects-production-7761157a
+      - aws_region=us-east-1
+
+labels:
+  - pairs:
+      cloud-provider: aws
+      environment: production
+      domain: saipriya.org
+    includeSelectors: false

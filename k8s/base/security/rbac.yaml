@@ -1,0 +1,85 @@
+# RBAC Configuration for Tesslate Backend
+# Grants permissions to manage development environments across namespaces
+
+---
+# Service Account for the backend pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tesslate-backend-sa
+  namespace: tesslate
+  labels:
+    app: tesslate-backend
+    component: rbac
+
+---
+# ClusterRole defining permissions for dev environment management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tesslate-dev-environments-manager
+  labels:
+    app: tesslate-backend
+    component: rbac
+rules:
+# Namespace management (for namespace-per-project isolation)
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+
+# Core resources (pods, services, PVCs, secrets, configmaps)
+- apiGroups: [""]
+  resources:
+    - pods
+    - pods/log
+    - pods/exec
+    - services
+    - persistentvolumeclaims
+    - secrets
+    - configmaps
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+
+# App resources (deployments, replicasets)
+- apiGroups: ["apps"]
+  resources:
+    - deployments
+    - replicasets
+    - statefulsets
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+
+# Networking (ingresses, networkpolicies)
+- apiGroups: ["networking.k8s.io"]
+  resources:
+    - ingresses
+    - networkpolicies
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+
+# Batch resources (for cleanup jobs)
+- apiGroups: ["batch"]
+  resources:
+    - jobs
+    - cronjobs
+  verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
+
+# Events (for troubleshooting)
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding - grants cluster-wide permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tesslate-backend-cluster-access
+  labels:
+    app: tesslate-backend
+    component: rbac
+subjects:
+- kind: ServiceAccount
+  name: tesslate-backend-sa
+  namespace: tesslate
+roleRef:
+  kind: ClusterRole
+  name: tesslate-dev-environments-manager
+  apiGroup: rbac.authorization.k8s.io

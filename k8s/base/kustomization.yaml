@@ -1,0 +1,56 @@
+# Tesslate Studio - Base Kustomize Configuration
+# This is the base layer that gets patched by overlays for each environment
+# Deploy with: kubectl apply -k overlays/<environment>/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+commonLabels:
+  app.kubernetes.io/name: tesslate-studio
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+  # Namespaces
+  - namespace/tesslate.yaml
+
+  # Core Application
+  - core/backend-deployment.yaml
+  - core/backend-service.yaml
+  - core/frontend-deployment.yaml
+  - core/frontend-service.yaml
+  - core/cleanup-cronjob.yaml
+
+  # Database
+  - database/postgres-deployment.yaml
+  - database/postgres-service.yaml
+  - database/postgres-pvc.yaml
+
+  # Security & RBAC
+  - security/network-policies.yaml
+  - security/rbac.yaml
+  - security/resource-quotas.yaml
+
+  # Ingress
+  - ingress/main-ingress.yaml
+
+# Images that can be overridden by overlays
+images:
+  - name: tesslate-backend
+    newName: tesslate-backend
+    newTag: latest
+  - name: tesslate-frontend
+    newName: tesslate-frontend
+    newTag: latest
+  - name: tesslate-devserver
+    newName: tesslate-devserver
+    newTag: latest
+
+# ConfigMap generator for common config
+configMapGenerator:
+  - name: tesslate-config
+    literals:
+      - DEPLOYMENT_MODE=kubernetes
+      - K8S_NAMESPACE_PER_PROJECT=true
+      - K8S_ENABLE_NETWORK_POLICIES=true
