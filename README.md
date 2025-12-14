@@ -6,6 +6,7 @@
 
 **AI Coding Across Your Entire Stack — Frontend, Backend, Infrastructure & Mobile**
 
+AI-powered development environment with advanced agent orchestration, designed for complete data sovereignty and infrastructure control.
 The open-source platform where AI agents build complete applications: React frontends, FastAPI/Go backends, Kubernetes deployments, and Expo mobile apps — all from natural language.
 
 🚀 **Multi-Container Architecture** | 🔒 **Self-Hosted & Private** | 🤖 **Autonomous AI Agents**
