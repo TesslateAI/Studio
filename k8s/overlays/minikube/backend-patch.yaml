@@ -1,0 +1,35 @@
+# Backend Patches for Minikube
+# Configures backend for local development
+# Note: Domain settings, CORS, S3 etc are in secrets which have local values
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+spec:
+  replicas: 1  # Single replica for local dev
+  template:
+    spec:
+      # No image pull secrets needed for local images
+      imagePullSecrets: []
+      containers:
+      - name: backend
+        imagePullPolicy: Never  # Use locally built image
+        env:
+          # Override devserver image to use local build (same tag as production)
+          - name: K8S_DEVSERVER_IMAGE
+            value: "tesslate-devserver:latest"
+          # Override image pull secret (empty for local)
+          - name: K8S_IMAGE_PULL_SECRET
+            value: ""
+          # Use Never for local images (critical for :latest tag to work locally)
+          - name: K8S_IMAGE_PULL_POLICY
+            value: "Never"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

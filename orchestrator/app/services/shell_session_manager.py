@@ -97,9 +97,11 @@ class ShellSessionManager:
             user_id, project_id, project.slug, container_name
         )
 
-        # 5. Verify container is running (use resolved name for accurate check)
+        # 5. Verify container is running
+        # IMPORTANT: Pass original container_name (not resolved) for K8s mode
+        # because is_container_ready generates resource names from it internally
         is_running = await self._is_container_running(
-            user_id, project_id, project.slug, resolved_container_name
+            user_id, project_id, project.slug, container_name
         )
         if not is_running:
             raise HTTPException(
@@ -384,11 +386,37 @@ class ShellSessionManager:
         orchestrator = get_orchestrator()
 
         if is_kubernetes_mode():
-            # K8s: Generate deployment name based on container_name for multi-container
-            # The k8s_client.generate_resource_names handles the sanitization
-            k8s_client = orchestrator.k8s_client
-            names = k8s_client.generate_resource_names(user_id, project_id, container_name=container_name)
-            return names["deployment"]
+            # K8s: Deployment names use format "dev-{container_directory}"
+            # The container_directory is derived from container name
+            if container_name:
+                # Sanitize container name same way as helpers.py does
+                safe_name = container_name.lower()
+                safe_name = safe_name.replace('_', '-').replace(' ', '-').replace('.', '-')
+                safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '-')
+                while '--' in safe_name:
+                    safe_name = safe_name.replace('--', '-')
+                safe_name = safe_name.strip('-')
+                return f"dev-{safe_name}"
+            else:
+                # No container specified - find first running deployment in namespace
+                namespace = orchestrator._get_namespace(str(project_id))
+                try:
+                    # Use correct label selector with tesslate.io prefix
+                    pods = await asyncio.to_thread(
+                        orchestrator.k8s_client.core_v1.list_namespaced_pod,
+                        namespace=namespace,
+                        label_selector="tesslate.io/component=dev-container"
+                    )
+                    if pods.items:
+                        # Get deployment name from first dev container pod
+                        # Labels use tesslate.io/container-directory
+                        container_dir = pods.items[0].metadata.labels.get('tesslate.io/container-directory')
+                        if container_dir:
+                            return f"dev-{container_dir}"
+                        return pods.items[0].metadata.labels.get('app', 'dev')
+                except Exception as e:
+                    logger.warning(f"Failed to list pods in namespace {namespace}: {e}")
+                return "dev"  # Fallback (shouldn't reach here normally)
         else:
             # Docker multi-container mode
             # Container name format: {project_slug}-{service_name}

@@ -1013,6 +1013,10 @@ async def agent_chat_stream(
                 yield f"data: {json.dumps(error_event)}\n\n"
                 return
 
+            # Track activity for idle cleanup (database-based)
+            from ..services.activity_tracker import track_project_activity
+            await track_project_activity(db, project.id, "agent")
+
             # Fetch container info for multi-container project support
             container_id = None
             container_name = None

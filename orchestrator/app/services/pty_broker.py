@@ -295,6 +295,22 @@ class KubernetesPTYBroker(BasePTYBroker):
         self.core_v1 = client.CoreV1Api()
         self.sessions: Dict[str, PTYSession] = {}
 
+    def _get_stream_client(self):
+        """
+        Create a fresh CoreV1Api client for stream operations.
+
+        IMPORTANT: The kubernetes-python `stream()` function temporarily patches
+        the api_client.request method to use WebSocket. If we use the shared
+        self.core_v1 client, concurrent regular API calls will accidentally use
+        the WebSocket-patched method, causing errors like:
+        "WebSocketBadStatusException: Handshake status 200 OK"
+
+        By creating a fresh client for each stream operation, we isolate the
+        WebSocket patching and prevent it from affecting other concurrent calls.
+        """
+        from kubernetes import client
+        return client.CoreV1Api()
+
     def _get_namespace_for_project(self, project_id: str) -> str:
         """
         Get the namespace for a project.
@@ -319,7 +335,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         self,
         user_id: UUID,
         project_id: str,
-        pod_name: str = None,
+        container_name: str = None,
         command: str = "/bin/sh",
         rows: int = 24,
         cols: int = 80,
@@ -332,12 +348,12 @@ class KubernetesPTYBroker(BasePTYBroker):
         Args:
             user_id: User ID
             project_id: Project ID (used to determine namespace if not provided)
-            pod_name: Pod name (optional - will be looked up if not provided)
+            container_name: Deployment/container name (used to look up pod)
             command: Shell command
             rows: Terminal rows
             cols: Terminal columns
             namespace: Namespace (optional - will be determined from project_id if not provided)
-            container: Container name within pod
+            container: Container name within pod (K8s container)
 
         Returns:
             PTYSession object
@@ -346,42 +362,64 @@ class KubernetesPTYBroker(BasePTYBroker):
         from kubernetes.client.rest import ApiException
 
         session_id = str(uuid.uuid4())
+        deployment_name = container_name  # container_name is actually deployment name like "dev-next-js-15"
 
         # Determine namespace if not provided
         if not namespace:
             namespace = self._get_namespace_for_project(project_id)
             logger.info(f"[PTY] Auto-detected namespace for project {project_id}: {namespace}")
 
-        # Look up pod name if not provided (find first pod in deployment)
-        if not pod_name:
-            try:
-                from .orchestration import get_orchestrator
-                orchestrator = get_orchestrator()
-                k8s_client = orchestrator.k8s_client
-                names = k8s_client.generate_resource_names(user_id, project_id)
-
+        # Always look up actual pod name - deployment_name is not the pod name
+        # Pods have suffix like "dev-next-js-15-f8d496f89-fpqsk"
+        pod_name = None
+        try:
+            if deployment_name:
+                # Look up pod by app label (matches deployment name)
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,
                     namespace=namespace,
-                    label_selector=f"app={names['deployment']}"
+                    label_selector=f"app={deployment_name}"
+                )
+                if pods.items:
+                    # Get first running pod
+                    for pod in pods.items:
+                        if pod.status.phase == "Running":
+                            pod_name = pod.metadata.name
+                            break
+                    if not pod_name and pods.items:
+                        pod_name = pods.items[0].metadata.name
+                    logger.info(f"[PTY] Found pod {pod_name} for deployment {deployment_name}")
+
+            if not pod_name:
+                # Fallback: List all dev container pods in the namespace
+                # Use correct label selector with tesslate.io prefix
+                pods = await asyncio.to_thread(
+                    self.core_v1.list_namespaced_pod,
+                    namespace=namespace,
+                    label_selector="tesslate.io/component=dev-container"
                 )
 
                 if not pods.items:
-                    raise RuntimeError(f"No pod found for project {project_id} in namespace {namespace}")
+                    raise RuntimeError(f"No dev container pod found in namespace {namespace}")
 
                 pod_name = pods.items[0].metadata.name
                 logger.info(f"[PTY] Auto-detected pod name: {pod_name}")
-            except Exception as e:
-                logger.error(f"[PTY] Failed to lookup pod for project {project_id}: {e}")
-                raise RuntimeError(f"Failed to find pod for project: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"[PTY] Failed to lookup pod for project {project_id}: {e}")
+            raise RuntimeError(f"Failed to find pod for project: {str(e)}") from e
 
         # Run command directly - pods already start in /app
         # Agent can use 'cd' commands if they need to change directories
         full_command = ["/bin/sh", "-c", command]
 
         # Create exec stream with PTY
+        # Use a fresh client for stream operations to avoid concurrency issues
+        # The stream() function patches api_client.request to use WebSocket,
+        # which would break concurrent regular API calls if using shared client
+        stream_client = self._get_stream_client()
+
         ws_stream = stream(
-            self.core_v1.connect_get_namespaced_pod_exec,
+            stream_client.connect_get_namespaced_pod_exec,
             pod_name,
             namespace,
             container=container,

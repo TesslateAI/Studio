@@ -1,0 +1,39 @@
+# =============================================================================
+# Google Kubernetes Engine (GKE) Overlay
+# =============================================================================
+# This overlay customizes the base manifests for GKE:
+# - pd-ssd StorageClass for PVCs
+# - Artifact Registry authentication
+# - Google Cloud Storage for S3 (with S3 compatibility layer)
+# - GKE Ingress or NGINX Ingress
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+resources:
+  - ../../base
+  - storage-class.yaml
+  # Secrets managed via Google Secret Manager + External Secrets Operator
+
+patches:
+  - path: backend-patch.yaml
+  - path: ingress-patch.yaml
+
+images:
+  - name: tesslate-backend
+    newName: <region>-docker.pkg.dev/<project-id>/tesslate/backend
+    newTag: latest
+  - name: tesslate-frontend
+    newName: <region>-docker.pkg.dev/<project-id>/tesslate/frontend
+    newTag: latest
+  - name: tesslate-devserver
+    newName: <region>-docker.pkg.dev/<project-id>/tesslate/devserver
+    newTag: latest
+
+# Common labels for all resources
+commonLabels:
+  cloud-provider: gcp
+  environment: production

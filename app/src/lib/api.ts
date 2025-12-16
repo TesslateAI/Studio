@@ -800,6 +800,36 @@ export const assetsApi = {
 };
 
 // ============================================================================
+// App Configuration API
+// ============================================================================
+
+// Cache app config to avoid repeated fetches
+let appConfigCache: { app_domain: string; deployment_mode: string } | null = null;
+
+export const configApi = {
+  /**
+   * Get app configuration (app_domain, deployment_mode)
+   * Cached after first fetch
+   */
+  getConfig: async () => {
+    if (appConfigCache) {
+      return appConfigCache;
+    }
+    const response = await api.get('/api/config');
+    appConfigCache = response.data;
+    return appConfigCache;
+  },
+
+  /**
+   * Get app_domain, with fallback to 'localhost'
+   */
+  getAppDomain: async (): Promise<string> => {
+    const config = await configApi.getConfig();
+    return config?.app_domain || 'localhost';
+  },
+};
+
+// ============================================================================
 // Billing & Subscription API
 // ============================================================================
 

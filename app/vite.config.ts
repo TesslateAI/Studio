@@ -3,12 +3,11 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-// Parse allowed hosts from environment variable
-// No hardcoded defaults - everything comes from environment
-const allowedHostsEnv = process.env.VITE_ALLOWED_HOSTS || ''
-const allowedHosts = allowedHostsEnv.split(',').map(host => host.trim()).filter(Boolean)
+// Allow all hosts - security is handled by ingress controller and Cloudflare
+// This is necessary for production K8s with dynamic subdomain previews
+const allowedHosts = true as const
 
-console.log('Vite allowed hosts:', allowedHosts)
+console.log('Vite allowed hosts: all (production mode)')
 
 // https://vite.dev/config/
 export default defineConfig({

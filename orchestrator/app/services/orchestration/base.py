@@ -215,7 +215,9 @@ class BaseOrchestrator(ABC):
         user_id: UUID,
         project_id: UUID,
         container_name: str,
-        file_path: str
+        file_path: str,
+        project_slug: str = None,
+        subdir: str = None
     ) -> Optional[str]:
         """
         Read a file from a container.
@@ -225,6 +227,8 @@ class BaseOrchestrator(ABC):
             project_id: Project ID
             container_name: Container name
             file_path: Relative path within project
+            project_slug: Project slug (optional)
+            subdir: Container subdirectory (optional, for multi-container projects)
 
         Returns:
             File content as string, or None if not found
@@ -238,7 +242,9 @@ class BaseOrchestrator(ABC):
         project_id: UUID,
         container_name: str,
         file_path: str,
-        content: str
+        content: str,
+        project_slug: str = None,
+        subdir: str = None
     ) -> bool:
         """
         Write a file to a container.

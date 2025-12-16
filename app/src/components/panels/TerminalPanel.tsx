@@ -109,25 +109,41 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     return newTab;
   };
 
-  // Initialize first (main) tab on mount
+  // Track current projectId to detect stale connections
+  const currentProjectIdRef = useRef(projectId);
+  currentProjectIdRef.current = projectId;
+
+  // Initialize first (main) tab on mount, cleanup on projectId change
   useEffect(() => {
-    const mainTab = createTab(true);
-    return () => {
-      // Cleanup all tabs on unmount
-      // Use setState callback to get current tabs value, avoiding stale closure
+    // Cleanup function that runs BEFORE effect and on unmount
+    // This ensures old tabs are fully cleaned up before creating new ones
+    const cleanupTabs = () => {
       setTabs(currentTabs => {
         currentTabs.forEach(tab => {
           if (tab.reconnectTimer) {
             clearTimeout(tab.reconnectTimer);
+            tab.reconnectTimer = null;
           }
           if (tab.ws) {
             tab.ws.close();
+            tab.ws = null;
           }
           tab.terminal.dispose();
         });
         return []; // Clear tabs array
       });
     };
+
+    // Clean up any existing tabs from previous projectId
+    cleanupTabs();
+
+    // Reset tab counter for new project
+    nextTabNumber.current = 2;
+
+    // Create main tab for new project
+    const mainTab = createTab(true);
+
+    return cleanupTabs;
   }, [projectId]);
 
   // Handle terminal rendering when active tab changes
@@ -192,6 +208,12 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
 
   // Connect WebSocket for a terminal tab with auto-reconnect
   const connectTerminal = (tab: TerminalTab, isReconnect: boolean = false) => {
+    // Check if projectId is still valid (not stale from previous project)
+    if (currentProjectIdRef.current !== projectId) {
+      console.warn('[Terminal] Skipping connection for stale projectId');
+      return;
+    }
+
     // Clear any existing reconnect timer
     if (tab.reconnectTimer) {
       clearTimeout(tab.reconnectTimer);
@@ -205,7 +227,9 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     }
 
     try {
-      const ws = createTerminalWebSocket(projectId);
+      // Use the current projectId from ref to avoid stale closures
+      const currentProjectId = currentProjectIdRef.current;
+      const ws = createTerminalWebSocket(currentProjectId);
       tab.ws = ws;
 
       ws.onopen = () => {

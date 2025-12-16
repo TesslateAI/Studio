@@ -59,17 +59,22 @@ class S3Manager:
         """Initialize S3 client for AWS S3 or S3-compatible storage."""
         settings = get_settings()
 
-        # Validate configuration
-        if not settings.s3_access_key_id or not settings.s3_secret_access_key:
-            raise ValueError("S3 credentials not configured. Set S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY.")
-
-        # Build client kwargs - endpoint_url is optional for AWS S3
+        # Build client kwargs
         client_kwargs = {
-            'aws_access_key_id': settings.s3_access_key_id,
-            'aws_secret_access_key': settings.s3_secret_access_key,
             'region_name': settings.s3_region,
             'config': S3_RETRY_CONFIG
         }
+
+        # Use explicit credentials if provided, otherwise rely on IRSA/IAM role
+        if settings.s3_access_key_id and settings.s3_secret_access_key:
+            client_kwargs['aws_access_key_id'] = settings.s3_access_key_id
+            client_kwargs['aws_secret_access_key'] = settings.s3_secret_access_key
+            auth_method = "explicit credentials"
+        else:
+            # On EKS, IRSA (IAM Roles for Service Accounts) provides credentials
+            # via AWS_WEB_IDENTITY_TOKEN_FILE and AWS_ROLE_ARN env vars
+            # boto3 automatically uses these when no explicit credentials are provided
+            auth_method = "IRSA/IAM role"
 
         # Only add endpoint_url if configured (for DigitalOcean Spaces, MinIO, etc.)
         if settings.s3_endpoint_url:
@@ -86,7 +91,7 @@ class S3Manager:
         self.region = settings.s3_region
 
         logger.info(f"[S3] Initialized S3Manager for bucket: {self.bucket_name}")
-        logger.info(f"[S3] Provider: {provider}")
+        logger.info(f"[S3] Provider: {provider}, Auth: {auth_method}")
         logger.info(f"[S3] Endpoint: {settings.s3_endpoint_url or '(AWS default)'}")
         logger.info(f"[S3] Region: {settings.s3_region}")
 
@@ -456,6 +461,66 @@ class S3Manager:
             error_msg = f"Failed to generate presigned URL: {str(e)}"
             logger.error(f"[S3] ❌ {error_msg}", exc_info=True)
             return None, error_msg
+
+    async def copy_to_deleted(
+        self,
+        user_id: UUID,
+        project_id: UUID
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Copy a project archive to the 'deleted/' prefix for backup retention.
+
+        Used when a project is deleted to preserve a backup copy before
+        removing the active archive. This allows separate retention policies
+        for deleted vs active projects.
+
+        S3 path: deleted/{user_id}/{project_id}/latest.zip
+
+        Args:
+            user_id: User UUID
+            project_id: Project UUID
+
+        Returns:
+            Tuple of (success: bool, error_message: Optional[str])
+        """
+        source_key = self._get_project_key(user_id, project_id)
+        dest_key = f"deleted/{user_id}/{project_id}/latest.zip"
+
+        logger.info(f"[S3] Copying project to deleted archive: {source_key} -> {dest_key}")
+
+        try:
+            # Check if source exists first
+            if not await self.project_exists(user_id, project_id):
+                logger.info(f"[S3] No existing archive to copy: {source_key}")
+                return True, None  # Nothing to copy, but not an error
+
+            # Use S3 copy_object (server-side copy, no download needed)
+            await asyncio.to_thread(
+                self.s3_client.copy_object,
+                Bucket=self.bucket_name,
+                CopySource={'Bucket': self.bucket_name, 'Key': source_key},
+                Key=dest_key,
+                MetadataDirective='COPY'  # Preserve original metadata
+            )
+
+            logger.info(f"[S3] ✅ Project copied to deleted archive: {dest_key}")
+            return True, None
+
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == 'NoSuchKey':
+                # Source doesn't exist - not an error for deletion flow
+                logger.info(f"[S3] Source archive not found (already deleted?): {source_key}")
+                return True, None
+            else:
+                error_msg = f"Failed to copy to deleted archive: {str(e)}"
+                logger.error(f"[S3] ❌ {error_msg}")
+                return False, error_msg
+
+        except Exception as e:
+            error_msg = f"Failed to copy to deleted archive: {str(e)}"
+            logger.error(f"[S3] ❌ {error_msg}", exc_info=True)
+            return False, error_msg
 
     async def get_project_size(
         self,

@@ -1,0 +1,48 @@
+# MinIO Bucket Initialization Job
+# Creates the tesslate-projects bucket on first deployment
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  namespace: minio-system
+  labels:
+    app: minio
+    component: init
+spec:
+  ttlSecondsAfterFinished: 300  # Clean up after 5 minutes
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mc
+        image: minio/mc:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for MinIO to be ready..."
+          sleep 15
+
+          # Configure MinIO client
+          mc alias set myminio http://minio.minio-system.svc.cluster.local:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
+
+          # Create bucket if it doesn't exist
+          mc mb --ignore-existing myminio/tesslate-projects
+
+          # Set bucket policy to allow downloads (for hydration)
+          mc anonymous set download myminio/tesslate-projects
+
+          echo "MinIO initialized successfully!"
+          echo "Bucket: tesslate-projects created"
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: MINIO_ROOT_USER
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: MINIO_ROOT_PASSWORD

@@ -8,6 +8,7 @@
 FROM node:20-alpine
 
 # Install system dependencies for Node.js, Python, and Go development
+# zip/unzip needed for project archiving (S3 ops handled securely by backend)
 RUN apk add --no-cache \
     git \
     curl \
@@ -17,7 +18,9 @@ RUN apk add --no-cache \
     g++ \
     go \
     bash \
-    tmux
+    tmux \
+    zip \
+    unzip
 
 # Set up Go environment
 ENV GOPATH=/go

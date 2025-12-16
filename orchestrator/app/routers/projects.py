@@ -170,6 +170,9 @@ async def _setup_github_project(
     project_path: str
 ) -> None:
     """Setup project from GitHub repository"""
+    import tempfile
+    import shutil
+
     # Step 2: Clone repository (10-40%)
     task.update_progress(10, 100, f"Cloning repository from GitHub: {project_data.github_repo_url}")
     logger.info(f"[CREATE] Importing from GitHub: {project_data.github_repo_url}")
@@ -180,7 +183,6 @@ async def _setup_github_project(
     access_token = await credential_manager.get_access_token(db, user_id)
 
     # Clone repository
-    from ..services.git_manager import GitManager
     from ..services.github_client import GitHubClient
     from ..services.project_patcher import ProjectPatcher
 
@@ -197,33 +199,60 @@ async def _setup_github_project(
         except:
             pass
 
-    git_manager = GitManager(user_id, str(db_project.id))
-    await git_manager.clone_repository(
-        repo_url=project_data.github_repo_url,
-        branch=branch,
-        auth_token=access_token,
-        direct_to_filesystem=(settings.deployment_mode == "docker")
-    )
-
-    task.update_progress(40, 100, "Repository cloned successfully")
-
-    # Step 3: Auto-patch project (40-60%)
-    task.update_progress(50, 100, "Patching project for Tesslate compatibility")
+    # For both Docker and K8s mode, clone to filesystem first
+    # Docker mode: clone to final project_path
+    # K8s mode: clone to temp directory, then save to database
     if settings.deployment_mode == "docker":
+        clone_path = project_path
+    else:
+        # K8s mode: use temp directory
+        clone_path = tempfile.mkdtemp(prefix=f"tesslate-github-{db_project.id}-")
+        logger.info(f"[CREATE] K8s mode: cloning to temp directory: {clone_path}")
+
+    try:
+        # Clone directly to filesystem
+        repo_url = project_data.github_repo_url
+        if access_token and "github.com" in repo_url:
+            if repo_url.startswith("git@github.com:"):
+                repo_url = repo_url.replace("git@github.com:", "https://github.com/")
+            repo_url = repo_url.replace("https://github.com/", f"https://{access_token}@github.com/")
+
+        # Build git clone command
+        git_cmd = ["git", "clone"]
+        if branch:
+            git_cmd.extend(["--branch", branch])
+        git_cmd.extend([repo_url, clone_path])
+
+        logger.info(f"[CREATE] Executing git clone to: {clone_path}")
+        process = await asyncio.create_subprocess_exec(
+            *git_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+
+        if process.returncode != 0:
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            raise RuntimeError(f"Git clone failed: {error_msg}")
+
+        logger.info(f"[CREATE] Repository cloned successfully to {clone_path}")
+        task.update_progress(40, 100, "Repository cloned successfully")
+
+        # Step 3: Auto-patch project (40-60%)
+        task.update_progress(50, 100, "Patching project for Tesslate compatibility")
         try:
-            patcher = ProjectPatcher(project_path)
+            patcher = ProjectPatcher(clone_path)
             await patcher.auto_patch()
         except Exception as patch_error:
             logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
 
-    task.update_progress(60, 100, "Patching complete")
+        task.update_progress(60, 100, "Patching complete")
 
-    # Step 4: Save files to database (60-90%)
-    if settings.deployment_mode == "docker":
+        # Step 4: Save files to database (60-90%)
         task.update_progress(65, 100, "Saving cloned files to database")
         files_saved = 0
         walk_results = await walk_directory_async(
-            project_path,
+            clone_path,
             exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
         )
 
@@ -233,7 +262,7 @@ async def _setup_github_project(
                     continue
 
                 file_full_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_full_path, project_path).replace('\\', '/')
+                relative_path = os.path.relpath(file_full_path, clone_path).replace('\\', '/')
 
                 try:
                     content = await read_file_async(file_full_path)
@@ -249,6 +278,15 @@ async def _setup_github_project(
 
         await db.commit()
         task.update_progress(90, 100, f"Saved {files_saved} files to database")
+
+    finally:
+        # Clean up temp directory for K8s mode
+        if settings.deployment_mode != "docker" and clone_path != project_path:
+            try:
+                await asyncio.to_thread(shutil.rmtree, clone_path, ignore_errors=True)
+                logger.info(f"[CREATE] Cleaned up temp directory: {clone_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"[CREATE] Failed to cleanup temp directory: {cleanup_error}")
 
     # Update project with Git info
     db_project.has_git_repo = True
@@ -755,62 +793,96 @@ async def get_project_files(
         except Exception as e:
             logger.warning(f"[FILES] Failed to read from shared volume: {e}, falling back to database")
 
-    # If from_pod requested, try to read from running container
+    # For K8s mode, automatically try reading from pod (like Docker reads from volume)
     from ..services.orchestration import get_orchestrator, is_kubernetes_mode
-    if from_pod and is_kubernetes_mode():
+    if is_kubernetes_mode():
         try:
             orchestrator = get_orchestrator()
 
-            # Check if container is ready
-            readiness = await orchestrator.is_container_ready(current_user.id, project_id, None)
+            # Determine directory to read from
+            # If container_dir specified, read from that subdirectory
+            # Otherwise, read from root /app (shows all container directories)
+            directory = container_dir if container_dir else "."
+            subdir_log = f"/{container_dir}" if container_dir else ""
+            logger.info(f"[FILES] K8s: Reading files from file-manager pod: /app{subdir_log}")
 
-            if readiness["ready"]:
-                logger.info(f"[FILES] Reading files from container for project {project_id}")
+            # Get list of files from file-manager pod
+            pod_files = await orchestrator.list_files(
+                user_id=current_user.id,
+                project_id=project_id,
+                container_name=None,
+                directory=directory
+            )
 
-                # Get list of files from container
-                pod_files = await orchestrator.list_files(
-                    user_id=current_user.id,
-                    project_id=project_id,
-                    container_name=None,
-                    directory="."
-                )
+            # Read content for each file (recursively for directories)
+            files_with_content = []
+            now = datetime.now(timezone.utc)
 
-                # Read content for each file
-                files_with_content = []
-                now = datetime.now(timezone.utc)
-                for pod_file in pod_files:
+            async def read_files_recursive(files, base_path=""):
+                for pod_file in files:
+                    file_name = pod_file.get("name", "")
+                    if not file_name or file_name in [".", ".."]:
+                        continue
+
+                    rel_path = f"{base_path}/{file_name}" if base_path else file_name
+
                     if pod_file["type"] == "file":
                         try:
+                            # Build the full path for reading
+                            full_path = f"{directory}/{rel_path}" if directory != "." else rel_path
                             content = await orchestrator.read_file(
                                 user_id=current_user.id,
                                 project_id=project_id,
                                 container_name=None,
-                                file_path=pod_file["path"]
+                                file_path=full_path
                             )
 
                             if content is not None:
                                 files_with_content.append(ProjectFileSchema(
-                                    id=uuid4(),  # Generate unique ID for each file
+                                    id=uuid4(),
                                     project_id=project_id,
-                                    file_path=pod_file["path"],
+                                    file_path=rel_path,  # Relative to container_dir
                                     content=content,
                                     created_at=now,
                                     updated_at=now
                                 ))
                         except Exception as e:
-                            logger.warning(f"[FILES] Failed to read {pod_file['path']}: {e}")
+                            logger.warning(f"[FILES] Failed to read {rel_path}: {e}")
                             continue
+                    elif pod_file["type"] == "directory":
+                        # Skip node_modules and other large directories
+                        if file_name in ["node_modules", ".next", ".git", "__pycache__", "dist", "build"]:
+                            continue
+                        # Recursively read directory contents
+                        try:
+                            sub_dir = f"{directory}/{rel_path}" if directory != "." else rel_path
+                            sub_files = await orchestrator.list_files(
+                                user_id=current_user.id,
+                                project_id=project_id,
+                                container_name=None,
+                                directory=sub_dir
+                            )
+                            await read_files_recursive(sub_files, rel_path)
+                        except Exception as e:
+                            logger.warning(f"[FILES] Failed to list {rel_path}: {e}")
 
-                logger.info(f"[FILES] ✅ Read {len(files_with_content)} files from pod")
+            await read_files_recursive(pod_files)
+
+            if files_with_content:
+                logger.info(f"[FILES] ✅ Read {len(files_with_content)} files from file-manager pod")
                 return files_with_content
-
             else:
-                logger.info(f"[FILES] Pod not ready, falling back to database")
+                # In K8s mode, return empty list - don't fall back to database
+                # Database files are templates that shouldn't be shown in K8s mode
+                logger.info(f"[FILES] No files found in pod - returning empty list (K8s mode)")
+                return []
 
         except Exception as e:
-            logger.warning(f"[FILES] Failed to read from pod: {e}, falling back to database")
+            logger.warning(f"[FILES] Failed to read from pod: {e}")
+            # In K8s mode, return empty list on error - don't fall back to database
+            return []
 
-    # Default: Get files from database
+    # Docker mode only: Get files from database
     result = await db.execute(
         select(ProjectFile).where(ProjectFile.project_id == project_id)
     )
@@ -910,6 +982,19 @@ async def get_container_status(
                 user_id=current_user.id
             )
 
+            # Build container URL from project's first container
+            container_url = None
+            containers_result = await db.execute(
+                select(Container).where(Container.project_id == project_id)
+            )
+            containers = containers_result.scalars().all()
+            if containers:
+                settings = get_settings()
+                first_container = containers[0]
+                container_dir = (first_container.directory or first_container.name).lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+                protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+                container_url = f"{protocol}://{container_dir}.{project_slug}.{settings.app_domain}"
+
             return {
                 "status": "ready" if readiness["ready"] else "starting",
                 "ready": readiness["ready"],
@@ -918,7 +1003,7 @@ async def get_container_status(
                 "responsive": readiness.get("responsive"),
                 "conditions": readiness.get("conditions", []),
                 "pod_name": readiness.get("pod_name"),
-                "url": env_status.get("url"),
+                "url": container_url,
                 "deployment": env_status.get("deployment_ready"),
                 "replicas": env_status.get("replicas"),
                 "project_id": project_id,
@@ -982,7 +1067,9 @@ async def save_project_file(
 
             if success:
                 logger.info(f"[FILE] ✅ Wrote {file_path} to container for user {current_user.id}, project {project_id}")
-                orchestrator.track_activity(current_user.id, str(project_id))
+                # Track activity for idle cleanup (database-based)
+                from ..services.activity_tracker import track_project_activity
+                await track_project_activity(db, project_id, "file_save")
             else:
                 logger.warning(f"[FILE] ⚠️ Failed to write to container")
 
@@ -1215,11 +1302,25 @@ async def _perform_project_deletion(
             # Kubernetes mode: Delete K8s resources and S3 archive
             logger.info(f"[DELETE] Kubernetes mode: Cleaning up K8s resources and S3...")
 
-            # 4a. Delete Kubernetes namespace and resources
+            # 4a. Copy S3 archive to deleted/ prefix for backup retention
+            if settings.k8s_use_s3_storage:
+                try:
+                    from ..services.s3_manager import get_s3_manager
+                    s3_manager = get_s3_manager()
+
+                    success, error = await s3_manager.copy_to_deleted(user_id, project_id)
+                    if success:
+                        logger.info(f"[DELETE] Archived project {project_id} to deleted/ prefix")
+                    else:
+                        logger.warning(f"[DELETE] Failed to archive to deleted/: {error}")
+                except Exception as e:
+                    logger.warning(f"[DELETE] Error archiving to deleted/: {e}")
+                    # Continue with deletion even if archive fails
+
+            # 4b. Delete Kubernetes namespace and all resources
             try:
-                # Reuse the orchestrator already defined at top of function
-                await orchestrator.stop_project(
-                    project_slug=project_slug,
+                # Delete entire namespace (cascades to all pods, services, ingresses, PVCs)
+                await orchestrator.delete_project_namespace(
                     project_id=project_id,
                     user_id=user_id
                 )
@@ -1227,9 +1328,9 @@ async def _perform_project_deletion(
             except Exception as e:
                 logger.warning(f"[DELETE] Error deleting K8s resources: {e}")
 
-            task.update_progress(85, 100, "Deleting S3 archive...")
+            task.update_progress(85, 100, "Cleaning up active S3 archive...")
 
-            # 4b. Delete S3 archive (permanent storage)
+            # 4c. Delete active S3 archive (backup already saved to deleted/ prefix)
             if settings.k8s_use_s3_storage:
                 try:
                     from ..services.s3_manager import get_s3_manager
@@ -2696,6 +2797,10 @@ async def interactive_terminal(
             )
             session_id = session_info["session_id"]
 
+            # Track activity for idle cleanup (database-based)
+            from ..services.activity_tracker import track_project_activity
+            await track_project_activity(db, project.id, "terminal")
+
             await websocket.send_json({"type": "status", "message": f"Shell session created: {session_id}"})
 
         except HTTPException as e:
@@ -4011,6 +4116,14 @@ async def _start_container_background_task(
         all_containers = containers_result.scalars().all()
         task.add_log(f"Found {len(all_containers)} containers in project")
 
+        # CRITICAL: Use the container from all_containers which has base eagerly loaded
+        # The original container from db.get() doesn't have the base relationship loaded
+        container = next((c for c in all_containers if c.id == container_id), container)
+        if container.base:
+            task.add_log(f"Container base: {container.base.name} (git: {container.base.git_repo_url})")
+        else:
+            task.add_log(f"WARNING: Container has no base - base_id={container.base_id}")
+
         connections_result = await db.execute(
             select(ContainerConnection).where(ContainerConnection.project_id == project.id)
         )
@@ -4215,7 +4328,12 @@ async def stop_single_container(
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
-        await orchestrator.stop_container(project.slug, container.name)
+        await orchestrator.stop_container(
+            project_slug=project.slug,
+            project_id=project.id,
+            container_name=container.name,
+            user_id=current_user.id
+        )
 
         logger.info(f"[ORCHESTRATION] Stopped container {container.name} in project {project.slug}")
 
