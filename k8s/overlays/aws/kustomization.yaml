@@ -8,9 +8,10 @@ resources:
   - ../../base
   - storage-class.yaml
 
-# Patch backend and replace ingress
+# Patch backend, frontend, and replace ingress
 patchesStrategicMerge:
   - backend-patch.yaml
+  - frontend-patch.yaml
   - ingress-patch.yaml
 
 images:
