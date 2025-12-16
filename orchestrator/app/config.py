@@ -97,6 +97,17 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_oauth_redirect_uri: str = ""  # Frontend callback URL
 
+    # GitLab OAuth Configuration (for repository import)
+    gitlab_client_id: str = ""
+    gitlab_client_secret: str = ""
+    gitlab_oauth_redirect_uri: str = ""  # Frontend callback URL
+    gitlab_api_base_url: str = "https://gitlab.com"  # Supports self-hosted GitLab instances
+
+    # Bitbucket OAuth Configuration (for repository import)
+    bitbucket_client_id: str = ""
+    bitbucket_client_secret: str = ""
+    bitbucket_oauth_redirect_uri: str = ""  # Frontend callback URL
+
     # Encryption key for GitHub tokens (base64 encoded Fernet key)
     # This is derived from secret_key if not provided
     github_token_encryption_key: str = ""

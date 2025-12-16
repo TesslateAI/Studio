@@ -142,8 +142,8 @@ async def _perform_project_setup(
                 await asyncio.sleep(0.1)
 
             # Handle different source types
-            if project_data.source_type == "github":
-                await _setup_github_project(project_data, db_project, user_id, settings, db, task, project_path)
+            if project_data.source_type in ("github", "gitlab", "bitbucket"):
+                await _setup_git_provider_project(project_data, db_project, user_id, settings, db, task, project_path)
             elif project_data.source_type == "base":
                 await _setup_base_project(project_data, db_project, user_id, settings, db, task, project_path)
             else:
@@ -160,6 +160,172 @@ async def _perform_project_setup(
             raise
 
 
+async def _setup_git_provider_project(
+    project_data: ProjectCreate,
+    db_project: Project,
+    user_id: UUID,
+    settings,
+    db: AsyncSession,
+    task: Task,
+    project_path: str
+) -> None:
+    """
+    Unified setup for projects imported from GitHub, GitLab, or Bitbucket.
+
+    Uses the git_providers infrastructure for a consistent experience across all providers.
+    """
+    import tempfile
+    import shutil
+
+    from ..services.git_providers import (
+        GitProviderManager,
+        get_git_provider_manager,
+        GitProviderType,
+    )
+    from ..services.git_providers.credential_service import get_git_provider_credential_service
+    from ..services.project_patcher import ProjectPatcher
+
+    # Determine provider and repo URL
+    provider_name = project_data.source_type  # 'github', 'gitlab', 'bitbucket'
+
+    # Support both new unified fields and legacy github-specific fields
+    repo_url = project_data.git_repo_url or project_data.github_repo_url
+    branch = project_data.git_branch or project_data.github_branch or "main"
+
+    if not repo_url:
+        raise ValueError(f"No repository URL provided for {provider_name} import")
+
+    provider_type = GitProviderType(provider_name)
+    provider_manager = get_git_provider_manager()
+
+    # Step 2: Clone repository (10-40%)
+    task.update_progress(10, 100, f"Cloning repository from {provider_name.title()}: {repo_url}")
+    logger.info(f"[CREATE] Importing from {provider_name}: {repo_url}")
+
+    # Get credentials for this provider
+    credential_service = get_git_provider_credential_service()
+    access_token = await credential_service.get_access_token(db, user_id, provider_type)
+
+    # Parse repository URL to extract owner/repo info
+    provider_class = provider_manager.get_provider(provider_type)
+    repo_info = provider_class.parse_repo_url(repo_url)
+    if not repo_info:
+        raise ValueError(f"Invalid {provider_name} repository URL: {repo_url}")
+
+    # Get default branch if not specified and we have credentials
+    if not project_data.git_branch and not project_data.github_branch and access_token:
+        try:
+            provider_instance = provider_class(access_token)
+            branch = await provider_instance.get_default_branch(repo_info['owner'], repo_info['repo'])
+            logger.info(f"[CREATE] Using default branch: {branch}")
+        except Exception as e:
+            logger.warning(f"[CREATE] Could not fetch default branch, using 'main': {e}")
+
+    # Determine clone path based on deployment mode
+    if settings.deployment_mode == "docker":
+        clone_path = project_path
+    else:
+        # K8s mode: use temp directory
+        clone_path = tempfile.mkdtemp(prefix=f"tesslate-{provider_name}-{db_project.id}-")
+        logger.info(f"[CREATE] K8s mode: cloning to temp directory: {clone_path}")
+
+    try:
+        # Format clone URL with authentication if available
+        authenticated_url = provider_class.format_clone_url(
+            repo_info['owner'],
+            repo_info['repo'],
+            access_token
+        )
+
+        # Build git clone command
+        git_cmd = ["git", "clone"]
+        if branch:
+            git_cmd.extend(["--branch", branch])
+        git_cmd.extend([authenticated_url, clone_path])
+
+        logger.info(f"[CREATE] Executing git clone to: {clone_path}")
+        process = await asyncio.create_subprocess_exec(
+            *git_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+
+        if process.returncode != 0:
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            raise RuntimeError(f"Git clone failed: {error_msg}")
+
+        logger.info(f"[CREATE] Repository cloned successfully to {clone_path}")
+        task.update_progress(40, 100, "Repository cloned successfully")
+
+        # Step 3: Auto-patch project (40-60%)
+        task.update_progress(50, 100, "Patching project for Tesslate compatibility")
+        try:
+            patcher = ProjectPatcher(clone_path)
+            await patcher.auto_patch()
+        except Exception as patch_error:
+            logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
+
+        task.update_progress(60, 100, "Patching complete")
+
+        # Step 4: Save files to database (60-90%)
+        task.update_progress(65, 100, "Saving cloned files to database")
+        files_saved = 0
+        walk_results = await walk_directory_async(
+            clone_path,
+            exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
+        )
+
+        for root, dirs, files in walk_results:
+            for file in files:
+                if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
+                    continue
+
+                file_full_path = os.path.join(root, file)
+                relative_path = os.path.relpath(file_full_path, clone_path).replace('\\', '/')
+
+                try:
+                    content = await read_file_async(file_full_path)
+                    db_file = ProjectFile(
+                        project_id=db_project.id,
+                        file_path=relative_path,
+                        content=content
+                    )
+                    db.add(db_file)
+                    files_saved += 1
+                except Exception as e:
+                    logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
+
+        await db.commit()
+        task.update_progress(90, 100, f"Saved {files_saved} files to database")
+
+    finally:
+        # Clean up temp directory for K8s mode
+        if settings.deployment_mode != "docker" and clone_path != project_path:
+            try:
+                await asyncio.to_thread(shutil.rmtree, clone_path, ignore_errors=True)
+                logger.info(f"[CREATE] Cleaned up temp directory: {clone_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"[CREATE] Failed to cleanup temp directory: {cleanup_error}")
+
+    # Update project with Git info
+    db_project.has_git_repo = True
+    db_project.git_remote_url = repo_url
+
+    from ..models import GitRepository
+    git_repo = GitRepository(
+        project_id=db_project.id,
+        user_id=user_id,
+        repo_url=repo_url,
+        repo_name=repo_info['repo'],
+        repo_owner=repo_info['owner'],
+        default_branch=branch,
+        auth_method='pat' if access_token else 'none'
+    )
+    db.add(git_repo)
+    await db.commit()
+
+
 async def _setup_github_project(
     project_data: ProjectCreate,
     db_project: Project,
@@ -169,7 +335,12 @@ async def _setup_github_project(
     task: Task,
     project_path: str
 ) -> None:
-    """Setup project from GitHub repository"""
+    """
+    Setup project from GitHub repository.
+
+    DEPRECATED: This function is kept for backward compatibility.
+    New code should use _setup_git_provider_project which handles all providers.
+    """
     import tempfile
     import shutil
 

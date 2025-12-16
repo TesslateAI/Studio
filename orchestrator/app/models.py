@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Float, JSON
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Float, JSON, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
@@ -317,6 +317,38 @@ class GitHubCredential(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="github_credential")
+
+
+class GitProviderCredential(Base):
+    """Store encrypted Git provider OAuth credentials for users (GitHub, GitLab, Bitbucket)."""
+    __tablename__ = "git_provider_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(String(20), nullable=False)  # 'github', 'gitlab', 'bitbucket'
+
+    # OAuth tokens (encrypted)
+    access_token = Column(Text, nullable=False)  # Encrypted OAuth access token
+    refresh_token = Column(Text, nullable=True)  # Encrypted OAuth refresh token
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    # OAuth metadata
+    scope = Column(String(500), nullable=True)  # Granted OAuth scopes
+
+    # Provider user info
+    provider_username = Column(String(255), nullable=False)
+    provider_email = Column(String(255), nullable=True)
+    provider_user_id = Column(String(100), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Unique constraint: one credential per user per provider
+    __table_args__ = (
+        Index('ix_git_provider_credentials_user_provider', 'user_id', 'provider', unique=True),
+    )
+
+    user = relationship("User", back_populates="git_provider_credentials")
 
 
 class GitRepository(Base):

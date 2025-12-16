@@ -49,27 +49,59 @@ class ProjectBase(BaseModel):
     description: Optional[str] = None
 
 class ProjectCreate(ProjectBase):
-    source_type: str = "template"  # "template", "github", or "base"
+    source_type: str = "template"  # "template", "github", "gitlab", "bitbucket", or "base"
+    # Legacy field for backward compatibility
     github_repo_url: Optional[str] = None
     github_branch: Optional[str] = "main"
+    # New unified fields for all git providers
+    git_repo_url: Optional[str] = None
+    git_branch: Optional[str] = "main"
+    git_provider: Optional[str] = None  # "github", "gitlab", "bitbucket" - auto-detected if not provided
     base_id: Optional[Union[UUID, str]] = None  # UUID for marketplace bases, 'builtin' for built-in template
 
     @field_validator('source_type')
     @classmethod
     def validate_source_type(cls, v):
-        if v not in ['template', 'github', 'base']:
-            raise ValueError('source_type must be "template", "github", or "base"')
+        valid_types = ['template', 'github', 'gitlab', 'bitbucket', 'base']
+        if v not in valid_types:
+            raise ValueError(f'source_type must be one of: {", ".join(valid_types)}')
         return v
 
     @field_validator('github_repo_url')
     @classmethod
     def validate_github_repo_url(cls, v, info):
+        # Legacy validation for backward compatibility
         if info.data.get('source_type') == 'github':
+            # If git_repo_url is provided, use that instead
+            if info.data.get('git_repo_url'):
+                return None
             if not v or not v.strip():
-                raise ValueError('github_repo_url is required when source_type is "github"')
+                raise ValueError('github_repo_url or git_repo_url is required when source_type is "github"')
             if 'github.com' not in v:
-                raise ValueError('Only GitHub repositories are supported')
+                raise ValueError('github_repo_url must be a GitHub repository URL')
         return v.strip() if v else None
+
+    @field_validator('git_repo_url')
+    @classmethod
+    def validate_git_repo_url(cls, v, info):
+        source_type = info.data.get('source_type')
+        if source_type in ['github', 'gitlab', 'bitbucket']:
+            # Check if legacy github_repo_url is provided for github
+            if source_type == 'github' and info.data.get('github_repo_url'):
+                return None
+            if not v or not v.strip():
+                raise ValueError(f'git_repo_url is required when source_type is "{source_type}"')
+        return v.strip() if v else None
+
+    @field_validator('git_provider')
+    @classmethod
+    def validate_git_provider(cls, v, info):
+        if v:
+            valid_providers = ['github', 'gitlab', 'bitbucket']
+            if v.lower() not in valid_providers:
+                raise ValueError(f'git_provider must be one of: {", ".join(valid_providers)}')
+            return v.lower()
+        return v
 
     @field_validator('base_id')
     @classmethod

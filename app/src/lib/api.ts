@@ -226,9 +226,9 @@ export const projectsApi = {
   create: async (
     name: string,
     description?: string,
-    sourceType?: 'template' | 'github' | 'base',
-    githubRepoUrl?: string,
-    githubBranch?: string,
+    sourceType?: 'template' | 'github' | 'gitlab' | 'bitbucket' | 'base',
+    repoUrl?: string,
+    branch?: string,
     baseId?: string
   ) => {
     const body: any = {
@@ -238,8 +238,13 @@ export const projectsApi = {
     };
 
     if (sourceType === 'github') {
-      body.github_repo_url = githubRepoUrl;
-      body.github_branch = githubBranch || 'main';
+      // Legacy GitHub support
+      body.github_repo_url = repoUrl;
+      body.github_branch = branch || 'main';
+    } else if (sourceType === 'gitlab' || sourceType === 'bitbucket') {
+      // New unified git provider support
+      body.git_repo_url = repoUrl;
+      body.git_branch = branch || 'main';
     } else if (sourceType === 'base') {
       body.base_id = baseId;
     }

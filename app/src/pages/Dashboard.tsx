@@ -7,7 +7,7 @@ import {
   ProjectCard
 } from '../components/ui';
 import type { Status } from '../components/ui';
-import { ConfirmDialog, CreateProjectModal } from '../components/modals';
+import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import {
@@ -23,7 +23,8 @@ import {
   CaretDown,
   Coins,
   CreditCard,
-  User
+  User,
+  GitBranch
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -47,6 +48,7 @@ export default function Dashboard() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [userName, setUserName] = useState<string>('');
   const [userCredits, setUserCredits] = useState<number>(0);
   const [userTier, setUserTier] = useState<string>('free');
@@ -456,7 +458,10 @@ export default function Dashboard() {
         <div className="flex-1 overflow-auto bg-[var(--bg)]">
           <div className="p-4 md:p-6">
             {/* Projects Grid */}
-            <div className={filteredProjects.length === 0 ? "" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"}>
+            <div className={filteredProjects.length === 0
+              ? "flex flex-wrap justify-center gap-4"
+              : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+            }>
               {/* Create New Project Card */}
               <button
                 onClick={() => setShowCreateDialog(true)}
@@ -468,7 +473,7 @@ export default function Dashboard() {
                   transition-all duration-300
                   hover:transform hover:-translate-y-1
                   flex flex-col items-center justify-center gap-3
-                  ${filteredProjects.length === 0 ? 'w-full min-h-[400px]' : 'min-h-[240px]'}
+                  ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
                   ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
               >
@@ -481,6 +486,34 @@ export default function Dashboard() {
                   </h3>
                   <p className="text-sm text-gray-500">
                     Start building something amazing
+                  </p>
+                </div>
+              </button>
+
+              {/* Import from Repository Card */}
+              <button
+                onClick={() => setShowImportDialog(true)}
+                disabled={isCreating}
+                className={`
+                  group bg-white/[0.01] rounded-2xl p-6
+                  border-2 border-dashed border-emerald-500/30
+                  hover:border-emerald-500/60
+                  transition-all duration-300
+                  hover:transform hover:-translate-y-1
+                  flex flex-col items-center justify-center gap-3
+                  ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
+                  ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+              >
+                <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
+                  <GitBranch className="w-8 h-8 text-emerald-500" weight="fill" />
+                </div>
+                <div className="text-center">
+                  <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
+                    Import from Repository
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    GitHub, GitLab, or Bitbucket
                   </p>
                 </div>
               </button>
@@ -539,6 +572,38 @@ export default function Dashboard() {
         onClose={() => setShowCreateDialog(false)}
         onConfirm={handleCreateProject}
         isLoading={isCreating}
+      />
+
+      {/* Import from Repository Modal */}
+      <RepoImportModal
+        isOpen={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+        onCreateProject={async (provider, repoUrl, branch, projectName) => {
+          setIsCreating(true);
+          const creatingToast = toast.loading(`Importing from ${provider}...`);
+
+          try {
+            const response = await projectsApi.create(
+              projectName,
+              '',
+              provider,  // 'github', 'gitlab', or 'bitbucket'
+              repoUrl,
+              branch,
+              undefined
+            );
+
+            const project = response.project;
+            toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
+            navigate(`/project/${project.slug}`);
+          } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            const errorMessage = typeof detail === 'string' ? detail : 'Failed to import project';
+            toast.error(errorMessage, { id: creatingToast });
+            throw error; // Re-throw so the modal knows it failed
+          } finally {
+            setIsCreating(false);
+          }
+        }}
       />
 
     </>

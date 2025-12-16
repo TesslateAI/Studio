@@ -75,6 +75,7 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")
     agent_commands = relationship("AgentCommandLog", back_populates="user", cascade="all, delete-orphan")
     github_credential = relationship("GitHubCredential", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    git_provider_credentials = relationship("GitProviderCredential", back_populates="user", cascade="all, delete-orphan")
     git_repositories = relationship("GitRepository", back_populates="user", cascade="all, delete-orphan")
     purchased_agents = relationship("UserPurchasedAgent", back_populates="user", cascade="all, delete-orphan")
     agent_reviews = relationship("AgentReview", back_populates="user", cascade="all, delete-orphan")
