@@ -549,7 +549,8 @@ class DockerOrchestrator(BaseOrchestrator):
                 cache_path,
                 destination_path,
                 ignore=ignore_patterns,
-                dirs_exist_ok=True
+                dirs_exist_ok=True,
+                symlinks=True  # Preserve symlinks (critical for node_modules/.bin/)
             )
 
             await asyncio.to_thread(self._fix_permissions, destination_path)
@@ -1235,9 +1236,13 @@ class DockerOrchestrator(BaseOrchestrator):
             # Base container logic
             base_image = "tesslate-devserver:latest"
 
-            # Build volume mounts with subpath isolation
+            # Build volume mounts - mount entire project to /app
+            # Each container uses working_dir to cd into its subdirectory
+            # This matches K8s behavior where PVC is mounted at /app
+
             if self.use_volumes:
                 # SECURE: Uses Docker Compose v2.23.0+ subpath feature
+                # Mount entire project directory to /app
                 volumes = [
                     {
                         'type': 'volume',
@@ -1250,10 +1255,9 @@ class DockerOrchestrator(BaseOrchestrator):
                 ]
                 project_work_dir = "/app"
             else:
-                # Legacy bind mounts
+                # Legacy bind mounts - mount entire project
                 project_dir = f"users/{user_id}/{project.id}"
-                container_dir = container.directory
-                container_path = f"/app/{project_dir}/{container_dir}"
+                container_path = f"/app/{project_dir}"
                 host_path = self._convert_to_host_path(container_path)
 
                 volumes = [f"{host_path}:/app"]

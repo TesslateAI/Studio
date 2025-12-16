@@ -26,10 +26,9 @@ import {
   Gear,
   Article,
   Kanban,
-  Package,
   X,
 } from '@phosphor-icons/react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
 import { BrowserPreviewNode } from '../components/BrowserPreviewNode';
 import { GraphCanvas } from '../components/GraphCanvas';
@@ -123,9 +122,6 @@ export const ProjectGraphCanvas = () => {
   // Drag state for pausing polling during drag operations - critical for performance
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
-
-  // Mobile state
-  const [isMobileComponentsOpen, setIsMobileComponentsOpen] = useState(false);
 
   // External service credential modal state
   const [externalServiceModal, setExternalServiceModal] = useState<{
@@ -1405,49 +1401,11 @@ export const ProjectGraphCanvas = () => {
         <div className="flex-1 overflow-hidden bg-[var(--bg)]">
           {/* Graph View */}
           <div className={`w-full h-full ${activeView === 'graph' ? 'flex' : 'hidden'} relative`}>
-            {/* Left sidebar with marketplace items - hidden on mobile, shown as overlay when toggled */}
-            <div className="hidden md:block">
-              <MarketplaceSidebar />
-            </div>
-
-            {/* Mobile Components Sidebar Overlay */}
-            <AnimatePresence>
-              {isMobileComponentsOpen && (
-                <>
-                  {/* Backdrop */}
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="md:hidden fixed inset-0 bg-black/50 z-40"
-                    onClick={() => setIsMobileComponentsOpen(false)}
-                  />
-                  {/* Sidebar */}
-                  <motion.div
-                    initial={{ x: '-100%' }}
-                    animate={{ x: 0 }}
-                    exit={{ x: '-100%' }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                    className="md:hidden fixed left-0 top-0 bottom-0 w-80 max-w-[85vw] z-50 shadow-2xl"
-                  >
-                    <div className="relative h-full">
-                      <MarketplaceSidebar />
-                      {/* Close button */}
-                      <button
-                        onClick={() => setIsMobileComponentsOpen(false)}
-                        className="absolute top-3 right-3 p-2 bg-[var(--surface)] hover:bg-[var(--sidebar-hover)] rounded-full shadow-lg border border-[var(--sidebar-border)] z-10"
-                      >
-                        <X size={18} className="text-[var(--text)]" />
-                      </button>
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-
             {/* React Flow canvas */}
             <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform" ref={reactFlowWrapper}>
+              {/* Floating component drawer */}
+              <MarketplaceSidebar />
+
               <GraphCanvas
                 nodes={nodes}
                 edges={edges}
@@ -1464,15 +1422,6 @@ export const ProjectGraphCanvas = () => {
                 edgeTypes={edgeTypes}
                 theme={theme}
               />
-
-              {/* Mobile floating button to open components sidebar */}
-              <button
-                onClick={() => setIsMobileComponentsOpen(true)}
-                className="md:hidden fixed bottom-24 left-4 z-30 flex items-center gap-2 px-4 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-full shadow-lg transition-all active:scale-95"
-              >
-                <Package size={20} weight="fill" />
-                <span className="text-sm font-medium">Components</span>
-              </button>
             </div>
 
             {/* Container Properties Panel - inline with graph */}
