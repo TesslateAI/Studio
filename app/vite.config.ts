@@ -46,13 +46,13 @@ export default defineConfig({
         changeOrigin: true,
         ws: true, // Enable WebSocket support for /api/chat/ws
         configure: (proxy, options) => {
-          proxy.on('error', (err, req, res) => {
+          proxy.on('error', (err, _req, _res) => {
             console.log('proxy error', err);
           });
-          proxy.on('proxyReq', (proxyReq, req, res) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
             console.log('Proxying:', req.method, req.url, '→', options.target + req.url);
           });
-          proxy.on('proxyReqWs', (proxyReq, req, socket, head) => {
+          proxy.on('proxyReqWs', (proxyReq, req, _socket, _head) => {
             console.log('Proxying WebSocket:', req.url);
           });
         }

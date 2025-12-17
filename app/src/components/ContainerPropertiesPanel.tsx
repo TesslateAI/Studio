@@ -64,9 +64,9 @@ export const ContainerPropertiesPanel = ({
       toast.success('Container renamed successfully');
       onNameChange?.(editedName.trim());
       setIsEditingName(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to rename container:', error);
-      const errorMessage = error.response?.data?.detail || 'Failed to rename container';
+      const errorMessage = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail || 'Failed to rename container';
       toast.error(errorMessage);
       setEditedName(containerName); // Reset on error
     } finally {
@@ -87,11 +87,11 @@ export const ContainerPropertiesPanel = ({
       }));
 
       setEnvVars(envVarsArray);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch container details:', error);
 
       // Handle 404 - container was deleted or doesn't exist
-      if (error.response?.status === 404) {
+      if ((error as { response?: { status?: number } }).response?.status === 404) {
         toast.error('Container not found. Please refresh the page to sync with the latest data.');
         onClose(); // Close the panel since container doesn't exist
       } else {
@@ -176,9 +176,9 @@ export const ContainerPropertiesPanel = ({
         // Show task info in console for debugging
         console.log(`Container ${action} task started:`, response.data);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Failed to ${action} container:`, error);
-      const errorMessage = error.response?.data?.detail || `Failed to ${action} container`;
+      const errorMessage = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail || `Failed to ${action} container`;
       toast.error(errorMessage);
       // Reset to stopped on error if we were trying to start
       if (action === 'start' || action === 'restart') {

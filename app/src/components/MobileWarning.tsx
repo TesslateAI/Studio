@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, DeviceMobile, Info } from '@phosphor-icons/react';
+import { X, DeviceMobile } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function MobileWarning() {

@@ -1,9 +1,8 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { NavigationSidebar } from './ui';
-import { MobileMenu } from './ui';
 import { MobileWarning } from './MobileWarning';
 import { DiscordSupport } from './DiscordSupport';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
 
 export function DashboardLayout() {

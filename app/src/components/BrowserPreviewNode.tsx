@@ -5,7 +5,6 @@ import {
   ArrowRight,
   House,
   ArrowClockwise,
-  X,
   Globe,
   Link as LinkIcon,
   ArrowsOut,
@@ -100,7 +99,9 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
   const refresh = useCallback(() => {
     setIsLoading(true);
     if (iframeRef.current) {
-      iframeRef.current.src = iframeRef.current.src;
+      // Force refresh by reloading with timestamp
+      const currentSrc = iframeRef.current.src;
+      iframeRef.current.src = currentSrc.includes('?') ? currentSrc : `${currentSrc}?t=${Date.now()}`;
     }
   }, []);
 

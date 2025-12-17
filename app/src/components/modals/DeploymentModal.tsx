@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   X,
   Rocket,
-  CloudArrowUp,
   Warning,
   Plus,
   Trash,
@@ -31,7 +30,7 @@ interface Provider {
 interface DeploymentCredential {
   id: string;
   provider: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export function DeploymentModal({
@@ -84,9 +83,10 @@ export function DeploymentModal({
       if (credentialsData.credentials && credentialsData.credentials.length > 0) {
         setSelectedProvider(credentialsData.credentials[0].provider);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load deployment data:', error);
-      toast.error(error.response?.data?.detail || 'Failed to load deployment options');
+      const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to load deployment options';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -126,7 +126,7 @@ export function DeploymentModal({
             throw new Error('Popup blocked');
           }
           toast.success('Deployment successful! Opening in new tab...');
-        } catch (e) {
+        } catch {
           // Fallback: Copy to clipboard and show clickable link
           navigator.clipboard.writeText(result.deployment_url).catch(() => {});
           toast.success(
@@ -158,9 +158,10 @@ export function DeploymentModal({
       } else {
         toast.error(result.error || 'Deployment failed');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Deployment failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to start deployment');
+      const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to start deployment';
+      toast.error(errorMessage);
     } finally {
       setIsDeploying(false);
     }
@@ -185,7 +186,7 @@ export function DeploymentModal({
     return provider?.display_name || providerName.charAt(0).toUpperCase() + providerName.slice(1);
   };
 
-  const getProviderColor = (providerName: string) => {
+  const _getProviderColor = (providerName: string) => {
     switch (providerName.toLowerCase()) {
       case 'cloudflare':
         return 'bg-orange-500/20 text-orange-400 border-orange-500/30';

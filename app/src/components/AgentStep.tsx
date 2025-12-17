@@ -1,4 +1,3 @@
-import React from 'react';
 import { Brain } from 'lucide-react';
 import ToolCallDisplay from './ToolCallDisplay';
 import AgentDebugPanel from './AgentDebugPanel';
@@ -9,16 +8,7 @@ interface AgentStepProps {
   totalSteps: number;
 }
 
-const formatTime = (timestamp: string) => {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return '';
-  }
-};
-
-export default function AgentStep({ step, totalSteps }: AgentStepProps) {
+export default function AgentStep({ step }: AgentStepProps) {
   return (
     <div className="agent-step bg-[var(--surface)]/30 rounded-lg p-3 border border-[var(--border-color)]">
       {/* Thought Process - Only show if there ARE tool calls */}

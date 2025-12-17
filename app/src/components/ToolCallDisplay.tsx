@@ -61,7 +61,7 @@ const getToolColor = (toolName: string): string => {
   }
 };
 
-const formatParameterValue = (key: string, value: any): string => {
+const formatParameterValue = (key: string, value: unknown): string => {
   if (typeof value === 'string') {
     return value;
   } else if (typeof value === 'object' && value !== null) {
@@ -90,7 +90,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   let additionalOutput = '';
   let suggestion = '';
   let diffPreview = '';
-  let technicalDetails: any = null;
+  let technicalDetails: Record<string, unknown> | null = null;
 
   if (hasResult && result.result) {
     if (typeof result.result === 'object') {
@@ -123,11 +123,12 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
       } else if (result.result.files) {
         // Directory listing - handle both string arrays and object arrays
         if (Array.isArray(result.result.files)) {
-          additionalOutput = result.result.files.map((file: any) => {
+          additionalOutput = result.result.files.map((file: unknown) => {
             if (typeof file === 'object' && file !== null) {
-              const name = file.name || file.file_path || 'unknown';
-              const type = file.type ? `[${file.type}]` : '';
-              const size = file.size ? ` (${file.size} bytes)` : '';
+              const fileObj = file as Record<string, unknown>;
+              const name = fileObj.name || fileObj.file_path || 'unknown';
+              const type = fileObj.type ? `[${fileObj.type}]` : '';
+              const size = fileObj.size ? ` (${fileObj.size} bytes)` : '';
               return `${type} ${name}${size}`.trim();
             }
             return String(file);

@@ -41,9 +41,10 @@ const DeployButton: React.FC<DeployButtonProps> = ({
 
       setLimits(limitsRes.data);
       setConfig(configRes.data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load deployment limits:', err);
-      setError(err.response?.data?.detail || 'Failed to load deployment limits');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to load deployment limits');
     } finally {
       setLoading(false);
     }
@@ -76,9 +77,10 @@ const DeployButton: React.FC<DeployButtonProps> = ({
       }
 
       await loadLimits();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to deploy project:', err);
-      setError(err.response?.data?.detail || 'Failed to deploy project');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to deploy project');
     } finally {
       setDeploying(false);
     }
@@ -102,9 +104,10 @@ const DeployButton: React.FC<DeployButtonProps> = ({
       }
 
       await loadLimits();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to undeploy project:', err);
-      setError(err.response?.data?.detail || 'Failed to undeploy project');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to undeploy project');
     } finally {
       setDeploying(false);
     }
@@ -124,9 +127,10 @@ const DeployButton: React.FC<DeployButtonProps> = ({
       } else {
         throw new Error('No checkout URL received');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to purchase deploy slot:', err);
-      setError(err.response?.data?.detail || 'Failed to purchase deploy slot');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to purchase deploy slot');
     }
   };
 

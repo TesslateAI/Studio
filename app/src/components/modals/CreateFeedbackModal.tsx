@@ -41,8 +41,8 @@ export function CreateFeedbackModal({ isOpen, onClose, onSuccess }: CreateFeedba
       setType('suggestion');
       onSuccess();
       onClose();
-    } catch (error: any) {
-      const detail = error?.response?.data?.detail;
+    } catch (error: unknown) {
+      const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to submit feedback';
       toast.error(errorMessage);
     } finally {

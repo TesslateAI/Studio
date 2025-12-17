@@ -74,11 +74,12 @@ export default function AuthCallback() {
       } else {
         throw new Error(result.message || 'Failed to complete OAuth flow');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as { message?: string };
       setStatus('error');
       setMessage('Failed to connect GitHub account');
-      setErrorDetail(error.message || 'Unknown error occurred');
-      toast.error(`Failed to connect GitHub: ${error.message}`);
+      setErrorDetail(err.message || 'Unknown error occurred');
+      toast.error(`Failed to connect GitHub: ${err.message}`);
 
       setTimeout(() => {
         navigate('/dashboard');

@@ -25,7 +25,7 @@ export const githubApi = {
   /**
    * Handle OAuth callback
    */
-  handleOAuthCallback: async (code: string, state: string): Promise<any> => {
+  handleOAuthCallback: async (code: string, state: string): Promise<{ message: string; credential_id?: string }> => {
     const response = await api.get('/api/github/oauth/callback', {
       params: { code, state }
     });

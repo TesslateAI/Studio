@@ -1,9 +1,9 @@
-import { Check, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 interface ApprovalRequestCardProps {
   approvalId: string;
   toolName: string;
-  toolParameters: any;
+  toolParameters: Record<string, unknown>;
   toolDescription: string;
   onRespond: (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop', toolName: string) => void;
 }
@@ -14,7 +14,7 @@ const WRITE_TOOLS = new Set(['write_file', 'patch_file', 'multi_edit']);
 export function ApprovalRequestCard({
   approvalId,
   toolName,
-  toolParameters,
+  toolParameters: _toolParameters,
   toolDescription,
   onRespond
 }: ApprovalRequestCardProps) {

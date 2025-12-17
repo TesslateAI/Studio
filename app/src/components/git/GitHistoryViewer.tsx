@@ -23,7 +23,7 @@ export function GitHistoryViewer({ projectId }: GitHistoryViewerProps) {
     try {
       const history = await gitApi.getCommitHistory(projectId, limit);
       setCommits(history.commits);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load commit history:', error);
       toast.error('Failed to load commit history');
     } finally {

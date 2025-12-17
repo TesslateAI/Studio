@@ -3,13 +3,10 @@ import {
   Plus,
   MagnifyingGlass,
   X,
-  DotsThreeVertical,
   Calendar,
   User,
-  Tag,
   Clock,
   Trash,
-  PencilSimple,
   ArrowsDownUp,
   Funnel,
   ChatCircle
@@ -65,8 +62,8 @@ interface Task {
 }
 
 interface TaskDetails extends Task {
-  attachments?: any[];
-  custom_fields?: any;
+  attachments?: unknown[];
+  custom_fields?: Record<string, unknown>;
   comments: Comment[];
 }
 
@@ -82,7 +79,7 @@ interface Comment {
   updated_at: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const _API_BASE = import.meta.env.VITE_API_URL || '';
 
 const priorityColors = {
   low: 'text-blue-400',
@@ -128,9 +125,10 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     try {
       const response = await api.get(`/api/kanban/projects/${projectId}/board`);
       setBoard(response.data);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load board:', error);
-      toast.error(error.response?.data?.detail || 'Failed to load kanban board');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to load kanban board');
     } finally {
       setLoading(false);
     }
@@ -141,7 +139,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       const response = await api.get(`/api/kanban/tasks/${taskId}`);
       setSelectedTask(response.data);
       setShowTaskDetails(true);
-    } catch (error: any) {
+    } catch {
       toast.error('Failed to load task details');
     }
   };
@@ -168,8 +166,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
         estimate_hours: undefined
       });
       await loadBoard();
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Failed to create task');
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to create task');
     }
   };
 
@@ -184,7 +183,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       if (selectedTask?.id === taskId) {
         await loadTaskDetails(taskId);
       }
-    } catch (error: any) {
+    } catch {
       toast.error('Failed to update task');
     }
   };
@@ -197,7 +196,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       toast.success('Task deleted');
       setShowTaskDetails(false);
       await loadBoard();
-    } catch (error: any) {
+    } catch {
       toast.error('Failed to delete task');
     }
   };
@@ -212,7 +211,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       );
       setNewComment('');
       await loadTaskDetails(selectedTask.id);
-    } catch (error: any) {
+    } catch {
       toast.error('Failed to add comment');
     }
   };
@@ -280,7 +279,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
           position: destination.index
         }
       );
-    } catch (error: any) {
+    } catch {
       toast.error('Failed to move task');
       await loadBoard(); // Reload on error
     }
@@ -531,7 +530,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">Priority</label>
                   <select
                     value={newTask.priority}
-                    onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as any })}
+                    onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as 'low' | 'medium' | 'high' | 'critical' })}
                     className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="low">Low</option>
@@ -544,7 +543,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">Type</label>
                   <select
                     value={newTask.task_type}
-                    onChange={(e) => setNewTask({ ...newTask, task_type: e.target.value as any })}
+                    onChange={(e) => setNewTask({ ...newTask, task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic' })}
                     className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="task">Task</option>
@@ -616,7 +615,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">Priority</label>
                   <select
                     value={selectedTask.priority || 'medium'}
-                    onChange={(e) => updateTask(selectedTask.id, { priority: e.target.value as any })}
+                    onChange={(e) => updateTask(selectedTask.id, { priority: e.target.value as 'low' | 'medium' | 'high' | 'critical' })}
                     className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="low">Low</option>
@@ -629,7 +628,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">Type</label>
                   <select
                     value={selectedTask.task_type || 'task'}
-                    onChange={(e) => updateTask(selectedTask.id, { task_type: e.target.value as any })}
+                    onChange={(e) => updateTask(selectedTask.id, { task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic' })}
                     className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="task">Task</option>

@@ -1,14 +1,6 @@
 import { type ReactNode, useState, useEffect } from 'react';
 import { X } from '@phosphor-icons/react';
 
-interface MenuItem {
-  icon: ReactNode;
-  title: string;
-  onClick: () => void;
-  active?: boolean;
-  section?: 'left' | 'right';
-}
-
 interface MobileMenuProps {
   leftItems: Array<{
     icon: ReactNode;

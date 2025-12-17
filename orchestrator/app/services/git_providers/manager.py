@@ -35,6 +35,31 @@ class GitProviderManager:
         logger.debug(f"Registered git provider: {provider_type.value}")
 
     @classmethod
+    def get_provider_class(
+        cls,
+        provider_type: GitProviderType
+    ) -> Type[BaseGitProvider]:
+        """
+        Get the provider class (not instance) for static method access.
+
+        Args:
+            provider_type: The provider type
+
+        Returns:
+            Provider class (not instantiated)
+
+        Raises:
+            ValueError: If provider type is not registered
+        """
+        if provider_type not in cls._providers:
+            available = ", ".join(p.value for p in cls._providers.keys())
+            raise ValueError(
+                f"Unknown provider: {provider_type.value}. "
+                f"Available providers: {available}"
+            )
+        return cls._providers[provider_type]
+
+    @classmethod
     def get_provider(
         cls,
         provider_type: GitProviderType,

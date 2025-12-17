@@ -52,14 +52,15 @@ export default function OAuthLoginCallback() {
     try {
       // Import api from lib to use configured axios instance with credentials
       const { authApi } = await import('../lib/api');
-      const user = await authApi.getCurrentUser();
+      await authApi.getCurrentUser();
 
       // Successfully authenticated via cookie - redirect immediately
       navigate('/dashboard', { state: { fromLogin: true } });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as { message?: string };
       setStatus('error');
       setMessage('Failed to complete sign in');
-      setErrorDetail(err.message || 'Unable to verify authentication');
+      setErrorDetail(error.message || 'Unable to verify authentication');
       toast.error('Failed to complete sign in');
 
       setTimeout(() => {

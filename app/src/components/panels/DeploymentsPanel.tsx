@@ -8,7 +8,6 @@ import {
   Spinner,
   ArrowSquareOut,
   Trash,
-  ArrowsClockwise,
   Plus
 } from '@phosphor-icons/react';
 import { deploymentsApi, deploymentCredentialsApi } from '../../lib/api';
@@ -33,7 +32,7 @@ interface Deployment {
 interface DeploymentCredential {
   id: string;
   provider: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
@@ -56,9 +55,10 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
         offset: 0,
       });
       setDeployments(Array.isArray(data) ? data : []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load deployments:', error);
-      toast.error(error.response?.data?.detail || 'Failed to load deployments');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to load deployments');
     } finally {
       setLoading(false);
     }
@@ -83,9 +83,10 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
       await deploymentsApi.delete(deploymentId);
       toast.success('Deployment deleted successfully');
       await loadDeployments();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to delete deployment:', error);
-      toast.error(error.response?.data?.detail || 'Failed to delete deployment');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to delete deployment');
     } finally {
       setDeletingId(null);
     }

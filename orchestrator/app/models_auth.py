@@ -59,6 +59,13 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     # User preferences
     diagram_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Model for architecture diagrams
 
+    # Public profile fields
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Profile picture URL
+    bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Short bio/description
+    twitter_handle: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Twitter username
+    github_username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # GitHub username
+    website_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Personal website
+
     # Referral system
     referral_code: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
     referred_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Referrer code

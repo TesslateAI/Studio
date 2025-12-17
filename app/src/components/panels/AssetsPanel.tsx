@@ -109,9 +109,10 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
       await loadDirectories();
       // Auto-select the newly created directory
       setSelectedDirectory(`/${path.trim()}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to create directory:', error);
-      toast.error(error.response?.data?.detail || 'Failed to create directory');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to create directory');
     }
   };
 
@@ -135,9 +136,10 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
       // Notify other components about file change
       const filePath = `${selectedDirectory}/${file.name}`.replace('//', '/');
       fileEvents.emit('file-created', filePath);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Upload failed:', error);
-      toast.error(error.response?.data?.detail || 'Upload failed');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Upload failed');
       throw error;
     }
   };
@@ -160,9 +162,10 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
 
       // Notify other components about file change
       fileEvents.emit('file-updated', selectedAsset.file_path);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to rename asset:', error);
-      toast.error(error.response?.data?.detail || 'Failed to rename asset');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to rename asset');
     }
   };
 
@@ -183,9 +186,10 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
 
       // Notify other components about file deletion
       fileEvents.emit('file-deleted', deletedFilePath);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to delete asset:', error);
-      toast.error(error.response?.data?.detail || 'Failed to delete asset');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to delete asset');
     }
   };
 
@@ -208,9 +212,10 @@ export function AssetsPanel({ projectSlug }: AssetsPanelProps) {
 
       // Notify other components about file change (moved files are like updates)
       fileEvents.emit('file-updated', selectedAsset.file_path);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to move asset:', error);
-      toast.error(error.response?.data?.detail || 'Failed to move asset');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to move asset');
     }
   };
 

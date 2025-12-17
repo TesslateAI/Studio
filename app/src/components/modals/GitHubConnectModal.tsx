@@ -10,7 +10,7 @@ interface GitHubConnectModalProps {
   onSuccess: () => void;
 }
 
-export function GitHubConnectModal({ isOpen, onClose, onSuccess }: GitHubConnectModalProps) {
+export function GitHubConnectModal({ isOpen, onClose }: GitHubConnectModalProps) {
   const [isConnecting, setIsConnecting] = useState(false);
 
   if (!isOpen) return null;
@@ -28,9 +28,10 @@ export function GitHubConnectModal({ isOpen, onClose, onSuccess }: GitHubConnect
 
       // Redirect to GitHub OAuth page
       window.location.href = authorization_url;
-    } catch (error: any) {
-      const detail = error.response?.data?.detail;
-      const errorMessage = typeof detail === 'string' ? detail : (error.message || 'Failed to initiate GitHub OAuth');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      const detail = err.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : (err.message || 'Failed to initiate GitHub OAuth');
       toast.error(errorMessage);
       setIsConnecting(false);
     }

@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { Folder, FolderOpen, Plus, Check, X } from '@phosphor-icons/react';
 
+interface TreeNode {
+  name: string;
+  fullPath: string;
+  children: Record<string, TreeNode>;
+}
+
 interface DirectoryTreeProps {
   directories: string[];
   selectedDirectory: string | null;
@@ -22,7 +28,7 @@ export default function DirectoryTree({
 
   // Build tree structure from flat directory list
   const buildTree = () => {
-    const tree: { [key: string]: any } = {};
+    const tree: Record<string, TreeNode> = {};
 
     directories.forEach((dir) => {
       const parts = dir.split('/').filter(Boolean);
@@ -53,7 +59,7 @@ export default function DirectoryTree({
     setExpandedDirs(newExpanded);
   };
 
-  const renderTree = (node: any, level: number = 0) => {
+  const renderTree = (node: Record<string, TreeNode>, level: number = 0) => {
     return Object.keys(node).map((key) => {
       const item = node[key];
       const isExpanded = expandedDirs.has(item.fullPath);

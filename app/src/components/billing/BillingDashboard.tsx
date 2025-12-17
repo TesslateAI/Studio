@@ -39,9 +39,10 @@ const BillingDashboard: React.FC = () => {
       setCredits(creditsRes);
       setTransactions(transRes.transactions);
       setCreditHistory(historyRes.purchases);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load billing data:', err);
-      setError(err.response?.data?.detail || 'Failed to load billing information');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to load billing information');
     } finally {
       setLoading(false);
     }
@@ -64,9 +65,10 @@ const BillingDashboard: React.FC = () => {
 
       alert('Subscription cancelled. You will have access until the end of your billing period.');
       await loadData();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to cancel subscription:', err);
-      setError(err.response?.data?.detail || 'Failed to cancel subscription');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to cancel subscription');
     } finally {
       setCancelling(false);
     }
@@ -78,12 +80,13 @@ const BillingDashboard: React.FC = () => {
       if (response.url) {
         window.location.href = response.url;
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to open customer portal:', err);
-      const errorDetail = err.response?.data?.detail || 'Failed to open customer portal';
+      const error = err as { response?: { data?: { detail?: string }; status?: number } };
+      const errorDetail = error.response?.data?.detail || 'Failed to open customer portal';
 
       // If portal not configured, redirect to library subscriptions tab
-      if (err.response?.status === 503 || errorDetail.includes('not configured')) {
+      if (error.response?.status === 503 || errorDetail.includes('not configured')) {
         if (confirm(errorDetail + '\n\nWould you like to go to Library > Subscriptions to manage your subscription?')) {
           window.location.href = '/library?tab=subscriptions';
         }

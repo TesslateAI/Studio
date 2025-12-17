@@ -50,9 +50,10 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({
       } else {
         throw new Error('No checkout URL received');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to start subscription:', err);
-      setError(err.response?.data?.detail || 'Failed to start subscription');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to start subscription');
       setUpgrading(false);
     }
   };

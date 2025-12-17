@@ -55,7 +55,7 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
       const repos = await githubApi.listRepositories();
       setRepositories(repos);
       setFilteredRepos(repos);
-    } catch (error: any) {
+    } catch {
       toast.error('Failed to load repositories. Make sure you connected GitHub first.');
       setMode('url');
     } finally {
@@ -98,8 +98,9 @@ export function GitHubImportModal({ isOpen, onClose, projectId, onSuccess }: Git
       setSelectedRepo(null);
       onSuccess();
       onClose();
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to clone repository';
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      const errorMessage = err.response?.data?.detail || 'Failed to clone repository';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
       setIsImporting(false);

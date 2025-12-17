@@ -17,7 +17,7 @@ interface MarketplaceItem {
   gradient: string;
 }
 
-export function MarketplacePanel({ projectId, onLockToggle }: MarketplacePanelProps) {
+export function MarketplacePanel({ projectId: _projectId, onLockToggle }: MarketplacePanelProps) {
   const [activeTab, setActiveTab] = useState<MarketplaceTab>('bases');
   const [searchQuery, setSearchQuery] = useState('');
   const [locked, setLocked] = useState(false);

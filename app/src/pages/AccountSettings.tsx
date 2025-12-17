@@ -3,10 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   CloudArrowUp,
-  Plus,
   Trash,
   CheckCircle,
-  XCircle,
   Spinner,
   Eye,
   EyeSlash,
@@ -27,7 +25,7 @@ interface Provider {
 interface DeploymentCredential {
   id: string;
   provider: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -55,9 +53,10 @@ export default function AccountSettings() {
       ]);
       setProviders(providersData.providers || []);
       setCredentials(credentialsData.credentials || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load data:', error);
-      toast.error(error.response?.data?.detail || 'Failed to load deployment providers');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to load deployment providers');
     } finally {
       setLoading(false);
     }
@@ -100,9 +99,10 @@ export default function AccountSettings() {
     if (provider.auth_type === 'oauth') {
       try {
         await deploymentCredentialsApi.startOAuth(providerName);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Failed to start OAuth:', error);
-        toast.error(error.response?.data?.detail || 'Failed to start OAuth flow');
+        const err = error as { response?: { data?: { detail?: string } } };
+        toast.error(err.response?.data?.detail || 'Failed to start OAuth flow');
       }
       return;
     }
@@ -136,9 +136,10 @@ export default function AccountSettings() {
       toast.success(`Successfully connected to ${provider.display_name}`);
       setExpandedProvider(null);
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to add credential:', error);
-      toast.error(error.response?.data?.detail || 'Failed to add credential');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to add credential');
     } finally {
       setSavingProvider(null);
     }
@@ -153,9 +154,10 @@ export default function AccountSettings() {
       } else {
         toast.error(result.error || 'Connection test failed');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Test failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to test connection');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to test connection');
     } finally {
       setTestingId(null);
     }
@@ -171,9 +173,10 @@ export default function AccountSettings() {
       await deploymentCredentialsApi.delete(credentialId);
       toast.success('Credential removed successfully');
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to delete credential:', error);
-      toast.error(error.response?.data?.detail || 'Failed to remove credential');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to remove credential');
     } finally {
       setDeletingId(null);
     }
@@ -192,7 +195,7 @@ export default function AccountSettings() {
     }
   };
 
-  const getProviderDisplay = (providerName: string) => {
+  const _getProviderDisplay = (providerName: string) => {
     const provider = providers.find(p => p.name === providerName);
     return provider?.display_name || providerName.charAt(0).toUpperCase() + providerName.slice(1);
   };

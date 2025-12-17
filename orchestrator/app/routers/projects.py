@@ -173,17 +173,17 @@ async def _setup_git_provider_project(
     Unified setup for projects imported from GitHub, GitLab, or Bitbucket.
 
     Uses the git_providers infrastructure for a consistent experience across all providers.
-    """
-    import tempfile
-    import shutil
 
+    In K8s mode: Creates project environment (namespace + PVC + file-manager pod) and
+    clones directly into the PVC. Files are never stored in the database.
+
+    In Docker mode: Clones directly to the project filesystem path.
+    """
     from ..services.git_providers import (
-        GitProviderManager,
         get_git_provider_manager,
         GitProviderType,
     )
     from ..services.git_providers.credential_service import get_git_provider_credential_service
-    from ..services.project_patcher import ProjectPatcher
 
     # Determine provider and repo URL
     provider_name = project_data.source_type  # 'github', 'gitlab', 'bitbucket'
@@ -198,16 +198,16 @@ async def _setup_git_provider_project(
     provider_type = GitProviderType(provider_name)
     provider_manager = get_git_provider_manager()
 
-    # Step 2: Clone repository (10-40%)
-    task.update_progress(10, 100, f"Cloning repository from {provider_name.title()}: {repo_url}")
+    # Step 1: Get credentials and parse URL
+    task.update_progress(10, 100, f"Preparing to import from {provider_name.title()}")
     logger.info(f"[CREATE] Importing from {provider_name}: {repo_url}")
 
     # Get credentials for this provider
     credential_service = get_git_provider_credential_service()
     access_token = await credential_service.get_access_token(db, user_id, provider_type)
 
-    # Parse repository URL to extract owner/repo info
-    provider_class = provider_manager.get_provider(provider_type)
+    # Parse repository URL to extract owner/repo info (use class, not instance)
+    provider_class = provider_manager.get_provider_class(provider_type)
     repo_info = provider_class.parse_repo_url(repo_url)
     if not repo_info:
         raise ValueError(f"Invalid {provider_name} repository URL: {repo_url}")
@@ -221,29 +221,94 @@ async def _setup_git_provider_project(
         except Exception as e:
             logger.warning(f"[CREATE] Could not fetch default branch, using 'main': {e}")
 
-    # Determine clone path based on deployment mode
-    if settings.deployment_mode == "docker":
-        clone_path = project_path
-    else:
-        # K8s mode: use temp directory
-        clone_path = tempfile.mkdtemp(prefix=f"tesslate-{provider_name}-{db_project.id}-")
-        logger.info(f"[CREATE] K8s mode: cloning to temp directory: {clone_path}")
+    # Format clone URL with authentication if available
+    authenticated_url = provider_class.format_clone_url(
+        repo_info['owner'],
+        repo_info['repo'],
+        access_token
+    )
 
-    try:
-        # Format clone URL with authentication if available
-        authenticated_url = provider_class.format_clone_url(
-            repo_info['owner'],
-            repo_info['repo'],
-            access_token
+    # ==========================================================================
+    # K8s Mode: Create environment and clone directly to PVC
+    # ==========================================================================
+    if settings.deployment_mode != "docker":
+        from ..services.orchestration import get_orchestrator
+        from ..services.orchestration.kubernetes.helpers import generate_git_clone_script
+
+        orchestrator = get_orchestrator()
+
+        # Step 2: Create K8s environment (namespace + PVC + file-manager pod)
+        task.update_progress(20, 100, "Creating project environment...")
+        logger.info(f"[CREATE] K8s mode: Creating environment for project {db_project.id}")
+
+        namespace = await orchestrator.ensure_project_environment(
+            project_id=db_project.id,
+            user_id=user_id
+        )
+        logger.info(f"[CREATE] K8s environment created: {namespace}")
+
+        # Step 3: Wait for file-manager pod to be ready
+        task.update_progress(30, 100, "Waiting for project environment...")
+        pod_name = None
+        for attempt in range(20):  # Up to 60 seconds
+            pod_name = await orchestrator.k8s_client.get_file_manager_pod(namespace)
+            if pod_name:
+                break
+            logger.info(f"[CREATE] Waiting for file-manager pod... (attempt {attempt + 1}/20)")
+            await asyncio.sleep(3)
+
+        if not pod_name:
+            raise RuntimeError("File manager pod not ready after 60 seconds")
+
+        logger.info(f"[CREATE] File-manager pod ready: {pod_name}")
+
+        # Step 4: Clone directly into PVC via file-manager pod
+        task.update_progress(40, 100, f"Cloning repository from {provider_name.title()}...")
+
+        # Generate clone script - clone to /app (root of PVC)
+        clone_script = generate_git_clone_script(
+            git_url=authenticated_url,
+            branch=branch,
+            target_dir="/app",
+            install_deps=False  # Don't install deps during import - user can do this when they start container
         )
 
-        # Build git clone command
+        logger.info(f"[CREATE] Executing git clone in file-manager pod...")
+        result = await asyncio.to_thread(
+            orchestrator.k8s_client._exec_in_pod,
+            pod_name,
+            namespace,
+            "file-manager",
+            ["/bin/sh", "-c", clone_script],
+            timeout=300  # 5 minutes for large repos
+        )
+
+        logger.info(f"[CREATE] Git clone completed in PVC")
+        logger.debug(f"[CREATE] Clone output: {result[:500] if result else 'None'}...")
+        task.update_progress(70, 100, "Repository cloned to project storage")
+
+        # Step 5: Auto-patch project (run patch script in pod)
+        task.update_progress(80, 100, "Patching project for Tesslate compatibility...")
+        # TODO: Run patcher inside pod if needed - for now skip since basic Next.js should work
+        logger.info(f"[CREATE] Skipping auto-patch in K8s mode (TODO: implement in-pod patching)")
+
+        task.update_progress(90, 100, "Project files ready")
+
+    # ==========================================================================
+    # Docker Mode: Clone directly to filesystem
+    # ==========================================================================
+    else:
+        from ..services.project_patcher import ProjectPatcher
+
+        # Step 2: Clone repository
+        task.update_progress(20, 100, f"Cloning repository from {provider_name.title()}...")
+
         git_cmd = ["git", "clone"]
         if branch:
             git_cmd.extend(["--branch", branch])
-        git_cmd.extend([authenticated_url, clone_path])
+        git_cmd.extend([authenticated_url, project_path])
 
-        logger.info(f"[CREATE] Executing git clone to: {clone_path}")
+        logger.info(f"[CREATE] Executing git clone to: {project_path}")
         process = await asyncio.create_subprocess_exec(
             *git_cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -255,58 +320,18 @@ async def _setup_git_provider_project(
             error_msg = stderr.decode() if stderr else "Unknown error"
             raise RuntimeError(f"Git clone failed: {error_msg}")
 
-        logger.info(f"[CREATE] Repository cloned successfully to {clone_path}")
-        task.update_progress(40, 100, "Repository cloned successfully")
+        logger.info(f"[CREATE] Repository cloned successfully to {project_path}")
+        task.update_progress(60, 100, "Repository cloned successfully")
 
-        # Step 3: Auto-patch project (40-60%)
-        task.update_progress(50, 100, "Patching project for Tesslate compatibility")
+        # Step 3: Auto-patch project
+        task.update_progress(70, 100, "Patching project for Tesslate compatibility")
         try:
-            patcher = ProjectPatcher(clone_path)
+            patcher = ProjectPatcher(project_path)
             await patcher.auto_patch()
         except Exception as patch_error:
             logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
 
-        task.update_progress(60, 100, "Patching complete")
-
-        # Step 4: Save files to database (60-90%)
-        task.update_progress(65, 100, "Saving cloned files to database")
-        files_saved = 0
-        walk_results = await walk_directory_async(
-            clone_path,
-            exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
-        )
-
-        for root, dirs, files in walk_results:
-            for file in files:
-                if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
-                    continue
-
-                file_full_path = os.path.join(root, file)
-                relative_path = os.path.relpath(file_full_path, clone_path).replace('\\', '/')
-
-                try:
-                    content = await read_file_async(file_full_path)
-                    db_file = ProjectFile(
-                        project_id=db_project.id,
-                        file_path=relative_path,
-                        content=content
-                    )
-                    db.add(db_file)
-                    files_saved += 1
-                except Exception as e:
-                    logger.warning(f"[CREATE] Could not read file {relative_path}: {e}")
-
-        await db.commit()
-        task.update_progress(90, 100, f"Saved {files_saved} files to database")
-
-    finally:
-        # Clean up temp directory for K8s mode
-        if settings.deployment_mode != "docker" and clone_path != project_path:
-            try:
-                await asyncio.to_thread(shutil.rmtree, clone_path, ignore_errors=True)
-                logger.info(f"[CREATE] Cleaned up temp directory: {clone_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"[CREATE] Failed to cleanup temp directory: {cleanup_error}")
+        task.update_progress(90, 100, "Project setup complete")
 
     # Update project with Git info
     db_project.has_git_repo = True
@@ -1043,14 +1068,13 @@ async def get_project_files(
                 logger.info(f"[FILES] ✅ Read {len(files_with_content)} files from file-manager pod")
                 return files_with_content
             else:
-                # In K8s mode, return empty list - don't fall back to database
-                # Database files are templates that shouldn't be shown in K8s mode
-                logger.info(f"[FILES] No files found in pod - returning empty list (K8s mode)")
+                # No files in pod yet - return empty (pod environment starting or files being cloned)
+                logger.info(f"[FILES] No files in pod - returning empty list (K8s mode)")
                 return []
 
         except Exception as e:
             logger.warning(f"[FILES] Failed to read from pod: {e}")
-            # In K8s mode, return empty list on error - don't fall back to database
+            # In K8s mode, return empty list on error - files live on PVC only
             return []
 
     # Docker mode only: Get files from database

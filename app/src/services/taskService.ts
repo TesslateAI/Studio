@@ -21,10 +21,10 @@ export interface Task {
   started_at: string | null;
   completed_at: string | null;
   progress: TaskProgress;
-  result: any | null;
+  result: unknown | null;
   error: string | null;
   logs: string[];
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export interface TaskUpdate {

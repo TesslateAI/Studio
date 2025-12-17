@@ -5,7 +5,7 @@ interface DebugData {
   full_response?: string;
   context_messages_count?: number;
   context_messages?: Array<{ role: string; content: string }>;
-  raw_tool_calls?: Array<{ name: string; params: any }>;
+  raw_tool_calls?: Array<{ name: string; params: Record<string, unknown> }>;
   raw_thought?: string;
   is_complete?: boolean;
   conversational_text?: string;
@@ -15,7 +15,7 @@ interface DebugData {
 interface ToolResult {
   success: boolean;
   tool: string;
-  result?: any;
+  result?: unknown;
   error?: string;
 }
 

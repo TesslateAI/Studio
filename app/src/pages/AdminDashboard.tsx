@@ -6,7 +6,6 @@ import {
   Zap,
   Package,
   TrendingUp,
-  TrendingDown,
   Coins,
   Timer,
   Activity,
@@ -15,7 +14,6 @@ import {
   ArrowUp,
   ArrowDown,
   Calendar,
-  Download,
   RefreshCw
 } from 'lucide-react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
@@ -56,11 +54,11 @@ interface MetricsSummary {
 }
 
 interface DetailedMetrics {
-  users?: any;
-  projects?: any;
-  sessions?: any;
-  tokens?: any;
-  marketplace?: any;
+  users?: Record<string, unknown>;
+  projects?: Record<string, unknown>;
+  sessions?: Record<string, unknown>;
+  tokens?: Record<string, unknown>;
+  marketplace?: Record<string, unknown>;
 }
 
 export default function AdminDashboard() {
@@ -151,7 +149,7 @@ export default function AdminDashboard() {
     return num.toString();
   };
 
-  const renderMetricCard = (title: string, value: any, change?: number, icon?: React.ReactNode, suffix?: string) => {
+  const renderMetricCard = (title: string, value: number | string, change?: number, icon?: React.ReactNode, suffix?: string) => {
     return (
       <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
         <div className="flex items-center justify-between mb-2">
@@ -176,13 +174,14 @@ export default function AdminDashboard() {
   const renderUserChart = () => {
     if (!detailedMetrics.users?.daily_new_users) return null;
 
-    const maxCount = Math.max(...detailedMetrics.users.daily_new_users.map((d: any) => d.count));
+    const dailyUsers = detailedMetrics.users.daily_new_users as Array<{ date: string; count: number }>;
+    const maxCount = Math.max(...dailyUsers.map(d => d.count));
 
     return (
       <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
         <h3 className="text-lg font-semibold text-white mb-4">User Growth</h3>
         <div className="h-64 flex items-end space-x-2">
-          {detailedMetrics.users.daily_new_users.map((d: any, idx: number) => (
+          {dailyUsers.map((d, idx: number) => (
             <div key={idx} className="flex-1 flex flex-col items-center">
               <div
                 className="w-full bg-green-500 rounded-t"
@@ -358,8 +357,8 @@ export default function AdminDashboard() {
             <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
               <h3 className="text-lg font-semibold text-white mb-4">Project Creation Over Time</h3>
               <div className="h-64 flex items-end space-x-1">
-                {detailedMetrics.projects.daily_projects?.map((d: any, idx: number) => {
-                  const maxCount = Math.max(...detailedMetrics.projects.daily_projects.map((d: any) => d.count), 1);
+                {(detailedMetrics.projects.daily_projects as Array<{ date: string; count: number }>)?.map((d, idx: number) => {
+                  const maxCount = Math.max(...(detailedMetrics.projects.daily_projects as Array<{ count: number }>).map(d => d.count), 1);
                   return (
                     <div key={idx} className="flex-1 flex flex-col items-center group">
                       <div
@@ -390,8 +389,8 @@ export default function AdminDashboard() {
               <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
                 <h3 className="text-lg font-semibold text-white mb-4">Sessions Over Time</h3>
                 <div className="h-64 flex items-end space-x-1">
-                  {detailedMetrics.sessions.daily_sessions?.map((d: any, idx: number) => {
-                    const maxCount = Math.max(...detailedMetrics.sessions.daily_sessions.map((d: any) => d.count), 1);
+                  {(detailedMetrics.sessions.daily_sessions as Array<{ date: string; count: number }>)?.map((d, idx: number) => {
+                    const maxCount = Math.max(...(detailedMetrics.sessions.daily_sessions as Array<{ count: number }>).map(d => d.count), 1);
                     return (
                       <div key={idx} className="flex-1 flex flex-col items-center">
                         <div
@@ -447,7 +446,7 @@ export default function AdminDashboard() {
               <div className="bg-gray-800 rounded-lg p-6 border border-[var(--text)]/15">
                 <h3 className="text-lg font-semibold text-white mb-4">Top Users by Token Usage</h3>
                 <div className="space-y-2">
-                  {detailedMetrics.tokens.top_users?.slice(0, 5).map((user: any, idx: number) => (
+                  {(detailedMetrics.tokens.top_users as Array<{ user_id: string; total_tokens: number; total_cost: number }>)?.slice(0, 5).map((user, idx: number) => (
                     <div key={idx} className="flex items-center justify-between">
                       <span className="text-gray-300">{user.user_id}</span>
                       <div className="text-right">
@@ -497,7 +496,7 @@ export default function AdminDashboard() {
                 <div>
                   <h4 className="text-md font-semibold text-white mb-3">Popular Agents (by purchases)</h4>
                   <div className="space-y-2">
-                    {detailedMetrics.marketplace.agents?.popular?.map((agent: any, idx: number) => (
+                    {(detailedMetrics.marketplace.agents?.popular as Array<{ name: string; slug: string; purchases: number; usage_count: number }>)?.map((agent, idx: number) => (
                       <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
                         <div>
                           <div className="text-white font-medium">{agent.name}</div>
@@ -515,7 +514,7 @@ export default function AdminDashboard() {
                   <h4 className="text-md font-semibold text-white mb-3">Most Used Agents</h4>
                   <div className="space-y-2">
                     {detailedMetrics.marketplace.agents?.most_used && detailedMetrics.marketplace.agents.most_used.length > 0 ? (
-                      detailedMetrics.marketplace.agents.most_used.map((agent: any, idx: number) => (
+                      (detailedMetrics.marketplace.agents.most_used as Array<{ name: string; slug: string; usage_count: number }>).map((agent, idx: number) => (
                         <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
                           <div>
                             <div className="text-white font-medium">{agent.name}</div>
@@ -553,7 +552,7 @@ export default function AdminDashboard() {
               <div>
                 <h4 className="text-md font-semibold text-white mb-3">Popular Bases</h4>
                 <div className="space-y-2">
-                  {detailedMetrics.marketplace.bases?.popular?.map((base: any, idx: number) => (
+                  {(detailedMetrics.marketplace.bases?.popular as Array<{ name: string; slug: string; purchases: number; downloads: number }>)?.map((base, idx: number) => (
                     <div key={idx} className="flex items-center justify-between bg-gray-700/50 rounded p-3">
                       <div>
                         <div className="text-white font-medium">{base.name}</div>
@@ -723,9 +722,10 @@ function AgentManagement() {
 
       toast.success('Agent deleted successfully');
       loadAgents();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to delete agent:', error);
-      toast.error(error.message || 'Failed to delete agent');
+      const err = error as { message?: string };
+      toast.error(err.message || 'Failed to delete agent');
     }
   };
 
@@ -1063,9 +1063,10 @@ function AgentFormModal({ agent, availableModels, onClose, onSuccess }: AgentFor
 
       toast.success(`Agent ${isEdit ? 'updated' : 'created'} successfully`);
       onSuccess();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to save agent:', error);
-      toast.error(error.message || 'Failed to save agent');
+      const err = error as { message?: string };
+      toast.error(err.message || 'Failed to save agent');
     } finally {
       setSaving(false);
     }

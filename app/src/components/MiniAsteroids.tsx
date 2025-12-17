@@ -281,7 +281,7 @@ export function MiniAsteroids() {
 
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      // y coordinate captured for future use
 
       const third = canvas.width / 3;
       if (x < third) {

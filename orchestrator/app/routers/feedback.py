@@ -168,6 +168,7 @@ async def get_feedback(
         status=post.status,
         upvote_count=post.upvote_count,
         has_upvoted=has_upvoted,
+        is_owner=post.user_id == current_user.id,
         created_at=post.created_at,
         updated_at=post.updated_at,
         comments=comments_data,

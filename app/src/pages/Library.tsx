@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package,
@@ -18,7 +18,6 @@ import {
   Trash,
   Eye,
   EyeSlash,
-  CurrencyDollar,
   Circle,
   CheckCircle,
   File,
@@ -35,7 +34,6 @@ import {
   Moon,
   Gear,
   SignOut,
-  CreditCard,
   Repeat,
   Coins
 } from '@phosphor-icons/react';
@@ -121,7 +119,7 @@ interface Provider {
 type TabType = 'agents' | 'models' | 'api-keys' | 'subscriptions' | 'credits';
 
 // All available tools in the system
-const ALL_TOOLS = [
+const _ALL_TOOLS = [
   'read_file',
   'write_file',
   'patch_file',
@@ -300,9 +298,10 @@ export default function Library() {
         toast.success('Agent published to community marketplace! 🎉');
       }
       loadLibraryAgents();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Publish toggle failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to toggle publish status');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to toggle publish status');
     }
   };
 
@@ -320,9 +319,10 @@ export default function Library() {
 
       // Reload to ensure consistency with backend
       await loadLibraryAgents();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Model change failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to change model');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to change model');
       // Revert on error
       await loadLibraryAgents();
     }
@@ -437,7 +437,7 @@ export default function Library() {
           <ModelsTab
             models={models}
             externalProviders={externalProviders}
-            onSetupProvider={(provider) => setActiveTab('api-keys')}
+            onSetupProvider={() => setActiveTab('api-keys')}
           />
         )}
 
@@ -501,9 +501,10 @@ export default function Library() {
               }
               setEditingAgent(null);
               loadLibraryAgents();
-            } catch (error: any) {
+            } catch (error: unknown) {
               console.error('Save failed:', error);
-              toast.error(error.response?.data?.detail || 'Failed to save agent');
+              const err = error as { response?: { data?: { detail?: string } } };
+              toast.error(err.response?.data?.detail || 'Failed to save agent');
             }
           }}
         />
@@ -738,9 +739,10 @@ function ModelsTab({
       await usersApi.updatePreferences({ diagram_model: modelId });
       setDiagramModel(modelId);
       toast.success('Diagram generation model updated');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to update diagram model:', error);
-      toast.error(error.response?.data?.detail || 'Failed to update diagram model');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to update diagram model');
     }
   };
 
@@ -1294,9 +1296,10 @@ function AddApiKeyModal({
       });
       toast.success('API key added successfully');
       onSuccess();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Add API key failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to add API key');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to add API key');
     } finally {
       setLoading(false);
     }
@@ -1873,9 +1876,10 @@ function AddCustomModelModal({
         pricing_output: pricingOutput ? parseFloat(pricingOutput) : undefined
       });
       onSuccess();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Add custom model failed:', error);
-      toast.error(error.response?.data?.detail || 'Failed to add custom model');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to add custom model');
     } finally {
       setLoading(false);
     }
@@ -1991,8 +1995,8 @@ function AddCustomModelModal({
 // Subscriptions Tab Component
 function SubscriptionsTab() {
   const [loading, setLoading] = useState(true);
-  const [premiumSubscription, setPremiumSubscription] = useState<any>(null);
-  const [agentSubscriptions, setAgentSubscriptions] = useState<any[]>([]);
+  const [premiumSubscription, setPremiumSubscription] = useState<Record<string, unknown> | null>(null);
+  const [agentSubscriptions, setAgentSubscriptions] = useState<Array<Record<string, unknown>>>([]);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2054,9 +2058,10 @@ function SubscriptionsTab() {
         toast.success('Agent subscription cancelled');
       }
       await loadSubscriptions();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to cancel subscription:', error);
-      toast.error(error.response?.data?.detail || 'Failed to cancel subscription');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to cancel subscription');
     } finally {
       setCancelingId(null);
     }
@@ -2087,9 +2092,10 @@ function SubscriptionsTab() {
         toast.success('Agent subscription renewed');
       }
       await loadSubscriptions();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to renew subscription:', error);
-      toast.error(error.response?.data?.detail || 'Failed to renew subscription');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to renew subscription');
     } finally {
       setCancelingId(null);
     }
@@ -2317,7 +2323,7 @@ function SubscriptionsTab() {
 // Credits Tab Component
 function CreditsTab() {
   const [loading, setLoading] = useState(true);
-  const [credits, setCredits] = useState<any>(null);
+  const [credits, setCredits] = useState<Record<string, unknown> | null>(null);
   const [purchasing, setPurchasing] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2344,9 +2350,10 @@ function CreditsTab() {
       if (response.url) {
         window.location.href = response.url;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to initiate credit purchase:', error);
-      toast.error(error.response?.data?.detail || 'Failed to start checkout');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to start checkout');
       setPurchasing(null);
     }
   };

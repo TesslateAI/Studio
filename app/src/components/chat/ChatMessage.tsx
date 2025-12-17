@@ -18,7 +18,7 @@ interface ChatMessageProps {
   }>;
 }
 
-export function ChatMessage({ type, content, avatar, agentIcon, agentAvatarUrl, actions, toolCalls }: ChatMessageProps) {
+export function ChatMessage({ type, content, avatar, agentAvatarUrl, actions, toolCalls }: ChatMessageProps) {
   const isUser = type === 'user';
 
   // 60-30-10: User avatar (10% accent), AI avatar (30% secondary surface)
@@ -70,7 +70,7 @@ export function ChatMessage({ type, content, avatar, agentIcon, agentAvatarUrl, 
                   ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
                   li: ({ children }) => <li className="ml-2">{children}</li>,
                   // Style code
-                  code: ({ children, ...props }) => {
+                  code: ({ children }) => {
                     const inline = !String(children).includes('\n');
                     return inline ? (
                       <code className="bg-black/20 px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>

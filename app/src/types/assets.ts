@@ -144,7 +144,7 @@ export function validateFile(file: File): FileValidationResult {
 }
 
 // Detect framework from package.json or other indicators
-export function detectFramework(packageJson?: any): FrameworkType {
+export function detectFramework(packageJson?: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }): FrameworkType {
   if (!packageJson) return 'generic';
 
   const dependencies = {

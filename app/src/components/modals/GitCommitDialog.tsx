@@ -53,8 +53,8 @@ export function GitCommitDialog({ isOpen, onClose, projectId, changes, onSuccess
       setSelectedPrefix(null);
       onSuccess();
       onClose();
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to create commit';
+    } catch (error: unknown) {
+      const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to create commit';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
       setIsCommitting(false);

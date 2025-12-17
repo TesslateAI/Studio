@@ -1,5 +1,3 @@
-import React from 'react';
-import { Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import AgentStep from './AgentStep';
@@ -12,7 +10,7 @@ interface AgentMessageProps {
   agentAvatarUrl?: string;
 }
 
-export default function AgentMessage({ agentData, finalResponse, agentIcon, agentAvatarUrl }: AgentMessageProps) {
+export default function AgentMessage({ agentData, finalResponse, agentAvatarUrl }: AgentMessageProps) {
   // In development, show all steps (to display debug panels)
   // In production, only show steps with meaningful content
   const isDevelopment = import.meta.env.DEV;
@@ -82,7 +80,7 @@ export default function AgentMessage({ agentData, finalResponse, agentIcon, agen
                   ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
                   li: ({ children }) => <li className="ml-2">{children}</li>,
                   // Style code
-                  code: ({ children, ...props }) => {
+                  code: ({ children }) => {
                     const inline = !String(children).includes('\n');
                     return inline ? (
                       <code className="bg-black/20 px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>

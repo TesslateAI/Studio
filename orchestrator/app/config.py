@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # JWT Configuration
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 10080  # 7 days
     refresh_token_expire_days: int = 14
 
     # Base URL for dev containers - set via environment

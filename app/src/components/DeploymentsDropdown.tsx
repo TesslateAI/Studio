@@ -72,9 +72,9 @@ export function DeploymentsDropdown({
         offset: 0,
       });
       setDeployments(Array.isArray(data) ? data : []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load deployments:', error);
-      toast.error(error.response?.data?.detail || 'Failed to load deployments');
+      toast.error((error as { response?: { data?: { detail?: string } } }).response?.data?.detail || 'Failed to load deployments');
     } finally {
       setLoading(false);
     }
@@ -94,9 +94,9 @@ export function DeploymentsDropdown({
       if (onDeploymentChange) {
         onDeploymentChange();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to delete deployment:', error);
-      toast.error(error.response?.data?.detail || 'Failed to delete deployment');
+      toast.error((error as { response?: { data?: { detail?: string } } }).response?.data?.detail || 'Failed to delete deployment');
     } finally {
       setDeletingId(null);
     }

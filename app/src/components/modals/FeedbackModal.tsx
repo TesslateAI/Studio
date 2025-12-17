@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Bug, Lightbulb, Heart, PaperPlaneRight } from '@phosphor-icons/react';
+import { X, Bug, Lightbulb, Heart, PaperPlaneRight, Trash } from '@phosphor-icons/react';
 import { feedbackApi } from '../../lib/api';
 import { PulsingGridSpinner } from '../PulsingGridSpinner';
 import toast from 'react-hot-toast';
@@ -21,6 +21,7 @@ interface FeedbackDetail {
   status: string;
   upvote_count: number;
   has_upvoted: boolean;
+  is_owner: boolean;
   created_at: string;
   updated_at: string;
   comments: Comment[];
@@ -55,7 +56,7 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
     try {
       const data = await feedbackApi.get(feedbackId);
       setFeedback(data);
-    } catch (error) {
+    } catch {
       toast.error('Failed to load feedback details');
       onClose();
     } finally {
@@ -74,7 +75,7 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
         upvote_count: result.upvote_count,
       });
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error('Failed to update upvote');
     }
   };
@@ -94,10 +95,25 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
       setNewComment('');
       toast.success('Comment added!');
       onUpdate();
-    } catch (error) {
+    } catch {
       toast.error('Failed to add comment');
     } finally {
       setSubmittingComment(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!feedback) return;
+
+    if (!confirm('Are you sure you want to delete this feedback? This action cannot be undone.')) return;
+
+    try {
+      await feedbackApi.delete(feedback.id);
+      toast.success('Feedback deleted successfully');
+      onUpdate();
+      onClose();
+    } catch {
+      toast.error('Failed to delete feedback');
     }
   };
 
@@ -158,12 +174,23 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
                   )}
                 </div>
 
-                <button
-                  onClick={onClose}
-                  className="text-gray-400 hover:text-white transition-colors p-2"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {feedback.is_owner && (
+                    <button
+                      onClick={handleDelete}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors p-2 rounded-lg"
+                      title="Delete feedback"
+                    >
+                      <Trash className="w-5 h-5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={onClose}
+                    className="text-gray-400 hover:text-white transition-colors p-2"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               <h2 className="font-heading text-2xl font-bold text-[var(--text)] mb-2">
@@ -240,9 +267,15 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
                   <textarea
                     value={newComment}
                     onChange={(e) => setNewComment(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && newComment.trim()) {
+                        e.preventDefault();
+                        handleSubmitComment(e as unknown as React.FormEvent);
+                      }
+                    }}
                     className="w-full bg-white/5 border border-white/10 text-[var(--text)] px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent resize-none transition-all placeholder:text-[var(--text)]/40 text-sm"
                     rows={3}
-                    placeholder="Add a comment..."
+                    placeholder="Add a comment... (Press Enter to submit)"
                     disabled={submittingComment}
                   />
 

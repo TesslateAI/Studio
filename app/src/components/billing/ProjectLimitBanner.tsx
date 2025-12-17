@@ -11,7 +11,7 @@ interface ProjectLimitBannerProps {
 
 const ProjectLimitBanner: React.FC<ProjectLimitBannerProps> = ({
   currentProjectCount,
-  onRefresh,
+  onRefresh: _onRefresh,
   compact = false,
 }) => {
   const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);

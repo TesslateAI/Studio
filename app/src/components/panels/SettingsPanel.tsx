@@ -37,9 +37,10 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
       await projectsApi.updateSettings(projectSlug, { preview_mode: mode });
       setPreviewMode(mode);
       toast.success('Preview mode updated! Refresh the page to see changes.');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to update settings:', error);
-      toast.error(error.response?.data?.detail || 'Failed to update settings');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      toast.error(axiosError.response?.data?.detail || 'Failed to update settings');
     } finally {
       setSaving(false);
     }

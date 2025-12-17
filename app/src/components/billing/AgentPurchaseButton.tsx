@@ -48,9 +48,10 @@ const AgentPurchaseButton: React.FC<AgentPurchaseButtonProps> = ({
       } else {
         throw new Error('No checkout URL received');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to purchase agent:', err);
-      setError(err.response?.data?.detail || 'Failed to start purchase');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to start purchase');
       setPurchasing(false);
     }
   };

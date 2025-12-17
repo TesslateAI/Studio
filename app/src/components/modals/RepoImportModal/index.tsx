@@ -6,9 +6,7 @@ import {
   MagnifyingGlass,
   GithubLogo,
   Link as LinkIcon,
-  ArrowRight,
   Check,
-  CaretDown,
   Lock,
   Globe,
 } from '@phosphor-icons/react';
@@ -137,8 +135,8 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
       const repos = await gitProvidersApi.listRepositories(activeProvider);
       setRepositories(repos);
       setFilteredRepos(repos);
-    } catch (error: any) {
-      const message = error.response?.data?.detail || 'Failed to load repositories';
+    } catch (error: unknown) {
+      const message = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to load repositories';
       toast.error(message);
       if (message.includes('not connected') || message.includes('expired')) {
         setMode('url');
@@ -187,9 +185,10 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
         clearInterval(checkPopup);
         setIsConnecting(false);
       }, 5 * 60 * 1000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       setIsConnecting(false);
-      toast.error(error.response?.data?.detail || 'Failed to initiate connection');
+      const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to initiate connection';
+      toast.error(errorMessage);
     }
   };
 
@@ -242,8 +241,8 @@ export function RepoImportModal({ isOpen, onClose, projectId, onSuccess, onCreat
           toast.success('Repository cloned successfully!', { id: loadingToast });
           handleClose();
           onSuccess();
-        } catch (error: any) {
-          const errorMessage = error.response?.data?.detail || 'Failed to clone repository';
+        } catch (error: unknown) {
+          const errorMessage = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to clone repository';
           toast.error(errorMessage, { id: loadingToast });
         }
       }

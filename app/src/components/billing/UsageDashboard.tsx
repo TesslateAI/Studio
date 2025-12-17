@@ -15,7 +15,7 @@ const UsageDashboard: React.FC = () => {
 
   const getDateRange = () => {
     const end = new Date();
-    let start = new Date();
+    const start = new Date();
 
     switch (dateRange) {
       case 'week':
@@ -44,9 +44,10 @@ const UsageDashboard: React.FC = () => {
       const response = await billingApi.getUsage(start, end);
 
       setUsage(response);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load usage:', err);
-      setError(err.response?.data?.detail || 'Failed to load usage data');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to load usage data');
     } finally {
       setLoading(false);
     }
@@ -61,9 +62,10 @@ const UsageDashboard: React.FC = () => {
       await loadUsage();
 
       alert('Usage data synced successfully');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to sync usage:', err);
-      setError(err.response?.data?.detail || 'Failed to sync usage data');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to sync usage data');
     } finally {
       setSyncing(false);
     }

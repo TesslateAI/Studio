@@ -177,9 +177,10 @@ export function ArchitecturePanel({ projectSlug }: ArchitecturePanelProps) {
       setDiagramType(response.diagram_type);
       setModelUsed(response.model_used);
       toast.success(`${requestedType === 'c4_plantuml' ? 'C4 PlantUML' : 'Mermaid'} diagram generated successfully!`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to generate diagram:', error);
-      const errorMsg = error.response?.data?.detail || 'Failed to generate diagram';
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      const errorMsg = axiosError.response?.data?.detail || 'Failed to generate diagram';
       toast.error(errorMsg);
 
       // Show helpful message if no model selected

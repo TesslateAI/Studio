@@ -1,10 +1,10 @@
 export interface ToolCallDetail {
   name: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   result?: {
     success: boolean;
     tool: string;
-    result?: any;
+    result?: unknown;
     error?: string;
   };
 }
@@ -16,7 +16,7 @@ export interface AgentStep {
   tool_results?: Array<{
     success: boolean;
     tool: string;
-    result?: any;
+    result?: unknown;
     error?: string;
   }>;
   response_text: string;
@@ -26,7 +26,7 @@ export interface AgentStep {
     full_response?: string;
     context_messages_count?: number;
     context_messages?: Array<{ role: string; content: string }>;
-    raw_tool_calls?: Array<{ name: string; params: any }>;
+    raw_tool_calls?: Array<{ name: string; params: Record<string, unknown> }>;
     raw_thought?: string;
     is_complete?: boolean;
     conversational_text?: string;
@@ -80,7 +80,7 @@ export interface DBMessage {
 export interface ApprovalRequestData {
   approval_id: string;
   tool_name: string;
-  tool_parameters: any;
+  tool_parameters: Record<string, unknown>;
   tool_description: string;
 }
 
@@ -89,7 +89,7 @@ export interface ApprovalMessage {
   type: 'approval_request';
   approvalId: string;
   toolName: string;
-  toolParameters: any;
+  toolParameters: Record<string, unknown>;
   toolDescription: string;
 }
 

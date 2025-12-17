@@ -32,8 +32,6 @@ export function BrowserPreview({
   const [activeTabId, setActiveTabId] = useState('1');
   const iframeRefs = useRef<{ [key: string]: HTMLIFrameElement | null }>({});
 
-  const activeTab = tabs.find(t => t.id === activeTabId);
-
   const addTab = () => {
     const newTab: Tab = {
       id: Date.now().toString(),
@@ -78,7 +76,7 @@ export function BrowserPreview({
           const pathParts = urlObj.pathname.split('/').filter(Boolean);
           const title = pathParts[pathParts.length - 1] || 'Home';
           updateTabTitle(activeTabId, title);
-        } catch (error) {
+        } catch {
           // Ignore URL parsing errors
         }
       }

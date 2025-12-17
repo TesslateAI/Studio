@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
-import { Plus, X, Search, Wifi, WifiOff } from 'lucide-react';
+import { Plus, X, Wifi, WifiOff } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { createTerminalWebSocket } from '../../lib/api';
 import { useTheme } from '../../theme/ThemeContext';
@@ -141,7 +141,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     nextTabNumber.current = 2;
 
     // Create main tab for new project
-    const mainTab = createTab(true);
+    createTab(true);
 
     return cleanupTabs;
   }, [projectId]);
@@ -185,7 +185,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     setTimeout(() => {
       try {
         activeTab.fitAddon.fit();
-      } catch (e) {
+      } catch {
         // Ignore fit errors
       }
     }, 0);
@@ -194,7 +194,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     const resizeObserver = new ResizeObserver(() => {
       try {
         activeTab.fitAddon.fit();
-      } catch (e) {
+      } catch {
         // Ignore resize errors
       }
     });
@@ -208,6 +208,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
 
   // Connect WebSocket for a terminal tab with auto-reconnect
   const connectTerminal = (tab: TerminalTab, isReconnect: boolean = false) => {
+    void isReconnect; // Mark as intentionally unused
     // Check if projectId is still valid (not stale from previous project)
     if (currentProjectIdRef.current !== projectId) {
       console.warn('[Terminal] Skipping connection for stale projectId');
@@ -282,7 +283,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
         tab.terminal.writeln('\r\n\x1b[31m✗ Connection error\x1b[0m\r\n');
       };
 
-      ws.onclose = (event) => {
+      ws.onclose = () => {
         tab.ws = null;
         tab.connectionStatus = 'disconnected';
         setTabs(prev => [...prev]); // Trigger re-render for status indicator

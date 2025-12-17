@@ -32,12 +32,12 @@ export function ProjectCard({
   onOpen,
   onDelete,
   onFork,
-  onStatusChange,
+  onStatusChange: _onStatusChange,
   onAddAgent,
   isDeleting = false
 }: ProjectCardProps) {
   // Status badge configuration (read-only, no dropdown)
-  const statusConfig = {
+  const _statusConfig = {
     idea: {
       label: 'Idea',
       className: 'bg-[rgba(var(--status-purple-rgb),0.1)] text-[var(--status-purple)] border border-[rgba(var(--status-purple-rgb),0.2)]'

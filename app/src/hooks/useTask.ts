@@ -1,7 +1,7 @@
 /**
  * React hooks for task management
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { taskService } from '../services/taskService';
 import type { Task } from '../services/taskService';
 

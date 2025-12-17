@@ -26,9 +26,10 @@ const TransactionHistory: React.FC = () => {
 
       setTransactions(response.transactions || []);
       setHasMore((response.transactions || []).length === ITEMS_PER_PAGE);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load transactions:', err);
-      setError(err.response?.data?.detail || 'Failed to load transaction history');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to load transaction history');
     } finally {
       setLoading(false);
     }

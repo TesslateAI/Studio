@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -45,11 +45,11 @@ import {
 import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
-import { projectsApi, marketplaceApi, tasksApi } from '../lib/api';
+import { projectsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
@@ -69,9 +69,9 @@ export default function Project() {
   const containerId = searchParams.get('container');
 
   const { theme, toggleTheme } = useTheme();
-  const [project, setProject] = useState<any>(null);
-  const [files, setFiles] = useState<any[]>([]);
-  const [container, setContainer] = useState<any>(null);
+  const [project, setProject] = useState<Record<string, unknown> | null>(null);
+  const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
+  const [container, setContainer] = useState<Record<string, unknown> | null>(null);
   const [agents, setAgents] = useState<UIAgent[]>([]);
   const [activeView, setActiveView] = useState<MainViewType>('preview');
   const [activePanel, setActivePanel] = useState<PanelType>(null);
@@ -161,7 +161,7 @@ export default function Project() {
           }
 
           setCurrentPreviewUrl(cleanUrl);
-        } catch (error) {
+        } catch {
           // If URL parsing fails, use it as-is
           setCurrentPreviewUrl(url);
         }
@@ -278,13 +278,13 @@ export default function Project() {
       // Each container has its own directory (e.g., next-js-15/, vite-react-fastapi/)
       // Strip the container directory prefix so paths are relative to container root
       if (containerId && container && container.directory) {
-        const containerDir = container.directory;
+        const containerDir = container.directory as string;
         const filteredFiles = filesData
-          .filter((file: any) => file.file_path.startsWith(containerDir + '/'))
-          .map((file: any) => ({
+          .filter((file: Record<string, unknown>) => (file.file_path as string).startsWith(containerDir + '/'))
+          .map((file: Record<string, unknown>) => ({
             ...file,
             // Strip container directory prefix for display (e.g., "next-js-15/app/page.tsx" -> "app/page.tsx")
-            file_path: file.file_path.slice(containerDir.length + 1)
+            file_path: (file.file_path as string).slice(containerDir.length + 1)
           }));
 
         // In K8s mode, files are already container-scoped (no prefix)
@@ -308,7 +308,7 @@ export default function Project() {
     if (!slug || !containerId) return;
     try {
       const containers = await projectsApi.getContainers(slug);
-      const foundContainer = containers.find((c: any) => c.id === containerId);
+      const foundContainer = containers.find((c: Record<string, unknown>) => c.id === containerId);
       if (foundContainer) {
         setContainer(foundContainer);
 
@@ -356,15 +356,15 @@ export default function Project() {
     try {
       // Load agents from user's library (enabled agents only)
       const libraryData = await marketplaceApi.getMyAgents();
-      const enabledAgents = libraryData.agents.filter((agent: any) => agent.is_enabled);
+      const enabledAgents = libraryData.agents.filter((agent: Record<string, unknown>) => agent.is_enabled);
 
       // Convert backend agents to UI format
-      const uiAgents = enabledAgents.map((agent: any) => ({
-        id: agent.slug,
-        name: agent.name,
-        icon: agent.icon || '🤖',
-        backendId: agent.id,
-        mode: agent.mode
+      const uiAgents = enabledAgents.map((agent: Record<string, unknown>) => ({
+        id: agent.slug as string,
+        name: agent.name as string,
+        icon: (agent.icon as string) || '🤖',
+        backendId: agent.id as string,
+        mode: agent.mode as string
       }));
 
       setAgents(uiAgents);
@@ -464,9 +464,11 @@ export default function Project() {
           setDevServerUrlWithAuth(response.url);
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.dismiss('dev-server');
-      const errorMessage = error.response?.data?.detail?.message || error.response?.data?.detail || 'Failed to start dev server';
+      const err = error as { response?: { data?: { detail?: { message?: string } | string } } };
+      const detail = err.response?.data?.detail;
+      const errorMessage = (typeof detail === 'object' && detail?.message) || (typeof detail === 'string' ? detail : null) || 'Failed to start dev server';
       toast.error(errorMessage, { id: 'dev-server' });
       setTimeout(() => loadDevServerUrl(), 5000);
     }

@@ -734,14 +734,23 @@ echo "[CLONE] Branch: {branch}"
 echo "[CLONE] Target: {target_dir}"
 echo "[CLONE] ======================================"
 
-# Remove target directory if exists (may have wrong permissions from failed starts)
-rm -rf {target_dir}
+# Clear target directory contents (target may be a mount point that cannot be removed)
+rm -rf {target_dir}/* {target_dir}/.[!.]* 2>/dev/null || true
 
-# Clone directly to target directory
-git clone --depth 1 --branch {branch} --single-branch {git_url} {target_dir}
+# Clone to a temporary directory first
+TEMP_CLONE="/tmp/git-clone-$$"
+rm -rf "$TEMP_CLONE"
+git clone --depth 1 --branch {branch} --single-branch {git_url} "$TEMP_CLONE"
 
 # Remove .git folder to save space
-rm -rf {target_dir}/.git
+rm -rf "$TEMP_CLONE/.git"
+
+# Move all files (including hidden files) to target directory
+mv "$TEMP_CLONE"/* {target_dir}/ 2>/dev/null || true
+mv "$TEMP_CLONE"/.[!.]* {target_dir}/ 2>/dev/null || true
+
+# Cleanup temp directory
+rm -rf "$TEMP_CLONE"
 
 # Move to target directory for dependency install
 cd {target_dir}

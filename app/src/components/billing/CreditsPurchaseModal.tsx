@@ -50,9 +50,10 @@ const CreditsPurchaseModal: React.FC<CreditsPurchaseModalProps> = ({
 
       setConfig(configRes);
       setBalance(balanceRes);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load credits data:', err);
-      setError(err.response?.data?.detail || 'Failed to load credits information');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to load credits information');
     } finally {
       setLoading(false);
     }
@@ -76,9 +77,10 @@ const CreditsPurchaseModal: React.FC<CreditsPurchaseModalProps> = ({
       } else {
         throw new Error('No checkout URL received');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to purchase credits:', err);
-      setError(err.response?.data?.detail || 'Failed to start credit purchase');
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Failed to start credit purchase');
       setPurchasing(false);
     }
   };

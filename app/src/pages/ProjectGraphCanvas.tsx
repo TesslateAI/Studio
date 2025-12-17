@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { debounce } from 'lodash';
 import {
@@ -26,7 +26,6 @@ import {
   Gear,
   Article,
   Kanban,
-  X,
 } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
@@ -44,7 +43,7 @@ import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../componen
 import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, marketplaceApi, deploymentCredentialsApi, configApi } from '../lib/api';
+import api, { projectsApi, marketplaceApi, configApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import toast from 'react-hot-toast';
@@ -103,12 +102,12 @@ export const ProjectGraphCanvas = () => {
 
   // Refs for stable callback references - prevents node re-renders when parent state changes
   const nodesRef = useRef<Node[]>(nodes);
-  const filesRef = useRef<any[]>([]);
+  const filesRef = useRef<Array<Record<string, unknown>>>([]);
   const slugRef = useRef(slug);
-  const [project, setProject] = useState<any>(null);
-  const [files, setFiles] = useState<any[]>([]);
+  const [project, setProject] = useState<Record<string, unknown> | null>(null);
+  const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
   const [agents, setAgents] = useState<UIAgent[]>([]);
-  const [appDomain, setAppDomain] = useState<string>('localhost');
+  const [_appDomain, setAppDomain] = useState<string>('localhost');
   const appDomainRef = useRef<string>('localhost');
   const [isRunning, setIsRunning] = useState(false);
   const [activeView, setActiveView] = useState<MainViewType>('graph');
@@ -126,7 +125,7 @@ export const ProjectGraphCanvas = () => {
   // External service credential modal state
   const [externalServiceModal, setExternalServiceModal] = useState<{
     isOpen: boolean;
-    item: any | null;
+    item: Record<string, unknown> | null;
     position: { x: number; y: number } | null;
   }>({ isOpen: false, item: null, position: null });
 
@@ -327,7 +326,7 @@ export const ProjectGraphCanvas = () => {
       }));
 
       // Convert browser previews to React Flow nodes
-      const browserNodes: Node[] = browserPreviews.map((preview: any) => {
+      const browserNodes: Node[] = browserPreviews.map((preview: Record<string, unknown>) => {
         // Find connected container for URL building
         const connectedContainer = preview.connected_container_id
           ? containers.find((c: Container) => c.id === preview.connected_container_id)
@@ -373,7 +372,7 @@ export const ProjectGraphCanvas = () => {
       }));
 
       // Add browser preview edges for connected browsers
-      browserPreviews.forEach((preview: any) => {
+      browserPreviews.forEach((preview: Record<string, unknown>) => {
         if (preview.connected_container_id) {
           flowEdges.push({
             id: `browser-edge-${preview.id}`,
@@ -407,15 +406,15 @@ export const ProjectGraphCanvas = () => {
     try {
       // Load agents from user's library (enabled agents only)
       const libraryData = await marketplaceApi.getMyAgents();
-      const enabledAgents = libraryData.agents.filter((agent: any) => agent.is_enabled);
+      const enabledAgents = libraryData.agents.filter((agent: Record<string, unknown>) => agent.is_enabled);
 
       // Convert backend agents to UI format
-      const uiAgents = enabledAgents.map((agent: any) => ({
-        id: agent.slug,
-        name: agent.name,
-        icon: agent.icon || '🤖',
-        backendId: agent.id,
-        mode: agent.mode
+      const uiAgents = enabledAgents.map((agent: Record<string, unknown>) => ({
+        id: agent.slug as string,
+        name: agent.name as string,
+        icon: (agent.icon as string) || '🤖',
+        backendId: agent.id as string,
+        mode: agent.mode as string
       }));
 
       setAgents(uiAgents);
@@ -628,7 +627,7 @@ export const ProjectGraphCanvas = () => {
 
   // Instantiate a workflow template (creates multiple nodes and connections)
   const instantiateWorkflow = useCallback(
-    async (workflow: any, basePosition: { x: number; y: number }) => {
+    async (workflow: Record<string, unknown>, basePosition: { x: number; y: number }) => {
       const template = workflow.template_definition;
       if (!template?.nodes || !template?.edges) {
         toast.error('Invalid workflow template');
@@ -654,16 +653,16 @@ export const ProjectGraphCanvas = () => {
           };
 
           // Build the item to create based on node type
-          let itemToCreate: any;
+          let _itemToCreate: unknown;
           if (nodeTemplate.type === 'base') {
-            itemToCreate = {
+            _itemToCreate = {
               type: 'base',
               name: nodeTemplate.name,
               slug: nodeTemplate.base_slug,
               id: nodeTemplate.base_slug, // Will be resolved by backend
             };
           } else if (nodeTemplate.type === 'service') {
-            itemToCreate = {
+            _itemToCreate = {
               type: 'service',
               name: nodeTemplate.name,
               slug: nodeTemplate.service_slug,
@@ -694,7 +693,7 @@ export const ProjectGraphCanvas = () => {
           setNodes((nds) => [...nds, optimisticNode]);
 
           // Create in backend
-          const payload: any = {
+          const payload: Record<string, unknown> = {
             project_id: project.id,
             name: nodeTemplate.name,
             position_x: nodePosition.x,
@@ -775,7 +774,7 @@ export const ProjectGraphCanvas = () => {
         // Increment download count for the workflow
         try {
           await api.post(`/api/marketplace/workflows/${workflow.slug}/increment-downloads`);
-        } catch (e) {
+        } catch {
           // Ignore download tracking errors
         }
 
@@ -804,7 +803,7 @@ export const ProjectGraphCanvas = () => {
   // Helper function to create container node (used by both regular drop and after credential modal)
   const createContainerNode = useCallback(
     async (
-      item: any,
+      item: Record<string, unknown>,
       position: { x: number; y: number },
       credentials?: Record<string, string>,
       externalEndpoint?: string
@@ -838,7 +837,7 @@ export const ProjectGraphCanvas = () => {
 
       try {
         // Build request payload based on item type
-        const payload: any = {
+        const payload: Record<string, unknown> = {
           project_id: project.id,
           name: item.name,
           position_x: position.x,
@@ -1045,7 +1044,7 @@ export const ProjectGraphCanvas = () => {
 
   // Stable callback - uses ref for slug, debounces API call
   const handleNodeDragStop = useCallback(
-    async (_event: any, node: Node) => {
+    async (_event: React.MouseEvent | React.TouchEvent, node: Node) => {
       // End dragging state
       setIsDragging(false);
 

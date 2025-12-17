@@ -271,6 +271,7 @@ export const MarkerEditor = forwardRef<MarkerEditorHandle, MarkerEditorProps>(fu
 });
 
 // Export a function to insert a marker at cursor position
+// eslint-disable-next-line react-refresh/only-export-components
 export function insertMarkerAtCursor(
   textareaRef: React.RefObject<HTMLTextAreaElement>,
   currentValue: string,

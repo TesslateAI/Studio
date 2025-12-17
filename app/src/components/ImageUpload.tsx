@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Image, Upload, X } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 
@@ -18,6 +18,11 @@ export function ImageUpload({
   const [preview, setPreview] = useState<string | null>(value || null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync preview state with value prop when it changes (e.g., after async load)
+  useEffect(() => {
+    setPreview(value || null);
+  }, [value]);
 
   const optimizeImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {

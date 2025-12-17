@@ -250,12 +250,14 @@ const techIconMap: Record<string, IconType> = {
 };
 
 // Get icon for a tech name (case-insensitive)
+// eslint-disable-next-line react-refresh/only-export-components
 export const getTechIcon = (tech: string): IconType | null => {
   const normalized = tech.toLowerCase().trim();
   return techIconMap[normalized] || null;
 };
 
 // Get multiple icons for a tech stack array
+// eslint-disable-next-line react-refresh/only-export-components
 export const getTechIcons = (techStack: string[], maxIcons: number = 3): Array<{ name: string; Icon: IconType }> => {
   const icons: Array<{ name: string; Icon: IconType }> = [];
 

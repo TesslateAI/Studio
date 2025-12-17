@@ -35,7 +35,7 @@ interface Project {
   created_at: string;
   updated_at: string;
   status?: Status;
-  agents?: Array<{ icon: any; name: string }>;
+  agents?: Array<{ icon: string; name: string }>;
 }
 
 export default function Dashboard() {
@@ -86,7 +86,7 @@ export default function Dashboard() {
         agents: p.agents || []
       }));
       setProjects(projectsWithMeta);
-    } catch (error) {
+    } catch {
       toast.error('Failed to load projects');
     } finally {
       setLoading(false);
@@ -118,8 +118,9 @@ export default function Dashboard() {
 
       // Navigate to project graph canvas
       navigate(`/project/${project.slug}`);
-    } catch (error: any) {
-      const detail = error?.response?.data?.detail;
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      const detail = err?.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to create project';
       toast.error(errorMessage, { id: creatingToast });
       setIsCreating(false);
@@ -190,7 +191,7 @@ export default function Dashboard() {
           return updated;
         });
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete project', { id: deletingToast });
       // Remove from deleting state on error
       setDeletingProjectIds(prev => {
@@ -211,7 +212,7 @@ export default function Dashboard() {
       ));
       toast.success(`Project moved to ${status}`);
       // TODO: Add API call to persist status
-    } catch (error) {
+    } catch {
       toast.error('Failed to update status');
     }
   };
@@ -226,8 +227,9 @@ export default function Dashboard() {
       setTimeout(() => {
         navigate(`/project/${forkedProject.id}`);
       }, 500);
-    } catch (error: any) {
-      const errorMessage = error?.response?.data?.detail || 'Failed to fork project';
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      const errorMessage = err?.response?.data?.detail || 'Failed to fork project';
       toast.error(errorMessage, { id: forkingToast });
     }
   };
@@ -595,8 +597,9 @@ export default function Dashboard() {
             const project = response.project;
             toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
             navigate(`/project/${project.slug}`);
-          } catch (error: any) {
-            const detail = error?.response?.data?.detail;
+          } catch (error: unknown) {
+            const err = error as { response?: { data?: { detail?: string } } };
+            const detail = err?.response?.data?.detail;
             const errorMessage = typeof detail === 'string' ? detail : 'Failed to import project';
             toast.error(errorMessage, { id: creatingToast });
             throw error; // Re-throw so the modal knows it failed

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../theme/ThemeContext';
-import { deploymentCredentialsApi } from '../lib/api';
+import { deploymentCredentialsApi, usersApi, UserProfile, UserProfileUpdate } from '../lib/api';
 import toast from 'react-hot-toast';
 import {
   X,
@@ -14,9 +14,14 @@ import {
   ArrowLeft,
   Check,
   LinkSimple,
-  Info
+  Info,
+  User,
+  TwitterLogo,
+  GithubLogo,
+  Globe
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import { ImageUpload } from '../components/ImageUpload';
 
 interface Provider {
   name: string;
@@ -30,7 +35,7 @@ interface Provider {
 interface DeploymentCredential {
   id: string;
   provider: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -40,8 +45,8 @@ interface ManualCredentialsForm {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { theme } = useTheme();
-  const [activeTab, setActiveTab] = useState('deployment');
+  useTheme(); // for side effects
+  const [activeTab, setActiveTab] = useState('profile');
   const [providers, setProviders] = useState<Provider[]>([]);
   const [credentials, setCredentials] = useState<DeploymentCredential[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,23 +56,54 @@ export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [deletingCredentialId, setDeletingCredentialId] = useState<string | null>(null);
 
+  // Profile state
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileForm, setProfileForm] = useState<UserProfileUpdate>({});
+  const [savingProfile, setSavingProfile] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
     try {
-      const [providersData, credentialsData] = await Promise.all([
+      const [providersData, credentialsData, profileData] = await Promise.all([
         deploymentCredentialsApi.getProviders(),
         deploymentCredentialsApi.list(),
+        usersApi.getProfile(),
       ]);
       setProviders(providersData.providers || []);
       setCredentials(credentialsData.credentials || []);
-    } catch (error: any) {
-      console.error('Failed to load deployment data:', error);
-      toast.error(error.response?.data?.detail || 'Failed to load deployment providers');
+      setProfile(profileData);
+      setProfileForm({
+        name: profileData.name || '',
+        avatar_url: profileData.avatar_url || '',
+        bio: profileData.bio || '',
+        twitter_handle: profileData.twitter_handle || '',
+        github_username: profileData.github_username || '',
+        website_url: profileData.website_url || '',
+      });
+    } catch (error: unknown) {
+      console.error('Failed to load settings data:', error);
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to load settings');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    setSavingProfile(true);
+    try {
+      const updatedProfile = await usersApi.updateProfile(profileForm);
+      setProfile(updatedProfile);
+      toast.success('Profile updated successfully');
+    } catch (error: unknown) {
+      console.error('Failed to update profile:', error);
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to update profile');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -82,9 +118,10 @@ export default function Settings() {
       } else {
         toast.error('Failed to start OAuth flow');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('OAuth flow error:', error);
-      toast.error(error.response?.data?.detail || 'Failed to start OAuth connection');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to start OAuth connection');
     }
   };
 
@@ -119,9 +156,10 @@ export default function Settings() {
       setSelectedProvider(null);
       setManualCredentials({});
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to save credentials:', error);
-      toast.error(error.response?.data?.detail || 'Failed to save credentials');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to save credentials');
     } finally {
       setIsSaving(false);
     }
@@ -137,9 +175,10 @@ export default function Settings() {
       await deploymentCredentialsApi.delete(credentialId);
       toast.success(`Disconnected from ${providerName}`);
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to delete credential:', error);
-      toast.error(error.response?.data?.detail || 'Failed to disconnect provider');
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to disconnect provider');
     } finally {
       setDeletingCredentialId(null);
     }
@@ -175,7 +214,7 @@ export default function Settings() {
     return credentials.some(c => c.provider === providerName);
   };
 
-  const getCredentialForProvider = (providerName: string) => {
+  const _getCredentialForProvider = (providerName: string) => {
     return credentials.find(c => c.provider === providerName);
   };
 
@@ -225,6 +264,19 @@ export default function Settings() {
         {/* Tabs */}
         <div className="flex gap-2 mb-8 border-b border-white/10 pb-2">
           <button
+            onClick={() => setActiveTab('profile')}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'profile'
+                ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
+                : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <User size={18} />
+              Profile
+            </div>
+          </button>
+          <button
             onClick={() => setActiveTab('deployment')}
             className={`px-4 py-2 rounded-lg font-medium transition-all ${
               activeTab === 'deployment'
@@ -251,6 +303,165 @@ export default function Settings() {
             </div>
           </button>
         </div>
+
+        {/* Profile Tab */}
+        {activeTab === 'profile' && (
+          <div className="space-y-6">
+            {/* Header */}
+            <div>
+              <h2 className="text-2xl font-bold text-[var(--text)] mb-2">Profile</h2>
+              <p className="text-[var(--text)]/60">
+                Manage your profile information and how you appear to others
+              </p>
+            </div>
+
+            {/* Profile Form */}
+            <div className="p-6 bg-[var(--surface)] border border-white/10 rounded-xl space-y-6">
+              {/* Avatar Upload */}
+              <div>
+                <label className="block text-sm font-semibold text-[var(--text)] mb-3">
+                  Profile Picture
+                </label>
+                <ImageUpload
+                  value={profileForm.avatar_url || null}
+                  onChange={(dataUrl) => setProfileForm({ ...profileForm, avatar_url: dataUrl || '' })}
+                  maxSizeKB={200}
+                />
+              </div>
+
+              {/* Name */}
+              <div>
+                <label htmlFor="name" className="block text-sm font-semibold text-[var(--text)] mb-2">
+                  Display Name
+                </label>
+                <input
+                  id="name"
+                  type="text"
+                  value={profileForm.name || ''}
+                  onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                  placeholder="Enter your display name"
+                  className="w-full max-w-md px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                />
+              </div>
+
+              {/* Bio */}
+              <div>
+                <label htmlFor="bio" className="block text-sm font-semibold text-[var(--text)] mb-2">
+                  Bio
+                </label>
+                <textarea
+                  id="bio"
+                  value={profileForm.bio || ''}
+                  onChange={(e) => setProfileForm({ ...profileForm, bio: e.target.value })}
+                  placeholder="Tell us about yourself"
+                  rows={3}
+                  className="w-full max-w-md px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none"
+                />
+              </div>
+
+              {/* Social Links */}
+              <div className="pt-4 border-t border-white/10">
+                <h3 className="text-lg font-semibold text-[var(--text)] mb-4">Social Links</h3>
+
+                {/* Twitter */}
+                <div className="mb-4">
+                  <label htmlFor="twitter" className="block text-sm font-semibold text-[var(--text)] mb-2">
+                    <div className="flex items-center gap-2">
+                      <TwitterLogo size={16} />
+                      Twitter Handle
+                    </div>
+                  </label>
+                  <div className="flex items-center max-w-md">
+                    <span className="px-3 py-3 bg-white/5 border border-r-0 border-white/10 rounded-l-lg text-[var(--text)]/60">
+                      @
+                    </span>
+                    <input
+                      id="twitter"
+                      type="text"
+                      value={profileForm.twitter_handle || ''}
+                      onChange={(e) => setProfileForm({ ...profileForm, twitter_handle: e.target.value })}
+                      placeholder="username"
+                      className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-r-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    />
+                  </div>
+                </div>
+
+                {/* GitHub */}
+                <div className="mb-4">
+                  <label htmlFor="github" className="block text-sm font-semibold text-[var(--text)] mb-2">
+                    <div className="flex items-center gap-2">
+                      <GithubLogo size={16} />
+                      GitHub Username
+                    </div>
+                  </label>
+                  <input
+                    id="github"
+                    type="text"
+                    value={profileForm.github_username || ''}
+                    onChange={(e) => setProfileForm({ ...profileForm, github_username: e.target.value })}
+                    placeholder="username"
+                    className="w-full max-w-md px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  />
+                </div>
+
+                {/* Website */}
+                <div>
+                  <label htmlFor="website" className="block text-sm font-semibold text-[var(--text)] mb-2">
+                    <div className="flex items-center gap-2">
+                      <Globe size={16} />
+                      Website
+                    </div>
+                  </label>
+                  <input
+                    id="website"
+                    type="url"
+                    value={profileForm.website_url || ''}
+                    onChange={(e) => setProfileForm({ ...profileForm, website_url: e.target.value })}
+                    placeholder="https://yourwebsite.com"
+                    className="w-full max-w-md px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-[var(--text)] placeholder-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  />
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="pt-4 border-t border-white/10">
+                <button
+                  onClick={handleSaveProfile}
+                  disabled={savingProfile}
+                  className="px-6 py-3 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all flex items-center gap-2"
+                >
+                  {savingProfile ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check size={18} weight="bold" />
+                      Save Changes
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Email Info */}
+            <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+              <div className="flex items-start gap-3">
+                <Info size={20} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-blue-400">
+                  <p className="font-semibold mb-1">Email: {profile?.email}</p>
+                  <p className="text-xs">
+                    Your email cannot be changed. Contact support if you need to update it.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Deployment Providers Tab */}
         {activeTab === 'deployment' && (

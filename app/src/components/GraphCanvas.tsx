@@ -24,7 +24,7 @@ interface GraphCanvasProps {
   onDrop: (event: React.DragEvent) => void;
   onDragOver: (event: React.DragEvent) => void;
   onNodeDragStart?: () => void;
-  onNodeDragStop: (event: any, node: Node) => void;
+  onNodeDragStop: (event: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent, node: Node) => void;
   onNodeClick: (event: React.MouseEvent, node: Node) => void;
   onNodeDoubleClick: (event: React.MouseEvent, node: Node) => void;
   nodeTypes: NodeTypes;

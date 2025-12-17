@@ -7,6 +7,8 @@ These agents have source_type='open' which allows users to:
 - Fork and customize
 - Edit system prompts
 
+All agents are owned by the official Tesslate account.
+
 HOW TO RUN:
 -----------
 Local (from orchestrator/):
@@ -22,6 +24,7 @@ Kubernetes:
 """
 
 import asyncio
+from uuid import uuid4
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select
@@ -38,7 +41,23 @@ else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.config import get_settings
-from app.models import MarketplaceAgent, User, UserPurchasedAgent
+from app.models import MarketplaceAgent
+from app.models_auth import User
+
+# Tesslate Official Account
+TESSLATE_ACCOUNT = {
+    "email": "official@tesslate.com",
+    "username": "tesslate",
+    "name": "Tesslate",
+    "slug": "tesslate",
+    "bio": "Official Tesslate account. Building the future of AI-powered development.",
+    "twitter_handle": "tesslateai",
+    "github_username": "TesslateAI",
+    "website_url": "https://tesslate.com",
+    "avatar_url": "https://avatars.githubusercontent.com/u/189477337",
+    "is_superuser": True,
+    "is_verified": True,
+}
 
 
 OPENSOURCE_AGENTS = [
@@ -274,14 +293,42 @@ Database design principles:
 ]
 
 
+async def get_or_create_tesslate_account(db: AsyncSession) -> User:
+    """Get or create the official Tesslate account."""
+    result = await db.execute(
+        select(User).where(User.email == TESSLATE_ACCOUNT["email"])
+    )
+    tesslate_user = result.scalar_one_or_none()
+
+    if not tesslate_user:
+        print("Creating Tesslate official account...")
+        tesslate_user = User(
+            id=uuid4(),
+            hashed_password="disabled",  # Cannot login directly
+            is_active=True,
+            **TESSLATE_ACCOUNT
+        )
+        db.add(tesslate_user)
+        await db.commit()
+        await db.refresh(tesslate_user)
+        print(f"✓ Created Tesslate account (ID: {tesslate_user.id})")
+    else:
+        print(f"✓ Tesslate account exists (ID: {tesslate_user.id})")
+
+    return tesslate_user
+
+
 async def seed_opensource_agents():
-    """Seed open source marketplace agents."""
+    """Seed open source marketplace agents owned by the Tesslate official account."""
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=False)
     AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with AsyncSessionLocal() as db:
         print("\n=== Seeding Open Source Marketplace Agents ===\n")
+
+        # Create or get Tesslate official account
+        tesslate_user = await get_or_create_tesslate_account(db)
 
         created_count = 0
         existing_count = 0
@@ -294,11 +341,18 @@ async def seed_opensource_agents():
             existing = result.scalar_one_or_none()
 
             if existing:
+                # Update ownership if not set
+                if not existing.created_by_user_id:
+                    existing.created_by_user_id = tesslate_user.id
+                    await db.commit()
                 print(f"✓ Agent '{agent_data['name']}' already exists (ID: {existing.id})")
                 existing_count += 1
             else:
-                # Create agent
-                agent = MarketplaceAgent(**agent_data)
+                # Create agent with Tesslate ownership
+                agent = MarketplaceAgent(
+                    **agent_data,
+                    created_by_user_id=tesslate_user.id
+                )
                 db.add(agent)
                 await db.commit()
                 await db.refresh(agent)

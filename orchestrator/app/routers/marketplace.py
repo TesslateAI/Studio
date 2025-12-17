@@ -4,7 +4,7 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Body, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body, Request, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -24,6 +24,7 @@ router = APIRouter()
 
 from ..config import get_settings
 from ..users import current_active_user, current_superuser
+from ..services.recommendations import update_co_install_counts, get_related_agents
 settings = get_settings()
 
 
@@ -335,6 +336,11 @@ async def get_marketplace_agents(
             if agent.forked_by_user:
                 creator_name = agent.forked_by_user.email.split('@')[0]  # Use email username as display name
 
+        # Get creator avatar URL
+        creator_avatar_url = None
+        if agent.forked_by_user:
+            creator_avatar_url = agent.forked_by_user.avatar_url
+
         agent_dict = {
             "id": agent.id,
             "name": agent.name,
@@ -362,7 +368,10 @@ async def get_marketplace_agents(
             "is_featured": agent.is_featured,
             "is_purchased": agent.id in purchased_agent_ids,
             "creator_type": creator_type,  # "official" or "community"
-            "creator_name": creator_name  # "Tesslate" or username
+            "creator_name": creator_name,  # "Tesslate" or username
+            "created_by_user_id": str(agent.created_by_user_id) if agent.created_by_user_id else None,
+            "forked_by_user_id": str(agent.forked_by_user_id) if agent.forked_by_user_id else None,
+            "creator_avatar_url": creator_avatar_url
         }
         response.append(agent_dict)
 
@@ -383,9 +392,11 @@ async def get_agent_details(
     """
     Get detailed information about a specific agent.
     """
-    # Get agent
+    # Get agent with forked_by_user relationship
     result = await db.execute(
-        select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
+        select(MarketplaceAgent).options(
+            selectinload(MarketplaceAgent.forked_by_user)
+        ).where(MarketplaceAgent.slug == slug)
     )
     agent = result.scalar_one_or_none()
 
@@ -410,6 +421,16 @@ async def get_agent_details(
     )
     reviews = reviews_result.scalars().all()
 
+    # Determine creator info
+    creator_type = "official"
+    creator_name = "Tesslate"
+    creator_avatar_url = None
+    if agent.forked_by_user_id:
+        creator_type = "community"
+        if agent.forked_by_user:
+            creator_name = agent.forked_by_user.email.split('@')[0]
+            creator_avatar_url = agent.forked_by_user.avatar_url
+
     # Format response
     return {
         "id": agent.id,
@@ -433,10 +454,18 @@ async def get_agent_details(
         "features": agent.features,
         "required_models": agent.required_models,
         "tags": agent.tags,
+        "tools": agent.tools,
         "is_featured": agent.is_featured,
         "is_forkable": agent.is_forkable,
         "source_type": agent.source_type,
+        "is_active": agent.is_active,
         "is_purchased": is_purchased,
+        "usage_count": agent.usage_count or 0,
+        "created_by_user_id": str(agent.created_by_user_id) if agent.created_by_user_id else None,
+        "forked_by_user_id": str(agent.forked_by_user_id) if agent.forked_by_user_id else None,
+        "creator_type": creator_type,
+        "creator_name": creator_name,
+        "creator_avatar_url": creator_avatar_url,
         "reviews": [
             {
                 "id": review.id,
@@ -450,6 +479,43 @@ async def get_agent_details(
 
 
 # ============================================================================
+# Related Agents (Recommendations)
+# ============================================================================
+
+@router.get("/agents/{slug}/related")
+async def get_related_agents_endpoint(
+    slug: str,
+    limit: int = Query(default=6, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Get agents that are frequently co-installed with the specified agent.
+    Uses co-installation tracking to provide "People also like" recommendations.
+
+    Algorithm: O(1) lookup - queries pre-computed co-install counts.
+    """
+    # Get user's already installed agents to exclude them
+    purchased_result = await db.execute(
+        select(UserPurchasedAgent.agent_id).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.is_active == True
+        )
+    )
+    exclude_ids = [row[0] for row in purchased_result.fetchall()]
+
+    # Get related agents from recommendations service
+    related = await get_related_agents(
+        db=db,
+        agent_slug=slug,
+        limit=limit,
+        exclude_agent_ids=exclude_ids
+    )
+
+    return {"related_agents": related}
+
+
+# ============================================================================
 # Purchase/Add Agents
 # ============================================================================
 
@@ -457,6 +523,7 @@ async def get_agent_details(
 async def purchase_agent(
     agent_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user)
 ):
@@ -506,6 +573,15 @@ async def purchase_agent(
 
         await db.commit()
 
+        # Schedule background task to update co-install counts (non-blocking)
+        # This tracks which agents are frequently installed together for recommendations
+        async def update_recommendations():
+            from ..database import async_session_maker
+            async with async_session_maker() as bg_db:
+                await update_co_install_counts(bg_db, current_user.id, agent.id)
+
+        background_tasks.add_task(update_recommendations)
+
         return {
             "message": "Free agent added to your library",
             "agent_id": agent_id,
@@ -550,6 +626,7 @@ async def purchase_agent(
 
 @router.post("/verify-purchase")
 async def verify_agent_purchase(
+    background_tasks: BackgroundTasks,
     session_id: str = Body(..., embed=True),
     agent_slug: Optional[str] = Body(None, embed=True),
     db: AsyncSession = Depends(get_db),
@@ -652,6 +729,14 @@ async def verify_agent_purchase(
         agent.downloads += 1
 
         await db.commit()
+
+        # Schedule background task to update co-install counts (non-blocking)
+        async def update_recommendations():
+            from ..database import async_session_maker
+            async with async_session_maker() as bg_db:
+                await update_co_install_counts(bg_db, current_user.id, agent.id)
+
+        background_tasks.add_task(update_recommendations)
 
         return {
             "success": True,
@@ -1744,6 +1829,109 @@ async def create_agent_review(
     await db.commit()
 
     return {"message": "Review submitted successfully", "rating": rating}
+
+
+@router.get("/agents/{agent_id}/reviews")
+async def get_agent_reviews(
+    agent_id: str,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Get all reviews for an agent with user info.
+    Returns paginated reviews with user avatar and name.
+    """
+    # Check agent exists
+    agent_result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+    )
+    agent = agent_result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Get reviews with user info
+    offset = (page - 1) * limit
+    reviews_result = await db.execute(
+        select(AgentReview, User)
+        .join(User, User.id == AgentReview.user_id)
+        .where(AgentReview.agent_id == agent_id)
+        .order_by(AgentReview.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    reviews = reviews_result.all()
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count(AgentReview.id)).where(AgentReview.agent_id == agent_id)
+    )
+    total = count_result.scalar() or 0
+
+    response = []
+    for review, user in reviews:
+        response.append({
+            "id": str(review.id),
+            "rating": review.rating,
+            "comment": review.comment,
+            "created_at": review.created_at.isoformat() if review.created_at else None,
+            "user_id": str(user.id),
+            "user_name": user.name or user.email.split('@')[0],
+            "user_avatar_url": user.avatar_url,
+            "is_own_review": str(user.id) == str(current_user.id)
+        })
+
+    return {
+        "reviews": response,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": offset + len(reviews) < total
+    }
+
+
+@router.delete("/agents/{agent_id}/review")
+async def delete_agent_review(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user)
+):
+    """
+    Delete current user's review for an agent.
+    """
+    # Find user's review
+    review_result = await db.execute(
+        select(AgentReview).where(
+            AgentReview.user_id == current_user.id,
+            AgentReview.agent_id == agent_id
+        )
+    )
+    review = review_result.scalar_one_or_none()
+
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # Delete the review
+    await db.delete(review)
+
+    # Update agent's average rating
+    rating_result = await db.execute(
+        select(func.avg(AgentReview.rating), func.count(AgentReview.id))
+        .where(AgentReview.agent_id == agent_id)
+    )
+    avg_rating, review_count = rating_result.one()
+
+    agent_result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+    )
+    agent = agent_result.scalar_one()
+    agent.rating = float(avg_rating) if avg_rating else 5.0
+    agent.reviews_count = review_count or 0
+
+    await db.commit()
+
+    return {"message": "Review deleted successfully"}
 
 
 # ============================================================================

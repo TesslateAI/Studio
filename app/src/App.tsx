@@ -1,9 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import toast from 'react-hot-toast';
 import { useState, useEffect } from 'react';
 import { ThemeProvider } from './theme';
-import Layout from './components/Layout';
 import { DashboardLayout } from './components/DashboardLayout';
 import Landing from './pages/Landing';
 import NewLandingPage from './pages/NewLandingPage';
@@ -13,6 +11,8 @@ import Dashboard from './pages/Dashboard';
 import Project from './pages/Project';
 import { ProjectGraphCanvas } from './pages/ProjectGraphCanvas';
 import Marketplace from './pages/Marketplace';
+import MarketplaceDetail from './pages/MarketplaceDetail';
+import MarketplaceAuthor from './pages/MarketplaceAuthor';
 import Library from './pages/Library';
 import Feedback from './pages/Feedback';
 import AdminDashboard from './pages/AdminDashboard';
@@ -21,7 +21,6 @@ import OAuthLoginCallback from './pages/OAuthLoginCallback';
 import Logout from './pages/Logout';
 import Referrals from './pages/Referrals';
 import AccountSettings from './pages/AccountSettings';
-import { Walkthrough } from './components/Walkthrough';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
 import axios from 'axios';
@@ -59,7 +58,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
         } else {
           setIsAuthenticated(false);
         }
-      } catch (error) {
+      } catch {
         setIsAuthenticated(false);
       }
     };
@@ -205,6 +204,8 @@ function AppContent() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/marketplace" element={<Marketplace />} />
             <Route path="/marketplace/success" element={<MarketplaceSuccess />} />
+            <Route path="/marketplace/:slug" element={<MarketplaceDetail />} />
+            <Route path="/marketplace/creator/:userId" element={<MarketplaceAuthor />} />
             <Route path="/library" element={<Library />} />
             <Route path="/feedback" element={<Feedback />} />
             <Route path="/settings" element={<AccountSettings />} />

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Float, JSON, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Float, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
@@ -763,6 +763,33 @@ class UserCustomModel(Base):
 
     # Relationships
     user = relationship("User", back_populates="custom_models")
+
+
+# ============================================================================
+# Recommendations System
+# ============================================================================
+
+class AgentCoInstall(Base):
+    """Tracks co-installation patterns for smart recommendations.
+
+    When a user installs an agent, we record which other agents they have.
+    This enables "People who installed X also installed Y" recommendations.
+    Algorithm is O(n) where n = user's installed agents count.
+    Updates happen in background task (non-blocking).
+    """
+    __tablename__ = "agent_co_installs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    related_agent_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    co_install_count = Column(Integer, default=1)  # Number of users who have both
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Composite unique constraint - only one record per agent pair
+    __table_args__ = (
+        UniqueConstraint('agent_id', 'related_agent_id', name='uq_agent_co_install_pair'),
+    )
 
 
 # ============================================================================

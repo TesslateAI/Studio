@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
-import { ToolDropdown } from './ToolDropdown';
-import { EditModeStatus, type EditMode } from './EditModeStatus';
+import { type EditMode } from './EditModeStatus';
 import { Gear } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
@@ -45,7 +44,7 @@ export function ChatInput({
   onSendMessage,
   projectFiles = [],
   projectName = 'project',
-  placeholder = 'Ask AI to build something... (Enter to send, Shift+Enter for new line, / for commands)',
+  placeholder: _placeholder = 'Ask AI to build something... (Enter to send, Shift+Enter for new line, / for commands)',
   disabled = false,
   isExecuting = false,
   onStop,

@@ -140,7 +140,7 @@ export const authApi = {
   logout: async () => {
     try {
       await api.post('/api/auth/jwt/logout');
-    } catch (error) {
+    } catch {
       // Ignore errors, we're logging out anyway
     }
     localStorage.removeItem('token');
@@ -172,7 +172,7 @@ export const tasksApi = {
     interval = 1000,
     maxRetries = 300,
     timeout = 300000
-  ): Promise<any> => {
+  ): Promise<{ status: string; error?: string; result?: unknown }> => {
     return new Promise((resolve, reject) => {
       let retryCount = 0;
       const startTime = Date.now();
@@ -231,7 +231,16 @@ export const projectsApi = {
     branch?: string,
     baseId?: string
   ) => {
-    const body: any = {
+    const body: {
+      name: string;
+      description?: string;
+      source_type: string;
+      github_repo_url?: string;
+      github_branch?: string;
+      git_repo_url?: string;
+      git_branch?: string;
+      base_id?: string;
+    } = {
       name,
       description,
       source_type: sourceType || 'template'
@@ -304,7 +313,7 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}/settings`);
     return response.data;
   },
-  updateSettings: async (slug: string, settings: any) => {
+  updateSettings: async (slug: string, settings: Record<string, unknown>) => {
     const response = await api.patch(`/api/projects/${slug}/settings`, { settings });
     return response.data;
   },
@@ -381,7 +390,7 @@ export const chatApi = {
   },
   sendAgentMessageStreaming: async (
     request: AgentChatRequest,
-    onEvent: (event: { type: string; data: any }) => void,
+    onEvent: (event: { type: string; data: Record<string, unknown> }) => void,
     signal?: AbortSignal
   ): Promise<void> => {
     const response = await fetch(`${API_URL}/api/chat/agent/stream`, {
@@ -477,6 +486,14 @@ export const marketplaceApi = {
   getAgentDetails: async (slug: string) => {
     const response = await api.get(`/api/marketplace/agents/${slug}`);
     return response.data;
+  },
+
+  // Get related agents (recommendations based on co-installs)
+  getRelatedAgents: async (slug: string, limit: number = 6) => {
+    const response = await api.get(`/api/marketplace/agents/${slug}/related`, {
+      params: { limit }
+    });
+    return response.data.related_agents || [];
   },
 
   // Fork an open source agent
@@ -632,6 +649,55 @@ export const marketplaceApi = {
     const response = await api.post(`/api/marketplace/subscriptions/${subscriptionId}/renew`);
     return response.data;
   },
+
+  // Get reviews for an agent
+  getAgentReviews: async (agentId: string, params?: { page?: number; limit?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    const response = await api.get(`/api/marketplace/agents/${agentId}/reviews?${queryParams}`);
+    return response.data;
+  },
+
+  // Create or update a review for an agent
+  createAgentReview: async (agentId: string, rating: number, comment?: string) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('rating', rating.toString());
+    if (comment) queryParams.append('comment', comment);
+    const response = await api.post(`/api/marketplace/agents/${agentId}/review?${queryParams}`);
+    return response.data;
+  },
+
+  // Delete user's review for an agent
+  deleteAgentReview: async (agentId: string) => {
+    const response = await api.delete(`/api/marketplace/agents/${agentId}/review`);
+    return response.data;
+  },
+
+};
+
+// Creator/Author profile API
+export const creatorsApi = {
+  // Get creator public profile
+  getProfile: async (userId: string) => {
+    const response = await api.get(`/api/creators/${userId}`);
+    return response.data;
+  },
+
+  // Get creator's published agents (paginated)
+  getCreatorAgents: async (userId: string, params?: { page?: number; limit?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    const response = await api.get(`/api/creators/${userId}/agents?${queryParams}`);
+    return response.data;
+  },
+
+  // Get creator stats
+  getCreatorStats: async (userId: string) => {
+    const response = await api.get(`/api/creators/${userId}/stats`);
+    return response.data;
+  },
 };
 
 export const agentsApi = {
@@ -671,7 +737,7 @@ export const secretsApi = {
     api_key: string;
     key_name?: string;
     auth_type?: string;
-    provider_metadata?: any;
+    provider_metadata?: Record<string, unknown>;
   }) => {
     const response = await api.post('/api/secrets/api-keys', data);
     return response.data;
@@ -681,7 +747,7 @@ export const secretsApi = {
   updateApiKey: async (keyId: number, data: {
     api_key?: string;
     key_name?: string;
-    provider_metadata?: any;
+    provider_metadata?: Record<string, unknown>;
   }) => {
     const response = await api.put(`/api/secrets/api-keys/${keyId}`, data);
     return response.data;
@@ -706,6 +772,26 @@ export const secretsApi = {
   },
 };
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  name?: string;
+  avatar_url?: string;
+  bio?: string;
+  twitter_handle?: string;
+  github_username?: string;
+  website_url?: string;
+}
+
+export interface UserProfileUpdate {
+  name?: string;
+  avatar_url?: string;
+  bio?: string;
+  twitter_handle?: string;
+  github_username?: string;
+  website_url?: string;
+}
+
 export const usersApi = {
   // Get user preferences
   getPreferences: async () => {
@@ -716,6 +802,18 @@ export const usersApi = {
   // Update user preferences
   updatePreferences: async (data: { diagram_model?: string }) => {
     const response = await api.patch('/api/users/preferences', data);
+    return response.data;
+  },
+
+  // Get user profile
+  getProfile: async (): Promise<UserProfile> => {
+    const response = await api.get('/api/users/profile');
+    return response.data;
+  },
+
+  // Update user profile
+  updateProfile: async (data: UserProfileUpdate): Promise<UserProfile> => {
+    const response = await api.patch('/api/users/profile', data);
     return response.data;
   },
 };
@@ -985,7 +1083,7 @@ export const deploymentCredentialsApi = {
   create: async (data: {
     provider: string;
     access_token: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
     project_id?: string;
   }) => {
     const response = await api.post('/api/deployment-credentials', data);
@@ -995,7 +1093,7 @@ export const deploymentCredentialsApi = {
   // Update credential
   update: async (credentialId: string, data: {
     access_token?: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }) => {
     const response = await api.put(`/api/deployment-credentials/${credentialId}`, data);
     return response.data;
@@ -1107,7 +1205,7 @@ export const deploymentsApi = {
   },
 
   // Stream deployment progress (SSE)
-  streamProgress: (deploymentId: string, onMessage: (data: any) => void, onError?: (error: any) => void) => {
+  streamProgress: (deploymentId: string, onMessage: (data: Record<string, unknown>) => void, onError?: (error: Event) => void) => {
     const eventSource = new EventSource(
       `${API_URL}/api/deployments/deployments/${deploymentId}/stream`,
       { withCredentials: true }

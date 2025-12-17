@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, FileCode, X } from 'lucide-react';
-import { PencilSimple, Storefront, Books } from '@phosphor-icons/react';
+import { PencilSimple, Storefront } from '@phosphor-icons/react';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
-import { EditModeStatus, type EditMode } from './EditModeStatus';
+import { type EditMode } from './EditModeStatus';
 import { ApprovalRequestCard } from './ApprovalRequestCard';
 import { createWebSocket, chatApi } from '../../lib/api';
 import toast from 'react-hot-toast';
@@ -40,7 +40,7 @@ interface Message {
   // Approval-specific fields
   approvalId?: string;
   toolName?: string;
-  toolParameters?: any;
+  toolParameters?: Record<string, unknown>;
   toolDescription?: string;
 }
 
@@ -98,7 +98,7 @@ export function ChatContainer({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const isUserScrollingRef = useRef(false);
-  const previousMessageCountRef = useRef(0);
+  const _previousMessageCountRef = useRef(0);
   const animatedMessagesRef = useRef<Set<string>>(new Set());
 
   // Load chat history from database
@@ -679,7 +679,7 @@ export function ChatContainer({
 
             toast.success('Task completed successfully');
           } else if (event.type === 'error') {
-            const errorMsg = (event as any).content || event.data?.message || 'Agent execution failed';
+            const errorMsg = (event as { content?: string; data?: { message?: string } }).content || event.data?.message || 'Agent execution failed';
             throw new Error(errorMsg);
           } else if (event.type === 'approval_required') {
             // Handle approval request - add approval message to chat

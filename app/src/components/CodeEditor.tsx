@@ -11,19 +11,24 @@ interface FileNode {
   children?: FileNode[];
 }
 
+interface FileData {
+  file_path: string;
+  content: string;
+}
+
 interface CodeEditorProps {
   projectId: number;
-  files: any[];
+  files: FileData[];
   onFileUpdate: (filePath: string, content: string) => void;
 }
 
-export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEditorProps) {
+export default function CodeEditor({ projectId: _projectId, files, onFileUpdate }: CodeEditorProps) {
   const { theme } = useTheme();
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const editorRef = useRef<any>(null);
+  const editorRef = useRef<unknown>(null);
 
   const getLanguage = (fileName: string): string => {
     const ext = fileName.split('.').pop()?.toLowerCase();
@@ -43,7 +48,7 @@ export default function CodeEditor({ projectId, files, onFileUpdate }: CodeEdito
     }
   };
 
-  const handleEditorDidMount = (editor: any) => {
+  const handleEditorDidMount = (editor: unknown) => {
     editorRef.current = editor;
   };
 

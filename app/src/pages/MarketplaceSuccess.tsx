@@ -35,11 +35,12 @@ export default function MarketplaceSuccess() {
           setStatus('error');
           setMessage('Failed to verify purchase. Please contact support.');
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Failed to verify purchase:', error);
+        const err = error as { response?: { data?: { detail?: string } } };
         setStatus('error');
         setMessage(
-          error.response?.data?.detail ||
+          err.response?.data?.detail ||
           'Failed to verify purchase. Please contact support if you were charged.'
         );
       }

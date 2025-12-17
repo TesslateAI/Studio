@@ -6,7 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
-from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth
+from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth, creators
 from .config import get_settings
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
@@ -653,6 +653,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
+app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])

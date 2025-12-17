@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Check, X, Pencil, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -6,7 +6,7 @@ export interface Tool {
   name: string;
   description: string;
   category: string;
-  parameters: any;
+  parameters: Record<string, unknown>;
   examples: string[];
   system_prompt?: string;
 }

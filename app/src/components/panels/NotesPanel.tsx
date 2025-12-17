@@ -48,7 +48,7 @@ interface NotesPanelProps {
   projectSlug: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const _API_URL = import.meta.env.VITE_API_URL || '';
 
 export function NotesPanel({ projectSlug }: NotesPanelProps) {
   const [isSaving, setIsSaving] = useState(false);
@@ -146,7 +146,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
         editor.commands.setContent(response.data.content);
       }
       setLastSaved(response.data.updated_at ? new Date(response.data.updated_at) : null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to load notes:', error);
       toast.error('Failed to load notes');
     } finally {
@@ -165,7 +165,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
         }
       );
       setLastSaved(new Date());
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to save notes:', error);
       toast.error('Failed to save notes');
     } finally {

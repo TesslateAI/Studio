@@ -12,7 +12,6 @@ import {
   Bug,
   Lightbulb,
   Plus,
-  CaretUp,
   Folder,
   Storefront,
   Books,
@@ -58,14 +57,14 @@ export default function Feedback() {
   const loadFeedback = async () => {
     try {
       setLoading(true);
-      const params: any = { sort: sortBy };
+      const params: Record<string, string> = { sort: sortBy };
       if (filter !== 'all') {
         params.type = filter;
       }
 
       const response = await feedbackApi.list(params);
       setFeedback(response.posts);
-    } catch (error) {
+    } catch {
       toast.error('Failed to load feedback');
     } finally {
       setLoading(false);
@@ -82,7 +81,7 @@ export default function Feedback() {
           ? { ...item, has_upvoted: result.upvoted, upvote_count: result.upvote_count }
           : item
       ));
-    } catch (error) {
+    } catch {
       toast.error('Failed to update upvote');
     }
   };
@@ -197,7 +196,7 @@ export default function Feedback() {
             {/* Sort Dropdown - Desktop */}
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as 'upvotes' | 'date' | 'comments')}
               className="hidden md:block text-xs bg-[var(--surface)] border border-white/10 text-[var(--text)] px-2 py-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
             >
               <option value="upvotes">Most Upvoted</option>

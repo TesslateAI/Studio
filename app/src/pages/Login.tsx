@@ -24,13 +24,14 @@ export default function Login() {
       toast.success('Logged in successfully!');
       setLoading(false);
       navigate('/dashboard');
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Handle validation errors (array format from FastAPI/Pydantic)
-      if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
-        const messages = error.response.data.detail.map((err: any) => err.msg).join(', ');
+      const err = error as { response?: { data?: { detail?: Array<{ msg: string }> | string } } };
+      if (err.response?.data?.detail && Array.isArray(err.response.data.detail)) {
+        const messages = err.response.data.detail.map(e => e.msg).join(', ');
         toast.error(messages);
-      } else if (typeof error.response?.data?.detail === 'string') {
-        const errorMessage = error.response.data.detail;
+      } else if (typeof err.response?.data?.detail === 'string') {
+        const errorMessage = err.response.data.detail;
         if (errorMessage === 'LOGIN_BAD_CREDENTIALS') {
           toast.error('Invalid email or password');
         } else {
@@ -51,7 +52,7 @@ export default function Login() {
       const authUrl = await authApi.getGithubAuthUrl();
       // Redirect to GitHub OAuth
       window.location.href = authUrl;
-    } catch (error) {
+    } catch {
       toast.error('Failed to initiate GitHub login');
       setLoading(false);
     }
@@ -64,7 +65,7 @@ export default function Login() {
       const authUrl = await authApi.getGoogleAuthUrl();
       // Redirect to Google OAuth
       window.location.href = authUrl;
-    } catch (error) {
+    } catch {
       toast.error('Failed to initiate Google login');
       setLoading(false);
     }

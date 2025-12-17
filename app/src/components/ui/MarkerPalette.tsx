@@ -1,5 +1,6 @@
 import { MarkerPill } from './MarkerPill';
 
+// eslint-disable-next-line react-refresh/only-export-components
 export interface Marker {
   key: string;
   label: string;
@@ -11,6 +12,7 @@ interface MarkerPaletteProps {
   onInsertMarker: (marker: string) => void;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const AVAILABLE_MARKERS: Marker[] = [
   // System markers
   { key: 'mode', label: 'Edit Mode', category: 'system', description: 'Current edit mode (allow/ask/plan)' },

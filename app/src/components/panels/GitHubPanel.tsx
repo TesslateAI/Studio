@@ -5,10 +5,7 @@ import {
   CloudArrowUp,
   CloudArrowDown,
   GitCommit,
-  Clock,
-  Link as LinkIcon,
   LinkBreak,
-  ArrowsClockwise,
   Warning,
   CheckCircle
 } from '@phosphor-icons/react';
@@ -49,11 +46,10 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   // Operation states
   const [isPushing, setIsPushing] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // Branch management
   const [showBranchMenu, setShowBranchMenu] = useState(false);
-  const [branches, setBranches] = useState<any[]>([]);
+  const [branches, setBranches] = useState<Array<{ name: string }>>([]);
   const [newBranchName, setNewBranchName] = useState('');
   const [showNewBranchInput, setShowNewBranchInput] = useState(false);
   const [isSwitchingBranch, setIsSwitchingBranch] = useState(false);
@@ -77,7 +73,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       const status = await githubApi.getStatus();
       setGithubConnected(status.connected);
       setGithubStatus(status);
-    } catch (error) {
+    } catch {
       setGithubConnected(false);
       setGithubStatus(null);
     }
@@ -88,7 +84,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       const info = await gitApi.getRepositoryInfo(projectId);
       setRepoConnected(true);
       setRepoInfo(info);
-    } catch (error) {
+    } catch {
       setRepoConnected(false);
       setRepoInfo(null);
     }
@@ -118,7 +114,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       setGithubConnected(false);
       setGithubStatus(null);
       toast.success('GitHub disconnected');
-    } catch (error) {
+    } catch {
       toast.error('Failed to disconnect GitHub');
     }
   };
@@ -136,7 +132,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       setRepoInfo(null);
       setGitStatus(null);
       toast.success('Repository disconnected');
-    } catch (error) {
+    } catch {
       toast.error('Failed to disconnect repository');
     }
   };
@@ -151,8 +147,9 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       await gitApi.push(projectId, gitStatus.branch);
       toast.success('Pushed successfully!', { id: loadingToast });
       await loadGitStatus();
-    } catch (error: any) {
-      const detail = error.response?.data?.detail;
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      const detail = axiosError.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to push';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
@@ -174,38 +171,13 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
         toast.success(result.message || 'Pulled successfully!', { id: loadingToast });
       }
       await loadGitStatus();
-    } catch (error: any) {
-      const detail = error.response?.data?.detail;
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      const detail = axiosError.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to pull';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
       setIsPulling(false);
-    }
-  };
-
-  const handleSync = async () => {
-    if (!gitStatus) return;
-
-    setIsSyncing(true);
-    const loadingToast = toast.loading('Syncing with remote...');
-
-    try {
-      // Pull first, then push
-      const pullResult = await gitApi.pull(projectId, gitStatus.branch);
-      if (pullResult.conflicts && pullResult.conflicts.length > 0) {
-        toast.error(`Conflicts detected. Resolve them before pushing.`, { id: loadingToast });
-        return;
-      }
-
-      await gitApi.push(projectId, gitStatus.branch);
-      toast.success('Synced successfully!', { id: loadingToast });
-      await loadGitStatus();
-    } catch (error: any) {
-      const detail = error.response?.data?.detail;
-      const errorMessage = typeof detail === 'string' ? detail : 'Failed to sync';
-      toast.error(errorMessage, { id: loadingToast });
-    } finally {
-      setIsSyncing(false);
     }
   };
 
@@ -237,8 +209,9 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       toast.success(`Switched to ${branchName}`, { id: loadingToast });
       setShowBranchMenu(false);
       await loadGitStatus();
-    } catch (error: any) {
-      const detail = error.response?.data?.detail;
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      const detail = axiosError.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to switch branch';
       toast.error(errorMessage, { id: loadingToast });
     } finally {
@@ -262,8 +235,9 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       setShowBranchMenu(false);
       await loadGitStatus();
       await loadBranches();
-    } catch (error: any) {
-      const detail = error.response?.data?.detail;
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      const detail = axiosError.response?.data?.detail;
       const errorMessage = typeof detail === 'string' ? detail : 'Failed to create branch';
       toast.error(errorMessage, { id: loadingToast });
     }

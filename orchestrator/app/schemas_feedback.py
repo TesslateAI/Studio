@@ -86,6 +86,7 @@ class FeedbackPostDetail(BaseModel):
     status: str
     upvote_count: int
     has_upvoted: bool = False
+    is_owner: bool = False  # Whether current user owns this feedback
     created_at: datetime
     updated_at: datetime
     comments: List[FeedbackCommentRead] = []

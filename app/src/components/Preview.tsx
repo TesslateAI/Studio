@@ -1,7 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { RefreshCw, ExternalLink, Loader, Monitor, FileText } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { projectsApi } from '../lib/api';
-import { LoadingSpinner } from './PulsingGridSpinner';
 import toast from 'react-hot-toast';
 
 interface PreviewProps {
@@ -11,7 +9,7 @@ interface PreviewProps {
   setActiveTab?: (tab: 'preview' | 'files') => void;
 }
 
-export default function Preview({ projectId, userId, activeTab = 'preview', setActiveTab }: PreviewProps) {
+export default function Preview({ projectId, activeTab = 'preview', setActiveTab }: PreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,13 +62,13 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     }
   };
 
-  const refresh = () => {
+  const _refresh = () => {
     if (iframeRef.current && devServerUrl) {
       iframeRef.current.src = devServerUrl;
     }
   };
 
-  const openInNewTab = () => {
+  const _openInNewTab = () => {
     if (devServerUrl) {
       window.open(devServerUrl, '_blank');
     }
@@ -213,7 +211,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
     const tabPreview = document.getElementById('tab-preview');
     const tabCode = document.getElementById('tab-code');
     const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
-    const urlDisplay = document.getElementById('url-display');
+    const _urlDisplay = document.getElementById('url-display');
     const liveStatusDot = document.getElementById('live-status-dot');
     const liveStatusText = document.getElementById('live-status-text');
 
@@ -270,7 +268,9 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
 
     if (refreshBtn) {
       refreshBtn.onclick = () => {
-        iframe.src = iframe.src;
+        // Force refresh by reloading with timestamp
+        const currentSrc = iframe.src;
+        iframe.src = currentSrc.includes('?') ? currentSrc : `${currentSrc}?t=${Date.now()}`;
       };
     }
 
@@ -311,7 +311,7 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
           if (urlDisplayElement) {
             urlDisplayElement.textContent = `${devServerUrl}${newPath}`;
           }
-        } catch (e) {
+        } catch {
           // Fallback if URL parsing fails
           const newPath = event.data.url || '/';
           setCurrentPath(newPath);
@@ -472,13 +472,13 @@ export default function Preview({ projectId, userId, activeTab = 'preview', setA
       animationId = requestAnimationFrame(animate);
 
       // Store animation ID for cleanup
-      (container as any).__animationId = animationId;
+      (container as unknown as { __animationId?: number }).__animationId = animationId;
     }
     // Cleanup function
     return () => {
-      if ((container as any).__animationId) {
-        cancelAnimationFrame((container as any).__animationId);
-        delete (container as any).__animationId;
+      if ((container as unknown as { __animationId?: number }).__animationId) {
+        cancelAnimationFrame((container as unknown as { __animationId?: number }).__animationId!);
+        delete (container as unknown as { __animationId?: number }).__animationId;
       }
     };
   }, [loading]);

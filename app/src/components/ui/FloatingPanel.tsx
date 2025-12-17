@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useTheme } from '../../theme/ThemeContext';
 
 interface FloatingPanelProps {
