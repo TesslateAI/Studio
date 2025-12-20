@@ -5,7 +5,8 @@ Tests tool registration, lookup, execution, and scoped registries.
 """
 
 import pytest
-from app.agent.tools.registry import ToolRegistry, Tool, ToolCategory, create_scoped_tool_registry
+
+from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry, create_scoped_tool_registry
 
 
 @pytest.mark.unit
@@ -20,11 +21,10 @@ class TestToolRegistry:
     @pytest.fixture
     def mock_tool_executor(self):
         """Create a mock tool executor function."""
+
         async def executor(params, context):
-            return {
-                "message": f"Executed with {params}",
-                "success": True
-            }
+            return {"message": f"Executed with {params}", "success": True}
+
         return executor
 
     def test_register_tool(self, registry, mock_tool_executor):
@@ -34,13 +34,11 @@ class TestToolRegistry:
             description="A test tool",
             parameters={
                 "type": "object",
-                "properties": {
-                    "param1": {"type": "string"}
-                },
-                "required": ["param1"]
+                "properties": {"param1": {"type": "string"}},
+                "required": ["param1"],
             },
             executor=mock_tool_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         registry.register(tool)
@@ -55,7 +53,7 @@ class TestToolRegistry:
             description="First version",
             parameters={},
             executor=mock_tool_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         tool2 = Tool(
@@ -63,7 +61,7 @@ class TestToolRegistry:
             description="Second version",
             parameters={},
             executor=mock_tool_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         registry.register(tool1)
@@ -84,7 +82,7 @@ class TestToolRegistry:
             description="Tool 1",
             parameters={},
             executor=mock_tool_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         tool2 = Tool(
@@ -92,7 +90,7 @@ class TestToolRegistry:
             description="Tool 2",
             parameters={},
             executor=mock_tool_executor,
-            category=ToolCategory.SHELL
+            category=ToolCategory.SHELL,
         )
 
         registry.register(tool1)
@@ -111,7 +109,7 @@ class TestToolRegistry:
             description="Read a file",
             parameters={},
             executor=mock_tool_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         shell_tool = Tool(
@@ -119,7 +117,7 @@ class TestToolRegistry:
             description="Execute bash command",
             parameters={},
             executor=mock_tool_executor,
-            category=ToolCategory.SHELL
+            category=ToolCategory.SHELL,
         )
 
         registry.register(file_tool)
@@ -136,26 +134,22 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_execute_tool_success(self, registry):
         """Test successful tool execution."""
+
         async def success_executor(params, context):
-            return {
-                "output": f"Processed {params['input']}",
-                "status": "ok"
-            }
+            return {"output": f"Processed {params['input']}", "status": "ok"}
 
         tool = Tool(
             name="process_tool",
             description="Process data",
             parameters={},
             executor=success_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         registry.register(tool)
 
         result = await registry.execute(
-            tool_name="process_tool",
-            parameters={"input": "test_data"},
-            context={}
+            tool_name="process_tool", parameters={"input": "test_data"}, context={}
         )
 
         assert result["success"] is True
@@ -165,11 +159,7 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_execute_tool_not_found(self, registry):
         """Test executing a non-existent tool."""
-        result = await registry.execute(
-            tool_name="nonexistent_tool",
-            parameters={},
-            context={}
-        )
+        result = await registry.execute(tool_name="nonexistent_tool", parameters={}, context={})
 
         assert result["success"] is False
         assert "Unknown tool" in result["error"]
@@ -177,6 +167,7 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_execute_tool_executor_exception(self, registry):
         """Test handling of exceptions during tool execution."""
+
         async def failing_executor(params, context):
             raise ValueError("Something went wrong")
 
@@ -185,16 +176,12 @@ class TestToolRegistry:
             description="A tool that fails",
             parameters={},
             executor=failing_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         registry.register(tool)
 
-        result = await registry.execute(
-            tool_name="failing_tool",
-            parameters={},
-            context={}
-        )
+        result = await registry.execute(tool_name="failing_tool", parameters={}, context={})
 
         assert result["success"] is False
         assert "Something went wrong" in result["error"]
@@ -207,20 +194,14 @@ class TestToolRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write"
-                    }
+                    "file_path": {"type": "string", "description": "Path to the file"},
+                    "content": {"type": "string", "description": "Content to write"},
                 },
-                "required": ["file_path"]
+                "required": ["file_path"],
             },
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
-            examples=["Example usage"]
+            examples=["Example usage"],
         )
 
         prompt_text = tool.to_prompt_format()
@@ -240,13 +221,11 @@ class TestToolRegistry:
             description="Read a file",
             parameters={
                 "type": "object",
-                "properties": {
-                    "file_path": {"type": "string", "description": "File path"}
-                },
-                "required": ["file_path"]
+                "properties": {"file_path": {"type": "string", "description": "File path"}},
+                "required": ["file_path"],
             },
             executor=mock_tool_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         shell_tool = Tool(
@@ -254,13 +233,11 @@ class TestToolRegistry:
             description="Execute command",
             parameters={
                 "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "Command to execute"}
-                },
-                "required": ["command"]
+                "properties": {"command": {"type": "string", "description": "Command to execute"}},
+                "required": ["command"],
             },
             executor=mock_tool_executor,
-            category=ToolCategory.SHELL
+            category=ToolCategory.SHELL,
         )
 
         registry.register(file_tool)
@@ -287,16 +264,12 @@ class TestToolRegistry:
             description="Check context",
             parameters={},
             executor=context_checker,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         registry.register(tool)
 
-        await registry.execute(
-            tool_name="context_tool",
-            parameters={},
-            context=test_context
-        )
+        await registry.execute(tool_name="context_tool", parameters={}, context=test_context)
 
         assert "user_id" in received_context
         assert "project_id" in received_context
@@ -310,11 +283,10 @@ class TestScopedToolRegistry:
     @pytest.fixture
     def mock_tool_executor(self):
         """Create a mock tool executor function."""
+
         async def executor(params, context):
-            return {
-                "message": f"Executed with {params}",
-                "success": True
-            }
+            return {"message": f"Executed with {params}", "success": True}
+
         return executor
 
     @pytest.fixture
@@ -334,10 +306,13 @@ class TestScopedToolRegistry:
 
         return registry
 
-    def test_create_scoped_registry_subset(self, populated_registry, mock_tool_executor, monkeypatch):
+    def test_create_scoped_registry_subset(
+        self, populated_registry, mock_tool_executor, monkeypatch
+    ):
         """Test creating a scoped registry with subset of tools."""
         # Mock get_tool_registry to return our populated registry
         from app.agent.tools import registry as registry_module
+
         monkeypatch.setattr(registry_module, "get_tool_registry", lambda: populated_registry)
 
         scoped = create_scoped_tool_registry(["read_file", "write_file"])
@@ -351,6 +326,7 @@ class TestScopedToolRegistry:
     def test_create_scoped_registry_missing_tools(self, populated_registry, monkeypatch):
         """Test creating scoped registry with some non-existent tools."""
         from app.agent.tools import registry as registry_module
+
         monkeypatch.setattr(registry_module, "get_tool_registry", lambda: populated_registry)
 
         scoped = create_scoped_tool_registry(["read_file", "nonexistent_tool"])
@@ -362,6 +338,7 @@ class TestScopedToolRegistry:
     def test_create_scoped_registry_empty_list(self, populated_registry, monkeypatch):
         """Test creating scoped registry with empty tool list."""
         from app.agent.tools import registry as registry_module
+
         monkeypatch.setattr(registry_module, "get_tool_registry", lambda: populated_registry)
 
         scoped = create_scoped_tool_registry([])
@@ -372,6 +349,7 @@ class TestScopedToolRegistry:
     async def test_scoped_registry_isolation(self, populated_registry, monkeypatch):
         """Test that scoped registry doesn't affect global registry."""
         from app.agent.tools import registry as registry_module
+
         monkeypatch.setattr(registry_module, "get_tool_registry", lambda: populated_registry)
 
         scoped = create_scoped_tool_registry(["read_file"])
@@ -390,11 +368,10 @@ class TestToolDataclass:
     @pytest.fixture
     def mock_tool_executor(self):
         """Create a mock tool executor function."""
+
         async def executor(params, context):
-            return {
-                "message": f"Executed with {params}",
-                "success": True
-            }
+            return {"message": f"Executed with {params}", "success": True}
+
         return executor
 
     def test_tool_creation(self, mock_tool_executor):
@@ -405,7 +382,7 @@ class TestToolDataclass:
             parameters={"type": "object"},
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
-            examples=["Example 1", "Example 2"]
+            examples=["Example 1", "Example 2"],
         )
 
         assert tool.name == "test_tool"
@@ -420,7 +397,7 @@ class TestToolDataclass:
             description="Test description",
             parameters={},
             executor=mock_tool_executor,
-            category=ToolCategory.FILE_OPS
+            category=ToolCategory.FILE_OPS,
         )
 
         assert tool.examples is None

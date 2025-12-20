@@ -5,7 +5,7 @@ Tests streaming agent functionality including code block extraction and file sav
 """
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+
 from app.agent.stream_agent import StreamAgent
 
 
@@ -184,7 +184,9 @@ const y = 2;
 
     @pytest.mark.skip(reason="Complex integration test - better tested at integration level")
     @pytest.mark.asyncio
-    async def test_save_file_database_error_continues(self, stream_agent, mock_user, mock_project, mock_db):
+    async def test_save_file_database_error_continues(
+        self, stream_agent, mock_user, mock_project, mock_db
+    ):
         """Test that database errors don't prevent file writing."""
         pass
 

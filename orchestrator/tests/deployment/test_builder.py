@@ -4,14 +4,13 @@ Tests for deployment builder service.
 This module tests the build integration and file collection functionality.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import os
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
-from app.services.deployment.builder import DeploymentBuilder, BuildError, get_deployment_builder
-from app.services.deployment.base import DeploymentFile
+import pytest
+
+from app.services.deployment.builder import BuildError, DeploymentBuilder, get_deployment_builder
 
 
 class TestDeploymentBuilder:
@@ -41,7 +40,9 @@ class TestDeploymentBuilder:
         builder = DeploymentBuilder()
 
         # execute_command_in_container is an async method, so we need AsyncMock
-        with patch.object(builder.container_manager, "execute_command_in_container", new_callable=AsyncMock) as mock_exec:
+        with patch.object(
+            builder.container_manager, "execute_command_in_container", new_callable=AsyncMock
+        ) as mock_exec:
             mock_exec.return_value = (0, "Build completed successfully")
 
             with patch.object(builder, "_get_project_path") as mock_path:
@@ -51,9 +52,7 @@ class TestDeploymentBuilder:
                     mock_detect.return_value = {"framework": "vite"}
 
                     success, output = await builder.trigger_build(
-                        user_id="user123",
-                        project_id="proj456",
-                        framework="vite"
+                        user_id="user123", project_id="proj456", framework="vite"
                     )
 
                     assert success is True
@@ -73,9 +72,7 @@ class TestDeploymentBuilder:
 
                 with pytest.raises(BuildError) as exc_info:
                     await builder.trigger_build(
-                        user_id="user123",
-                        project_id="proj456",
-                        framework="vite"
+                        user_id="user123", project_id="proj456", framework="vite"
                     )
 
                 assert "Build failed" in str(exc_info.value)
@@ -103,9 +100,7 @@ class TestDeploymentBuilder:
                 mock_path.return_value = str(project_dir)
 
                 files = await builder.collect_deployment_files(
-                    user_id="user123",
-                    project_id="proj456",
-                    framework="vite"
+                    user_id="user123", project_id="proj456", framework="vite"
                 )
 
                 assert len(files) == 3
@@ -119,18 +114,18 @@ class TestDeploymentBuilder:
         """Test error when build output directory doesn't exist."""
         builder = DeploymentBuilder()
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with patch.object(builder, "_get_project_path") as mock_path:
-                mock_path.return_value = temp_dir
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch.object(builder, "_get_project_path") as mock_path,
+        ):
+            mock_path.return_value = temp_dir
 
-                with pytest.raises(FileNotFoundError) as exc_info:
-                    await builder.collect_deployment_files(
-                        user_id="user123",
-                        project_id="proj456",
-                        framework="vite"
-                    )
+            with pytest.raises(FileNotFoundError) as exc_info:
+                await builder.collect_deployment_files(
+                    user_id="user123", project_id="proj456", framework="vite"
+                )
 
-                assert "Build output directory not found" in str(exc_info.value)
+            assert "Build output directory not found" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_verify_build_output_valid(self):
@@ -147,9 +142,7 @@ class TestDeploymentBuilder:
                 mock_path.return_value = str(project_dir)
 
                 is_valid = await builder.verify_build_output(
-                    user_id="user123",
-                    project_id="proj456",
-                    framework="vite"
+                    user_id="user123", project_id="proj456", framework="vite"
                 )
 
                 assert is_valid is True
@@ -168,9 +161,7 @@ class TestDeploymentBuilder:
                 mock_path.return_value = str(project_dir)
 
                 is_valid = await builder.verify_build_output(
-                    user_id="user123",
-                    project_id="proj456",
-                    framework="vite"
+                    user_id="user123", project_id="proj456", framework="vite"
                 )
 
                 assert is_valid is False
@@ -201,9 +192,7 @@ class TestDeploymentBuilder:
                 mock_path.return_value = str(project_dir)
 
                 files = await builder.collect_deployment_files(
-                    user_id="user123",
-                    project_id="proj456",
-                    framework="vite"
+                    user_id="user123", project_id="proj456", framework="vite"
                 )
 
                 # Should only include index.html

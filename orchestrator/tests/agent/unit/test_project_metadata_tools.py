@@ -4,10 +4,12 @@ Unit tests for Project Metadata Tools.
 Tests project information retrieval tools.
 """
 
-import pytest
-from unittest.mock import Mock, AsyncMock
-from uuid import uuid4
 from datetime import datetime
+from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
+
+import pytest
+
 from app.agent.tools.project_ops.metadata import get_project_info_tool
 
 
@@ -35,11 +37,7 @@ class TestProjectMetadataTools:
     @pytest.fixture
     def test_context(self, mock_db):
         """Create a test context."""
-        return {
-            "user_id": uuid4(),
-            "project_id": uuid4(),
-            "db": mock_db
-        }
+        return {"user_id": uuid4(), "project_id": uuid4(), "db": mock_db}
 
     @pytest.mark.asyncio
     async def test_get_project_info_success(self, test_context, mock_project, mock_db):
@@ -85,7 +83,9 @@ class TestProjectMetadataTools:
         assert "suggestion" in result
 
     @pytest.mark.asyncio
-    async def test_get_project_info_uses_context_project_id(self, test_context, mock_project, mock_db):
+    async def test_get_project_info_uses_context_project_id(
+        self, test_context, mock_project, mock_db
+    ):
         """Test that tool uses project_id from context."""
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = mock_project
@@ -97,7 +97,9 @@ class TestProjectMetadataTools:
         mock_db.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_project_info_handles_none_timestamps(self, test_context, mock_project, mock_db):
+    async def test_get_project_info_handles_none_timestamps(
+        self, test_context, mock_project, mock_db
+    ):
         """Test handling of None timestamps."""
         mock_project.created_at = None
         mock_project.updated_at = None
@@ -112,7 +114,9 @@ class TestProjectMetadataTools:
         assert result["details"]["updated_at"] is None
 
     @pytest.mark.asyncio
-    async def test_get_project_info_with_empty_description(self, test_context, mock_project, mock_db):
+    async def test_get_project_info_with_empty_description(
+        self, test_context, mock_project, mock_db
+    ):
         """Test project info with empty description."""
         mock_project.description = ""
 
@@ -126,7 +130,9 @@ class TestProjectMetadataTools:
         assert result["name"] == mock_project.name
 
     @pytest.mark.asyncio
-    async def test_get_project_info_with_long_description(self, test_context, mock_project, mock_db):
+    async def test_get_project_info_with_long_description(
+        self, test_context, mock_project, mock_db
+    ):
         """Test project info with very long description."""
         mock_project.description = "A" * 10000
 
@@ -139,7 +145,9 @@ class TestProjectMetadataTools:
         assert len(result["description"]) == 10000
 
     @pytest.mark.asyncio
-    async def test_get_project_info_with_special_characters(self, test_context, mock_project, mock_db):
+    async def test_get_project_info_with_special_characters(
+        self, test_context, mock_project, mock_db
+    ):
         """Test project info with special characters in name/description."""
         mock_project.name = "Project with émojis 🚀 and spëcial chars"
         mock_project.description = "Description with\nmultiple\nlines"
@@ -155,7 +163,9 @@ class TestProjectMetadataTools:
         assert "\n" in result["description"]
 
     @pytest.mark.asyncio
-    async def test_get_project_info_returns_all_required_fields(self, test_context, mock_project, mock_db):
+    async def test_get_project_info_returns_all_required_fields(
+        self, test_context, mock_project, mock_db
+    ):
         """Test that all required fields are present in response."""
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = mock_project
@@ -210,7 +220,9 @@ class TestProjectMetadataTools:
         assert mock_project.name in result["message"]
 
     @pytest.mark.asyncio
-    async def test_get_project_info_multiple_calls_consistent(self, test_context, mock_project, mock_db):
+    async def test_get_project_info_multiple_calls_consistent(
+        self, test_context, mock_project, mock_db
+    ):
         """Test that multiple calls return consistent results."""
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = mock_project

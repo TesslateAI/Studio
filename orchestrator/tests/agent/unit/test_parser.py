@@ -6,6 +6,7 @@ and pure JSON-format tool calls.
 """
 
 import pytest
+
 from app.agent.parser import AgentResponseParser, ToolCall
 
 
@@ -132,7 +133,7 @@ TASK_COMPLETE
         signals = [
             "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
             "<task_complete>",
-            "<!-- TASK COMPLETE -->"
+            "<!-- TASK COMPLETE -->",
         ]
 
         for signal in signals:
@@ -297,11 +298,14 @@ ls -la
         assert len(tool_calls) == 1
         assert tool_calls[0].name == "read_file"
 
-    @pytest.mark.parametrize("invalid_json", [
-        '{"tool_name": "test", "parameters": {"key": value}}',  # Missing quotes
-        '{"tool_name": "test", "parameters": {"key": "value"',  # Missing closing brace
-        '{tool_name: "test", parameters: {key: "value"}}',  # Unquoted keys
-    ])
+    @pytest.mark.parametrize(
+        "invalid_json",
+        [
+            '{"tool_name": "test", "parameters": {"key": value}}',  # Missing quotes
+            '{"tool_name": "test", "parameters": {"key": "value"',  # Missing closing brace
+            '{tool_name: "test", parameters: {key: "value"}}',  # Unquoted keys
+        ],
+    )
     def test_parse_various_json_errors(self, parser, invalid_json):
         """Test handling of various JSON syntax errors."""
         response = invalid_json
@@ -315,7 +319,7 @@ ls -la
         tool_call = ToolCall(
             name="test_tool",
             parameters={"param1": "value1"},
-            raw_text='{"tool_name": "test_tool", ...}'
+            raw_text='{"tool_name": "test_tool", ...}',
         )
 
         assert tool_call.name == "test_tool"

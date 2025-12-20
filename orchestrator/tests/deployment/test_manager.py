@@ -4,21 +4,19 @@ Tests for deployment manager.
 Tests the factory pattern, provider registration, and deployment orchestration.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import tempfile
-import os
+from unittest.mock import AsyncMock, patch
 
-from app.services.deployment.manager import DeploymentManager, deployment_manager
+import pytest
+
 from app.services.deployment.base import (
     BaseDeploymentProvider,
     DeploymentConfig,
-    DeploymentFile,
-    DeploymentResult
+    DeploymentResult,
 )
+from app.services.deployment.manager import DeploymentManager, deployment_manager
 from app.services.deployment.providers.cloudflare import CloudflareWorkersProvider
-from app.services.deployment.providers.vercel import VercelProvider
 from app.services.deployment.providers.netlify import NetlifyProvider
+from app.services.deployment.providers.vercel import VercelProvider
 
 
 class TestDeploymentManager:
@@ -26,10 +24,7 @@ class TestDeploymentManager:
 
     def test_get_provider_cloudflare(self):
         """Test getting Cloudflare provider."""
-        credentials = {
-            "account_id": "test-account",
-            "api_token": "test-token"
-        }
+        credentials = {"account_id": "test-account", "api_token": "test-token"}
 
         provider = DeploymentManager.get_provider("cloudflare", credentials)
 
@@ -108,6 +103,7 @@ class TestDeploymentManager:
 
     def test_register_provider(self):
         """Test registering custom provider."""
+
         class CustomProvider(BaseDeploymentProvider):
             def validate_credentials(self):
                 pass
@@ -139,6 +135,7 @@ class TestDeploymentManager:
 
     def test_register_provider_invalid_class(self):
         """Test registering invalid provider class."""
+
         class NotAProvider:
             pass
 
@@ -162,35 +159,27 @@ class TestDeploymentManager:
         (dist_dir / "index.html").write_text("<html>Test</html>")
 
         config = DeploymentConfig(
-            project_id="test-123",
-            project_name="Test Project",
-            framework="vite"
+            project_id="test-123", project_name="Test Project", framework="vite"
         )
 
-        credentials = {
-            "account_id": "test-account",
-            "api_token": "test-token"
-        }
+        credentials = {"account_id": "test-account", "api_token": "test-token"}
 
         # Mock the provider's deploy method
         mock_result = DeploymentResult(
             success=True,
             deployment_id="deploy-123",
             deployment_url="https://test.workers.dev",
-            logs=["Deployment successful"]
+            logs=["Deployment successful"],
         )
 
         with patch.object(
-            CloudflareWorkersProvider,
-            "deploy",
-            new_callable=AsyncMock,
-            return_value=mock_result
+            CloudflareWorkersProvider, "deploy", new_callable=AsyncMock, return_value=mock_result
         ):
             result = await DeploymentManager.deploy_project(
                 project_path=str(tmp_path),
                 provider_name="cloudflare",
                 credentials=credentials,
-                config=config
+                config=config,
             )
 
             assert result.success is True
@@ -201,15 +190,10 @@ class TestDeploymentManager:
     async def test_deploy_project_missing_build_output(self, tmp_path):
         """Test deployment with missing build output."""
         config = DeploymentConfig(
-            project_id="test-123",
-            project_name="Test Project",
-            framework="vite"
+            project_id="test-123", project_name="Test Project", framework="vite"
         )
 
-        credentials = {
-            "account_id": "test-account",
-            "api_token": "test-token"
-        }
+        credentials = {"account_id": "test-account", "api_token": "test-token"}
 
         with pytest.raises(FileNotFoundError):
             await DeploymentManager.deploy_project(
@@ -217,16 +201,14 @@ class TestDeploymentManager:
                 provider_name="cloudflare",
                 credentials=credentials,
                 config=config,
-                build_output_dir="dist"  # This doesn't exist
+                build_output_dir="dist",  # This doesn't exist
             )
 
     @pytest.mark.asyncio
     async def test_deploy_project_unknown_provider(self, tmp_path):
         """Test deployment with unknown provider."""
         config = DeploymentConfig(
-            project_id="test-123",
-            project_name="Test Project",
-            framework="vite"
+            project_id="test-123", project_name="Test Project", framework="vite"
         )
 
         credentials = {"token": "test-token"}
@@ -236,7 +218,7 @@ class TestDeploymentManager:
                 project_path=str(tmp_path),
                 provider_name="unknown-provider",
                 credentials=credentials,
-                config=config
+                config=config,
             )
 
     def test_singleton_instance(self):
@@ -255,7 +237,7 @@ class TestDeploymentManager:
         config = DeploymentConfig(
             project_id="test-123",
             project_name="Test Project",
-            framework="react"  # React uses 'build' directory
+            framework="react",  # React uses 'build' directory
         )
 
         credentials = {"token": "test-token"}
@@ -264,21 +246,18 @@ class TestDeploymentManager:
             success=True,
             deployment_id="deploy-123",
             deployment_url="https://test.vercel.app",
-            logs=["Deployment successful"]
+            logs=["Deployment successful"],
         )
 
         with patch.object(
-            VercelProvider,
-            "deploy",
-            new_callable=AsyncMock,
-            return_value=mock_result
+            VercelProvider, "deploy", new_callable=AsyncMock, return_value=mock_result
         ):
             result = await DeploymentManager.deploy_project(
                 project_path=str(tmp_path),
                 provider_name="vercel",
                 credentials=credentials,
                 config=config,
-                build_output_dir="build"
+                build_output_dir="build",
             )
 
             assert result.success is True
@@ -294,10 +273,7 @@ class TestDeploymentManager:
             project_id="test-123",
             project_name="Test Project",
             framework="vite",
-            env_vars={
-                "API_URL": "https://api.example.com",
-                "NODE_ENV": "production"
-            }
+            env_vars={"API_URL": "https://api.example.com", "NODE_ENV": "production"},
         )
 
         credentials = {"token": "test-token"}
@@ -306,20 +282,17 @@ class TestDeploymentManager:
             success=True,
             deployment_id="deploy-123",
             deployment_url="https://test.netlify.app",
-            logs=["Deployment successful"]
+            logs=["Deployment successful"],
         )
 
         with patch.object(
-            NetlifyProvider,
-            "deploy",
-            new_callable=AsyncMock,
-            return_value=mock_result
+            NetlifyProvider, "deploy", new_callable=AsyncMock, return_value=mock_result
         ) as mock_deploy:
             result = await DeploymentManager.deploy_project(
                 project_path=str(tmp_path),
                 provider_name="netlify",
                 credentials=credentials,
-                config=config
+                config=config,
             )
 
             assert result.success is True

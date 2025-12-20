@@ -4,21 +4,21 @@ Integration test for diff-based editing with simulated AI responses.
 Tests the complete flow from AI response → extraction → file editing → saving.
 """
 
-import sys
-import os
 import io
+import os
+import sys
 
 # Fix Windows console encoding for emojis
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'orchestrator'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "orchestrator"))
 
 from app.utils.code_patching import (
-    is_search_replace_format,
+    apply_multiple_edits,
     extract_edits_by_file,
-    apply_multiple_edits
+    is_search_replace_format,
 )
 
 
@@ -32,9 +32,9 @@ def test_simulated_ai_edit_flow():
     3. AI responds with search/replace blocks
     4. System applies the edits
     """
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("INTEGRATION TEST: Simulated AI Edit Flow")
-    print("="*70)
+    print("=" * 70)
 
     # Step 1: Original file content (what's in the project)
     print("\n📄 Step 1: Original file content")
@@ -64,7 +64,7 @@ export default App
 """
 
     print(f"   File length: {len(original_content)} characters")
-    print(f"   Contains: bg-blue-500 ✓")
+    print("   Contains: bg-blue-500 ✓")
 
     # Step 2: User request
     print("\n💬 Step 2: User requests")
@@ -156,12 +156,14 @@ The button now has a green background!
     print("\n📊 Step 8: Changes summary")
     print(f"   Original lines: {len(original_content.splitlines())}")
     print(f"   Modified lines: {len(result.content.splitlines())}")
-    print(f"   Line count change: {len(result.content.splitlines()) - len(original_content.splitlines())}")
+    print(
+        f"   Line count change: {len(result.content.splitlines()) - len(original_content.splitlines())}"
+    )
 
     # Show the actual change
     print("\n   Actual change made:")
-    print("   OLD: className=\"bg-blue-500 hover:bg-blue-700\"")
-    print("   NEW: className=\"bg-green-500 hover:bg-green-700\"")
+    print('   OLD: className="bg-blue-500 hover:bg-blue-700"')
+    print('   NEW: className="bg-green-500 hover:bg-green-700"')
 
     print("\n✅ Integration test passed!")
     return True
@@ -171,9 +173,9 @@ def test_multiple_files_edit():
     """
     Test editing multiple files in one AI response.
     """
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("INTEGRATION TEST: Multiple Files Edit")
-    print("="*70)
+    print("=" * 70)
 
     # Original files
     app_content = """export default function App() {
@@ -231,7 +233,10 @@ src/components/Header.jsx
 
     # Edit Header.jsx
     if "src/components/Header.jsx" in edits_by_file:
-        edits = [(e.search_content, e.replace_content) for e in edits_by_file["src/components/Header.jsx"]]
+        edits = [
+            (e.search_content, e.replace_content)
+            for e in edits_by_file["src/components/Header.jsx"]
+        ]
         result = apply_multiple_edits(header_content, edits, fuzzy=True)
         assert result.success, f"Failed to edit Header.jsx: {result.error}"
         assert "bg-green-500" in result.content
@@ -246,9 +251,9 @@ def test_fuzzy_matching_realistic():
     Test fuzzy matching with realistic scenarios where AI's search block
     doesn't exactly match due to whitespace or minor differences.
     """
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("INTEGRATION TEST: Fuzzy Matching (Realistic Scenarios)")
-    print("="*70)
+    print("=" * 70)
 
     # Scenario 1: AI search has different indentation
     print("\n📝 Scenario 1: Different indentation")
@@ -313,9 +318,9 @@ def test_fuzzy_matching_realistic():
 
 def run_integration_tests():
     """Run all integration tests."""
-    print("="*70)
+    print("=" * 70)
     print("DIFF EDITING - INTEGRATION TEST SUITE")
-    print("="*70)
+    print("=" * 70)
 
     tests = [
         ("Simulated AI Edit Flow", test_simulated_ai_edit_flow),
@@ -339,12 +344,13 @@ def run_integration_tests():
         except Exception as e:
             print(f"\n❌ {name} ERROR: {e}")
             import traceback
+
             traceback.print_exc()
             failed += 1
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print(f"RESULTS: {passed} passed, {failed} failed out of {len(tests)} tests")
-    print("="*70)
+    print("=" * 70)
 
     return failed == 0
 

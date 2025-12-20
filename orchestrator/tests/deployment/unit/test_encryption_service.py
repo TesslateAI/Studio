@@ -7,12 +7,10 @@ for deployment credential storage.
 
 import pytest
 from cryptography.fernet import Fernet
-import base64
-import hashlib
 
 from app.services.deployment_encryption import (
-    DeploymentEncryptionService,
     DeploymentEncryptionError,
+    DeploymentEncryptionService,
     get_deployment_encryption_service,
     reset_deployment_encryption_service,
 )
@@ -53,7 +51,9 @@ class TestDeploymentEncryptionService:
             deployment_encryption_key = test_key
             secret_key = "test_secret"
 
-        monkeypatch.setattr("app.services.deployment_encryption.get_settings", lambda: MockSettings())
+        monkeypatch.setattr(
+            "app.services.deployment_encryption.get_settings", lambda: MockSettings()
+        )
 
         service = DeploymentEncryptionService()
         assert service.cipher_suite is not None
@@ -66,18 +66,23 @@ class TestDeploymentEncryptionService:
             deployment_encryption_key = None
             secret_key = secret
 
-        monkeypatch.setattr("app.services.deployment_encryption.get_settings", lambda: MockSettings())
+        monkeypatch.setattr(
+            "app.services.deployment_encryption.get_settings", lambda: MockSettings()
+        )
 
         service = DeploymentEncryptionService()
         assert service.cipher_suite is not None
 
     def test_initialization_fails_without_key(self, monkeypatch):
         """Test that initialization fails when no encryption key is available."""
+
         class MockSettings:
             deployment_encryption_key = None
             secret_key = None
 
-        monkeypatch.setattr("app.services.deployment_encryption.get_settings", lambda: MockSettings())
+        monkeypatch.setattr(
+            "app.services.deployment_encryption.get_settings", lambda: MockSettings()
+        )
 
         with pytest.raises(DeploymentEncryptionError, match="No encryption key available"):
             DeploymentEncryptionService()
@@ -222,7 +227,9 @@ class TestDeploymentEncryptionServiceSingleton:
             deployment_encryption_key = test_key
             secret_key = "test_secret"
 
-        monkeypatch.setattr("app.services.deployment_encryption.get_settings", lambda: MockSettings())
+        monkeypatch.setattr(
+            "app.services.deployment_encryption.get_settings", lambda: MockSettings()
+        )
 
         service1 = get_deployment_encryption_service()
         service2 = get_deployment_encryption_service()
@@ -251,7 +258,9 @@ class TestDeploymentEncryptionServiceSingleton:
             deployment_encryption_key = test_key
             secret_key = "test_secret"
 
-        monkeypatch.setattr("app.services.deployment_encryption.get_settings", lambda: MockSettings())
+        monkeypatch.setattr(
+            "app.services.deployment_encryption.get_settings", lambda: MockSettings()
+        )
 
         service1 = get_deployment_encryption_service()
 
@@ -307,7 +316,7 @@ class TestDeploymentEncryptionEdgeCases:
         encrypted = encryption_service.encrypt(plaintext)
 
         # Truncate the encrypted data
-        truncated = encrypted[:len(encrypted) // 2]
+        truncated = encrypted[: len(encrypted) // 2]
 
         with pytest.raises(DeploymentEncryptionError):
             encryption_service.decrypt(truncated)
@@ -321,7 +330,7 @@ class TestDeploymentEncryptionEdgeCases:
         encrypted_bytes = bytearray(encrypted.encode())
         if len(encrypted_bytes) > 10:
             encrypted_bytes[10] ^= 0xFF  # Flip all bits of one byte
-        modified = bytes(encrypted_bytes).decode('latin1')
+        modified = bytes(encrypted_bytes).decode("latin1")
 
         with pytest.raises(DeploymentEncryptionError):
             encryption_service.decrypt(modified)

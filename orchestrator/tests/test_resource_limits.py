@@ -8,14 +8,16 @@ Tests the resource limits module to ensure it correctly:
 - Provides accurate statistics
 """
 
-import pytest
 import threading
 import time
+
+import pytest
+
 from app.agent.resource_limits import (
-    ResourceLimits,
     ResourceLimitExceeded,
+    ResourceLimits,
     get_resource_limits,
-    reset_resource_limits
+    reset_resource_limits,
 )
 
 
@@ -35,7 +37,7 @@ class TestBasicResourceTracking:
         limits.add_cost(0.03)
 
         stats = limits.get_stats()
-        assert stats['global']['total_cost'] == 0.06
+        assert stats["global"]["total_cost"] == 0.06
 
     def test_iteration_tracking(self):
         """Test that iterations are tracked correctly."""
@@ -46,7 +48,7 @@ class TestBasicResourceTracking:
         limits.add_iteration()
 
         stats = limits.get_stats()
-        assert stats['global']['total_iterations'] == 3
+        assert stats["global"]["total_iterations"] == 3
 
     def test_per_run_cost_tracking(self):
         """Test per-run cost tracking."""
@@ -57,14 +59,14 @@ class TestBasicResourceTracking:
         limits.add_cost(0.03, run_id="run2")
 
         stats1 = limits.get_stats(run_id="run1")
-        assert stats1['run']['cost'] == 0.03
+        assert stats1["run"]["cost"] == 0.03
 
         stats2 = limits.get_stats(run_id="run2")
-        assert stats2['run']['cost'] == 0.03
+        assert stats2["run"]["cost"] == 0.03
 
         # Global should have all costs
         stats_global = limits.get_stats()
-        assert stats_global['global']['total_cost'] == 0.06
+        assert stats_global["global"]["total_cost"] == 0.06
 
     def test_per_run_iteration_tracking(self):
         """Test per-run iteration tracking."""
@@ -75,14 +77,14 @@ class TestBasicResourceTracking:
         limits.add_iteration(run_id="run2")
 
         stats1 = limits.get_stats(run_id="run1")
-        assert stats1['run']['iterations'] == 2
+        assert stats1["run"]["iterations"] == 2
 
         stats2 = limits.get_stats(run_id="run2")
-        assert stats2['run']['iterations'] == 1
+        assert stats2["run"]["iterations"] == 1
 
         # Global should have all iterations
         stats_global = limits.get_stats()
-        assert stats_global['global']['total_iterations'] == 3
+        assert stats_global["global"]["total_iterations"] == 3
 
     def test_reset(self):
         """Test that reset clears all counters."""
@@ -94,8 +96,8 @@ class TestBasicResourceTracking:
         limits.reset()
 
         stats = limits.get_stats()
-        assert stats['global']['total_cost'] == 0.0
-        assert stats['global']['total_iterations'] == 0
+        assert stats["global"]["total_cost"] == 0.0
+        assert stats["global"]["total_iterations"] == 0
 
     def test_cleanup_run(self):
         """Test that cleanup_run removes per-run data."""
@@ -108,12 +110,12 @@ class TestBasicResourceTracking:
 
         # Global stats should still have the data
         stats = limits.get_stats()
-        assert stats['global']['total_cost'] == 0.05
-        assert stats['global']['total_iterations'] == 1
+        assert stats["global"]["total_cost"] == 0.05
+        assert stats["global"]["total_iterations"] == 1
 
         # But per-run stats should be gone
         stats_run = limits.get_stats(run_id="run1")
-        assert 'run' not in stats_run
+        assert "run" not in stats_run
 
 
 class TestResourceLimits:
@@ -164,10 +166,10 @@ class TestResourceLimits:
 
         # Both runs should be under their per-run limits
         stats1 = limits.get_stats(run_id="run1")
-        assert stats1['run']['cost'] == 0.04
+        assert stats1["run"]["cost"] == 0.04
 
         stats2 = limits.get_stats(run_id="run2")
-        assert stats2['run']['cost'] == 0.04
+        assert stats2["run"]["cost"] == 0.04
 
     def test_check_limits(self):
         """Test pre-flight check without incrementing."""
@@ -203,7 +205,7 @@ class TestStatistics:
         limits.add_cost(0.25)
 
         stats = limits.get_stats()
-        assert stats['global']['cost_utilization'] == 25.0
+        assert stats["global"]["cost_utilization"] == 25.0
 
     def test_iteration_utilization(self):
         """Test iteration utilization percentage calculation."""
@@ -213,7 +215,7 @@ class TestStatistics:
             limits.add_iteration()
 
         stats = limits.get_stats()
-        assert stats['global']['iteration_utilization'] == 50.0
+        assert stats["global"]["iteration_utilization"] == 50.0
 
     def test_per_run_utilization(self):
         """Test per-run utilization calculation."""
@@ -222,7 +224,7 @@ class TestStatistics:
         limits.add_cost(0.05, run_id="run1")
 
         stats = limits.get_stats(run_id="run1")
-        assert stats['run']['cost_utilization'] == 50.0
+        assert stats["run"]["cost_utilization"] == 50.0
 
     def test_stats_structure(self):
         """Test that stats return correct structure."""
@@ -234,21 +236,21 @@ class TestStatistics:
         stats = limits.get_stats(run_id="run1")
 
         # Check global stats structure
-        assert 'global' in stats
-        assert 'total_cost' in stats['global']
-        assert 'total_iterations' in stats['global']
-        assert 'cost_limit' in stats['global']
-        assert 'iteration_limit' in stats['global']
-        assert 'cost_utilization' in stats['global']
-        assert 'iteration_utilization' in stats['global']
+        assert "global" in stats
+        assert "total_cost" in stats["global"]
+        assert "total_iterations" in stats["global"]
+        assert "cost_limit" in stats["global"]
+        assert "iteration_limit" in stats["global"]
+        assert "cost_utilization" in stats["global"]
+        assert "iteration_utilization" in stats["global"]
 
         # Check per-run stats structure
-        assert 'run' in stats
-        assert 'run_id' in stats['run']
-        assert 'cost' in stats['run']
-        assert 'iterations' in stats['run']
-        assert 'cost_limit' in stats['run']
-        assert 'cost_utilization' in stats['run']
+        assert "run" in stats
+        assert "run_id" in stats["run"]
+        assert "cost" in stats["run"]
+        assert "iterations" in stats["run"]
+        assert "cost_limit" in stats["run"]
+        assert "cost_utilization" in stats["run"]
 
 
 class TestThreadSafety:
@@ -280,7 +282,7 @@ class TestThreadSafety:
         # Total cost should be exactly num_threads * additions_per_thread * 0.01
         stats = limits.get_stats()
         expected_cost = num_threads * additions_per_thread * 0.01
-        assert abs(stats['global']['total_cost'] - expected_cost) < 0.001
+        assert abs(stats["global"]["total_cost"] - expected_cost) < 0.001
 
     def test_concurrent_iteration_tracking(self):
         """Test that concurrent iteration additions are thread-safe."""
@@ -304,7 +306,7 @@ class TestThreadSafety:
         # Total iterations should be exactly num_threads * additions_per_thread
         stats = limits.get_stats()
         expected_iterations = num_threads * additions_per_thread
-        assert stats['global']['total_iterations'] == expected_iterations
+        assert stats["global"]["total_iterations"] == expected_iterations
 
     def test_concurrent_per_run_tracking(self):
         """Test that concurrent per-run tracking is thread-safe."""
@@ -328,13 +330,13 @@ class TestThreadSafety:
         # Check global total
         stats = limits.get_stats()
         expected_global_cost = num_runs * additions_per_run * 0.01
-        assert abs(stats['global']['total_cost'] - expected_global_cost) < 0.001
+        assert abs(stats["global"]["total_cost"] - expected_global_cost) < 0.001
 
         # Check per-run totals
         for i in range(num_runs):
             run_stats = limits.get_stats(run_id=f"run{i}")
             expected_run_cost = additions_per_run * 0.01
-            assert abs(run_stats['run']['cost'] - expected_run_cost) < 0.001
+            assert abs(run_stats["run"]["cost"] - expected_run_cost) < 0.001
 
     def test_concurrent_limit_enforcement(self):
         """Test that limit enforcement is thread-safe."""
@@ -365,7 +367,7 @@ class TestThreadSafety:
         # Total cost should not exceed limit by more than one addition
         # (due to race condition where multiple threads add just before limit)
         stats = limits.get_stats()
-        assert stats['global']['total_cost'] <= limits.max_cost + 0.02 * num_threads
+        assert stats["global"]["total_cost"] <= limits.max_cost + 0.02 * num_threads
 
 
 class TestSingleton:
@@ -390,7 +392,7 @@ class TestSingleton:
         limits2 = get_resource_limits()
         stats = limits2.get_stats()
 
-        assert stats['global']['total_cost'] == 0.05
+        assert stats["global"]["total_cost"] == 0.05
 
 
 class TestRealWorldScenarios:
@@ -415,16 +417,16 @@ class TestRealWorldScenarios:
 
             # Check per-run stats (use approximate comparison for floating point)
             run_stats = limits.get_stats(run_id=run_id)
-            assert abs(run_stats['run']['cost'] - 0.50) < 0.001
-            assert run_stats['run']['iterations'] == 10
+            assert abs(run_stats["run"]["cost"] - 0.50) < 0.001
+            assert run_stats["run"]["iterations"] == 10
 
             # Cleanup after run
             limits.cleanup_run(run_id)
 
         # Check global stats
         global_stats = limits.get_stats()
-        assert abs(global_stats['global']['total_cost'] - 1.50) < 0.001
-        assert global_stats['global']['total_iterations'] == 30
+        assert abs(global_stats["global"]["total_cost"] - 1.50) < 0.001
+        assert global_stats["global"]["total_iterations"] == 30
 
     def test_gradual_cost_accumulation(self):
         """Test that costs accumulate correctly over time."""
@@ -438,7 +440,7 @@ class TestRealWorldScenarios:
 
         stats = limits.get_stats()
         expected_total = sum(costs)
-        assert abs(stats['global']['total_cost'] - expected_total) < 0.001
+        assert abs(stats["global"]["total_cost"] - expected_total) < 0.001
 
     def test_limit_exceeded_midway(self):
         """Test behavior when limit is exceeded midway through operations."""
@@ -462,7 +464,7 @@ class TestRealWorldScenarios:
         assert abs(sum(costs_added) - 0.65) < 0.001
 
         stats = limits.get_stats()
-        assert abs(stats['global']['total_cost'] - 0.65) < 0.001
+        assert abs(stats["global"]["total_cost"] - 0.65) < 0.001
 
 
 if __name__ == "__main__":

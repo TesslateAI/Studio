@@ -14,9 +14,9 @@ Tests the complete flow from project creation to deletion:
 These are integration tests that verify the entire system works together.
 """
 
-import pytest
 from uuid import uuid4
-from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 
 @pytest.mark.integration
@@ -40,8 +40,8 @@ class TestProjectCreationFlow:
         8. Return project URL to frontend
         """
         # Mock user and database
-        user_id = uuid4()
-        project_id = uuid4()
+        uuid4()
+        uuid4()
 
         # This would be a real integration test with actual K8s cluster
         # For now, we document the flow
@@ -58,7 +58,7 @@ class TestProjectCreationFlow:
             "Service created",
             "Ingress created with TLS + auth",
             "Wait for pod Running status",
-            "Return {project_url: https://{slug}.tesslate.com}"
+            "Return {project_url: https://{slug}.tesslate.com}",
         ]
 
         assert len(steps) == 12
@@ -89,7 +89,7 @@ class TestProjectCreationFlow:
             "Services created: frontend-service, backend-service",
             "Ingresses created: {slug}.domain, {slug}-backend.domain",
             "All pods reach Running status",
-            "DNS: backend-service.proj-{id}.svc.cluster.local"
+            "DNS: backend-service.proj-{id}.svc.cluster.local",
         ]
 
         assert len(steps) == 11
@@ -125,7 +125,7 @@ class TestShellSessionFlow:
             "background_task": "Read stdout/stderr -> buffer",
             "websocket": "Send buffer to client",
             "client_input": "User types command",
-            "stdin": "Write to pod exec stdin"
+            "stdin": "Write to pod exec stdin",
         }
 
         assert len(flow) == 10
@@ -161,7 +161,7 @@ class TestAgentToolCallFlow:
             "K8s: execute_command('cat /app/src/App.tsx')",
             "K8s API: Returns stdout",
             "Tool: Return content to agent",
-            "Agent: Process file content"
+            "Agent: Process file content",
         ]
 
         assert len(flow_steps) == 9
@@ -187,7 +187,7 @@ class TestAgentToolCallFlow:
             "K8s: execute_command(mkdir -p && cat > ...)",
             "Pod: File written to /app/...",
             "Tool: Return success=True",
-            "Agent: Continue with next task"
+            "Agent: Continue with next task",
         ]
 
         assert len(flow_steps) == 8
@@ -227,7 +227,7 @@ class TestHibernationFlow:
             "K8s: Schedule new pod",
             "Pod: Mount PVC at /app",
             "Pod: Running",
-            "User: Access project"
+            "User: Access project",
         ]
 
         assert len(hibernation_steps) == 13
@@ -269,7 +269,7 @@ class TestHibernationFlow:
             "Init: Complete",
             "Main container: Starts with /app populated",
             "Pod: Running",
-            "User: Access project with restored state"
+            "User: Access project with restored state",
         ]
 
         assert len(s3_steps) == 18
@@ -311,7 +311,7 @@ class TestNetworkingFlow:
             "Pod: Process request on port 5173",
             "Pod: Return HTML",
             "Nginx: Add CORS headers",
-            "Browser: Render page"
+            "Browser: Render page",
         ]
 
         assert len(request_flow) == 13
@@ -337,7 +337,7 @@ class TestNetworkingFlow:
             "Nginx: Forward to pod",
             "Pod: Accept WebSocket upgrade",
             "WebSocket: Established",
-            "Vite HMR: Hot reload works"
+            "Vite HMR: Hot reload works",
         ]
 
         assert len(ws_flow) == 8
@@ -369,7 +369,7 @@ class TestMultiContainerCommunication:
             "Backend: Query postgres-service for data",
             "Postgres: Return data",
             "Backend: Return JSON",
-            "Frontend: Receive response"
+            "Frontend: Receive response",
         ]
 
         assert len(communication_flow) == 8
@@ -387,7 +387,7 @@ class TestMultiContainerCommunication:
             "port": 5432,
             "database": "mydb",
             "user": "postgres",
-            "password": "from_env_var"
+            "password": "from_env_var",
         }
 
         assert "postgres-service" in db_connection["host"]
@@ -424,7 +424,7 @@ class TestCleanupFlow:
             "K8s: Cascade delete network policy",
             "Namespace: Terminating -> Deleted",
             "API: Return 204 No Content",
-            "Frontend: Redirect to projects list"
+            "Frontend: Redirect to projects list",
         ]
 
         assert len(deletion_steps) == 12
@@ -441,7 +441,7 @@ class TestCleanupFlow:
             "tier1_threshold": 15,  # minutes
             "tier1_action": "scale_to_zero",
             "tier2_threshold": 24,  # hours
-            "tier2_action": "delete_resources"
+            "tier2_action": "delete_resources",
         }
 
         assert cleanup_logic["tier1_action"] == "scale_to_zero"

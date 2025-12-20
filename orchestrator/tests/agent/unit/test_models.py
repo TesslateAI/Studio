@@ -4,14 +4,16 @@ Unit tests for Model Adapters.
 Tests OpenAI adapter, model adapter interface, and client creation.
 """
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
+
 from app.agent.models import (
+    ANTHROPIC_AVAILABLE,
+    AnthropicAdapter,
     ModelAdapter,
     OpenAIAdapter,
-    AnthropicAdapter,
     create_model_adapter,
-    ANTHROPIC_AVAILABLE
 )
 
 
@@ -28,6 +30,7 @@ class TestModelAdapter:
 
     def test_concrete_adapter_must_implement_chat(self):
         """Test that concrete adapters must implement chat method."""
+
         class IncompleteAdapter(ModelAdapter):
             def get_model_name(self):
                 return "test"
@@ -39,6 +42,7 @@ class TestModelAdapter:
 
     def test_concrete_adapter_can_be_instantiated(self):
         """Test that fully implemented adapter can be instantiated."""
+
         class CompleteAdapter(ModelAdapter):
             async def chat(self, messages, **kwargs):
                 yield "test"
@@ -63,10 +67,7 @@ class TestOpenAIAdapter:
     def test_openai_adapter_initialization(self, mock_openai_client):
         """Test OpenAI adapter initialization."""
         adapter = OpenAIAdapter(
-            model_name="gpt-4o",
-            client=mock_openai_client,
-            temperature=0.8,
-            max_tokens=2000
+            model_name="gpt-4o", client=mock_openai_client, temperature=0.8, max_tokens=2000
         )
 
         assert adapter.model_name == "gpt-4o"
@@ -78,18 +79,14 @@ class TestOpenAIAdapter:
     def test_openai_adapter_detects_openrouter_models(self, mock_openai_client):
         """Test that adapter detects OpenRouter models."""
         adapter = OpenAIAdapter(
-            model_name="openrouter/anthropic/claude-3.5-sonnet",
-            client=mock_openai_client
+            model_name="openrouter/anthropic/claude-3.5-sonnet", client=mock_openai_client
         )
 
         assert adapter.is_openrouter is True
 
     def test_openai_adapter_get_model_name(self, mock_openai_client):
         """Test getting model name from adapter."""
-        adapter = OpenAIAdapter(
-            model_name="gpt-4o-mini",
-            client=mock_openai_client
-        )
+        adapter = OpenAIAdapter(model_name="gpt-4o-mini", client=mock_openai_client)
 
         assert adapter.get_model_name() == "gpt-4o-mini"
 
@@ -109,14 +106,11 @@ class TestOpenAIAdapter:
         mock_response.__aiter__ = lambda self: mock_stream()
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        adapter = OpenAIAdapter(
-            model_name="gpt-4o",
-            client=mock_openai_client
-        )
+        adapter = OpenAIAdapter(model_name="gpt-4o", client=mock_openai_client)
 
         messages = [
             {"role": "system", "content": "You are helpful"},
-            {"role": "user", "content": "Hello"}
+            {"role": "user", "content": "Hello"},
         ]
 
         chunks = []
@@ -140,8 +134,7 @@ class TestOpenAIAdapter:
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         adapter = OpenAIAdapter(
-            model_name="openrouter/anthropic/claude-3.5-sonnet",
-            client=mock_openai_client
+            model_name="openrouter/anthropic/claude-3.5-sonnet", client=mock_openai_client
         )
 
         messages = [{"role": "user", "content": "test"}]
@@ -165,10 +158,7 @@ class TestOpenAIAdapter:
         mock_response.__aiter__ = lambda self: mock_stream()
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        adapter = OpenAIAdapter(
-            model_name="openrouter/openai/gpt-4",
-            client=mock_openai_client
-        )
+        adapter = OpenAIAdapter(model_name="openrouter/openai/gpt-4", client=mock_openai_client)
 
         messages = [{"role": "user", "content": "test"}]
 
@@ -196,10 +186,7 @@ class TestOpenAIAdapter:
         mock_response.__aiter__ = lambda self: mock_stream()
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        adapter = OpenAIAdapter(
-            model_name="gpt-4o",
-            client=mock_openai_client
-        )
+        adapter = OpenAIAdapter(model_name="gpt-4o", client=mock_openai_client)
 
         chunks = []
         async for chunk in adapter.chat([{"role": "user", "content": "test"}]):
@@ -210,14 +197,9 @@ class TestOpenAIAdapter:
     @pytest.mark.asyncio
     async def test_openai_adapter_error_handling(self, mock_openai_client):
         """Test that adapter handles API errors gracefully."""
-        mock_openai_client.chat.completions.create = AsyncMock(
-            side_effect=Exception("API Error")
-        )
+        mock_openai_client.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
 
-        adapter = OpenAIAdapter(
-            model_name="gpt-4o",
-            client=mock_openai_client
-        )
+        adapter = OpenAIAdapter(model_name="gpt-4o", client=mock_openai_client)
 
         with pytest.raises(RuntimeError) as exc_info:
             async for _ in adapter.chat([{"role": "user", "content": "test"}]):
@@ -239,10 +221,7 @@ class TestOpenAIAdapter:
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         adapter = OpenAIAdapter(
-            model_name="gpt-4o",
-            client=mock_openai_client,
-            temperature=0.5,
-            max_tokens=1000
+            model_name="gpt-4o", client=mock_openai_client, temperature=0.5, max_tokens=1000
         )
 
         messages = [{"role": "user", "content": "test"}]
@@ -261,12 +240,12 @@ class TestAnthropicAdapter:
 
     def test_anthropic_adapter_initialization(self):
         """Test Anthropic adapter initialization."""
-        with patch('app.agent.models.AsyncAnthropic'):
+        with patch("app.agent.models.AsyncAnthropic"):
             adapter = AnthropicAdapter(
                 model_name="claude-3-5-sonnet-20241022",
                 api_key="test-key",
                 temperature=0.8,
-                max_tokens=2000
+                max_tokens=2000,
             )
 
             assert adapter.model_name == "claude-3-5-sonnet-20241022"
@@ -275,11 +254,8 @@ class TestAnthropicAdapter:
 
     def test_anthropic_adapter_get_model_name(self):
         """Test getting model name from Anthropic adapter."""
-        with patch('app.agent.models.AsyncAnthropic'):
-            adapter = AnthropicAdapter(
-                model_name="claude-3-opus-20240229",
-                api_key="test-key"
-            )
+        with patch("app.agent.models.AsyncAnthropic"):
+            adapter = AnthropicAdapter(model_name="claude-3-opus-20240229", api_key="test-key")
 
             assert adapter.get_model_name() == "claude-3-opus-20240229"
 
@@ -297,19 +273,18 @@ class TestCreateModelAdapter:
     def mock_user_id(self):
         """Create mock user ID."""
         from uuid import uuid4
+
         return uuid4()
 
     @pytest.mark.asyncio
     async def test_create_adapter_for_openai_model(self, mock_user_id, mock_db):
         """Test creating adapter for OpenAI model."""
-        with patch('app.agent.models.get_llm_client') as mock_get_client:
+        with patch("app.agent.models.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
             adapter = await create_model_adapter(
-                model_name="gpt-4o",
-                user_id=mock_user_id,
-                db=mock_db
+                model_name="gpt-4o", user_id=mock_user_id, db=mock_db
             )
 
             assert isinstance(adapter, OpenAIAdapter)
@@ -319,14 +294,14 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_for_openrouter_model(self, mock_user_id, mock_db):
         """Test creating adapter for OpenRouter model."""
-        with patch('app.agent.models.get_llm_client') as mock_get_client:
+        with patch("app.agent.models.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
             adapter = await create_model_adapter(
                 model_name="openrouter/anthropic/claude-3.5-sonnet",
                 user_id=mock_user_id,
-                db=mock_db
+                db=mock_db,
             )
 
             assert isinstance(adapter, OpenAIAdapter)
@@ -336,7 +311,7 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_with_custom_params(self, mock_user_id, mock_db):
         """Test creating adapter with custom parameters."""
-        with patch('app.agent.models.get_llm_client') as mock_get_client:
+        with patch("app.agent.models.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
@@ -345,7 +320,7 @@ class TestCreateModelAdapter:
                 user_id=mock_user_id,
                 db=mock_db,
                 temperature=0.9,
-                max_tokens=3000
+                max_tokens=3000,
             )
 
             assert adapter.temperature == 0.9
@@ -356,10 +331,7 @@ class TestCreateModelAdapter:
         """Test that native Anthropic provider raises NotImplementedError."""
         with pytest.raises(NotImplementedError) as exc_info:
             await create_model_adapter(
-                model_name="claude-3-opus",
-                user_id=mock_user_id,
-                db=mock_db,
-                provider="anthropic"
+                model_name="claude-3-opus", user_id=mock_user_id, db=mock_db, provider="anthropic"
             )
 
         assert "Native Anthropic adapter not yet updated" in str(exc_info.value)
@@ -369,10 +341,7 @@ class TestCreateModelAdapter:
         """Test that unsupported provider raises ValueError."""
         with pytest.raises(ValueError) as exc_info:
             await create_model_adapter(
-                model_name="some-model",
-                user_id=mock_user_id,
-                db=mock_db,
-                provider="unsupported"
+                model_name="some-model", user_id=mock_user_id, db=mock_db, provider="unsupported"
             )
 
         assert "Unsupported provider" in str(exc_info.value)
@@ -380,15 +349,13 @@ class TestCreateModelAdapter:
     @pytest.mark.asyncio
     async def test_create_adapter_auto_detects_provider(self, mock_user_id, mock_db):
         """Test that provider is auto-detected from model name."""
-        with patch('app.agent.models.get_llm_client') as mock_get_client:
+        with patch("app.agent.models.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
 
             # OpenAI model
             adapter1 = await create_model_adapter(
-                model_name="gpt-4o",
-                user_id=mock_user_id,
-                db=mock_db
+                model_name="gpt-4o", user_id=mock_user_id, db=mock_db
             )
             assert isinstance(adapter1, OpenAIAdapter)
 
@@ -396,6 +363,6 @@ class TestCreateModelAdapter:
             adapter2 = await create_model_adapter(
                 model_name="openrouter/anthropic/claude-3.5-sonnet",
                 user_id=mock_user_id,
-                db=mock_db
+                db=mock_db,
             )
             assert isinstance(adapter2, OpenAIAdapter)

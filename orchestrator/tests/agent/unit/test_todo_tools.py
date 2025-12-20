@@ -4,13 +4,15 @@ Unit tests for Todo Planning Tools.
 Tests todo read/write operations and session management.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
+
 from app.agent.tools.planning_ops.todos import (
+    _get_session_key,
+    _todo_storage,
     todo_read_tool,
     todo_write_tool,
-    _get_session_key,
-    _todo_storage
 )
 
 
@@ -28,10 +30,7 @@ class TestTodoTools:
     @pytest.fixture
     def test_context(self):
         """Create a test context."""
-        return {
-            "user_id": uuid4(),
-            "project_id": str(uuid4())
-        }
+        return {"user_id": uuid4(), "project_id": str(uuid4())}
 
     def test_get_session_key(self, test_context):
         """Test session key generation."""
@@ -70,14 +69,7 @@ class TestTodoTools:
     @pytest.mark.asyncio
     async def test_todo_write_single(self, test_context):
         """Test writing a single todo."""
-        params = {
-            "todos": [
-                {
-                    "content": "Read package.json",
-                    "status": "pending"
-                }
-            ]
-        }
+        params = {"todos": [{"content": "Read package.json", "status": "pending"}]}
 
         result = await todo_write_tool(params, test_context)
 
@@ -93,7 +85,7 @@ class TestTodoTools:
             "todos": [
                 {"content": "Task 1", "status": "completed"},
                 {"content": "Task 2", "status": "in_progress"},
-                {"content": "Task 3", "status": "pending"}
+                {"content": "Task 3", "status": "pending"},
             ]
         }
 
@@ -108,18 +100,14 @@ class TestTodoTools:
     async def test_todo_write_replaces_existing(self, test_context):
         """Test that writing todos replaces existing list."""
         # Write first set
-        params1 = {
-            "todos": [
-                {"content": "Old task", "status": "pending"}
-            ]
-        }
+        params1 = {"todos": [{"content": "Old task", "status": "pending"}]}
         await todo_write_tool(params1, test_context)
 
         # Write second set (should replace)
         params2 = {
             "todos": [
                 {"content": "New task 1", "status": "pending"},
-                {"content": "New task 2", "status": "pending"}
+                {"content": "New task 2", "status": "pending"},
             ]
         }
         result = await todo_write_tool(params2, test_context)
@@ -134,7 +122,7 @@ class TestTodoTools:
         params = {
             "todos": [
                 {"content": "Task 1", "status": "completed"},
-                {"content": "Task 2", "status": "pending"}
+                {"content": "Task 2", "status": "pending"},
             ]
         }
         await todo_write_tool(params, test_context)
@@ -149,11 +137,7 @@ class TestTodoTools:
     @pytest.mark.asyncio
     async def test_todo_write_adds_default_priority(self, test_context):
         """Test that default priority is added if missing."""
-        params = {
-            "todos": [
-                {"content": "Task without priority", "status": "pending"}
-            ]
-        }
+        params = {"todos": [{"content": "Task without priority", "status": "pending"}]}
 
         result = await todo_write_tool(params, test_context)
 
@@ -163,9 +147,7 @@ class TestTodoTools:
     async def test_todo_write_preserves_explicit_priority(self, test_context):
         """Test that explicit priority is preserved."""
         params = {
-            "todos": [
-                {"content": "High priority task", "status": "pending", "priority": "high"}
-            ]
+            "todos": [{"content": "High priority task", "status": "pending", "priority": "high"}]
         }
 
         result = await todo_write_tool(params, test_context)
@@ -175,11 +157,7 @@ class TestTodoTools:
     @pytest.mark.asyncio
     async def test_todo_write_adds_timestamps(self, test_context):
         """Test that timestamps are added automatically."""
-        params = {
-            "todos": [
-                {"content": "Task", "status": "pending"}
-            ]
-        }
+        params = {"todos": [{"content": "Task", "status": "pending"}]}
 
         result = await todo_write_tool(params, test_context)
 
@@ -240,11 +218,7 @@ class TestTodoTools:
     @pytest.mark.asyncio
     async def test_todo_write_validates_status_values(self, test_context):
         """Test validation of status field values."""
-        params = {
-            "todos": [
-                {"content": "Task", "status": "invalid_status"}
-            ]
-        }
+        params = {"todos": [{"content": "Task", "status": "invalid_status"}]}
 
         result = await todo_write_tool(params, test_context)
 
@@ -256,9 +230,7 @@ class TestTodoTools:
     @pytest.mark.asyncio
     async def test_todo_write_validates_todo_is_dict(self, test_context):
         """Test validation when todo is not a dictionary."""
-        params = {
-            "todos": ["not a dict"]
-        }
+        params = {"todos": ["not a dict"]}
 
         result = await todo_write_tool(params, test_context)
 
@@ -271,16 +243,10 @@ class TestTodoTools:
         context2 = {"user_id": uuid4(), "project_id": "project2"}
 
         # Write to session 1
-        await todo_write_tool(
-            {"todos": [{"content": "Task 1", "status": "pending"}]},
-            context1
-        )
+        await todo_write_tool({"todos": [{"content": "Task 1", "status": "pending"}]}, context1)
 
         # Write to session 2
-        await todo_write_tool(
-            {"todos": [{"content": "Task 2", "status": "pending"}]},
-            context2
-        )
+        await todo_write_tool({"todos": [{"content": "Task 2", "status": "pending"}]}, context2)
 
         # Read from session 1
         result1 = await todo_read_tool({}, context1)
@@ -297,7 +263,7 @@ class TestTodoTools:
             "todos": [
                 {"content": "Pending task", "status": "pending"},
                 {"content": "In progress task", "status": "in_progress"},
-                {"content": "Completed task", "status": "completed"}
+                {"content": "Completed task", "status": "completed"},
             ]
         }
 
@@ -314,7 +280,7 @@ class TestTodoTools:
             "todos": [
                 {"content": "Task 1", "status": "completed"},
                 {"content": "Task 2", "status": "in_progress"},
-                {"content": "Task 3", "status": "pending"}
+                {"content": "Task 3", "status": "pending"},
             ]
         }
         await todo_write_tool(params, test_context)
@@ -331,14 +297,8 @@ class TestTodoTools:
         """Test writing todos with complex content."""
         params = {
             "todos": [
-                {
-                    "content": "Task with\nmultiple\nlines",
-                    "status": "pending"
-                },
-                {
-                    "content": "Task with special chars: @#$%^&*()",
-                    "status": "pending"
-                }
+                {"content": "Task with\nmultiple\nlines", "status": "pending"},
+                {"content": "Task with special chars: @#$%^&*()", "status": "pending"},
             ]
         }
 

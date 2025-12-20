@@ -4,18 +4,20 @@ Unit tests for Agent Factory.
 Tests agent creation, registration, and factory functions.
 """
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, AsyncMock, MagicMock
-from app.agent.factory import (
-    create_agent_from_db_model,
-    register_agent_type,
-    get_available_agent_types,
-    get_agent_class,
-    AGENT_CLASS_MAP
-)
+
 from app.agent.base import AbstractAgent
-from app.agent.stream_agent import StreamAgent
+from app.agent.factory import (
+    AGENT_CLASS_MAP,
+    create_agent_from_db_model,
+    get_agent_class,
+    get_available_agent_types,
+    register_agent_type,
+)
 from app.agent.iterative_agent import IterativeAgent
+from app.agent.stream_agent import StreamAgent
 
 
 @pytest.mark.unit
@@ -53,14 +55,15 @@ class TestAgentFactory:
         assert agent.system_prompt == "You are a helpful assistant."
 
     @pytest.mark.asyncio
-    async def test_create_iterative_agent_from_model(self, mock_agent_model_with_tools, mock_model_adapter):
+    async def test_create_iterative_agent_from_model(
+        self, mock_agent_model_with_tools, mock_model_adapter
+    ):
         """Test creating an IterativeAgent from database model."""
         model_adapter_instance = mock_model_adapter()
         mock_agent_model_with_tools.agent_type = "IterativeAgent"
 
         agent = await create_agent_from_db_model(
-            mock_agent_model_with_tools,
-            model_adapter=model_adapter_instance
+            mock_agent_model_with_tools, model_adapter=model_adapter_instance
         )
 
         assert isinstance(agent, IterativeAgent)
@@ -103,7 +106,7 @@ class TestAgentFactory:
     async def test_create_agent_with_scoped_tools(self, mock_agent_model_with_tools, monkeypatch):
         """Test that agent is created with scoped tool registry."""
         from app.agent.tools import registry as registry_module
-        from app.agent.tools.registry import ToolRegistry, Tool, ToolCategory
+        from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
 
         # Create a mock global registry
         global_registry = ToolRegistry()
@@ -112,32 +115,32 @@ class TestAgentFactory:
             return {"success": True}
 
         for tool_name in ["read_file", "write_file", "bash_exec"]:
-            global_registry.register(Tool(
-                name=tool_name,
-                description=f"Mock {tool_name}",
-                parameters={},
-                executor=mock_executor,
-                category=ToolCategory.FILE_OPS
-            ))
+            global_registry.register(
+                Tool(
+                    name=tool_name,
+                    description=f"Mock {tool_name}",
+                    parameters={},
+                    executor=mock_executor,
+                    category=ToolCategory.FILE_OPS,
+                )
+            )
 
         monkeypatch.setattr(registry_module, "get_tool_registry", lambda: global_registry)
 
-        agent = await create_agent_from_db_model(
-            mock_agent_model_with_tools,
-            model_adapter=Mock()
-        )
+        agent = await create_agent_from_db_model(mock_agent_model_with_tools, model_adapter=Mock())
 
         assert agent.tools is not None
         assert len(agent.tools._tools) == 3
 
     def test_register_new_agent_type(self):
         """Test registering a new agent type."""
+
         class CustomAgent(AbstractAgent):
             async def run(self, user_request, context):
-                yield {'type': 'complete', 'data': {}}
+                yield {"type": "complete", "data": {}}
 
         # Store original state
-        original_types = get_available_agent_types().copy()
+        get_available_agent_types().copy()
 
         try:
             register_agent_type("CustomAgent", CustomAgent)
@@ -154,13 +157,14 @@ class TestAgentFactory:
 
     def test_register_overwrites_existing_type(self):
         """Test that registering same type overwrites previous."""
+
         class CustomAgent1(AbstractAgent):
             async def run(self, user_request, context):
-                yield {'type': 'complete', 'data': {'version': 1}}
+                yield {"type": "complete", "data": {"version": 1}}
 
         class CustomAgent2(AbstractAgent):
             async def run(self, user_request, context):
-                yield {'type': 'complete', 'data': {'version': 2}}
+                yield {"type": "complete", "data": {"version": 2}}
 
         try:
             register_agent_type("CustomAgent", CustomAgent1)
@@ -212,10 +216,7 @@ class TestAgentFactory:
         mock_agent_model.agent_type = "IterativeAgent"
         mock_agent_model.tools = None  # No specific tools
 
-        agent = await create_agent_from_db_model(
-            mock_agent_model,
-            model_adapter=Mock()
-        )
+        agent = await create_agent_from_db_model(mock_agent_model, model_adapter=Mock())
 
         assert isinstance(agent, IterativeAgent)
         assert agent.tools is not None  # Should have global registry
@@ -229,10 +230,7 @@ class TestAgentFactory:
         mock_agent_model.agent_type = "IterativeAgent"
         mock_agent_model.tools = []  # Empty list is falsy
 
-        agent = await create_agent_from_db_model(
-            mock_agent_model,
-            model_adapter=Mock()
-        )
+        agent = await create_agent_from_db_model(mock_agent_model, model_adapter=Mock())
 
         assert isinstance(agent, IterativeAgent)
         assert agent.tools is not None
@@ -259,5 +257,6 @@ class TestAgentClassMap:
     def test_all_mapped_classes_inherit_from_abstract_agent(self):
         """Test that all mapped classes inherit from AbstractAgent."""
         for agent_type, agent_class in AGENT_CLASS_MAP.items():
-            assert issubclass(agent_class, AbstractAgent), \
+            assert issubclass(agent_class, AbstractAgent), (
                 f"{agent_type} does not inherit from AbstractAgent"
+            )

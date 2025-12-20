@@ -4,11 +4,11 @@ Unit tests for DeploymentCredential and Deployment models.
 Tests model structure, field definitions, and basic model instantiation.
 """
 
-import pytest
-from datetime import datetime
 from uuid import uuid4
 
-from app.models import DeploymentCredential, Deployment
+import pytest
+
+from app.models import Deployment, DeploymentCredential
 
 
 @pytest.mark.unit
@@ -18,9 +18,14 @@ class TestDeploymentCredentialModel:
     def test_model_has_required_fields(self):
         """Test that DeploymentCredential model has all required fields."""
         required_fields = [
-            'id', 'user_id', 'project_id', 'provider',
-            'access_token_encrypted', 'provider_metadata',
-            'created_at', 'updated_at'
+            "id",
+            "user_id",
+            "project_id",
+            "provider",
+            "access_token_encrypted",
+            "provider_metadata",
+            "created_at",
+            "updated_at",
         ]
 
         for field in required_fields:
@@ -114,8 +119,8 @@ class TestDeploymentCredentialModel:
 
     def test_relationship_attributes_exist(self):
         """Test that relationship attributes are defined."""
-        assert hasattr(DeploymentCredential, 'user')
-        assert hasattr(DeploymentCredential, 'project')
+        assert hasattr(DeploymentCredential, "user")
+        assert hasattr(DeploymentCredential, "project")
 
 
 @pytest.mark.unit
@@ -125,10 +130,19 @@ class TestDeploymentModel:
     def test_model_has_required_fields(self):
         """Test that Deployment model has all required fields."""
         required_fields = [
-            'id', 'project_id', 'user_id', 'provider',
-            'deployment_id', 'deployment_url', 'status',
-            'error', 'logs', 'deployment_metadata',
-            'created_at', 'updated_at', 'completed_at'
+            "id",
+            "project_id",
+            "user_id",
+            "provider",
+            "deployment_id",
+            "deployment_url",
+            "status",
+            "error",
+            "logs",
+            "deployment_metadata",
+            "created_at",
+            "updated_at",
+            "completed_at",
         ]
 
         for field in required_fields:
@@ -233,8 +247,8 @@ class TestDeploymentModel:
 
     def test_relationship_attributes_exist(self):
         """Test that relationship attributes are defined."""
-        assert hasattr(Deployment, 'project')
-        assert hasattr(Deployment, 'user')
+        assert hasattr(Deployment, "project")
+        assert hasattr(Deployment, "user")
 
 
 @pytest.mark.unit
@@ -248,7 +262,7 @@ class TestDeploymentModelConstraints:
         from sqlalchemy.inspection import inspect
 
         mapper = inspect(DeploymentCredential)
-        user_id_column = mapper.columns['user_id']
+        user_id_column = mapper.columns["user_id"]
 
         assert not user_id_column.nullable
 
@@ -257,7 +271,7 @@ class TestDeploymentModelConstraints:
         from sqlalchemy.inspection import inspect
 
         mapper = inspect(DeploymentCredential)
-        provider_column = mapper.columns['provider']
+        provider_column = mapper.columns["provider"]
 
         assert not provider_column.nullable
 
@@ -266,7 +280,7 @@ class TestDeploymentModelConstraints:
         from sqlalchemy.inspection import inspect
 
         mapper = inspect(DeploymentCredential)
-        token_column = mapper.columns['access_token_encrypted']
+        token_column = mapper.columns["access_token_encrypted"]
 
         assert not token_column.nullable
 
@@ -275,7 +289,7 @@ class TestDeploymentModelConstraints:
         from sqlalchemy.inspection import inspect
 
         mapper = inspect(DeploymentCredential)
-        project_id_column = mapper.columns['project_id']
+        project_id_column = mapper.columns["project_id"]
 
         assert project_id_column.nullable
 
@@ -284,7 +298,7 @@ class TestDeploymentModelConstraints:
         from sqlalchemy.inspection import inspect
 
         mapper = inspect(Deployment)
-        provider_column = mapper.columns['provider']
+        provider_column = mapper.columns["provider"]
 
         assert not provider_column.nullable
 
@@ -293,6 +307,6 @@ class TestDeploymentModelConstraints:
         from sqlalchemy.inspection import inspect
 
         mapper = inspect(Deployment)
-        status_column = mapper.columns['status']
+        status_column = mapper.columns["status"]
 
         assert not status_column.nullable

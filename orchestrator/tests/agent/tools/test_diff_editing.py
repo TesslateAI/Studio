@@ -4,18 +4,18 @@ Test suite for diff-based file editing system.
 Tests the search/replace functionality and fuzzy matching strategies.
 """
 
-import sys
 import os
+import sys
 
 # Add parent directory to path to import orchestrator modules
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'orchestrator'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "orchestrator"))
 
 from app.utils.code_patching import (
-    extract_search_replace_blocks,
-    apply_search_replace,
     apply_multiple_edits,
+    apply_search_replace,
+    extract_edits_by_file,
+    extract_search_replace_blocks,
     is_search_replace_format,
-    extract_edits_by_file
 )
 
 
@@ -163,7 +163,7 @@ const VERSION = '1.0.0';
     edits = [
         ("const API_URL = 'http://localhost:3000';", "const API_URL = 'https://api.example.com';"),
         ("const APP_NAME = 'My App';", "const APP_NAME = 'Tesslate Studio';"),
-        ("const VERSION = '1.0.0';", "const VERSION = '2.0.0';")
+        ("const VERSION = '1.0.0';", "const VERSION = '2.0.0';"),
     ]
 
     result = apply_multiple_edits(original, edits, fuzzy=True)
@@ -174,7 +174,7 @@ const VERSION = '1.0.0';
     assert "2.0.0" in result.content, "Third edit not applied"
 
     print("[OK] Multiple edits successful")
-    print(f"   Applied 3 edits")
+    print("   Applied 3 edits")
     print(f"   Result: {result.content.strip()}")
 
 
@@ -200,7 +200,9 @@ export default function NewComponent() {
 ```
 """
 
-    assert is_search_replace_format(search_replace_response), "Failed to detect search/replace format"
+    assert is_search_replace_format(search_replace_response), (
+        "Failed to detect search/replace format"
+    )
     assert not is_search_replace_format(full_file_response), "False positive for full file format"
 
     print("[OK] Format detection working correctly")
@@ -238,8 +240,12 @@ new util
     assert len(by_file) == 2, f"Expected 2 files, got {len(by_file)}"
     assert "src/App.jsx" in by_file, "App.jsx not found"
     assert "src/utils.js" in by_file, "utils.js not found"
-    assert len(by_file["src/App.jsx"]) == 2, f"Expected 2 edits for App.jsx, got {len(by_file['src/App.jsx'])}"
-    assert len(by_file["src/utils.js"]) == 1, f"Expected 1 edit for utils.js, got {len(by_file['src/utils.js'])}"
+    assert len(by_file["src/App.jsx"]) == 2, (
+        f"Expected 2 edits for App.jsx, got {len(by_file['src/App.jsx'])}"
+    )
+    assert len(by_file["src/utils.js"]) == 1, (
+        f"Expected 1 edit for utils.js, got {len(by_file['src/utils.js'])}"
+    )
 
     print("[OK] Edits grouped correctly by file")
     print(f"   Files: {list(by_file.keys())}")
@@ -309,6 +315,7 @@ def run_all_tests():
         except Exception as e:
             print(f"[ERROR] Test error: {e}")
             import traceback
+
             traceback.print_exc()
             failed += 1
 

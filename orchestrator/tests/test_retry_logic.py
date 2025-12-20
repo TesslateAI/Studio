@@ -8,17 +8,14 @@ Tests different scenarios:
 - Exponential backoff behavior
 """
 
-import pytest
-import asyncio
-from unittest.mock import AsyncMock, patch
 import time
 
+import pytest
+
 from app.agent.tools.retry_config import (
-    tool_retry,
     create_retry_decorator,
     is_retryable_error,
-    RETRYABLE_EXCEPTIONS,
-    NON_RETRYABLE_EXCEPTIONS
+    tool_retry,
 )
 
 
@@ -29,7 +26,7 @@ class TestRetryableExceptions:
         """Test that retryable exceptions are correctly identified."""
         assert is_retryable_error(ConnectionError("network issue"))
         assert is_retryable_error(TimeoutError("request timeout"))
-        assert is_retryable_error(IOError("io error"))
+        assert is_retryable_error(OSError("io error"))
 
     def test_non_retryable_errors(self):
         """Test that non-retryable exceptions fail immediately."""
@@ -209,7 +206,7 @@ class TestRealWorldScenarios:
 
             # Simulate temporary IO error
             if call_count == 1:
-                raise IOError("Device busy")
+                raise OSError("Device busy")
 
             return {"success": True, "message": "File written"}
 
@@ -232,11 +229,7 @@ class TestRealWorldScenarios:
             if call_count < 3:
                 raise TimeoutError("Request timed out")
 
-            return {
-                "success": True,
-                "content": "Fetched successfully",
-                "status_code": 200
-            }
+            return {"success": True, "content": "Fetched successfully", "status_code": 200}
 
         result = await fetch_url()
 
@@ -281,14 +274,13 @@ class TestIntegrationWithTools:
             # Success
             return {
                 "success": True,
-                "message": f"Tool executed successfully",
+                "message": "Tool executed successfully",
                 "file_path": params.get("file_path"),
-                "details": {"attempts": call_count}
+                "details": {"attempts": call_count},
             }
 
         result = await tool_executor(
-            {"file_path": "test.py"},
-            {"user_id": "123", "project_id": "456"}
+            {"file_path": "test.py"}, {"user_id": "123", "project_id": "456"}
         )
 
         assert result["success"] is True

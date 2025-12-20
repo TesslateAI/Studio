@@ -9,18 +9,21 @@ These tests verify security aspects of the deployment system:
 5. Input validation (sanitize user inputs)
 """
 
+from uuid import uuid4
+
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
-from sqlalchemy.ext.asyncio import AsyncSession
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 
-from app.models import Base, DeploymentCredential, Deployment, Project, User
 from app.database import AsyncSessionLocal
-from app.services.deployment_encryption import DeploymentEncryptionService, get_deployment_encryption_service, reset_deployment_encryption_service
+from app.models import Deployment, DeploymentCredential, Project, User
 from app.services.deployment.base import DeploymentConfig
-from cryptography.fernet import Fernet
+from app.services.deployment_encryption import (
+    DeploymentEncryptionService,
+    get_deployment_encryption_service,
+    reset_deployment_encryption_service,
+)
 
 
 @pytest_asyncio.fixture
@@ -41,7 +44,7 @@ async def test_users(test_db_session):
             email=f"user{i}@example.com",
             hashed_password="hashed_password",
             is_active=True,
-            is_verified=True
+            is_verified=True,
         )
         test_db_session.add(user)
         users.append(user)
@@ -68,7 +71,9 @@ def encryption_service():
 class TestEncryptionAtRest:
     """Test that credentials are never stored as plaintext."""
 
-    async def test_credentials_encrypted_in_database(self, test_db_session, test_users, encryption_service):
+    async def test_credentials_encrypted_in_database(
+        self, test_db_session, test_users, encryption_service
+    ):
         """Verify that credentials are encrypted before being stored in the database."""
         user = test_users[0]
         plaintext_token = "super_secret_api_token_12345"
@@ -76,10 +81,7 @@ class TestEncryptionAtRest:
         # Create credential with encrypted token
         encrypted_token = encryption_service.encrypt(plaintext_token)
         credential = DeploymentCredential(
-            user_id=user.id,
-            provider="vercel",
-            access_token_encrypted=encrypted_token,
-            metadata={}
+            user_id=user.id, provider="vercel", access_token_encrypted=encrypted_token, metadata={}
         )
 
         test_db_session.add(credential)
@@ -99,9 +101,11 @@ class TestEncryptionAtRest:
         decrypted_token = encryption_service.decrypt(stored_credential.access_token_encrypted)
         assert decrypted_token == plaintext_token
 
-    async def test_encrypted_token_cannot_be_decrypted_with_wrong_key(self, test_db_session, test_users):
+    async def test_encrypted_token_cannot_be_decrypted_with_wrong_key(
+        self, test_db_session, test_users
+    ):
         """Verify that encrypted tokens cannot be decrypted with a different key."""
-        user = test_users[0]
+        test_users[0]
         plaintext_token = "secret_token_xyz"
 
         # Encrypt with one key
@@ -113,10 +117,12 @@ class TestEncryptionAtRest:
         key2 = Fernet.generate_key().decode()
         service2 = DeploymentEncryptionService(encryption_key=key2)
 
-        with pytest.raises(Exception):  # Should raise DeploymentEncryptionError
+        with pytest.raises(Exception):  # noqa: B017 - Should raise DeploymentEncryptionError
             service2.decrypt(encrypted_token)
 
-    async def test_empty_tokens_handled_safely(self, test_db_session, test_users, encryption_service):
+    async def test_empty_tokens_handled_safely(
+        self, test_db_session, test_users, encryption_service
+    ):
         """Verify that empty tokens are handled safely."""
         user = test_users[0]
 
@@ -129,7 +135,7 @@ class TestEncryptionAtRest:
             user_id=user.id,
             provider="vercel",
             access_token_encrypted="",  # Empty but valid
-            metadata={}
+            metadata={},
         )
 
         test_db_session.add(credential)
@@ -148,7 +154,9 @@ class TestEncryptionAtRest:
 class TestAuthenticationAuthorization:
     """Test that users can only access their own credentials and deployments."""
 
-    async def test_user_cannot_access_other_users_credentials(self, test_db_session, test_users, encryption_service):
+    async def test_user_cannot_access_other_users_credentials(
+        self, test_db_session, test_users, encryption_service
+    ):
         """Verify users cannot access credentials belonging to other users."""
         user1, user2, user3 = test_users
 
@@ -157,7 +165,7 @@ class TestAuthenticationAuthorization:
             user_id=user1.id,
             provider="vercel",
             access_token_encrypted=encryption_service.encrypt("user1_token"),
-            metadata={}
+            metadata={},
         )
         test_db_session.add(cred1)
         await test_db_session.commit()
@@ -183,7 +191,7 @@ class TestAuthenticationAuthorization:
             user_id=user1.id,
             name="User1 Project",
             slug="user1-project",
-            framework="vite"
+            framework="vite",
         )
 
         project2 = Project(
@@ -191,7 +199,7 @@ class TestAuthenticationAuthorization:
             user_id=user2.id,
             name="User2 Project",
             slug="user2-project",
-            framework="vite"
+            framework="vite",
         )
 
         test_db_session.add(project1)
@@ -199,9 +207,7 @@ class TestAuthenticationAuthorization:
         await test_db_session.commit()
 
         # User1 should only see their own projects
-        result = await test_db_session.execute(
-            select(Project).where(Project.user_id == user1.id)
-        )
+        result = await test_db_session.execute(select(Project).where(Project.user_id == user1.id))
         user1_projects = result.scalars().all()
 
         assert len(user1_projects) == 1
@@ -217,17 +223,14 @@ class TestAuthenticationAuthorization:
             user_id=user1.id,
             name="User1 Project",
             slug="user1-project",
-            framework="vite"
+            framework="vite",
         )
         test_db_session.add(project1)
         await test_db_session.commit()
 
         # Create deployment for user1's project
         deployment = Deployment(
-            project_id=project1.id,
-            user_id=user1.id,
-            provider="vercel",
-            status="success"
+            project_id=project1.id, user_id=user1.id, provider="vercel", status="success"
         )
         test_db_session.add(deployment)
         await test_db_session.commit()
@@ -285,9 +288,7 @@ class TestInputValidation:
         """Test that deployment configs are validated."""
         # Valid config
         config = DeploymentConfig(
-            project_id="proj123",
-            project_name="Test Project",
-            framework="vite"
+            project_id="proj123", project_name="Test Project", framework="vite"
         )
 
         assert config.project_id == "proj123"
@@ -302,8 +303,8 @@ class TestInputValidation:
             env_vars={
                 "API_URL": "https://api.example.com",  # Safe
                 "DATABASE_URL": "postgresql://localhost/db",  # Safe
-                "'; DROP TABLE users; --": "malicious"  # Malicious key
-            }
+                "'; DROP TABLE users; --": "malicious",  # Malicious key
+            },
         )
 
         # The config should accept it (validation happens at provider level)
@@ -342,7 +343,7 @@ class TestInjectionPrevention:
             user_id=user.id,
             provider=malicious_provider,  # SQLAlchemy will handle this safely
             access_token_encrypted=encryption_service.encrypt("token"),
-            metadata={}
+            metadata={},
         )
 
         test_db_session.add(credential)
@@ -350,9 +351,7 @@ class TestInjectionPrevention:
 
         # Query should treat it as a literal string
         result = await test_db_session.execute(
-            select(DeploymentCredential).where(
-                DeploymentCredential.provider == malicious_provider
-            )
+            select(DeploymentCredential).where(DeploymentCredential.provider == malicious_provider)
         )
         found = result.scalar_one_or_none()
 
@@ -362,9 +361,7 @@ class TestInjectionPrevention:
 
         # Should NOT find credentials with provider="vercel"
         result2 = await test_db_session.execute(
-            select(DeploymentCredential).where(
-                DeploymentCredential.provider == "vercel"
-            )
+            select(DeploymentCredential).where(DeploymentCredential.provider == "vercel")
         )
         found2 = result2.scalar_one_or_none()
         assert found2 is None
@@ -391,10 +388,7 @@ class TestInjectionPrevention:
         xss_payload = "<script>alert('XSS')</script>"
 
         # Metadata with XSS payload
-        metadata = {
-            "team_id": xss_payload,
-            "account_name": "<img src=x onerror=alert('XSS')>"
-        }
+        metadata = {"team_id": xss_payload, "account_name": "<img src=x onerror=alert('XSS')>"}
 
         # The metadata should be stored as-is (escaping happens on display)
         # This tests that we don't execute it during storage

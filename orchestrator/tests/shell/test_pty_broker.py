@@ -2,16 +2,11 @@
 Unit tests for PTY Broker Service
 """
 
-import pytest
-import asyncio
-import sys
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-from app.services.pty_broker import (
-    PTYSession,
-    BasePTYBroker,
-    get_pty_broker
-)
+import pytest
+
+from app.services.pty_broker import PTYSession, get_pty_broker
 
 
 class TestPTYSession:
@@ -134,7 +129,7 @@ class TestDockerPTYBroker:
         # Mock exec_resize
         mock_client.api.exec_resize = Mock()
 
-        with patch.dict('sys.modules', {'docker': mock_docker}):
+        with patch.dict("sys.modules", {"docker": mock_docker}):
             from app.services.pty_broker import DockerPTYBroker
 
             broker = DockerPTYBroker()
@@ -173,7 +168,7 @@ class TestDockerPTYBroker:
         # Mock exec_resize
         mock_client.api.exec_resize = Mock()
 
-        with patch.dict('sys.modules', {'docker': mock_docker}):
+        with patch.dict("sys.modules", {"docker": mock_docker}):
             from app.services.pty_broker import DockerPTYBroker
 
             broker = DockerPTYBroker()
@@ -219,12 +214,15 @@ class TestKubernetesPTYBroker:
         mock_ws.close = Mock()
         mock_k8s_stream.stream.return_value = mock_ws
 
-        with patch.dict('sys.modules', {
-            'kubernetes': MagicMock(),
-            'kubernetes.client': mock_k8s_client,
-            'kubernetes.config': mock_k8s_config,
-            'kubernetes.stream': mock_k8s_stream
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "kubernetes": MagicMock(),
+                "kubernetes.client": mock_k8s_client,
+                "kubernetes.config": mock_k8s_config,
+                "kubernetes.stream": mock_k8s_stream,
+            },
+        ):
             from app.services.pty_broker import KubernetesPTYBroker
 
             broker = KubernetesPTYBroker()
@@ -253,14 +251,16 @@ def test_get_pty_broker_docker():
     mock_docker.from_env.return_value = mock_client
     mock_client.api = Mock()
 
-    with patch('app.config.get_settings') as mock_settings:
-        with patch.dict('sys.modules', {'docker': mock_docker}):
-            from app.services.pty_broker import DockerPTYBroker
+    with (
+        patch("app.config.get_settings") as mock_settings,
+        patch.dict("sys.modules", {"docker": mock_docker}),
+    ):
+        from app.services.pty_broker import DockerPTYBroker
 
-            mock_settings.return_value.deployment_mode = "docker"
+        mock_settings.return_value.deployment_mode = "docker"
 
-            broker = get_pty_broker()
-            assert isinstance(broker, DockerPTYBroker)
+        broker = get_pty_broker()
+        assert isinstance(broker, DockerPTYBroker)
 
 
 def test_get_pty_broker_kubernetes():
@@ -271,16 +271,21 @@ def test_get_pty_broker_kubernetes():
     mock_core_v1 = Mock()
     mock_k8s_client.CoreV1Api.return_value = mock_core_v1
 
-    with patch('app.config.get_settings') as mock_settings:
-        with patch.dict('sys.modules', {
-            'kubernetes': MagicMock(),
-            'kubernetes.client': mock_k8s_client,
-            'kubernetes.config': mock_k8s_config,
-            'kubernetes.stream': MagicMock()
-        }):
-            from app.services.pty_broker import KubernetesPTYBroker
+    with (
+        patch("app.config.get_settings") as mock_settings,
+        patch.dict(
+            "sys.modules",
+            {
+                "kubernetes": MagicMock(),
+                "kubernetes.client": mock_k8s_client,
+                "kubernetes.config": mock_k8s_config,
+                "kubernetes.stream": MagicMock(),
+            },
+        ),
+    ):
+        from app.services.pty_broker import KubernetesPTYBroker
 
-            mock_settings.return_value.deployment_mode = "kubernetes"
+        mock_settings.return_value.deployment_mode = "kubernetes"
 
-            broker = get_pty_broker()
-            assert isinstance(broker, KubernetesPTYBroker)
+        broker = get_pty_broker()
+        assert isinstance(broker, KubernetesPTYBroker)

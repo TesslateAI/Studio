@@ -7,14 +7,14 @@ This module tests the deployment API endpoints:
 - Deployments
 """
 
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from datetime import datetime, UTC
 
+import pytest
+
+from app.models import Deployment, DeploymentCredential, Project, User
 from app.routers import deployment_credentials, deployment_oauth, deployments
-from app.models import DeploymentCredential, Deployment, Project, User
-from app.services.deployment_encryption import DeploymentEncryptionService
 
 
 class TestDeploymentCredentialsRouter:
@@ -43,12 +43,12 @@ class TestDeploymentCredentialsRouter:
         request = deployment_credentials.CreateCredentialRequest(
             provider="vercel",
             access_token="test_token_12345",
-            metadata=deployment_credentials.CredentialMetadata(
-                team_id="team_abc123"
-            )
+            metadata=deployment_credentials.CredentialMetadata(team_id="team_abc123"),
         )
 
-        with patch("app.routers.deployment_credentials.get_deployment_encryption_service") as mock_enc:
+        with patch(
+            "app.routers.deployment_credentials.get_deployment_encryption_service"
+        ) as mock_enc:
             mock_service = MagicMock()
             mock_service.encrypt.return_value = "encrypted_token"
             mock_enc.return_value = mock_service
@@ -65,7 +65,9 @@ class TestDeploymentCredentialsRouter:
             mock_credential.updated_at = datetime.now()
 
             # Mock database operations
-            mock_db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+            mock_db.execute = AsyncMock(
+                return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+            )
             mock_db.commit = AsyncMock()
             mock_db.refresh = AsyncMock()
             mock_db.add = MagicMock()
@@ -82,9 +84,7 @@ class TestDeploymentCredentialsRouter:
             mock_db.rollback = AsyncMock()
 
             response = await deployment_credentials.create_credential(
-                request=request,
-                current_user=mock_user,
-                db=mock_db
+                request=request, current_user=mock_user, db=mock_db
             )
 
             assert response.provider == "vercel"
@@ -96,15 +96,12 @@ class TestDeploymentCredentialsRouter:
     async def test_create_credential_invalid_provider(self, mock_db, mock_user):
         """Test creating credential with invalid provider."""
         request = deployment_credentials.CreateCredentialRequest(
-            provider="invalid_provider",
-            access_token="test_token"
+            provider="invalid_provider", access_token="test_token"
         )
 
-        with pytest.raises(Exception):  # Should raise HTTPException
+        with pytest.raises(Exception):  # noqa: B017 - Should raise HTTPException
             await deployment_credentials.create_credential(
-                request=request,
-                current_user=mock_user,
-                db=mock_db
+                request=request, current_user=mock_user, db=mock_db
             )
 
     @pytest.mark.asyncio
@@ -118,7 +115,9 @@ class TestDeploymentCredentialsRouter:
         mock_credential.access_token_encrypted = "encrypted_token"
         mock_credential.metadata = {"team_id": "team_123"}
 
-        with patch("app.routers.deployment_credentials.get_deployment_encryption_service") as mock_enc:
+        with patch(
+            "app.routers.deployment_credentials.get_deployment_encryption_service"
+        ) as mock_enc:
             mock_service = MagicMock()
             mock_service.decrypt.return_value = "decrypted_token"
             mock_enc.return_value = mock_service
@@ -128,9 +127,7 @@ class TestDeploymentCredentialsRouter:
             mock_db.execute = AsyncMock(return_value=mock_result)
 
             response = await deployment_credentials.test_credential(
-                credential_id=credential_id,
-                current_user=mock_user,
-                db=mock_db
+                credential_id=credential_id, current_user=mock_user, db=mock_db
             )
 
             assert response.valid is True
@@ -150,8 +147,7 @@ class TestDeploymentOAuthRouter:
             mock_settings.return_value = settings
 
             response = await deployment_oauth.vercel_authorize(
-                project_id=None,
-                current_user=mock_user
+                project_id=None, current_user=mock_user
             )
 
             assert response.status_code == 307  # Redirect
@@ -167,8 +163,7 @@ class TestDeploymentOAuthRouter:
             mock_settings.return_value = settings
 
             response = await deployment_oauth.netlify_authorize(
-                project_id=None,
-                current_user=mock_user
+                project_id=None, current_user=mock_user
             )
 
             assert response.status_code == 307  # Redirect
@@ -181,20 +176,15 @@ class TestDeploymentsRouter:
     @pytest.mark.asyncio
     async def test_deploy_project_not_found(self, mock_db, mock_user):
         """Test deploying a non-existent project."""
-        request = deployments.DeploymentRequest(
-            provider="vercel"
-        )
+        request = deployments.DeploymentRequest(provider="vercel")
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with pytest.raises(Exception):  # Should raise HTTPException 404
+        with pytest.raises(Exception):  # noqa: B017 - Should raise HTTPException 404
             await deployments.deploy_project(
-                project_slug="non-existent",
-                request=request,
-                current_user=mock_user,
-                db=mock_db
+                project_slug="non-existent", request=request, current_user=mock_user, db=mock_db
             )
 
     @pytest.mark.asyncio
@@ -237,9 +227,7 @@ class TestDeploymentsRouter:
         mock_db.execute = AsyncMock(side_effect=mock_execute)
 
         response = await deployments.list_project_deployments(
-            project_slug="test-project",
-            current_user=mock_user,
-            db=mock_db
+            project_slug="test-project", current_user=mock_user, db=mock_db
         )
 
         assert len(response) == 1
@@ -269,9 +257,7 @@ class TestDeploymentsRouter:
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         response = await deployments.get_deployment(
-            deployment_id=deployment_id,
-            current_user=mock_user,
-            db=mock_db
+            deployment_id=deployment_id, current_user=mock_user, db=mock_db
         )
 
         assert response.id == deployment_id
@@ -282,6 +268,7 @@ class TestDeploymentsRouter:
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def mock_user():

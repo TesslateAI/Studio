@@ -56,6 +56,8 @@ dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-cov>=6.0.0",
+    "freezegun>=1.2.0",
+    "pytest-timeout>=2.2.0",
     "ruff>=0.8.4",
     "pyright>=1.1.391",
 ]
@@ -97,6 +99,7 @@ indent-style = "space"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
@@ -104,6 +107,11 @@ markers = [
     "slow: Slow running tests",
     "docker: Tests requiring Docker",
     "kubernetes: Tests requiring Kubernetes",
+    "minikube: Tests requiring minikube cluster",
+    "mocked: Fully mocked tests (no containers required)",
+    "llm: Tests using real LLM (Llama-4-Maverick via LiteLLM)",
+    "deterministic: Determinism verification tests",
+    "oracle: Oracle tests (golden input/output verification)",
 ]
 
 # ============================================================================

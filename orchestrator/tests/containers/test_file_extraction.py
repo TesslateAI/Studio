@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Test file extraction functionality"""
 
-import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'backend'))
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "backend"))
 from app.routers.chat import extract_complete_code_blocks
 
 # Test with example AI response
@@ -30,7 +31,7 @@ body {
 """
 
 files = extract_complete_code_blocks(test_response)
-print(f'Extracted {len(files)} files:')
+print(f"Extracted {len(files)} files:")
 for file_path, code in files:
-    print(f'  - {file_path} ({len(code)} chars)')
-    print(f'    First 50 chars: {repr(code[:50])}')
+    print(f"  - {file_path} ({len(code)} chars)")
+    print(f"    First 50 chars: {repr(code[:50])}")

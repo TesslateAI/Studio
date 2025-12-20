@@ -9,42 +9,31 @@ Tests cover:
 - Error handling and edge cases
 """
 
-import pytest
-import httpx
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
-import tempfile
 import os
-from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import pytest
 
 from app.services.deployment.base import (
     BaseDeploymentProvider,
     DeploymentConfig,
     DeploymentFile,
-    DeploymentResult
 )
 from app.services.deployment.providers.cloudflare import CloudflareWorkersProvider
-from app.services.deployment.providers.vercel import VercelProvider
 from app.services.deployment.providers.netlify import NetlifyProvider
-
+from app.services.deployment.providers.vercel import VercelProvider
 
 # Test Fixtures
+
 
 @pytest.fixture
 def sample_files():
     """Create sample deployment files."""
     return [
-        DeploymentFile(
-            path="index.html",
-            content=b"<html><body>Hello World</body></html>"
-        ),
-        DeploymentFile(
-            path="assets/style.css",
-            content=b"body { margin: 0; }"
-        ),
-        DeploymentFile(
-            path="assets/app.js",
-            content=b"console.log('Hello');"
-        )
+        DeploymentFile(path="index.html", content=b"<html><body>Hello World</body></html>"),
+        DeploymentFile(path="assets/style.css", content=b"body { margin: 0; }"),
+        DeploymentFile(path="assets/app.js", content=b"console.log('Hello');"),
     ]
 
 
@@ -55,7 +44,7 @@ def deployment_config():
         project_id="test-project-123",
         project_name="Test Project",
         framework="vite",
-        env_vars={"API_URL": "https://api.example.com"}
+        env_vars={"API_URL": "https://api.example.com"},
     )
 
 
@@ -79,15 +68,13 @@ def temp_project_dir(tmp_path):
 
 # Cloudflare Workers Provider Tests
 
+
 class TestCloudflareWorkersProvider:
     """Tests for Cloudflare Workers provider."""
 
     def test_validate_credentials_success(self):
         """Test successful credential validation."""
-        credentials = {
-            "account_id": "test-account-123",
-            "api_token": "test-token-456"
-        }
+        credentials = {"account_id": "test-account-123", "api_token": "test-token-456"}
         provider = CloudflareWorkersProvider(credentials)
         assert provider.credentials == credentials
 
@@ -105,10 +92,7 @@ class TestCloudflareWorkersProvider:
 
     def test_create_asset_manifest(self, sample_files):
         """Test asset manifest creation."""
-        credentials = {
-            "account_id": "test-account-123",
-            "api_token": "test-token-456"
-        }
+        credentials = {"account_id": "test-account-123", "api_token": "test-token-456"}
         provider = CloudflareWorkersProvider(credentials)
         manifest = provider._create_asset_manifest(sample_files)
 
@@ -124,10 +108,7 @@ class TestCloudflareWorkersProvider:
 
     def test_generate_worker_script(self, deployment_config):
         """Test worker script generation."""
-        credentials = {
-            "account_id": "test-account-123",
-            "api_token": "test-token-456"
-        }
+        credentials = {"account_id": "test-account-123", "api_token": "test-token-456"}
         provider = CloudflareWorkersProvider(credentials)
         script = provider._generate_worker_script(deployment_config)
 
@@ -140,23 +121,15 @@ class TestCloudflareWorkersProvider:
     @pytest.mark.asyncio
     async def test_deploy_success(self, sample_files, deployment_config):
         """Test successful deployment flow."""
-        credentials = {
-            "account_id": "test-account-123",
-            "api_token": "test-token-456"
-        }
+        credentials = {"account_id": "test-account-123", "api_token": "test-token-456"}
         provider = CloudflareWorkersProvider(credentials)
 
         # Mock HTTP responses
         mock_session_response = {
-            "result": {
-                "jwt": "test-jwt-token",
-                "buckets": [["hash1", "hash2"]]
-            }
+            "result": {"jwt": "test-jwt-token", "buckets": [["hash1", "hash2"]]}
         }
 
-        mock_upload_response = {
-            "result": {"jwt": "completion-jwt-token"}
-        }
+        mock_upload_response = {"result": {"jwt": "completion-jwt-token"}}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
@@ -168,18 +141,17 @@ class TestCloudflareWorkersProvider:
                 MagicMock(
                     status_code=200,
                     json=lambda: mock_session_response,
-                    raise_for_status=lambda: None
+                    raise_for_status=lambda: None,
                 ),
                 MagicMock(
                     status_code=200,
                     json=lambda: mock_upload_response,
-                    raise_for_status=lambda: None
-                )
+                    raise_for_status=lambda: None,
+                ),
             ]
 
             mock_instance.put.return_value = MagicMock(
-                status_code=200,
-                raise_for_status=lambda: None
+                status_code=200, raise_for_status=lambda: None
             )
 
             result = await provider.deploy(sample_files, deployment_config)
@@ -192,10 +164,7 @@ class TestCloudflareWorkersProvider:
     @pytest.mark.asyncio
     async def test_deploy_api_error(self, sample_files, deployment_config):
         """Test deployment with API error."""
-        credentials = {
-            "account_id": "test-account-123",
-            "api_token": "test-token-456"
-        }
+        credentials = {"account_id": "test-account-123", "api_token": "test-token-456"}
         provider = CloudflareWorkersProvider(credentials)
 
         with patch("httpx.AsyncClient") as mock_client:
@@ -203,9 +172,11 @@ class TestCloudflareWorkersProvider:
             mock_response = MagicMock()
             mock_response.status_code = 403
             mock_response.text = "Forbidden"
-            mock_instance.post = AsyncMock(side_effect=httpx.HTTPStatusError(
-                "Error", request=MagicMock(), response=mock_response
-            ))
+            mock_instance.post = AsyncMock(
+                side_effect=httpx.HTTPStatusError(
+                    "Error", request=MagicMock(), response=mock_response
+                )
+            )
 
             result = await provider.deploy(sample_files, deployment_config)
 
@@ -216,23 +187,18 @@ class TestCloudflareWorkersProvider:
     @pytest.mark.asyncio
     async def test_get_deployment_status(self):
         """Test getting deployment status."""
-        credentials = {
-            "account_id": "test-account-123",
-            "api_token": "test-token-456"
-        }
+        credentials = {"account_id": "test-account-123", "api_token": "test-token-456"}
         provider = CloudflareWorkersProvider(credentials)
 
-        mock_response = {
-            "result": {"id": "worker-123", "created_on": "2025-01-15"}
-        }
+        mock_response = {"result": {"id": "worker-123", "created_on": "2025-01-15"}}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
-            mock_instance.get = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: mock_response,
-                raise_for_status=lambda: None
-            ))
+            mock_instance.get = AsyncMock(
+                return_value=MagicMock(
+                    status_code=200, json=lambda: mock_response, raise_for_status=lambda: None
+                )
+            )
 
             status = await provider.get_deployment_status("test-worker")
 
@@ -242,10 +208,7 @@ class TestCloudflareWorkersProvider:
     @pytest.mark.asyncio
     async def test_delete_deployment(self):
         """Test deleting deployment."""
-        credentials = {
-            "account_id": "test-account-123",
-            "api_token": "test-token-456"
-        }
+        credentials = {"account_id": "test-account-123", "api_token": "test-token-456"}
         provider = CloudflareWorkersProvider(credentials)
 
         with patch("httpx.AsyncClient") as mock_client:
@@ -258,6 +221,7 @@ class TestCloudflareWorkersProvider:
 
 
 # Vercel Provider Tests
+
 
 class TestVercelProvider:
     """Tests for Vercel provider."""
@@ -293,29 +257,31 @@ class TestVercelProvider:
         mock_create_response = {
             "id": "deployment-123",
             "url": "test-project.vercel.app",
-            "readyState": "BUILDING"
+            "readyState": "BUILDING",
         }
 
-        mock_status_response = {
-            "readyState": "READY"
-        }
+        mock_status_response = {"readyState": "READY"}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
 
             # Mock deployment creation
-            mock_instance.post = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: mock_create_response,
-                raise_for_status=lambda: None
-            ))
+            mock_instance.post = AsyncMock(
+                return_value=MagicMock(
+                    status_code=200,
+                    json=lambda: mock_create_response,
+                    raise_for_status=lambda: None,
+                )
+            )
 
             # Mock status polling
-            mock_instance.get = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: mock_status_response,
-                raise_for_status=lambda: None
-            ))
+            mock_instance.get = AsyncMock(
+                return_value=MagicMock(
+                    status_code=200,
+                    json=lambda: mock_status_response,
+                    raise_for_status=lambda: None,
+                )
+            )
 
             result = await provider.deploy(sample_files, deployment_config)
 
@@ -333,11 +299,13 @@ class TestVercelProvider:
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
-            mock_instance.get = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: {"readyState": "BUILDING"},
-                raise_for_status=lambda: None
-            ))
+            mock_instance.get = AsyncMock(
+                return_value=MagicMock(
+                    status_code=200,
+                    json=lambda: {"readyState": "BUILDING"},
+                    raise_for_status=lambda: None,
+                )
+            )
 
             # Use very short timeout for testing
             state = await provider._wait_for_deployment("test-123", logs, max_wait=1)
@@ -353,15 +321,14 @@ class TestVercelProvider:
 
         mock_events = [
             {"type": "stdout", "payload": {"text": "Building..."}},
-            {"type": "stderr", "payload": {"text": "Warning: deprecated"}}
+            {"type": "stderr", "payload": {"text": "Warning: deprecated"}},
         ]
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
-            mock_instance.get = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: mock_events
-            ))
+            mock_instance.get = AsyncMock(
+                return_value=MagicMock(status_code=200, json=lambda: mock_events)
+            )
 
             logs = await provider.get_deployment_logs("test-123")
 
@@ -371,6 +338,7 @@ class TestVercelProvider:
 
 
 # Netlify Provider Tests
+
 
 class TestNetlifyProvider:
     """Tests for Netlify provider."""
@@ -395,16 +363,16 @@ class TestNetlifyProvider:
 
         mock_sites = [
             {"id": "site-123", "name": "test-project"},
-            {"id": "site-456", "name": "other-project"}
+            {"id": "site-456", "name": "other-project"},
         ]
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
-            mock_instance.get = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: mock_sites,
-                raise_for_status=lambda: None
-            ))
+            mock_instance.get = AsyncMock(
+                return_value=MagicMock(
+                    status_code=200, json=lambda: mock_sites, raise_for_status=lambda: None
+                )
+            )
 
             site_id = await provider._get_or_create_site("test-project")
 
@@ -423,17 +391,17 @@ class TestNetlifyProvider:
             mock_instance = mock_client.return_value.__aenter__.return_value
 
             # Mock GET (no existing sites) and POST (create new)
-            mock_instance.get = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: mock_sites,
-                raise_for_status=lambda: None
-            ))
+            mock_instance.get = AsyncMock(
+                return_value=MagicMock(
+                    status_code=200, json=lambda: mock_sites, raise_for_status=lambda: None
+                )
+            )
 
-            mock_instance.post = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: mock_new_site,
-                raise_for_status=lambda: None
-            ))
+            mock_instance.post = AsyncMock(
+                return_value=MagicMock(
+                    status_code=200, json=lambda: mock_new_site, raise_for_status=lambda: None
+                )
+            )
 
             site_id = await provider._get_or_create_site("new-project")
 
@@ -449,12 +417,10 @@ class TestNetlifyProvider:
             "id": "deploy-123",
             "state": "processing",
             "required": ["hash1", "hash2"],
-            "ssl_url": "https://test-project.netlify.app"
+            "ssl_url": "https://test-project.netlify.app",
         }
 
-        mock_status = {
-            "state": "ready"
-        }
+        mock_status = {"state": "ready"}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_instance = mock_client.return_value.__aenter__.return_value
@@ -467,20 +433,21 @@ class TestNetlifyProvider:
             # Configure side effects for different calls
             mock_instance.get.side_effect = [
                 # Get sites
-                MagicMock(status_code=200, json=lambda: [{"id": "site-123", "name": "test-project"}], raise_for_status=lambda: None),
+                MagicMock(
+                    status_code=200,
+                    json=lambda: [{"id": "site-123", "name": "test-project"}],
+                    raise_for_status=lambda: None,
+                ),
                 # Check deploy status
-                MagicMock(status_code=200, json=lambda: mock_status, raise_for_status=lambda: None)
+                MagicMock(status_code=200, json=lambda: mock_status, raise_for_status=lambda: None),
             ]
 
             mock_instance.post.return_value = MagicMock(
-                status_code=200,
-                json=lambda: mock_deploy,
-                raise_for_status=lambda: None
+                status_code=200, json=lambda: mock_deploy, raise_for_status=lambda: None
             )
 
             mock_instance.put.return_value = MagicMock(
-                status_code=200,
-                raise_for_status=lambda: None
+                status_code=200, raise_for_status=lambda: None
             )
 
             result = await provider.deploy(sample_files, deployment_config)
@@ -492,12 +459,14 @@ class TestNetlifyProvider:
 
 # Base Provider Tests
 
+
 class TestBaseProvider:
     """Tests for base provider functionality."""
 
     @pytest.mark.asyncio
     async def test_collect_files_from_container(self, temp_project_dir):
         """Test file collection from container."""
+
         # Create a concrete implementation for testing
         class TestProvider(BaseDeploymentProvider):
             def validate_credentials(self):
@@ -527,6 +496,7 @@ class TestBaseProvider:
     @pytest.mark.asyncio
     async def test_collect_files_missing_directory(self):
         """Test file collection with missing directory."""
+
         class TestProvider(BaseDeploymentProvider):
             def validate_credentials(self):
                 pass
@@ -550,6 +520,7 @@ class TestBaseProvider:
 
     def test_get_framework_config(self):
         """Test framework configuration lookup."""
+
         class TestProvider(BaseDeploymentProvider):
             def validate_credentials(self):
                 pass
@@ -584,6 +555,7 @@ class TestBaseProvider:
 
     def test_sanitize_name(self):
         """Test name sanitization."""
+
         class TestProvider(BaseDeploymentProvider):
             def validate_credentials(self):
                 pass

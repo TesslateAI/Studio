@@ -3,16 +3,28 @@ Test configuration and fixtures for pytest.
 
 This file provides comprehensive fixtures for testing the agent system.
 Fixtures include: database sessions, mock users/projects, tool registries,
-model adapters, and agent instances.
+model adapters, agent instances, container backends, and timing utilities.
+
+Test Markers:
+- @pytest.mark.mocked: Fully mocked, no containers required
+- @pytest.mark.docker: Requires Docker daemon
+- @pytest.mark.minikube: Requires minikube cluster
+- @pytest.mark.llm: Uses real LLM (Llama-4-Maverick via LiteLLM)
+- @pytest.mark.deterministic: Determinism verification tests
+- @pytest.mark.oracle: Golden input/output tests
 """
 
-import sys
-import os
-from pathlib import Path
-import pytest
 import asyncio
+import os
+import sys
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
-from unittest.mock import Mock, AsyncMock, MagicMock
+
+import pytest
 
 # Add the orchestrator directory to sys.path
 orchestrator_dir = Path(__file__).parent.parent
@@ -25,7 +37,9 @@ def pytest_configure(config):
     Sets up test environment variables and registers custom markers.
     """
     # CRITICAL: Set test environment variables BEFORE any app imports
-    os.environ["DATABASE_URL"] = "postgresql+asyncpg://tesslate_user:dev_password_change_me@localhost:5432/tesslate_dev"
+    os.environ["DATABASE_URL"] = (
+        "postgresql+asyncpg://tesslate_user:dev_password_change_me@localhost:5432/tesslate_dev"
+    )
     os.environ["SECRET_KEY"] = "test-secret-key-for-testing-only"
     os.environ["DEPLOYMENT_MODE"] = "docker"
     os.environ["LITELLM_API_BASE"] = "http://localhost:4000/v1"
@@ -33,6 +47,7 @@ def pytest_configure(config):
 
     # Import and clear settings cache after env vars are set
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     # Register custom markers
@@ -94,39 +109,33 @@ def test_context(mock_user, mock_project, mock_db):
         "user_id": mock_user.id,
         "project_id": mock_project.id,
         "db": mock_db,
-        "project_context": {
-            "project_name": mock_project.name,
-            "project_slug": mock_project.slug
-        }
+        "project_context": {"project_name": mock_project.name, "project_slug": mock_project.slug},
     }
 
 
 @pytest.fixture
 def mock_tool_registry():
     """Create a mock tool registry for testing."""
-    from app.agent.tools.registry import ToolRegistry, Tool, ToolCategory
+    from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
 
     registry = ToolRegistry()
 
     async def mock_tool_executor(params, context):
-        return {
-            "message": "Mock tool executed",
-            "params": params
-        }
+        return {"message": "Mock tool executed", "params": params}
 
-    registry.register(Tool(
-        name="mock_tool",
-        description="A mock tool for testing",
-        parameters={
-            "type": "object",
-            "properties": {
-                "test_param": {"type": "string", "description": "A test parameter"}
+    registry.register(
+        Tool(
+            name="mock_tool",
+            description="A mock tool for testing",
+            parameters={
+                "type": "object",
+                "properties": {"test_param": {"type": "string", "description": "A test parameter"}},
+                "required": ["test_param"],
             },
-            "required": ["test_param"]
-        },
-        executor=mock_tool_executor,
-        category=ToolCategory.FILE_OPS
-    ))
+            executor=mock_tool_executor,
+            category=ToolCategory.FILE_OPS,
+        )
+    )
 
     return registry
 
@@ -189,7 +198,7 @@ export default function Button({ children, onClick }) {
     </button>
   );
 }
-"""
+""",
     }
 
 
@@ -206,7 +215,7 @@ def temp_project_dir(tmp_path, mock_user, mock_project, sample_project_files):
     for file_path, content in sample_project_files.items():
         full_path = project_dir / file_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content, encoding='utf-8')
+        full_path.write_text(content, encoding="utf-8")
 
     return project_dir
 
@@ -256,7 +265,7 @@ THOUGHT: First, I should check what files exist in the project.
 {"command": "ls -la src/"}
 </parameters>
 </tool_call>
-"""
+""",
     }
 
 
@@ -266,9 +275,404 @@ def mock_k8s_manager():
     manager = AsyncMock()
     manager.read_file_from_pod = AsyncMock(return_value="File content")
     manager.write_file_to_pod = AsyncMock(return_value=True)
-    manager.execute_command_in_pod = AsyncMock(return_value={
-        "stdout": "Command output",
-        "stderr": "",
-        "exit_code": 0
-    })
+    manager.execute_command_in_pod = AsyncMock(
+        return_value={"stdout": "Command output", "stderr": "", "exit_code": 0}
+    )
     return manager
+
+
+# ============================================================================
+# Container Backend Fixtures
+# ============================================================================
+
+
+class MockContainerBackend:
+    """Mock container backend for fully mocked tests."""
+
+    def __init__(self):
+        self.files: dict[str, str] = {}
+        self.commands_executed: list[str] = []
+
+    async def read_file(self, path: str) -> str:
+        if path in self.files:
+            return self.files[path]
+        raise FileNotFoundError(f"File not found: {path}")
+
+    async def write_file(self, path: str, content: str) -> bool:
+        self.files[path] = content
+        return True
+
+    async def execute_command(self, command: str, timeout: int = 30) -> dict[str, Any]:
+        self.commands_executed.append(command)
+        return {"stdout": "", "stderr": "", "exit_code": 0}
+
+
+class DockerContainerBackend:
+    """Docker container backend for Docker integration tests."""
+
+    def __init__(self):
+        import docker
+
+        self.client = docker.from_env()
+
+    async def read_file(self, container_name: str, path: str) -> str:
+        container = self.client.containers.get(container_name)
+        exit_code, output = container.exec_run(f"cat {path}")
+        if exit_code != 0:
+            raise FileNotFoundError(f"File not found: {path}")
+        return output.decode("utf-8")
+
+    async def write_file(self, container_name: str, path: str, content: str) -> bool:
+        container = self.client.containers.get(container_name)
+        # Use base64 to safely transfer content
+        import base64
+
+        encoded = base64.b64encode(content.encode()).decode()
+        container.exec_run(f"sh -c 'echo {encoded} | base64 -d > {path}'")
+        return True
+
+    async def execute_command(
+        self, container_name: str, command: str, timeout: int = 30
+    ) -> dict[str, Any]:
+        container = self.client.containers.get(container_name)
+        exit_code, output = container.exec_run(command)
+        return {
+            "stdout": output.decode("utf-8"),
+            "stderr": "",
+            "exit_code": exit_code,
+        }
+
+
+class MinikubeContainerBackend:
+    """Minikube container backend for Kubernetes integration tests."""
+
+    def __init__(self):
+        from kubernetes import client, config
+
+        config.load_kube_config(context="tesslate")
+        self.core_v1 = client.CoreV1Api()
+
+    async def read_file(self, namespace: str, pod_name: str, path: str) -> str:
+        from kubernetes.stream import stream
+
+        exec_command = ["cat", path]
+        resp = stream(
+            self.core_v1.connect_get_namespaced_pod_exec,
+            pod_name,
+            namespace,
+            command=exec_command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+        )
+        return resp
+
+    async def execute_command(self, namespace: str, pod_name: str, command: str) -> dict[str, Any]:
+        from kubernetes.stream import stream
+
+        exec_command = ["sh", "-c", command]
+        resp = stream(
+            self.core_v1.connect_get_namespaced_pod_exec,
+            pod_name,
+            namespace,
+            command=exec_command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+        )
+        return {"stdout": resp, "stderr": "", "exit_code": 0}
+
+
+@pytest.fixture
+def container_backend(request):
+    """
+    Returns appropriate container backend based on test markers.
+
+    Usage:
+        @pytest.mark.mocked
+        def test_something(container_backend):
+            # Uses MockContainerBackend
+
+        @pytest.mark.docker
+        def test_docker_something(container_backend):
+            # Uses DockerContainerBackend
+    """
+    markers = [m.name for m in request.node.iter_markers()]
+
+    if "mocked" in markers:
+        return MockContainerBackend()
+    elif "docker" in markers:
+        return DockerContainerBackend()
+    elif "minikube" in markers:
+        return MinikubeContainerBackend()
+    else:
+        # Default to mocked for safety
+        return MockContainerBackend()
+
+
+# ============================================================================
+# Permission Auto-Approval Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def auto_approve_permissions(monkeypatch):
+    """
+    Automatically approve all tool permissions in tests.
+
+    This fixture patches the approval manager to always return approved.
+    Use this when you don't want tests to block on permission prompts.
+    """
+
+    async def mock_check_approval(*args, **kwargs):
+        return {"approved": True, "auto_approved": True}
+
+    # Patch at the module level where it's used
+    monkeypatch.setattr(
+        "app.agent.tools.registry.check_tool_approval",
+        mock_check_approval,
+        raising=False,
+    )
+    return True
+
+
+# ============================================================================
+# Real LLM Fixtures (for @pytest.mark.llm tests)
+# ============================================================================
+
+
+@pytest.fixture
+async def real_model_adapter(mock_user, mock_db):
+    """
+    Real LLM adapter using Llama-4-Maverick via LiteLLM.
+
+    Use this fixture for tests that need actual LLM reasoning.
+    Mark tests with @pytest.mark.llm to indicate they use real LLM.
+    """
+    from app.agent.models import create_model_adapter
+
+    adapter = await create_model_adapter(
+        model_name="Llama-4-Maverick-17B-128E-Instruct-FP8",
+        user_id=mock_user.id,
+        db=mock_db,
+    )
+    return adapter
+
+
+@pytest.fixture
+def mock_model_with_responses():
+    """
+    Factory fixture to create mock models with specific response sequences.
+
+    Usage:
+        def test_something(mock_model_with_responses):
+            model = mock_model_with_responses([
+                '{"tool_name": "read_file", "parameters": {"file_path": "test.js"}}',
+                'TASK_COMPLETE'
+            ])
+    """
+    from app.agent.models import ModelAdapter
+
+    def create_model(responses: list[str]):
+        class ConfiguredMockModel(ModelAdapter):
+            def __init__(self):
+                self.responses = responses
+                self.call_count = 0
+                self.messages_received: list[list[dict]] = []
+
+            async def chat(self, messages, **kwargs):
+                self.messages_received.append(messages)
+                response = self.responses[min(self.call_count, len(self.responses) - 1)]
+                self.call_count += 1
+                for char in response:
+                    yield char
+
+            def get_model_name(self):
+                return "mock-model-with-responses"
+
+        return ConfiguredMockModel()
+
+    return create_model
+
+
+# ============================================================================
+# Determinism Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def frozen_time():
+    """
+    Freeze time for deterministic timestamp testing.
+
+    Usage:
+        def test_something(frozen_time):
+            with frozen_time("2025-01-01 12:00:00"):
+                # All datetime.now() calls return frozen time
+    """
+    from freezegun import freeze_time
+
+    return freeze_time
+
+
+@pytest.fixture
+def deterministic_uuid(monkeypatch):
+    """
+    Provide deterministic UUIDs for testing.
+
+    UUIDs will be generated as:
+    00000000-0000-0000-0000-000000000001
+    00000000-0000-0000-0000-000000000002
+    etc.
+    """
+    counter = [0]
+
+    def predictable_uuid4():
+        counter[0] += 1
+        return uuid.UUID(f"00000000-0000-0000-0000-{counter[0]:012d}")
+
+    monkeypatch.setattr("uuid.uuid4", predictable_uuid4)
+    return counter
+
+
+@pytest.fixture
+def seeded_random(monkeypatch):
+    """Seed random for deterministic behavior."""
+    import random
+
+    random.seed(42)
+    return 42
+
+
+# ============================================================================
+# Mock Orchestrator Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_docker_orchestrator():
+    """
+    Mock Docker orchestrator for file/shell operations.
+
+    Provides in-memory file storage and command execution tracking.
+    """
+    orchestrator = AsyncMock()
+    files: dict[str, str] = {}
+    commands: list[str] = []
+
+    async def mock_read_file(user_id, project_id, file_path, *args, **kwargs):
+        key = f"{project_id}/{file_path}"
+        if key in files:
+            return files[key]
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    async def mock_write_file(user_id, project_id, file_path, content, *args, **kwargs):
+        key = f"{project_id}/{file_path}"
+        files[key] = content
+        return True
+
+    async def mock_execute_command(user_id, project_id, command, *args, **kwargs):
+        commands.append(command)
+        return {"stdout": "", "stderr": "", "exit_code": 0}
+
+    orchestrator.read_file = mock_read_file
+    orchestrator.write_file = mock_write_file
+    orchestrator.execute_command = mock_execute_command
+    orchestrator._files = files  # Expose for assertions
+    orchestrator._commands = commands  # Expose for assertions
+
+    return orchestrator
+
+
+@pytest.fixture
+def mock_pty_session():
+    """
+    Mock PTY session with controllable output buffer.
+
+    Allows tests to simulate PTY session behavior without real PTY.
+    """
+    session = Mock()
+    session.session_id = str(uuid4())
+    session.output_buffer = b""
+    session.read_offset = 0
+    session.is_eof = False
+
+    def append_output(data: bytes):
+        session.output_buffer += data
+
+    def read_new_output():
+        new_data = session.output_buffer[session.read_offset :]
+        session.read_offset = len(session.output_buffer)
+        return new_data
+
+    session.append_output = append_output
+    session.read_new_output = read_new_output
+
+    return session
+
+
+# ============================================================================
+# Tmux Session Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_tmux_session_manager():
+    """Mock TmuxSessionManager for testing tmux operations."""
+    manager = AsyncMock()
+
+    manager.generate_startup_command = Mock(
+        return_value="tmux new-session -d -s main -x 120 -y 30 'npm run dev'"
+    )
+    manager.create_session = AsyncMock(
+        return_value={
+            "session_id": "main",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+    manager.is_session_active = AsyncMock(return_value=True)
+    manager.attach_to_session = AsyncMock(return_value="main:0.0")
+    manager.send_keys = AsyncMock(return_value=True)
+    manager.capture_pane = AsyncMock(return_value="$ npm run dev\nReady on http://localhost:3000")
+    manager.close_window = AsyncMock(return_value=True)
+
+    return manager
+
+
+# ============================================================================
+# Tool Registry Fixtures (Enhanced)
+# ============================================================================
+
+
+@pytest.fixture
+def full_tool_registry():
+    """
+    Create a full tool registry with all real tools registered.
+
+    Use this for integration tests that need actual tool implementations.
+    """
+    from app.agent.tools.registry import get_global_registry
+
+    return get_global_registry()
+
+
+@pytest.fixture
+def file_ops_registry():
+    """Tool registry with only file operation tools."""
+    from app.agent.tools.registry import create_scoped_tool_registry
+
+    return create_scoped_tool_registry(
+        tool_names=["read_file", "write_file", "patch_file", "multi_edit"]
+    )
+
+
+@pytest.fixture
+def shell_ops_registry():
+    """Tool registry with only shell operation tools."""
+    from app.agent.tools.registry import create_scoped_tool_registry
+
+    return create_scoped_tool_registry(
+        tool_names=["bash_exec", "shell_open", "shell_exec", "shell_close"]
+    )

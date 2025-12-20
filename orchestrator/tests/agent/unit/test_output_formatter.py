@@ -5,11 +5,12 @@ Tests success/error output formatting and utility functions.
 """
 
 import pytest
+
 from app.agent.tools.output_formatter import (
-    success_output,
     error_output,
     format_file_size,
-    pluralize
+    pluralize,
+    success_output,
 )
 
 
@@ -19,11 +20,7 @@ class TestOutputFormatter:
 
     def test_success_output_basic(self):
         """Test creating a basic success output."""
-        result = success_output(
-            message="Operation succeeded",
-            key1="value1",
-            key2="value2"
-        )
+        result = success_output(message="Operation succeeded", key1="value1", key2="value2")
 
         assert result["message"] == "Operation succeeded"
         assert result["key1"] == "value1"
@@ -32,9 +29,7 @@ class TestOutputFormatter:
     def test_success_output_with_details(self):
         """Test success output with details dict."""
         result = success_output(
-            message="File written",
-            file_path="src/App.jsx",
-            details={"size": 1024, "lines": 50}
+            message="File written", file_path="src/App.jsx", details={"size": 1024, "lines": 50}
         )
 
         assert result["message"] == "File written"
@@ -45,8 +40,7 @@ class TestOutputFormatter:
     def test_error_output_basic(self):
         """Test creating a basic error output."""
         result = error_output(
-            message="Operation failed",
-            suggestion="Try again with correct parameters"
+            message="Operation failed", suggestion="Try again with correct parameters"
         )
 
         assert result["message"] == "Operation failed"
@@ -58,7 +52,7 @@ class TestOutputFormatter:
             message="File not found",
             suggestion="Check the file path",
             file_path="missing.txt",
-            details={"error": "ENOENT"}
+            details={"error": "ENOENT"},
         )
 
         assert result["message"] == "File not found"
@@ -104,12 +98,15 @@ class TestOutputFormatter:
         assert pluralize(2, "child", "children") == "2 children"
         assert pluralize(1, "child", "children") == "1 child"
 
-    @pytest.mark.parametrize("count,word,expected", [
-        (0, "item", "0 items"),
-        (1, "item", "1 item"),
-        (5, "item", "5 items"),
-        (100, "item", "100 items"),
-    ])
+    @pytest.mark.parametrize(
+        "count,word,expected",
+        [
+            (0, "item", "0 items"),
+            (1, "item", "1 item"),
+            (5, "item", "5 items"),
+            (100, "item", "100 items"),
+        ],
+    )
     def test_pluralize_parametrized(self, count, word, expected):
         """Test pluralize with various counts."""
         assert pluralize(count, word) == expected

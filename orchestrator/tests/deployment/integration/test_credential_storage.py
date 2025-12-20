@@ -5,9 +5,9 @@ Tests the complete flow of encrypting, storing, and retrieving deployment creden
 using both the encryption service and the model layer (with mocked database operations).
 """
 
-import pytest
 from uuid import uuid4
-from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from cryptography.fernet import Fernet
 
 from app.models import DeploymentCredential
@@ -200,9 +200,7 @@ class TestCredentialStorageWorkflow:
 
         # Simulate deployment: Find credential for specific provider
         target_provider = "cloudflare"
-        target_credential = next(
-            cred for cred in credentials if cred.provider == target_provider
-        )
+        target_credential = next(cred for cred in credentials if cred.provider == target_provider)
 
         # Decrypt for deployment use
         decrypted_token = encryption_service.decrypt(target_credential.access_token_encrypted)
