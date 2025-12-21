@@ -1185,19 +1185,38 @@ async def agent_chat_stream(
             tool_calls_made = 0
             completion_reason = "task_complete"
 
+            logger.info(f"[SSE-AGENT] Starting agent.run() for project {request.project_id}, message: {request.message[:100]}...")
+
             # Stream events from agent and collect metadata
+            event_count = 0
             async for event in agent_instance.run(request.message, context):
-                # Collect step data for persistence
+                event_count += 1
+                event_type = event.get('type', 'unknown')
+                logger.info(f"[SSE-AGENT] Event #{event_count}: type={event_type}")
+
+                # Collect step data for persistence (use safe .get() to avoid KeyError)
                 if event['type'] == 'agent_step':
-                    collected_steps.append(event['data'])
+                    step_data = event.get('data', {})
+                    collected_steps.append(step_data)
+                    tool_calls = step_data.get('tool_calls', [])
+                    logger.info(f"[SSE-AGENT] Agent step - iteration={step_data.get('iteration')}, tools={[tc.get('name') for tc in tool_calls]}")
                 elif event['type'] == 'complete':
-                    final_response = event['data'].get('final_response', '')
-                    iterations = event['data'].get('iterations', iterations)
-                    tool_calls_made = event['data'].get('tool_calls_made', tool_calls_made)
-                    completion_reason = event['data'].get('completion_reason', completion_reason)
+                    complete_data = event.get('data', {})
+                    final_response = complete_data.get('final_response', '')
+                    iterations = complete_data.get('iterations', iterations)
+                    tool_calls_made = complete_data.get('tool_calls_made', tool_calls_made)
+                    completion_reason = complete_data.get('completion_reason', completion_reason)
+                    logger.info(f"[SSE-AGENT] Agent complete - iterations={iterations}, tool_calls={tool_calls_made}, reason={completion_reason}")
+                elif event['type'] == 'error':
+                    # Error events may use 'content' key instead of 'data'
+                    error_msg = event.get('content', event.get('data', {}).get('message', 'Unknown error'))
+                    logger.error(f"[SSE-AGENT] Agent error event: {error_msg}")
 
                 # Send event in SSE format
                 yield f"data: {json.dumps(event)}\n\n"
+                logger.debug(f"[SSE-AGENT] Yielded event #{event_count} to SSE stream")
+
+            logger.info(f"[SSE-AGENT] Agent.run() finished, total events: {event_count}")
 
             # Increment usage_count for the agent
             if agent_model:
@@ -1256,8 +1275,8 @@ async def agent_chat_stream(
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
-            logger.error(f"SSE Agent error: {e}")
-            logger.error(f"Full traceback:\n{error_traceback}")
+            logger.error(f"[SSE-AGENT] Exception during agent streaming: {e}")
+            logger.error(f"[SSE-AGENT] Full traceback:\n{error_traceback}")
 
             error_event = {
                 'type': 'error',
@@ -1292,7 +1311,41 @@ class ConnectionManager:
         if connection_key in self.active_connections:
             await self.active_connections[connection_key].send_text(message)
 
+    async def send_status_update(self, user_id: UUID, project_id: UUID, status: dict):
+        """
+        Send project/container status update to connected client.
+
+        Used for:
+        - Container startup progress (creating_environment, installing_dependencies, etc.)
+        - Hibernation notifications (hibernating, hibernated)
+        - Corruption alerts
+
+        Args:
+            user_id: User UUID
+            project_id: Project UUID
+            status: Status dict with fields like:
+                - environment_status: 'hibernating', 'hibernated', 'active', 'corrupted'
+                - container_status: 'starting', 'ready'
+                - phase: Current startup phase
+                - progress: 0-100 progress percentage
+                - message: Human-readable status message
+                - action: Optional action like 'redirect_to_projects'
+        """
+        message = json.dumps({
+            "type": "status_update",
+            "payload": status
+        })
+        await self.send_personal_message(message, user_id, project_id)
+        logger.info(f"[WS-STATUS] Sent status update to user {user_id}, project {project_id}: {status.get('phase') or status.get('environment_status')}")
+
+
+# Global connection manager - exported for use by other modules (e.g., kubernetes_orchestrator)
 manager = ConnectionManager()
+
+
+def get_chat_connection_manager() -> ConnectionManager:
+    """Get the global chat WebSocket connection manager."""
+    return manager
 
 @router.websocket("/ws/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: str, db: AsyncSession = Depends(get_db)):

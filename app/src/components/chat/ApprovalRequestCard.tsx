@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Check, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 interface ApprovalRequestCardProps {
   approvalId: string;

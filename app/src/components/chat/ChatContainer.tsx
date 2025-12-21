@@ -65,7 +65,6 @@ interface ChatContainerProps {
   projectName?: string;
   className?: string;
   sidebarExpanded?: boolean;
-  containerId?: string;  // Container ID for multi-container projects
 }
 
 export function ChatContainer({
@@ -351,6 +350,29 @@ export function ChatContainer({
               toolDescription: data.data.tool_description,
             };
             setMessages(prev => [...prev, approvalMessage]);
+          } else if (data.type === 'status_update') {
+            // Handle hibernation status updates
+            // Backend sends: { type: 'status_update', payload: { environment_status, message, action } }
+            const payload = data.payload || data.data;
+            const status = payload?.environment_status || payload?.status;
+            const message = payload?.message;
+
+            if (status === 'hibernating') {
+              toast.loading(message || 'Project is being saved...', { duration: 5000 });
+              // Redirect to projects page after short delay
+              setTimeout(() => {
+                navigate('/projects');
+              }, 2000);
+            } else if (status === 'hibernated') {
+              toast.success(message || 'Project saved successfully');
+              navigate('/projects');
+            } else if (status === 'waking') {
+              toast.loading(message || 'Waking up project...', { duration: 10000 });
+            } else if (status === 'active') {
+              toast.success(message || 'Project is ready!');
+            } else if (status === 'corrupted') {
+              toast.error(message || 'Project data may be corrupted');
+            }
           }
         };
 
@@ -602,7 +624,6 @@ export function ChatContainer({
           container_id: containerId,  // Container ID for scoped file access
           message,
           agent_id: currentAgent.backendId?.toString(),
-          container_id: containerId,
           max_iterations: 20,
           edit_mode: editMode,
         },

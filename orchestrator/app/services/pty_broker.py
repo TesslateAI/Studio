@@ -364,10 +364,12 @@ class KubernetesPTYBroker(BasePTYBroker):
         session_id = str(uuid.uuid4())
         deployment_name = container_name  # container_name is actually deployment name like "dev-next-js-15"
 
+        logger.info(f"[K8S-PTY] create_session called: project_id={project_id}, container_name={container_name}")
+
         # Determine namespace if not provided
         if not namespace:
             namespace = self._get_namespace_for_project(project_id)
-            logger.info(f"[PTY] Auto-detected namespace for project {project_id}: {namespace}")
+            logger.info(f"[K8S-PTY] Using namespace: {namespace}")
 
         # Always look up actual pod name - deployment_name is not the pod name
         # Pods have suffix like "dev-next-js-15-f8d496f89-fpqsk"
@@ -375,11 +377,13 @@ class KubernetesPTYBroker(BasePTYBroker):
         try:
             if deployment_name:
                 # Look up pod by app label (matches deployment name)
+                logger.info(f"[K8S-PTY] Looking up pod by label app={deployment_name} in namespace {namespace}...")
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,
                     namespace=namespace,
                     label_selector=f"app={deployment_name}"
                 )
+                logger.info(f"[K8S-PTY] Found {len(pods.items)} pods matching label")
                 if pods.items:
                     # Get first running pod
                     for pod in pods.items:
@@ -388,7 +392,7 @@ class KubernetesPTYBroker(BasePTYBroker):
                             break
                     if not pod_name and pods.items:
                         pod_name = pods.items[0].metadata.name
-                    logger.info(f"[PTY] Found pod {pod_name} for deployment {deployment_name}")
+                    logger.info(f"[K8S-PTY] Selected pod: {pod_name}")
 
             if not pod_name:
                 # Fallback: List all dev container pods in the namespace
@@ -416,20 +420,26 @@ class KubernetesPTYBroker(BasePTYBroker):
         # Use a fresh client for stream operations to avoid concurrency issues
         # The stream() function patches api_client.request to use WebSocket,
         # which would break concurrent regular API calls if using shared client
+        logger.info(f"[K8S-PTY] Creating WebSocket stream to pod {pod_name} in namespace {namespace}...")
         stream_client = self._get_stream_client()
 
-        ws_stream = stream(
-            stream_client.connect_get_namespaced_pod_exec,
-            pod_name,
-            namespace,
-            container=container,
-            command=full_command,
-            stderr=True,
-            stdin=True,
-            stdout=True,
-            tty=True,
-            _preload_content=False,  # Required for streaming
-        )
+        try:
+            ws_stream = stream(
+                stream_client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container,
+                command=full_command,
+                stderr=True,
+                stdin=True,
+                stdout=True,
+                tty=True,
+                _preload_content=False,  # Required for streaming
+            )
+            logger.info(f"[K8S-PTY] WebSocket stream created successfully for pod {pod_name}")
+        except Exception as e:
+            logger.error(f"[K8S-PTY] Failed to create WebSocket stream to pod {pod_name}: {e}", exc_info=True)
+            raise
 
         # Get configured project path (differs between Docker and K8s)
         from ..config import get_settings
@@ -452,22 +462,25 @@ class KubernetesPTYBroker(BasePTYBroker):
         self.sessions[session_id] = session
 
         # Start background output reader
+        logger.info(f"[K8S-PTY] Starting output reader task for session {session_id}...")
         session.reader_task = asyncio.create_task(
             self._output_reader(session_id)
         )
 
-        logger.info(f"Created K8s PTY session {session_id}")
+        logger.info(f"[K8S-PTY] Session {session_id} fully created and ready")
         return session
 
     async def _output_reader(self, session_id: str) -> None:
         """Background task to read PTY output and buffer it."""
+        logger.info(f"[K8S-PTY] Output reader started for session {session_id}")
         try:
             session = self.sessions.get(session_id)
             if not session:
-                logger.error(f"Session {session_id} not found for output reader")
+                logger.error(f"[K8S-PTY] Session {session_id} not found for output reader")
                 return
 
             socket = session.socket
+            logger.info(f"[K8S-PTY] Output reader entering read loop for session {session_id}")
 
             # Read loop
             while not session.is_closed:

@@ -93,16 +93,20 @@ class ShellSessionManager:
             )
 
         # 4. Get container/pod name based on deployment mode
+        logger.info(f"[SHELL] Resolving container name for project {project_id}, container_hint: {container_name}")
         resolved_container_name = await self._get_container_name(
             user_id, project_id, project.slug, container_name
         )
+        logger.info(f"[SHELL] Resolved container name: {resolved_container_name}")
 
         # 5. Verify container is running
         # IMPORTANT: Pass original container_name (not resolved) for K8s mode
         # because is_container_ready generates resource names from it internally
+        logger.info(f"[SHELL] Checking if container is running...")
         is_running = await self._is_container_running(
             user_id, project_id, project.slug, container_name
         )
+        logger.info(f"[SHELL] Container running check: {is_running}")
         if not is_running:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -110,6 +114,7 @@ class ShellSessionManager:
             )
 
         # 6. Create PTY session
+        logger.info(f"[SHELL] Creating PTY session via pty_broker.create_session()...")
         try:
             pty_session = await self.pty_broker.create_session(
                 user_id=user_id,
@@ -117,8 +122,9 @@ class ShellSessionManager:
                 container_name=resolved_container_name,
                 command=command,
             )
+            logger.info(f"[SHELL] PTY session created: {pty_session.session_id}")
         except Exception as e:
-            logger.error(f"Failed to create PTY session: {e}")
+            logger.error(f"[SHELL] Failed to create PTY session: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to create shell session: {str(e)}"
@@ -146,7 +152,7 @@ class ShellSessionManager:
         assert pty_session.session_id in self.pty_broker.sessions, "Session not in broker dict"
 
         logger.info(
-            f"Created shell session {pty_session.session_id} for user {user_id}, "
+            f"[SHELL] Session ready: {pty_session.session_id} for user {user_id}, "
             f"project {project_id}, container {resolved_container_name}. "
             f"Total active sessions: {len(self.active_sessions)}"
         )

@@ -115,15 +115,47 @@ async def verify_token_for_user(token: str, db: AsyncSession) -> Optional[User]:
     """
     Verify a JWT token and return the user (for WebSocket authentication).
     Returns None if token is invalid.
+
+    Handles both:
+    - fastapi-users tokens (sub contains UUID, has audience claim)
+    - Legacy tokens (sub contains username)
     """
+    from uuid import UUID
+
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        username: str = payload.get("sub")
-        if username is None:
+        # Don't verify audience for backward compatibility with fastapi-users tokens
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+            options={"verify_aud": False}
+        )
+        user_id_or_username: str = payload.get("sub")
+        if user_id_or_username is None:
+            logger.warning("[AUTH-WS] Token has no 'sub' claim")
             return None
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"[AUTH-WS] JWT decode failed: {e}")
         return None
 
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
+    # Try to find user by ID (UUID) first (fastapi-users), then by username (legacy)
+    try:
+        user_uuid = UUID(user_id_or_username)
+        logger.info(f"[AUTH-WS] Looking up user by UUID: {user_uuid}")
+        result = await db.execute(select(User).where(User.id == user_uuid))
+        user = result.scalar_one_or_none()
+        if user:
+            logger.info(f"[AUTH-WS] Found user by UUID: {user.id}")
+        else:
+            logger.warning(f"[AUTH-WS] No user found for UUID: {user_uuid}")
+    except (ValueError, TypeError):
+        # Not a valid UUID, try username lookup
+        logger.info(f"[AUTH-WS] Looking up user by username: {user_id_or_username}")
+        result = await db.execute(select(User).where(User.username == user_id_or_username))
+        user = result.scalar_one_or_none()
+        if user:
+            logger.info(f"[AUTH-WS] Found user by username: {user.id}")
+        else:
+            logger.warning(f"[AUTH-WS] No user found for username: {user_id_or_username}")
+
     return user

@@ -50,6 +50,9 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     if not command:
         raise ValueError("command parameter is required")
 
+    logger.info(f"[BASH] Starting bash_exec, command: {command[:100]}...")
+    logger.info(f"[BASH] Existing session_id in context: {context.get('_bash_session_id')}")
+
     # Check if we have a reusable session from a previous bash_exec call
     session_id = context.get("_bash_session_id")
     session_created = False
@@ -57,7 +60,9 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
     try:
         # 1. Open session only if we don't have one
         if not session_id:
+            logger.info(f"[BASH] No existing session, calling shell_open_executor...")
             session_result = await shell_open_executor({}, context)
+            logger.info(f"[BASH] shell_open_executor returned: success={session_result.get('success')}")
             if not session_result.get("success"):
                 return error_output(
                     message="Failed to open shell session",
@@ -74,11 +79,13 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
             logger.debug(f"[BASH] Reusing existing session {session_id}")
 
         # 2. Execute command
+        logger.info(f"[BASH] Calling shell_exec_executor with session_id={session_id}, command={command[:50]}...")
         exec_result = await shell_exec_executor({
             "session_id": session_id,
             "command": command,
             "wait_seconds": wait_seconds
         }, context)
+        logger.info(f"[BASH] shell_exec_executor returned, output_length={len(exec_result.get('output', ''))}")
 
         # 3. Return execution result (session stays open for reuse)
         return success_output(
@@ -92,6 +99,7 @@ async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
         )
 
     except Exception as e:
+        logger.error(f"[BASH] Exception during bash_exec: {e}", exc_info=True)
         # On error, close and clear the session so next call creates a fresh one
         if session_id:
             try:

@@ -217,13 +217,14 @@ class Settings(BaseSettings):
     # Kubernetes S3 Sandwich Settings
     # ==========================================================================
     # Hibernation/Hydration lifecycle timing
-    k8s_hibernation_idle_minutes: int = 5  # Hibernate pods after X minutes of inactivity
+    k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
     k8s_hibernation_grace_seconds: int = 120  # Grace period for dehydration before deletion
     k8s_hydration_timeout_seconds: int = 300  # Max time to wait for project hydration from S3
-    k8s_dehydration_timeout_seconds: int = 120  # Max time to wait for project dehydration to S3
+    k8s_dehydration_timeout_seconds: int = 300  # Max time for dehydration (increased for full zips)
 
     # Dehydration exclusions (comma-separated patterns)
-    k8s_dehydration_exclude_patterns: str = "node_modules,.git,__pycache__,venv,.venv"
+    # Minimal exclusions - we zip EVERYTHING including node_modules for instant restore
+    k8s_dehydration_exclude_patterns: str = ".git"
 
     # ==========================================================================
     # Kubernetes Storage Settings

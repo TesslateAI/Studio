@@ -200,7 +200,7 @@ class ToolRegistry:
             logger.info(f"[ASK MODE] Skipping approval check for {tool_name} (approval granted)")
 
         try:
-            logger.info(f"Executing tool: {tool_name} with params: {parameters} [edit_mode={edit_mode}]")
+            logger.info(f"[TOOL-EXEC] Starting tool: {tool_name} with params: {parameters} [edit_mode={edit_mode}]")
 
             # Execute the tool
             result = await tool.executor(parameters, context)
@@ -210,9 +210,9 @@ class ToolRegistry:
             tool_succeeded = result.get("success", True) if isinstance(result, dict) else True
 
             if tool_succeeded:
-                logger.info(f"Tool {tool_name} executed successfully")
+                logger.info(f"[TOOL-EXEC] Completed tool: {tool_name}, success=True")
             else:
-                logger.warning(f"Tool {tool_name} executed but reported failure: {result.get('message', 'Unknown error')}")
+                logger.warning(f"[TOOL-EXEC] Completed tool: {tool_name}, success=False, error: {result.get('message', 'Unknown error')}")
 
             return {
                 "success": tool_succeeded,
@@ -221,7 +221,7 @@ class ToolRegistry:
             }
 
         except Exception as e:
-            logger.error(f"Tool {tool_name} execution failed: {e}", exc_info=True)
+            logger.error(f"[TOOL-EXEC] Tool {tool_name} execution FAILED with exception: {e}", exc_info=True)
             return {
                 "success": False,
                 "tool": tool_name,

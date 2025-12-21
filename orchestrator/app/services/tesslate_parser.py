@@ -36,26 +36,28 @@ class TesslateParser:
     """Parser for TESSLATE.md configuration files."""
 
     # Default configurations for known frameworks
+    # NOTE: Dependencies are installed during file init (generate_git_clone_script)
+    # start_command should only contain the dev server command, NOT npm install
     DEFAULT_CONFIGS = {
         "vite": TesslateConfig(
             framework="vite",
             port=5173,
-            start_command="npm install\nnpm run dev -- --host 0.0.0.0 --port 5173"
+            start_command="npm run dev -- --host 0.0.0.0 --port 5173"
         ),
         "nextjs": TesslateConfig(
             framework="nextjs",
             port=3000,
-            start_command="npm install\nnpm run dev -- --hostname 0.0.0.0 --port 3000"
+            start_command="npm run dev -- --hostname 0.0.0.0 --port 3000"
         ),
         "react": TesslateConfig(
             framework="react",
             port=3000,
-            start_command="npm install\nnpm start"
+            start_command="npm start"
         ),
         "expo": TesslateConfig(
             framework="expo",
             port=19006,
-            start_command="npm install\nnpx expo start --web"
+            start_command="npx expo start --web"
         ),
     }
 
@@ -179,7 +181,7 @@ class TesslateParser:
             return '\n'.join(lines)
 
         # Fallback: default Vite command
-        return "npm install\nnpm run dev -- --host 0.0.0.0 --port 5173"
+        return "npm run dev -- --host 0.0.0.0 --port 5173"
 
     @staticmethod
     def _extract_stop_command(content: str) -> Optional[str]:

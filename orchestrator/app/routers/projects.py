@@ -30,6 +30,7 @@ import logging
 import re
 from pathlib import Path
 import mimetypes
+from .chat import manager as ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -540,16 +541,16 @@ async def _setup_base_project(
     if not base_repo:
         raise ValueError("Project base not found.")
 
-    # Initialize project settings from base metadata (for framework detection caching)
-    if base_repo.metadata:
-        if not db_project.settings:
-            db_project.settings = {}
-        db_project.settings.update(base_repo.metadata)
-        await db.commit()
-        logger.info(f"Initialized project settings from base metadata: {base_repo.metadata}")
+    # Note: MarketplaceBase doesn't have a metadata column - framework detection
+    # happens via TESSLATE.md parsing during container startup
+
+    # Track if we're using a temp clone directory (for K8s mode without local cache)
+    # Must be defined before try block so finally block can reference it
+    temp_clone_dir = None
 
     try:
         from ..services.base_cache_manager import get_base_cache_manager
+        from ..services.orchestration import get_orchestrator
         import tempfile
 
         task.update_progress(20, 100, "Copying pre-installed base from cache")
@@ -558,9 +559,6 @@ async def _setup_base_project(
         base_cache_manager = get_base_cache_manager()
         cached_base_path = await base_cache_manager.get_base_path(base_repo.slug)
         orchestrator = get_orchestrator()
-
-        # Track if we're using a temp clone directory (for K8s mode without local cache)
-        temp_clone_dir = None
 
         if not os.path.exists(cached_base_path):
             # Base not in local cache - need to git clone
@@ -4688,3 +4686,204 @@ async def _restart_container_background_task(
             await db_gen.aclose()
         except Exception:
             pass
+
+
+# =============================================================================
+# Admin Endpoints for Testing
+# =============================================================================
+
+@router.post("/{project_slug}/admin/hibernate")
+async def admin_force_hibernate(
+    project_slug: str,
+    current_user: User = Depends(current_superuser),  # Requires admin/superuser
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    [ADMIN ONLY] Force hibernate a project for testing.
+
+    This endpoint allows admins to immediately hibernate a project without
+    waiting for the idle timeout. Useful for testing hibernation/restore flow.
+
+    The project will be:
+    1. Marked as 'hibernating'
+    2. Saved to S3 (full zip including node_modules)
+    3. K8s namespace deleted
+    4. Marked as 'hibernated'
+
+    Returns the hibernation result including archive size.
+    """
+    settings = get_settings()
+
+    if settings.deployment_mode != "kubernetes":
+        raise HTTPException(
+            status_code=400,
+            detail="Hibernation is only available in Kubernetes mode"
+        )
+
+    # Get project (admin can access any project)
+    result = await db.execute(
+        select(Project).where(Project.slug == project_slug)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.environment_status == 'hibernated':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project is already hibernated (hibernated_at: {project.hibernated_at})"
+        )
+
+    if project.environment_status == 'hibernating':
+        raise HTTPException(
+            status_code=400,
+            detail="Project is currently being hibernated"
+        )
+
+    try:
+        from ..services.orchestration.kubernetes_orchestrator import get_kubernetes_orchestrator
+        from datetime import datetime, timezone
+
+        orchestrator = get_kubernetes_orchestrator()
+
+        logger.info(f"[ADMIN:HIBERNATE] Force hibernating project {project.slug} by admin {current_user.email}")
+
+        # Mark as hibernating
+        project.environment_status = 'hibernating'
+        await db.commit()
+
+        # Send WebSocket notification to redirect user (same as cleanup task)
+        try:
+            await ws_manager.send_status_update(
+                user_id=project.owner_id,
+                project_id=project.id,
+                status={
+                    "environment_status": "hibernating",
+                    "message": "Saving project files...",
+                    "action": "redirect_to_projects"
+                }
+            )
+        except Exception as ws_err:
+            logger.debug(f"[ADMIN:HIBERNATE] Could not send WebSocket notification: {ws_err}")
+
+        # Perform hibernation
+        success = await orchestrator.hibernate_project(project.id, project.owner_id)
+
+        if not success:
+            project.environment_status = 'active'
+            await db.commit()
+            raise HTTPException(
+                status_code=500,
+                detail="Hibernation failed - S3 save returned false. Check logs for details."
+            )
+
+        # Mark as hibernated
+        project.environment_status = 'hibernated'
+        project.hibernated_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        # Send completion notification
+        try:
+            await ws_manager.send_status_update(
+                user_id=project.owner_id,
+                project_id=project.id,
+                status={
+                    "environment_status": "hibernated",
+                    "message": "Project saved successfully"
+                }
+            )
+        except Exception as ws_err:
+            logger.debug(f"[ADMIN:HIBERNATE] Could not send completion notification: {ws_err}")
+
+        logger.info(f"[ADMIN:HIBERNATE] ✅ Successfully hibernated project {project.slug}")
+
+        return {
+            "message": f"Project '{project.slug}' hibernated successfully",
+            "project_id": str(project.id),
+            "project_slug": project.slug,
+            "environment_status": project.environment_status,
+            "hibernated_at": project.hibernated_at.isoformat(),
+            "owner_id": str(project.owner_id)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ADMIN:HIBERNATE] Failed to hibernate project: {e}", exc_info=True)
+        project.environment_status = 'active'
+        await db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Hibernation failed: {str(e)}"
+        )
+
+
+@router.get("/{project_slug}/admin/status")
+async def admin_get_project_status(
+    project_slug: str,
+    current_user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    [ADMIN ONLY] Get detailed project environment status.
+
+    Returns environment status, hibernation timestamp, namespace info, etc.
+    """
+    settings = get_settings()
+
+    # Get project (admin can access any project)
+    result = await db.execute(
+        select(Project).where(Project.slug == project_slug)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    response = {
+        "project_id": str(project.id),
+        "project_slug": project.slug,
+        "project_name": project.name,
+        "owner_id": str(project.owner_id),
+        "environment_status": project.environment_status,
+        "hibernated_at": project.hibernated_at.isoformat() if project.hibernated_at else None,
+        "last_activity": project.last_activity.isoformat() if project.last_activity else None,
+        "deployment_mode": settings.deployment_mode,
+        "idle_timeout_minutes": settings.k8s_hibernation_idle_minutes if settings.deployment_mode == "kubernetes" else None
+    }
+
+    # Check K8s namespace if in kubernetes mode
+    if settings.deployment_mode == "kubernetes":
+        try:
+            from ..services.orchestration.kubernetes_orchestrator import get_kubernetes_orchestrator
+            orchestrator = get_kubernetes_orchestrator()
+            namespace = orchestrator._get_namespace(str(project.id))
+            namespace_exists = await orchestrator.k8s_client.namespace_exists(namespace)
+            response["k8s_namespace"] = namespace
+            response["k8s_namespace_exists"] = namespace_exists
+        except Exception as e:
+            response["k8s_namespace_error"] = str(e)
+
+    # Check S3 archive if hibernated
+    if project.environment_status == 'hibernated':
+        try:
+            from ..services.s3_manager import get_s3_manager
+            s3_manager = get_s3_manager()
+            s3_key = s3_manager._get_project_key(project.owner_id, project.id)
+
+            # Check if file exists and get size
+            try:
+                head_response = s3_manager.s3_client.head_object(
+                    Bucket=s3_manager.bucket_name,
+                    Key=s3_key
+                )
+                response["s3_archive_key"] = s3_key
+                response["s3_archive_size_mb"] = round(head_response['ContentLength'] / (1024 * 1024), 2)
+                response["s3_archive_last_modified"] = head_response['LastModified'].isoformat()
+            except Exception:
+                response["s3_archive_exists"] = False
+        except Exception as e:
+            response["s3_error"] = str(e)
+
+    return response

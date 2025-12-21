@@ -88,7 +88,8 @@ class ConnectionManager:
         self.active_connections: dict[int, List[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: int):
-        await websocket.accept()
+        # Note: websocket.accept() is called by the endpoint before authentication
+        # Do NOT call accept() here - it would cause double-accept and disconnect
         if user_id not in self.active_connections:
             self.active_connections[user_id] = []
         self.active_connections[user_id].append(websocket)
@@ -154,13 +155,18 @@ async def websocket_endpoint(websocket: WebSocket):
     {"type": "task_update", "task": {...}}
     {"type": "notification", "notification": {...}}
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     await websocket.accept()
+    logger.info("[TASK-WS] WebSocket accepted, waiting for auth...")
 
     try:
         # Wait for authentication
         auth_data = await asyncio.wait_for(websocket.receive_text(), timeout=10)
         auth_json = json.loads(auth_data)
         token = auth_json.get("token", "").replace("Bearer ", "")
+        logger.info(f"[TASK-WS] Received auth token (length={len(token)})")
 
         # Authenticate user
         from ..auth import verify_token_for_user
@@ -172,14 +178,17 @@ async def websocket_endpoint(websocket: WebSocket):
 
         try:
             user = await verify_token_for_user(token, db)
+            logger.info(f"[TASK-WS] Token verification result: user={user.id if user else None}")
         finally:
             await db_gen.aclose()
 
         if not user:
+            logger.warning("[TASK-WS] Authentication failed - invalid token")
             await websocket.close(code=1008, reason="Authentication failed")
             return
 
         # Register connection
+        logger.info(f"[TASK-WS] Registering connection for user {user.id}")
         await manager.connect(websocket, user.id)
 
         # Subscribe to task updates
@@ -212,11 +221,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
 
     except asyncio.TimeoutError:
+        logger.warning("[TASK-WS] Authentication timeout - no token received in 10s")
         await websocket.close(code=1008, reason="Authentication timeout")
+    except WebSocketDisconnect:
+        logger.info("[TASK-WS] Client disconnected during auth")
     except Exception as e:
-        print(f"WebSocket connection error: {e}")
+        logger.error(f"[TASK-WS] WebSocket connection error: {e}", exc_info=True)
     finally:
         if 'user' in locals() and user is not None:
+            logger.info(f"[TASK-WS] Cleaning up connection for user {user.id}")
             manager.disconnect(websocket, user.id)
 
 

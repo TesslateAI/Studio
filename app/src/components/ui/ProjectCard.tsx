@@ -1,6 +1,8 @@
-import { type ReactNode } from 'react';
+import React, { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
+
+export type EnvironmentStatus = 'active' | 'hibernated' | 'hibernating' | 'corrupted' | 'creating';
 
 interface Project {
   id: string;
@@ -15,6 +17,7 @@ interface Project {
   gitRepoName?: string;
   gitSyncStatus?: 'synced' | 'ahead' | 'behind' | 'diverged' | 'error';
   slug?: string;
+  environmentStatus?: EnvironmentStatus;
 }
 
 interface ProjectCardProps {
@@ -49,6 +52,35 @@ export function ProjectCard({
     launch: {
       label: 'Launch',
       className: 'bg-[rgba(var(--status-green-rgb),0.1)] text-[var(--status-green)] border border-[rgba(var(--status-green-rgb),0.2)]'
+    }
+  };
+
+  // Environment status badge configuration
+  const envStatusConfig: Record<EnvironmentStatus, { label: string; icon: string; className: string }> = {
+    active: {
+      label: 'Active',
+      icon: '🟢',
+      className: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+    },
+    hibernated: {
+      label: 'Hibernated',
+      icon: '💤',
+      className: 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+    },
+    hibernating: {
+      label: 'Saving...',
+      icon: '⏳',
+      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+    },
+    corrupted: {
+      label: 'Corrupted',
+      icon: '❌',
+      className: 'bg-red-500/10 text-red-400 border border-red-500/20'
+    },
+    creating: {
+      label: 'Creating...',
+      icon: '⏳',
+      className: 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
     }
   };
 
@@ -110,6 +142,16 @@ export function ProjectCard({
               >
                 {project.name}
               </h3>
+              {/* Environment Status Badge */}
+              {project.environmentStatus && project.environmentStatus !== 'active' && (
+                <div
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs flex-shrink-0 ${envStatusConfig[project.environmentStatus].className}`}
+                  title={`Environment: ${envStatusConfig[project.environmentStatus].label}`}
+                >
+                  <span>{envStatusConfig[project.environmentStatus].icon}</span>
+                  <span className="font-medium text-[10px]">{envStatusConfig[project.environmentStatus].label}</span>
+                </div>
+              )}
               {project.hasGitRepo && (
                 <div className="flex items-center gap-1 px-2 py-0.5 bg-[rgba(var(--status-green-rgb),0.1)] border border-[rgba(var(--status-green-rgb),0.2)] rounded text-xs text-[var(--status-green)] flex-shrink-0">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 256 256">

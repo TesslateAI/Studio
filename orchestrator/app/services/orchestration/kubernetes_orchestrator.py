@@ -96,6 +96,72 @@ class KubernetesOrchestrator(BaseOrchestrator):
         """Get namespace for a project."""
         return self.k8s_client.get_project_namespace(project_id)
 
+    async def _get_tesslate_config_from_pod(
+        self,
+        namespace: str,
+        container_directory: str
+    ) -> Optional[Any]:
+        """
+        Read and parse TESSLATE.md from the file-manager pod.
+
+        In K8s mode, we can't use Docker volumes, so we read directly from the pod.
+
+        Args:
+            namespace: K8s namespace
+            container_directory: Container directory name (e.g., "next-js-15")
+
+        Returns:
+            Parsed BaseConfig or None
+        """
+        from ...services.base_config_parser import parse_tesslate_md
+
+        try:
+            # Find file-manager pod
+            logger.info(f"[K8S] Looking for file-manager pod in namespace {namespace}")
+            pods = self.k8s_client.core_v1.list_namespaced_pod(
+                namespace=namespace,
+                label_selector="app=file-manager"
+            )
+
+            if not pods.items:
+                logger.warning(f"[K8S] No file-manager pod found in {namespace}")
+                return None
+
+            pod_name = pods.items[0].metadata.name
+            logger.info(f"[K8S] Found file-manager pod: {pod_name}")
+
+            # Read TESSLATE.md from the pod
+            tesslate_path = f"/app/{container_directory}/TESSLATE.md"
+            logger.info(f"[K8S] Reading TESSLATE.md from {tesslate_path}")
+
+            result = await asyncio.to_thread(
+                self.k8s_client._exec_in_pod,
+                pod_name,
+                namespace,
+                "file-manager",
+                ["cat", tesslate_path],
+                timeout=10
+            )
+
+            logger.info(f"[K8S] TESSLATE.md read result: {result[:200] if result else 'None'}...")
+
+            if result and not result.startswith("cat:"):
+                config = parse_tesslate_md(result)
+                logger.info(f"[K8S] Parsed config: start_command={config.start_command if config else 'None'}")
+
+                if config and config.validate():
+                    logger.info(f"[K8S] ✅ Validated TESSLATE.md: start_command={config.start_command}")
+                    return config
+                else:
+                    logger.warning(f"[K8S] TESSLATE.md validation failed: {config.validation_error if config else 'no config'}")
+            else:
+                logger.warning(f"[K8S] TESSLATE.md not found or error: {result}")
+
+        except Exception as e:
+            logger.error(f"[K8S] Could not read TESSLATE.md from pod: {e}", exc_info=True)
+
+        return None
+
     # =========================================================================
     # PROJECT ENVIRONMENT LIFECYCLE
     # =========================================================================
@@ -174,7 +240,25 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
             # 8. If hibernated, restore from S3
             if is_hibernated:
-                await self._restore_from_s3(project_id, user_id, namespace)
+                restore_success = await self._restore_from_s3(project_id, user_id, namespace)
+
+                if not restore_success:
+                    # NEVER fall back to git clone - project is corrupted
+                    logger.error(f"[K8S] ❌ Project {project_id} restore FAILED - marking as CORRUPTED")
+
+                    # Delete the namespace since restore failed
+                    try:
+                        await asyncio.to_thread(
+                            self.k8s_client.core_v1.delete_namespace,
+                            name=namespace
+                        )
+                    except Exception:
+                        pass  # Namespace cleanup is best-effort
+
+                    raise RuntimeError(
+                        f"Project restore failed - project is corrupted and requires admin intervention. "
+                        f"The S3 archive is empty or invalid. Please contact support."
+                    )
 
             # Activity tracking is now database-based (via activity_tracker service)
 
@@ -335,11 +419,13 @@ fi
                 )
 
             # Clone from git repository
+            # install_deps=False - dependencies are installed by the container's start_command
+            # This keeps file init fast and non-blocking
             script = generate_git_clone_script(
                 git_url=git_url,
                 branch=git_branch,
                 target_dir=target_dir,
-                install_deps=True
+                install_deps=False
             )
 
             # Execute script in file-manager pod
@@ -349,7 +435,7 @@ fi
                 namespace,
                 "file-manager",
                 ["/bin/sh", "-c", script],
-                timeout=300  # 5 minutes for npm install
+                timeout=60  # Just git clone, should be fast
             )
 
             logger.info(f"[K8S] ✅ Files initialized for {container_directory}")
@@ -390,24 +476,43 @@ fi
         Returns:
             Dict with status and URL
         """
-        from ...services.base_config_parser import (
-            get_base_config_from_cache,
-            generate_startup_command
-        )
-
         project_id = str(project.id)
         namespace = self._get_namespace(project_id)
         container_directory = self._sanitize_name(container.directory or container.name)
 
         logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
 
+        # Import WebSocket manager for status updates
+        from ...routers.chat import get_chat_connection_manager
+        ws_manager = get_chat_connection_manager()
+
+        async def send_progress(phase: str, message: str, progress: int, **kwargs):
+            """Helper to send progress updates via WebSocket."""
+            try:
+                status = {
+                    "container_status": "starting",
+                    "phase": phase,
+                    "message": message,
+                    "progress": progress,
+                    **kwargs
+                }
+                await ws_manager.send_status_update(user_id, project.id, status)
+            except Exception:
+                pass  # Don't fail container start if WebSocket fails
+
         try:
             # Check if project was hibernated (needs S3 restoration)
             is_hibernated = project.environment_status == 'hibernated'
 
+            # Send initial progress
+            await send_progress("creating_environment", "Creating project environment...", 10)
+
             # Ensure environment exists (check K8s namespace)
             namespace_exists = await self.k8s_client.namespace_exists(namespace)
             if not namespace_exists:
+                if is_hibernated:
+                    await send_progress("restoring_files", "Restoring project files from backup...", 20)
+
                 await self.ensure_project_environment(project.id, user_id, is_hibernated=is_hibernated)
 
                 # Update environment_status to 'active' after restore
@@ -416,6 +521,7 @@ fi
                     project.hibernated_at = None
                     await db.commit()
                     logger.info(f"[K8S] Restored hibernated project {project.slug} from S3")
+                    await send_progress("files_restored", "Project files restored successfully", 40)
 
             # CRITICAL: Initialize container files BEFORE starting
             # Skip if project was restored from S3 (files already exist)
@@ -427,6 +533,7 @@ fi
                 if container.base and hasattr(container.base, 'git_repo_url'):
                     git_url = container.base.git_repo_url
 
+                await send_progress("initializing_files", "Setting up project files...", 50)
                 logger.info(f"[K8S] Initializing files for container {container_directory} (git_url={git_url})")
                 await self.initialize_container_files(
                     project_id=project.id,
@@ -437,21 +544,28 @@ fi
                 )
 
             # Get base config for port and startup command
-            base_config = None
-            if container.base:
-                try:
-                    base_config = await asyncio.to_thread(
-                        get_base_config_from_cache,
-                        container.base.slug
-                    )
-                except Exception as e:
-                    logger.debug(f"[K8S] Could not read base config: {e}")
+            # Read TESSLATE.md directly from the file-manager pod
+            base_config = await self._get_tesslate_config_from_pod(namespace, container_directory)
 
             # Determine port and startup command from base config
             port = container.internal_port or (base_config.port if base_config else 3000)
-            startup_command = generate_startup_command(base_config) if base_config else "npm run dev"
+
+            # Get startup command as a string for tmux (convert newlines to &&)
+            if base_config and base_config.start_command:
+                # Convert multi-line commands to single-line shell command
+                startup_command = " && ".join(
+                    line.strip() for line in base_config.start_command.strip().split('\n')
+                    if line.strip() and not line.strip().startswith('#')
+                )
+                logger.info(f"[K8S] ✅ Using TESSLATE.md start_command: {startup_command}")
+            else:
+                # Fallback: generic command that installs deps and starts dev server
+                startup_command = "npm install && npm run dev"
+                logger.warning(f"[K8S] ⚠️ No base_config found, using fallback: {startup_command}")
 
             logger.info(f"[K8S] Container config: port={port}, cmd={startup_command}")
+
+            await send_progress("starting_server", "Starting development server...", 70)
 
             # Create Deployment (NO init containers - files already exist!)
             deployment = create_container_deployment(
@@ -502,6 +616,15 @@ fi
             # Activity tracking is now database-based (via activity_tracker service)
 
             logger.info(f"[K8S] ✅ Container started: {preview_url}")
+
+            # Send ready notification with URL
+            await send_progress(
+                "ready",
+                "Container is ready!",
+                100,
+                container_status="ready",
+                url=preview_url
+            )
 
             return {
                 "status": "running",
@@ -879,24 +1002,62 @@ fi
                 logger.warning("[K8S:HIBERNATE] No file-manager pod, skipping S3 save")
                 return False
 
-            # 2. Create zip in pod (excluding node_modules, .git, etc.)
-            # Use */pattern/* to match in subdirectories (e.g., next-js-15/node_modules)
+            # 2. Create zip in pod - Exclude regeneratable dependencies for fast hibernate
+            # Dependencies are regenerated on restore (npm install, pip install, etc.)
+            # This reduces zip from ~200MB to ~5MB, making hibernate fast
+            zip_start = time.time()
             zip_script = '''
 cd /app
 rm -f /tmp/project.zip
 zip -r -q /tmp/project.zip . \
-    -x "*/node_modules/*" \
     -x "node_modules/*" \
-    -x "*/.git/*" \
-    -x ".git/*" \
-    -x "*/__pycache__/*" \
-    -x "__pycache__/*" \
-    -x "*/.next/*" \
+    -x "*/node_modules/*" \
     -x ".next/*" \
+    -x "*/.next/*" \
+    -x "dist/*" \
+    -x "*/dist/*" \
+    -x "build/*" \
+    -x "*/build/*" \
+    -x ".git/*" \
+    -x "*/.git/*" \
+    -x "__pycache__/*" \
+    -x "*/__pycache__/*" \
     -x "*.pyc" \
+    -x "*.pyo" \
+    -x "venv/*" \
+    -x "*/venv/*" \
+    -x ".venv/*" \
+    -x "*/.venv/*" \
+    -x "*.egg-info/*" \
+    -x "*/*.egg-info/*" \
+    -x ".eggs/*" \
+    -x "target/*" \
+    -x "*/target/*" \
+    -x "vendor/*" \
+    -x "*/vendor/*" \
+    -x ".gradle/*" \
+    -x "*/.gradle/*" \
+    -x "bin/*" \
+    -x "*/bin/*" \
+    -x "obj/*" \
+    -x "*/obj/*" \
+    -x "_build/*" \
+    -x "*/_build/*" \
+    -x "deps/*" \
+    -x "*/deps/*" \
+    -x "*.log" \
     -x ".DS_Store" \
-    -x "*.log"
-echo "ZIP_SIZE=$(stat -f%z /tmp/project.zip 2>/dev/null || stat -c%s /tmp/project.zip)"
+    -x "*.tmp" \
+    -x ".cache/*" \
+    -x "*/.cache/*" \
+    -x ".npm/*" \
+    -x ".yarn/*" \
+    -x ".pnpm-store/*" \
+    -x "coverage/*" \
+    -x "*/coverage/*" \
+    -x ".nyc_output/*"
+ZIP_SIZE=$(stat -f%z /tmp/project.zip 2>/dev/null || stat -c%s /tmp/project.zip)
+echo "ZIP_SIZE_BYTES=$ZIP_SIZE"
 '''
             result = await asyncio.to_thread(
                 self.k8s_client._exec_in_pod,
@@ -904,9 +1065,10 @@ echo "ZIP_SIZE=$(stat -f%z /tmp/project.zip 2>/dev/null || stat -c%s /tmp/projec
                 namespace,
                 "file-manager",
                 ["/bin/sh", "-c", zip_script],
-                timeout=120
+                timeout=60  # 1 min - much faster without node_modules
             )
-            logger.info(f"[K8S:HIBERNATE] Zip created in pod: {result.strip()}")
+            zip_duration = time.time() - zip_start
+            logger.info(f"[K8S:HIBERNATE] Zip created in pod ({zip_duration:.1f}s): {result.strip()}")
 
             # 3. Copy zip from pod to backend temp directory
             temp_fd, temp_zip = tempfile.mkstemp(suffix='.zip', prefix='tesslate-hibernate-')
@@ -921,8 +1083,28 @@ echo "ZIP_SIZE=$(stat -f%z /tmp/project.zip 2>/dev/null || stat -c%s /tmp/projec
                 timeout=300  # 5 min for large projects
             )
 
-            file_size_mb = os.path.getsize(temp_zip) / (1024 * 1024)
-            logger.info(f"[K8S:HIBERNATE] Copied zip to backend: {file_size_mb:.2f} MB")
+            file_size_bytes = os.path.getsize(temp_zip)
+            file_size_mb = file_size_bytes / (1024 * 1024)
+            logger.info(f"[K8S:HIBERNATE] Copied zip to backend: {file_size_mb:.2f} MB ({file_size_bytes} bytes)")
+
+            # CRITICAL: Validate archive is valid before uploading
+            # We check file count instead of size - a minimal project with just package.json
+            # could be under 1KB but is still valid
+            import zipfile
+            try:
+                with zipfile.ZipFile(temp_zip, 'r') as zf:
+                    file_list = zf.namelist()
+                    file_count = len(file_list)
+                    if file_count == 0:
+                        logger.error(f"[K8S:HIBERNATE] ❌ ZIP has no files - refusing to save (corrupt archive)")
+                        return False
+                    # Log first few files for debugging
+                    sample_files = file_list[:5]
+                    logger.info(f"[K8S:HIBERNATE] ✅ Archive validated: {file_count} files, {file_size_bytes} bytes")
+                    logger.debug(f"[K8S:HIBERNATE] Sample files: {sample_files}")
+            except zipfile.BadZipFile:
+                logger.error(f"[K8S:HIBERNATE] ❌ Invalid ZIP file - refusing to save")
+                return False
 
             # 4. Upload to S3 using s3_manager (boto3 - credentials in backend only)
             from ..s3_manager import get_s3_manager
@@ -1010,6 +1192,25 @@ echo "ZIP_SIZE=$(stat -f%z /tmp/project.zip 2>/dev/null || stat -c%s /tmp/projec
 
             file_size_mb = os.path.getsize(temp_zip) / (1024 * 1024)
             logger.info(f"[K8S:RESTORE] Downloaded from S3: {file_size_mb:.2f} MB")
+
+            # CRITICAL: Validate downloaded archive is not empty/corrupt
+            if file_size_mb < 0.01:  # Less than 10KB is corrupt
+                logger.error(f"[K8S:RESTORE] ❌ CORRUPT ARCHIVE - Downloaded {file_size_mb:.4f} MB")
+                logger.error(f"[K8S:RESTORE] ❌ Project {project_id} is CORRUPTED - requires admin intervention")
+                return False  # Do NOT continue, do NOT fall back to git clone
+
+            # Validate zip is extractable
+            import zipfile
+            try:
+                with zipfile.ZipFile(temp_zip, 'r') as zf:
+                    file_count = len(zf.namelist())
+                    if file_count == 0:
+                        logger.error(f"[K8S:RESTORE] ❌ ZIP has no files - project is CORRUPTED")
+                        return False
+                    logger.info(f"[K8S:RESTORE] ✅ Archive validated: {file_count} files, {file_size_mb:.2f} MB")
+            except zipfile.BadZipFile:
+                logger.error(f"[K8S:RESTORE] ❌ Invalid ZIP file - project is CORRUPTED")
+                return False
 
             # 3. Get file-manager pod
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -1432,6 +1633,10 @@ echo "FILES_RESTORED=$(ls -1 /app | wc -l)"
 
                 logger.info(f"[K8S:CLEANUP] Found {len(idle_projects)} idle projects")
 
+                # Import WebSocket manager for status updates
+                from ...routers.chat import get_chat_connection_manager
+                ws_manager = get_chat_connection_manager()
+
                 for project in idle_projects:
                     if project.last_activity:
                         idle_minutes = (datetime.now(timezone.utc) - project.last_activity).total_seconds() / 60
@@ -1440,6 +1645,24 @@ echo "FILES_RESTORED=$(ls -1 /app | wc -l)"
                         logger.info(f"[K8S:CLEANUP] Hibernating project {project.slug} (no activity tracked)")
 
                     try:
+                        # Mark as hibernating and notify user
+                        project.environment_status = 'hibernating'
+                        await db.commit()
+
+                        # Send WebSocket notification to redirect user
+                        try:
+                            await ws_manager.send_status_update(
+                                user_id=project.owner_id,
+                                project_id=project.id,
+                                status={
+                                    "environment_status": "hibernating",
+                                    "message": "Saving project files...",
+                                    "action": "redirect_to_projects"
+                                }
+                            )
+                        except Exception as ws_err:
+                            logger.debug(f"[K8S:CLEANUP] Could not send WebSocket notification: {ws_err}")
+
                         # Hibernate project (S3 upload + delete namespace)
                         await self.hibernate_project(project.id, project.owner_id)
 
@@ -1447,6 +1670,19 @@ echo "FILES_RESTORED=$(ls -1 /app | wc -l)"
                         project.environment_status = 'hibernated'
                         project.hibernated_at = datetime.now(timezone.utc)
                         await db.commit()
+
+                        # Send completion notification
+                        try:
+                            await ws_manager.send_status_update(
+                                user_id=project.owner_id,
+                                project_id=project.id,
+                                status={
+                                    "environment_status": "hibernated",
+                                    "message": "Project saved successfully"
+                                }
+                            )
+                        except Exception as ws_err:
+                            logger.debug(f"[K8S:CLEANUP] Could not send completion notification: {ws_err}")
 
                         hibernated.append(str(project.id))
                         logger.info(f"[K8S:CLEANUP] ✅ Hibernated {project.slug}")

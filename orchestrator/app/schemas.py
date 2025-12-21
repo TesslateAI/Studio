@@ -124,6 +124,8 @@ class Project(ProjectBase):
     network_name: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
+    environment_status: Optional[str] = None  # 'active', 'hibernated', 'hibernating', 'corrupted'
+    hibernated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

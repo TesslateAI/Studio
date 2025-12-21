@@ -10,6 +10,7 @@ export { AgentTag } from './AgentTag';
 export { ToggleSwitch } from './ToggleSwitch';
 export { Dropdown } from './Dropdown';
 export { ProjectCard } from './ProjectCard';
+export type { EnvironmentStatus } from './ProjectCard';
 export { MarketplaceCard } from './MarketplaceCard';
 export { default as HelpModal } from './HelpModal';
 export { Breadcrumbs } from './Breadcrumbs';

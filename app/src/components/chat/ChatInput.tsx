@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
-import { type EditMode } from './EditModeStatus';
+import { EditModeStatus, type EditMode } from './EditModeStatus';
 import { Gear } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';

@@ -6,7 +6,7 @@ import {
   MobileMenu,
   ProjectCard
 } from '../components/ui';
-import type { Status } from '../components/ui';
+import type { Status, EnvironmentStatus } from '../components/ui';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
@@ -36,6 +36,7 @@ interface Project {
   updated_at: string;
   status?: Status;
   agents?: Array<{ icon: string; name: string }>;
+  environment_status?: EnvironmentStatus;
 }
 
 export default function Dashboard() {
@@ -74,6 +75,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadProjects();
+  }, []);
+
+  // Poll for project status updates every 60 seconds
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      loadProjects();
+    }, 60000);
+
+    return () => clearInterval(pollInterval);
   }, []);
 
   const loadProjects = async () => {
@@ -532,7 +542,8 @@ export default function Dashboard() {
                     agents: project.agents || [],
                     lastUpdated: formatDate(project.updated_at),
                     isLive: project.status === 'launch',
-                    slug: project.slug
+                    slug: project.slug,
+                    environmentStatus: project.environment_status
                   }}
                   onOpen={() => navigate(`/project/${project.slug}`)}
                   onDelete={() => deleteProject(project.id)}

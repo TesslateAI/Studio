@@ -379,6 +379,7 @@ kubectl logs -n proj-<uuid> <pod-name> -c dev-server
 - **Domain**: your-domain.com (Cloudflare DNS)
 - **ECR Registry**: <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 - **S3 Bucket**: tesslate-project-storage-prod (for project files)
+- **AWS User**: Always use `<AWS_IAM_USER>` credentials for deployments
 
 ### Initial Setup / Login
 

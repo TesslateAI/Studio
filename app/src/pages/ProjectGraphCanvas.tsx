@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { debounce } from 'lodash';
 import {
@@ -1515,7 +1515,6 @@ export const ProjectGraphCanvas = () => {
           projectFiles={files}
           projectName={project?.name}
           sidebarExpanded={isLeftSidebarExpanded}
-          containerId={selectedContainer?.id}
         />
       ) : (
         <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">

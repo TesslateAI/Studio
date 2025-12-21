@@ -320,7 +320,9 @@ def create_container_deployment(
         # Run dev server in tmux session so agent can stop/restart without crashing container
         # PID 1 is immortal tail -f, dev server runs in tmux session "main"
         # Agent can: tmux send-keys -t main C-c (stop), tmux send-keys -t main 'npm run dev' Enter (start)
-        args=[f"cd {working_dir} && ([ -d node_modules ] || npm install) && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"],
+        # Dependencies are installed during file init (generate_git_clone_script)
+        # No need to check/install here - just start the dev server
+        args=[f"cd {working_dir} && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"],
         ports=[
             client.V1ContainerPort(
                 container_port=port,
@@ -727,38 +729,63 @@ fi
     return f'''#!/bin/sh
 set -e
 
+TARGET_DIR="{target_dir}"
+
 echo "[CLONE] ======================================"
 echo "[CLONE] Cloning repository"
 echo "[CLONE] URL: {git_url}"
 echo "[CLONE] Branch: {branch}"
-echo "[CLONE] Target: {target_dir}"
+echo "[CLONE] Target: $TARGET_DIR"
 echo "[CLONE] ======================================"
 
 # Clear target directory contents (target may be a mount point that cannot be removed)
-rm -rf {target_dir}/* {target_dir}/.[!.]* 2>/dev/null || true
+rm -rf "$TARGET_DIR"/* "$TARGET_DIR"/.[!.]* 2>/dev/null || true
 
 # Clone to a temporary directory first
 TEMP_CLONE="/tmp/git-clone-$$"
 rm -rf "$TEMP_CLONE"
+echo "[CLONE] Running git clone..."
 git clone --depth 1 --branch {branch} --single-branch {git_url} "$TEMP_CLONE"
+
+# Verify clone succeeded
+if [ ! -f "$TEMP_CLONE/package.json" ] && [ ! -f "$TEMP_CLONE/requirements.txt" ] && [ ! -f "$TEMP_CLONE/go.mod" ]; then
+    echo "[CLONE] ERROR: Clone failed - no package.json, requirements.txt, or go.mod found"
+    ls -la "$TEMP_CLONE/" 2>/dev/null || echo "[CLONE] Temp directory is empty or doesn't exist"
+    exit 1
+fi
+
+echo "[CLONE] Clone successful, copying files..."
 
 # Remove .git folder to save space
 rm -rf "$TEMP_CLONE/.git"
 
-# Move all files (including hidden files) to target directory
-mv "$TEMP_CLONE"/* {target_dir}/ 2>/dev/null || true
-mv "$TEMP_CLONE"/.[!.]* {target_dir}/ 2>/dev/null || true
+# Use cp -a with trailing dot to copy ALL files including hidden ones reliably
+# This works better than mv with glob patterns in BusyBox
+cp -a "$TEMP_CLONE"/. "$TARGET_DIR"/
+
+# Fix ownership: change files to node:node for dev container compatibility
+# File-manager runs as root, but dev containers run as node user
+chown -R node:node "$TARGET_DIR" 2>/dev/null || echo "[CLONE] Warning: could not chown to node:node"
 
 # Cleanup temp directory
 rm -rf "$TEMP_CLONE"
 
+# Verify files were copied
+if [ ! -f "$TARGET_DIR/package.json" ] && [ ! -f "$TARGET_DIR/requirements.txt" ] && [ ! -f "$TARGET_DIR/go.mod" ]; then
+    echo "[CLONE] ERROR: Copy failed - target directory is empty"
+    ls -la "$TARGET_DIR/" 2>/dev/null || true
+    exit 1
+fi
+
+echo "[CLONE] Files copied successfully"
+
 # Move to target directory for dependency install
-cd {target_dir}
+cd "$TARGET_DIR"
 {install_section}
 echo "[CLONE] ======================================"
 echo "[CLONE] ✅ Clone complete"
 echo "[CLONE] Files:"
-ls -la {target_dir}/ | head -20
+ls -la "$TARGET_DIR/" | head -20
 echo "[CLONE] ======================================"
 '''
 

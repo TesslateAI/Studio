@@ -627,7 +627,7 @@ function AgentsTab({
               is_published: false,
               usage_count: 0
             };
-            setEditingAgent(newAgent);
+            onEdit(newAgent);
           }}
           className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors flex items-center gap-2"
         >
