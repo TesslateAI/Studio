@@ -24,6 +24,7 @@ pip-delete-this-directory.txt
 .mypy_cache/
 .dmypy.json
 dmypy.json
+doc_collector.py
 
 # Node.js / Frontend
 node_modules/

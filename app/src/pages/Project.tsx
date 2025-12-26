@@ -955,6 +955,7 @@ export default function Project() {
         <ChatContainer
           projectId={project?.id}
           containerId={containerId || undefined}
+          viewContext="builder"
           agents={agents}
           currentAgent={agents[0]}
           onSelectAgent={(agent) => console.log('Selected agent:', agent)}

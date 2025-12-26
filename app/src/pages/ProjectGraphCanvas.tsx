@@ -1116,6 +1116,56 @@ export const ProjectGraphCanvas = () => {
     }
   }, [handleOpenBuilder]);
 
+  // Edge click handler - selects the edge for deletion
+  const handleEdgeClick = useCallback((_: React.MouseEvent, _edge: Edge) => {
+    // Edge is automatically selected by ReactFlow when clicked
+    // Show a visual hint that Del key can delete it
+    toast(`Press Delete to remove this connection`, { id: 'edge-hint', duration: 2000, icon: '🗑️' });
+  }, []);
+
+  // Edge deletion handler - called when Delete key is pressed on selected edges
+  const handleEdgesDelete = useCallback(async (deletedEdges: Edge[]) => {
+    for (const edge of deletedEdges) {
+      try {
+        // Check if this is a browser preview edge
+        if (edge.type === 'browser_preview' || edge.id.startsWith('browser-edge-')) {
+          // Find the browser preview node and disconnect it
+          const browserPreviewId = edge.target;
+          await api.delete(`/api/projects/${slugRef.current}/browser-previews/${browserPreviewId}/disconnect`);
+
+          // Update the browser node to remove connected container data
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === browserPreviewId
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      connectedContainerId: undefined,
+                      connectedContainerName: undefined,
+                      connectedPort: undefined,
+                      baseUrl: undefined,
+                    },
+                  }
+                : node
+            )
+          );
+        } else {
+          // Regular container-to-container connection - delete from backend
+          await api.delete(`/api/projects/${slugRef.current}/containers/connections/${edge.id}`);
+        }
+      } catch (error) {
+        console.error('Failed to delete connection:', error);
+        toast.error('Failed to delete connection');
+        return; // Stop processing further deletions on error
+      }
+    }
+
+    // Remove edges from local state
+    setEdges((eds) => eds.filter((e) => !deletedEdges.some((de) => de.id === e.id)));
+    toast.success(`Deleted ${deletedEdges.length} connection(s)`);
+  }, [setNodes, setEdges]);
+
   if (!project) {
     return (
       <div className="flex items-center justify-center h-full bg-[var(--bg)]">
@@ -1417,6 +1467,8 @@ export const ProjectGraphCanvas = () => {
                 onNodeDragStop={handleNodeDragStop}
                 onNodeClick={handleNodeClick}
                 onNodeDoubleClick={handleNodeDoubleClick}
+                onEdgeClick={handleEdgeClick}
+                onEdgesDelete={handleEdgesDelete}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 theme={theme}
@@ -1508,6 +1560,7 @@ export const ProjectGraphCanvas = () => {
         <ChatContainer
           projectId={project?.id}
           containerId={selectedContainer?.id}
+          viewContext="graph"
           agents={agents}
           currentAgent={agents[0]}
           onSelectAgent={(agent) => console.log('Selected agent:', agent)}

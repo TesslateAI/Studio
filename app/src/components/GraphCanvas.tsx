@@ -27,6 +27,8 @@ interface GraphCanvasProps {
   onNodeDragStop: (event: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent, node: Node) => void;
   onNodeClick: (event: React.MouseEvent, node: Node) => void;
   onNodeDoubleClick: (event: React.MouseEvent, node: Node) => void;
+  onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void;
+  onEdgesDelete?: (edges: Edge[]) => void;
   nodeTypes: NodeTypes;
   edgeTypes: EdgeTypes;
   theme: 'dark' | 'light';
@@ -51,6 +53,8 @@ const GraphCanvasComponent = ({
   onNodeDragStop,
   onNodeClick,
   onNodeDoubleClick,
+  onEdgeClick,
+  onEdgesDelete,
   nodeTypes,
   edgeTypes,
   theme,
@@ -73,6 +77,8 @@ const GraphCanvasComponent = ({
       onNodeDragStop={onNodeDragStop}
       onNodeClick={onNodeClick}
       onNodeDoubleClick={onNodeDoubleClick}
+      onEdgeClick={onEdgeClick}
+      onEdgesDelete={onEdgesDelete}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       defaultViewport={DEFAULT_VIEWPORT}
@@ -90,15 +96,15 @@ const GraphCanvasComponent = ({
       elevateNodesOnSelect={false}
       nodesDraggable
       nodesConnectable
-      // Edge performance optimizations
+      // Edge configuration - enable selection for deletion
       connectionLineStyle={CONNECTION_LINE_STYLE}
-      edgesFocusable={false}
+      edgesFocusable
       edgesReconnectable={false}
       // Disable auto-pan during drag (major performance gain)
       autoPanOnNodeDrag={false}
       autoPanOnConnect={false}
-      // Disable keyboard shortcuts during drag
-      deleteKeyCode={null}
+      // Enable Delete key for edge deletion
+      deleteKeyCode="Delete"
       selectionKeyCode={null}
       multiSelectionKeyCode={null}
       // Disable snapping for smoother drag
@@ -140,7 +146,9 @@ const arePropsEqual = (prev: GraphCanvasProps, next: GraphCanvasProps): boolean 
     prev.edges === next.edges &&
     prev.theme === next.theme &&
     prev.nodeTypes === next.nodeTypes &&
-    prev.edgeTypes === next.edgeTypes
+    prev.edgeTypes === next.edgeTypes &&
+    prev.onEdgeClick === next.onEdgeClick &&
+    prev.onEdgesDelete === next.onEdgesDelete
   );
 };
 

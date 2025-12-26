@@ -20,6 +20,14 @@ interface BrowserPreviewNodeData extends Record<string, unknown> {
   onDisconnect?: (id: string) => void;
 }
 
+// Resize handle positions
+type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+const MIN_WIDTH = 280;
+const MIN_HEIGHT = 200;
+const MAX_WIDTH = 1200;
+const MAX_HEIGHT = 900;
+
 type BrowserPreviewNodeProps = Node<BrowserPreviewNodeData> & {
   id: string;
   data: BrowserPreviewNodeData;
@@ -47,9 +55,19 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
   const [inputUrl, setInputUrl] = useState('/');
   const [history, setHistory] = useState<string[]>(['/']);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const [isExpanded, setIsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Resize state
+  const [size, setSize] = useState({ width: 320, height: 240 });
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeRef = useRef<{
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+    handle: ResizeHandle;
+  } | null>(null);
 
   // Build the full URL based on connected container
   const getFullUrl = useCallback((path: string) => {
@@ -114,11 +132,69 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
     setIsLoading(false);
   }, []);
 
+  // Resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent, handle: ResizeHandle) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    resizeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startWidth: size.width,
+      startHeight: size.height,
+      handle,
+    };
+  }, [size]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeRef.current) return;
+
+      const { startX, startY, startWidth, startHeight, handle } = resizeRef.current;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+
+      // Calculate new dimensions based on which handle is being dragged
+      if (handle.includes('e')) {
+        newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + deltaX));
+      }
+      if (handle.includes('w')) {
+        newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth - deltaX));
+      }
+      if (handle.includes('s')) {
+        newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startHeight + deltaY));
+      }
+      if (handle.includes('n')) {
+        newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, startHeight - deltaY));
+      }
+
+      setSize({ width: newWidth, height: newHeight });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      resizeRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
   const isConnected = !!data.connectedContainerId && !!data.baseUrl;
 
   return (
     <div
-      className={`relative group ${isExpanded ? 'z-50' : ''}`}
+      className="relative group"
       style={{ contain: 'layout style paint' }}
     >
       {/* Connection handle - connects FROM containers TO this browser */}
@@ -131,10 +207,44 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
 
       {/* Browser window */}
       <div
-        className={`bg-[#1a1a1a] rounded-xl overflow-hidden shadow-2xl border border-[#333] ${
-          isExpanded ? 'w-[800px] h-[600px]' : 'w-[320px] h-[240px]'
-        } transition-all duration-200`}
+        className="bg-[#1a1a1a] rounded-xl overflow-hidden shadow-2xl border border-[#333]"
+        style={{ width: size.width, height: size.height }}
       >
+        {/* Resize handles */}
+        {/* Edge handles */}
+        <div
+          className="absolute top-0 left-2 right-2 h-1 cursor-n-resize hover:bg-blue-500/30 z-10"
+          onMouseDown={(e) => handleResizeStart(e, 'n')}
+        />
+        <div
+          className="absolute bottom-0 left-2 right-2 h-1 cursor-s-resize hover:bg-blue-500/30 z-10"
+          onMouseDown={(e) => handleResizeStart(e, 's')}
+        />
+        <div
+          className="absolute left-0 top-2 bottom-2 w-1 cursor-w-resize hover:bg-blue-500/30 z-10"
+          onMouseDown={(e) => handleResizeStart(e, 'w')}
+        />
+        <div
+          className="absolute right-0 top-2 bottom-2 w-1 cursor-e-resize hover:bg-blue-500/30 z-10"
+          onMouseDown={(e) => handleResizeStart(e, 'e')}
+        />
+        {/* Corner handles */}
+        <div
+          className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize hover:bg-blue-500/30 z-20"
+          onMouseDown={(e) => handleResizeStart(e, 'nw')}
+        />
+        <div
+          className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize hover:bg-blue-500/30 z-20"
+          onMouseDown={(e) => handleResizeStart(e, 'ne')}
+        />
+        <div
+          className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize hover:bg-blue-500/30 z-20"
+          onMouseDown={(e) => handleResizeStart(e, 'sw')}
+        />
+        <div
+          className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize hover:bg-blue-500/30 z-20"
+          onMouseDown={(e) => handleResizeStart(e, 'se')}
+        />
         {/* Browser chrome / toolbar */}
         <div className="bg-[#252525] border-b border-[#333] px-2 py-1.5">
           {/* Window controls and title */}
@@ -146,14 +256,14 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
                 title="Close browser"
               />
               <button
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={() => setSize({ width: 320, height: 240 })}
                 className="w-3 h-3 rounded-full bg-yellow-500 hover:bg-yellow-400 transition-colors"
-                title={isExpanded ? 'Minimize' : 'Expand'}
+                title="Reset to default size"
               />
               <button
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={() => setSize({ width: 800, height: 600 })}
                 className="w-3 h-3 rounded-full bg-green-500 hover:bg-green-400 transition-colors"
-                title={isExpanded ? 'Minimize' : 'Expand'}
+                title="Expand to large size"
               />
             </div>
             <div className="flex-1 text-center">
@@ -220,11 +330,13 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
 
             {/* Expand/collapse */}
             <button
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={() => setSize(prev =>
+                prev.width >= 600 ? { width: 320, height: 240 } : { width: 800, height: 600 }
+              )}
               className="p-1 rounded hover:bg-[#333] transition-colors"
-              title={isExpanded ? 'Minimize' : 'Expand'}
+              title={size.width >= 600 ? 'Minimize' : 'Expand'}
             >
-              {isExpanded ? (
+              {size.width >= 600 ? (
                 <ArrowsIn size={12} className="text-gray-400" />
               ) : (
                 <ArrowsOut size={12} className="text-gray-400" />
@@ -234,7 +346,7 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
         </div>
 
         {/* Browser viewport */}
-        <div className="relative bg-white" style={{ height: isExpanded ? 'calc(100% - 52px)' : 'calc(100% - 52px)' }}>
+        <div className="relative bg-white" style={{ height: 'calc(100% - 52px)' }}>
           {isConnected ? (
             <>
               {isLoading && (

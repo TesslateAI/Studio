@@ -1129,10 +1129,25 @@ async def agent_chat_stream(
                 db=db
             )
 
-            # 4. Create agent via factory
+            # 4. Create view-scoped tool registry if view_context is provided
+            tools_override = None
+            if request.view_context:
+                from ..agent.tools.view_context import ViewContext
+                from ..agent.tools.view_scoped_factory import create_view_scoped_registry
+
+                view_context = ViewContext.from_string(request.view_context)
+                tools_override = create_view_scoped_registry(
+                    view_context=view_context,
+                    project_id=request.project_id,
+                    container_id=request.container_id
+                )
+                logger.info(f"[SSE-AGENT] Created view-scoped registry for view: {view_context.value}")
+
+            # 5. Create agent via factory
             agent_instance = await create_agent_from_db_model(
                 agent_model=agent_model,
-                model_adapter=model_adapter
+                model_adapter=model_adapter,
+                tools_override=tools_override
             )
 
             # Set max_iterations
@@ -1175,7 +1190,8 @@ async def agent_chat_stream(
                 "edit_mode": request.edit_mode,
                 "container_id": container_id,
                 "container_name": container_name,
-                "project_slug": project_slug
+                "project_slug": project_slug,
+                "view_context": request.view_context  # UI view for scoped tools
             }
 
             # Accumulate results for database persistence

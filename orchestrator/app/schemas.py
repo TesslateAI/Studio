@@ -439,6 +439,7 @@ class AgentChatRequest(BaseModel):
     max_iterations: Optional[int] = 20
     minimal_prompts: Optional[bool] = False
     edit_mode: Optional[str] = 'ask'  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)
+    view_context: Optional[str] = None  # UI view context: 'graph', 'builder', 'terminal', 'kanban'
 
     @field_validator('message')
     @classmethod
@@ -455,6 +456,16 @@ class AgentChatRequest(BaseModel):
         if v not in ['allow', 'ask', 'plan']:
             raise ValueError('edit_mode must be "allow", "ask", or "plan"')
         return v
+
+    @field_validator('view_context')
+    @classmethod
+    def validate_view_context(cls, v):
+        if v is None:
+            return v
+        valid_views = ['graph', 'builder', 'terminal', 'kanban']
+        if v.lower() not in valid_views:
+            raise ValueError(f'view_context must be one of: {", ".join(valid_views)}')
+        return v.lower()
 
 
 class ToolCallDetail(BaseModel):

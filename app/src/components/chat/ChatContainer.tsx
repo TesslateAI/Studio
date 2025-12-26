@@ -57,6 +57,7 @@ interface ProjectFile {
 interface ChatContainerProps {
   projectId: number;
   containerId?: string;  // Container ID for container-scoped agents
+  viewContext?: 'graph' | 'builder' | 'terminal' | 'kanban';  // UI view context for scoped tools
   agents: Agent[];
   currentAgent: Agent;
   onSelectAgent: (agent: Agent) => void;
@@ -70,6 +71,7 @@ interface ChatContainerProps {
 export function ChatContainer({
   projectId,
   containerId,
+  viewContext,
   agents: initialAgents,
   currentAgent: initialCurrentAgent,
   onSelectAgent,
@@ -530,7 +532,8 @@ export function ChatContainer({
       project_id: projectId,
       container_id: containerId,  // Container ID for scoped file access
       agent_id: currentAgent.backendId,  // Include agent_id
-      edit_mode: editMode  // Include edit mode
+      edit_mode: editMode,  // Include edit mode
+      view_context: viewContext  // UI view context for scoped tools
     }));
   };
 
@@ -626,6 +629,7 @@ export function ChatContainer({
           agent_id: currentAgent.backendId?.toString(),
           max_iterations: 20,
           edit_mode: editMode,
+          view_context: viewContext,  // UI view context for scoped tools
         },
         (event) => {
           if (event.type === 'agent_step') {

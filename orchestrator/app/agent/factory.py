@@ -36,20 +36,23 @@ AGENT_CLASS_MAP: Dict[str, Type[AbstractAgent]] = {
 
 async def create_agent_from_db_model(
     agent_model: MarketplaceAgentModel,
-    model_adapter=None
+    model_adapter=None,
+    tools_override=None
 ) -> AbstractAgent:
     """
     Factory function to create an agent instance from its database model.
 
     This function:
     1. Looks up the agent class based on agent_type
-    2. Creates a scoped tool registry if tools are specified
+    2. Creates a scoped tool registry if tools are specified (or uses override)
     3. Instantiates the agent with the appropriate configuration
     4. Returns the ready-to-use agent instance
 
     Args:
         agent_model: The MarketplaceAgent database model
         model_adapter: Optional ModelAdapter for IterativeAgent
+        tools_override: Optional pre-configured tool registry (e.g., ViewScopedToolRegistry)
+                       If provided, this takes precedence over agent_model.tools
 
     Returns:
         An instantiated agent ready to run
@@ -84,9 +87,14 @@ async def create_agent_from_db_model(
 
     logger.info(f"[AgentFactory] Creating agent '{agent_model.name}' of type '{agent_type_str}'")
 
-    # Create scoped tool registry if tools are defined
+    # Determine tool registry to use
+    # Priority: tools_override > agent_model.tools > global registry
     tools = None
-    if agent_model.tools:
+    if tools_override is not None:
+        # Use the provided tool registry (e.g., ViewScopedToolRegistry)
+        tools = tools_override
+        logger.info(f"[AgentFactory] Using provided tools_override registry")
+    elif agent_model.tools:
         logger.info(f"[AgentFactory] Creating scoped tool registry with tools: {agent_model.tools}")
         # Pass custom tool configurations if available
         tool_configs = agent_model.tool_configs if hasattr(agent_model, 'tool_configs') else None

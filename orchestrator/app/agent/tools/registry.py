@@ -19,6 +19,7 @@ class ToolCategory(Enum):
     SHELL = "shell_commands"
     PROJECT = "project_management"
     BUILD = "build_operations"
+    VIEW_GRAPH = "graph_view_tools"  # Tools only available in graph/architecture view
 
 
 @dataclass
