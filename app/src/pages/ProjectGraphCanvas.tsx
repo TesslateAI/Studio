@@ -26,6 +26,7 @@ import {
   Gear,
   Article,
   Kanban,
+  X,
 } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';

@@ -1,0 +1,157 @@
+stateDiagram-v2
+    [*] --> ProjectCreation: User creates project
+
+    state ProjectCreation {
+        [*] --> CreateDBRecord
+        CreateDBRecord --> CopyTemplate: Copy base template files
+        CopyTemplate --> CreateContainerModels: Create Container models in DB
+        CreateContainerModels --> GenerateManifests: Generate docker-compose.yml<br/>or K8s manifests
+        GenerateManifests --> [*]
+    }
+
+    ProjectCreation --> NamespaceCreation: Start project
+
+    state NamespaceCreation {
+        [*] --> CheckMode
+        CheckMode --> DockerMode: DEPLOYMENT_MODE=docker
+        CheckMode --> K8sMode: DEPLOYMENT_MODE=kubernetes
+
+        state DockerMode {
+            [*] --> CreateDockerNetwork
+            CreateDockerNetwork --> ConnectTraefik
+            ConnectTraefik --> [*]
+        }
+
+        state K8sMode {
+            [*] --> CreateNamespace: Create proj-{uuid} namespace
+            CreateNamespace --> ApplyNetworkPolicy: Isolate namespace
+            ApplyNetworkPolicy --> CreatePVC: Create PersistentVolumeClaim
+            CreatePVC --> CreateFileManagerPod: Always-running file manager
+            CreateFileManagerPod --> [*]
+        }
+
+        DockerMode --> [*]
+        K8sMode --> [*]
+    }
+
+    NamespaceCreation --> ContainerStopped
+
+    state "Container Stopped" as ContainerStopped {
+        [*] --> NoResources: No pod/container running
+    }
+
+    ContainerStopped --> ContainerStarting: Start container
+    ContainerStopped --> ProjectDeleted: Delete project
+
+    state "Container Starting" as ContainerStarting {
+        [*] --> CreateDeployment: Create Deployment manifest
+
+        state "Init Container: Hydrate" as InitHydrate {
+            [*] --> CheckS3: Check if project exists in S3
+            CheckS3 --> DownloadS3: Download from S3
+            CheckS3 --> CopyTemplate: Use template if new
+            DownloadS3 --> ExtractToPVC
+            CopyTemplate --> ExtractToPVC
+            ExtractToPVC --> [*]: PVC populated
+        }
+
+        CreateDeployment --> InitHydrate
+        InitHydrate --> StartMainContainer
+        StartMainContainer --> WaitForReady: Health check probe
+        WaitForReady --> [*]
+    }
+
+    ContainerStarting --> ContainerRunning: Pod ready
+    ContainerStarting --> ContainerFailed: Pod error
+
+    state "Container Running" as ContainerRunning {
+        [*] --> ServingTraffic
+
+        state "Dev Server Active" as ServingTraffic {
+            [*] --> HandleRequests: npm run dev / vite
+            HandleRequests --> LocalPVCIO: Fast local I/O
+            LocalPVCIO --> HandleRequests
+        }
+
+        ServingTraffic --> CheckConnections
+
+        state "Container Connections" as CheckConnections {
+            [*] --> EnvInjection: ENV_INJECTION:<br/>Set environment variables
+            EnvInjection --> HttpApi: HTTP_API:<br/>Make HTTP calls
+            HttpApi --> DatabaseConn: DATABASE:<br/>Connection string
+        }
+    }
+
+    ContainerRunning --> ContainerStopped: Stop container
+    ContainerRunning --> ContainerFailed: Runtime error
+
+    state "Container Failed" as ContainerFailed {
+        [*] --> CrashLoopBackOff: Pod restart loop
+        CrashLoopBackOff --> ImagePullError: Cannot pull image
+        CrashLoopBackOff --> RuntimeError: Application crash
+        CrashLoopBackOff --> HealthCheckFail: Readiness probe fail
+    }
+
+    ContainerFailed --> ContainerStopped: Manual stop
+    ContainerFailed --> ContainerStarting: Retry start
+
+    ContainerStopped --> Dehydration: Cleanup/Hibernate
+
+    state "Dehydration Process" as Dehydration {
+        [*] --> DetectIdle: Cleanup cronjob detects idle
+        DetectIdle --> TriggerPreStop: Send SIGTERM to pod
+
+        state "PreStop Hook" as PreStopHook {
+            [*] --> TarProject: Create tarball of project
+            TarProject --> UploadS3: Upload to S3
+            UploadS3 --> [*]: Project preserved
+        }
+
+        TriggerPreStop --> PreStopHook
+        PreStopHook --> DeletePod
+        DeletePod --> [*]
+    }
+
+    Dehydration --> ContainerStopped: Resources freed
+
+    state "Ingress Creation" as IngressState {
+        [*] --> GenerateRules: Create Ingress rules
+        GenerateRules --> DockerTraefik: Docker: Traefik labels<br/>{container}.localhost
+        GenerateRules --> K8sIngress: K8s: Ingress manifest<br/>{container}.{project}.your-domain.com
+        DockerTraefik --> RouteTraffic
+        K8sIngress --> RouteTraffic
+        RouteTraffic --> [*]: Traffic routed to container
+    }
+
+    ContainerRunning --> IngressState: Access container
+
+    state "Project Deletion" as ProjectDeleted {
+        [*] --> TriggerDehydration: Save to S3 if needed
+        TriggerDehydration --> DeleteNamespace: Delete K8s namespace<br/>(cascades to all resources)
+        DeleteNamespace --> DeleteDBRecords: Delete project + containers<br/>from database
+        DeleteDBRecords --> DeleteFiles: Delete local files
+        DeleteFiles --> [*]
+    }
+
+    ProjectDeleted --> [*]
+
+    note right of NamespaceCreation
+        File Manager Pod:
+        - Always running
+        - Handles file operations
+        - Independent of dev containers
+    end note
+
+    note right of InitHydrate
+        S3 Sandwich Pattern:
+        1. Hydrate: S3 → PVC
+        2. Runtime: Fast PVC I/O
+        3. Dehydrate: PVC → S3
+    end note
+
+    note right of ContainerRunning
+        Connections enable:
+        - Frontend → Backend API
+        - Backend → Database
+        - Microservice communication
+    end note

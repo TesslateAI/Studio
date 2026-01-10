@@ -54,6 +54,11 @@ export function MiniAsteroids() {
   const [combo, setCombo] = useState(0);
   const [showCombo, setShowCombo] = useState(false);
   const [gameFocused, setGameFocused] = useState(false);
+  const [lives, setLives] = useState(3);
+  const highScoreRef = useRef(highScore);
+
+  // Keep highScoreRef in sync
+  highScoreRef.current = highScore;
 
   const gameStateRef = useRef({
     ship: {
@@ -573,7 +578,7 @@ export function MiniAsteroids() {
 
               setScore(s => {
                 const newScore = s + points;
-                if (newScore > highScore) {
+                if (newScore > highScoreRef.current) {
                   setHighScore(newScore);
                   localStorage.setItem('asteroidsHighScore', newScore.toString());
                 }
@@ -624,7 +629,20 @@ export function MiniAsteroids() {
           if (dist < asteroid.radius + 10) {
             createParticles(ship.pos.x, ship.pos.y, '#ff0000', 40);
             gameStateRef.current.shake = 20;
-            setGameOver(true);
+
+            setLives(currentLives => {
+              if (currentLives <= 1) {
+                setGameOver(true);
+                return 0;
+              }
+              // Reset ship position and grant invulnerability
+              ship.pos.x = canvas.width / 2;
+              ship.pos.y = canvas.height / 2;
+              ship.vel.x = 0;
+              ship.vel.y = 0;
+              gameStateRef.current.invulnerable = 120;
+              return currentLives - 1;
+            });
           }
         } else if (ship.shield > 0) {
           // Shield collision - smooth bounce with physics
@@ -906,12 +924,13 @@ export function MiniAsteroids() {
       canvas.removeEventListener('pointerup', handlePointerUp);
       canvas.removeEventListener('pointerleave', handlePointerUp);
     };
-  }, [gameOver, highScore, gameFocused]);
+  }, [gameOver, gameFocused]);
 
   const handleRestart = () => {
     setGameOver(false);
     setScore(0);
     setCombo(0);
+    setLives(3);
   };
 
   const getPowerUpIcon = (type: string) => {
@@ -951,6 +970,9 @@ export function MiniAsteroids() {
           </div>
           <div className="text-gray-300 text-sm bg-black/60 px-4 py-2 rounded-full backdrop-blur-sm border border-white/20">
             High: <span className="text-yellow-400">{highScore}</span>
+          </div>
+          <div className="text-red-400 text-sm bg-black/60 px-4 py-2 rounded-full backdrop-blur-sm border border-white/20">
+            Lives: <span className="text-red-500">{Array(lives).fill('❤️').join(' ')}{lives === 0 ? '💀' : ''}</span>
           </div>
           {showCombo && combo > 1 && (
             <div className="text-orange-400 text-xl font-bold bg-black/80 px-4 py-2 rounded-full backdrop-blur-sm border-2 border-orange-400 animate-pulse">

@@ -1,0 +1,130 @@
+flowchart TD
+    Start([User visits Tesslate Studio]) --> CheckAuth{Authenticated?}
+
+    CheckAuth -->|No| LoginPage[Show Login Page]
+    CheckAuth -->|Yes| Dashboard[Show Dashboard]
+
+    LoginPage --> ChooseMethod{Auth Method?}
+
+    %% JWT Bearer Token Flow
+    ChooseMethod -->|Email/Password| EmailLogin[Enter credentials]
+    EmailLogin --> SubmitLogin[POST /api/auth/login]
+    SubmitLogin --> ValidateCreds{Credentials<br/>valid?}
+
+    ValidateCreds -->|No| LoginError[Show error message]
+    LoginError --> LoginPage
+
+    ValidateCreds -->|Yes| GenerateJWT[Generate JWT token:<br/>- user_id<br/>- email<br/>- role<br/>- exp: 7 days]
+    GenerateJWT --> ReturnToken[Return:<br/>- access_token<br/>- token_type: bearer<br/>- user info]
+    ReturnToken --> StoreToken[Store token in localStorage]
+    StoreToken --> Dashboard
+
+    %% OAuth Flow
+    ChooseMethod -->|OAuth - GitHub| GitHubOAuth[Redirect to GitHub OAuth]
+    ChooseMethod -->|OAuth - Google| GoogleOAuth[Redirect to Google OAuth]
+
+    GitHubOAuth --> OAuthProvider[OAuth Provider Login Page]
+    GoogleOAuth --> OAuthProvider
+
+    OAuthProvider --> UserAuthorize{User<br/>authorizes?}
+
+    UserAuthorize -->|No| OAuthCancel[Redirect to login<br/>with error]
+    OAuthCancel --> LoginPage
+
+    UserAuthorize -->|Yes| OAuthCallback[Redirect to callback:<br/>/api/auth/oauth/callback]
+
+    OAuthCallback --> ExchangeCode[Exchange auth code<br/>for access token]
+    ExchangeCode --> GetUserInfo[Fetch user profile<br/>from provider API]
+    GetUserInfo --> CheckUserExists{User exists<br/>in DB?}
+
+    CheckUserExists -->|No| CreateUser[Create User record:<br/>- email<br/>- oauth_provider<br/>- oauth_id]
+    CheckUserExists -->|Yes| UpdateUser[Update last_login]
+
+    CreateUser --> GenerateSessionJWT
+    UpdateUser --> GenerateSessionJWT
+
+    GenerateSessionJWT[Generate JWT token] --> SetCookie[Set HTTP-only cookie:<br/>- Name: tesslate_session<br/>- Domain: .your-domain.com<br/>- Secure: true<br/>- SameSite: Lax<br/>- Max-Age: 7 days]
+
+    SetCookie --> StoreOAuthToken[Store OAuth credentials<br/>in DeploymentCredential table]
+    StoreOAuthToken --> RedirectDashboard[Redirect to dashboard]
+    RedirectDashboard --> Dashboard
+
+    %% Cookie-based Session Flow
+    ChooseMethod -->|Session Cookie| SessionAuth[Cookie sent automatically<br/>by browser]
+
+    SessionAuth --> CheckCookie{Cookie<br/>valid?}
+
+    CheckCookie -->|No| CookieError[Clear cookie]
+    CookieError --> LoginPage
+
+    CheckCookie -->|Yes| ExtractUserId[Extract user_id from JWT]
+    ExtractUserId --> LoadUserSession[Load user from database]
+    LoadUserSession --> Dashboard
+
+    %% Authenticated Requests
+    Dashboard --> MakeRequest[User makes API request]
+    MakeRequest --> CheckAuthType{Auth Type?}
+
+    CheckAuthType -->|Bearer Token| AddAuthHeader[Add header:<br/>Authorization: Bearer token]
+    CheckAuthType -->|Session Cookie| SendCookie[Cookie sent automatically]
+
+    AddAuthHeader --> APIMiddleware[FastAPI Middleware:<br/>Verify JWT]
+    SendCookie --> APIMiddleware
+
+    APIMiddleware --> VerifyJWT{JWT valid?}
+
+    VerifyJWT -->|No - Expired| Return401[Return 401 Unauthorized]
+    VerifyJWT -->|No - Invalid| Return401
+    VerifyJWT -->|Yes| ExtractUser[Extract user from JWT]
+
+    Return401 --> TriggerRefresh{Refresh<br/>available?}
+
+    TriggerRefresh -->|No| ClearAuth[Clear auth state]
+    ClearAuth --> LoginPage
+
+    TriggerRefresh -->|Yes| RefreshToken[POST /api/auth/refresh]
+    RefreshToken --> GenerateNewJWT[Generate new JWT token]
+    GenerateNewJWT --> ReturnNewToken[Return new access_token]
+    ReturnNewToken --> StoreToken
+    StoreToken --> MakeRequest
+
+    ExtractUser --> AttachToRequest[Attach user to request.state]
+    AttachToRequest --> RouteHandler[Route handler executes]
+    RouteHandler --> CheckPermissions{User has<br/>permission?}
+
+    CheckPermissions -->|No| Return403[Return 403 Forbidden]
+    CheckPermissions -->|Yes| ProcessRequest[Process request]
+
+    ProcessRequest --> ReturnResponse[Return response]
+    Return403 --> Dashboard
+    ReturnResponse --> Dashboard
+
+    %% CSRF Protection
+    Dashboard --> CSRFCheck{POST/PUT/DELETE<br/>request?}
+    CSRFCheck -->|Yes| GenerateCSRF[Generate CSRF token:<br/>Include in form/header]
+    CSRFCheck -->|No| MakeRequest
+
+    GenerateCSRF --> MakeRequest
+    APIMiddleware --> ValidateCSRF{CSRF token<br/>valid?}
+    ValidateCSRF -->|No| Return403
+    ValidateCSRF -->|Yes| VerifyJWT
+
+    %% Logout
+    Dashboard --> LogoutAction{User clicks<br/>logout?}
+    LogoutAction -->|Yes| ClearTokens[Clear localStorage token<br/>Clear session cookie]
+    ClearTokens --> LoginPage
+
+    %% Styling
+    classDef startEnd fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    classDef process fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    classDef decision fill:#ff9800,stroke:#333,stroke-width:2px,color:#000
+    classDef error fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    classDef success fill:#8bc34a,stroke:#333,stroke-width:2px,color:#000
+    classDef external fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+
+    class Start,Dashboard startEnd
+    class EmailLogin,SubmitLogin,GenerateJWT,ReturnToken,StoreToken,OAuthCallback,ExchangeCode,GetUserInfo,CreateUser,UpdateUser,GenerateSessionJWT,SetCookie,StoreOAuthToken,SessionAuth,ExtractUserId,LoadUserSession,MakeRequest,AddAuthHeader,SendCookie,APIMiddleware,ExtractUser,AttachToRequest,RouteHandler,ProcessRequest,GenerateNewJWT,ReturnNewToken,RefreshToken,GenerateCSRF,ClearTokens process
+    class CheckAuth,ChooseMethod,ValidateCreds,UserAuthorize,CheckUserExists,CheckCookie,CheckAuthType,VerifyJWT,TriggerRefresh,CheckPermissions,CSRFCheck,ValidateCSRF,LogoutAction decision
+    class LoginError,OAuthCancel,CookieError,Return401,Return403,ClearAuth error
+    class RedirectDashboard,ReturnResponse success
+    class GitHubOAuth,GoogleOAuth,OAuthProvider external

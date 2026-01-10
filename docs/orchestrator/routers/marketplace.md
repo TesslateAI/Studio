@@ -1,0 +1,592 @@
+# Marketplace Router
+
+**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/marketplace.py` (2417 lines)
+
+The marketplace router manages the agent and base template marketplace where users can browse, purchase, and publish AI agents and project templates.
+
+## Overview
+
+The marketplace has two main sections:
+1. **Agents**: Pre-configured AI agents with custom prompts and tool sets
+2. **Bases**: Starter project templates (Next.js, React, Vue, etc.)
+
+Both support:
+- Free and paid listings
+- User reviews and ratings
+- Purchase tracking
+- Creator royalties
+- Publishing workflow
+
+## Base Path
+
+All endpoints are mounted at `/api/marketplace`
+
+## Model Configuration
+
+### Get Available Models
+
+```
+GET /api/marketplace/models
+```
+
+Returns list of AI models available for agent creation, including system models and user's custom models.
+
+**Response**:
+```json
+{
+  "models": [
+    {
+      "id": "claude-sonnet-4-5-20250929",
+      "name": "Claude Sonnet 4.5",
+      "source": "system",
+      "provider": "internal",
+      "pricing": {"input": 3.0, "output": 15.0},
+      "available": true
+    }
+  ],
+  "default": "claude-sonnet-4-5-20250929",
+  "count": 15,
+  "external_providers": [
+    {
+      "provider": "openrouter",
+      "name": "OpenRouter",
+      "has_key": false,
+      "setup_required": true,
+      "models_count": "200+"
+    }
+  ],
+  "custom_models": []
+}
+```
+
+### Add Custom Model
+
+```
+POST /api/marketplace/models/custom
+```
+
+Adds a custom model from OpenRouter to the user's account.
+
+**Request Body**:
+```json
+{
+  "model_id": "anthropic/claude-3-opus",
+  "model_name": "Claude 3 Opus",
+  "pricing_input": 15.0,
+  "pricing_output": 75.0
+}
+```
+
+## Agent Marketplace
+
+### Browse Agents
+
+```
+GET /api/marketplace/agents
+```
+
+Browse published agents with filtering and pagination.
+
+**Query Parameters**:
+- `category`: Filter by category (web-development, data-analysis, devops, etc.)
+- `pricing_type`: Filter by pricing (free, credits, subscription)
+- `search`: Search in name and description
+- `sort`: Sort by (popular, recent, rating)
+- `skip`: Pagination offset (default: 0)
+- `limit`: Results per page (default: 20, max: 100)
+
+**Response**:
+```json
+{
+  "agents": [
+    {
+      "id": "uuid",
+      "name": "React Specialist",
+      "slug": "react-specialist",
+      "description": "Expert in React development",
+      "category": "web-development",
+      "pricing_type": "free",
+      "price_credits": 0,
+      "downloads": 1542,
+      "rating": 4.7,
+      "review_count": 89,
+      "creator": {
+        "id": "uuid",
+        "username": "techcreator"
+      }
+    }
+  ],
+  "total": 45,
+  "skip": 0,
+  "limit": 20
+}
+```
+
+### Get Agent Details
+
+```
+GET /api/marketplace/agents/{agent_id}
+```
+
+Returns full details for a specific agent including system prompt (if user purchased or creator).
+
+**Response**:
+```json
+{
+  "id": "uuid",
+  "name": "React Specialist",
+  "description": "Expert in React development...",
+  "system_prompt": "You are an expert React developer...",  // Only if purchased
+  "category": "web-development",
+  "pricing_type": "free",
+  "model": "claude-sonnet-4-5-20250929",
+  "is_purchased": true,
+  "creator": {...},
+  "reviews": [...]
+}
+```
+
+### Purchase Agent
+
+```
+POST /api/marketplace/agents/{agent_id}/purchase
+```
+
+Purchases an agent (free or paid).
+
+**Request Body**:
+```json
+{
+  "payment_method": "credits|subscription"  // For paid agents
+}
+```
+
+**Response**:
+```json
+{
+  "message": "Agent purchased successfully",
+  "purchase": {
+    "id": "uuid",
+    "agent_id": "uuid",
+    "purchased_at": "2025-01-09T10:00:00Z"
+  }
+}
+```
+
+**Credit Deduction**:
+For paid agents, credits are deducted from user's balance. Transaction recorded in `MarketplaceTransaction`.
+
+### Review Agent
+
+```
+POST /api/marketplace/agents/{agent_id}/reviews
+```
+
+Submit a review for a purchased agent.
+
+**Request Body**:
+```json
+{
+  "rating": 5,
+  "review_text": "Great agent, very helpful!"
+}
+```
+
+**Response**: Review object
+
+**Restrictions**:
+- Must have purchased agent
+- One review per user per agent
+- Rating must be 1-5
+
+### Update Review
+
+```
+PATCH /api/marketplace/agents/{agent_id}/reviews/{review_id}
+```
+
+Update an existing review.
+
+### Delete Review
+
+```
+DELETE /api/marketplace/agents/{agent_id}/reviews/{review_id}
+```
+
+Delete a review (own reviews only).
+
+### Get My Agents
+
+```
+GET /api/marketplace/agents/my-agents
+```
+
+Returns all agents purchased by the current user.
+
+**Response**:
+```json
+{
+  "agents": [...],
+  "total": 12
+}
+```
+
+## Base Marketplace
+
+Bases are starter project templates (full codebases with frameworks, dependencies, configuration).
+
+### Browse Bases
+
+```
+GET /api/marketplace/bases
+```
+
+Browse published project bases.
+
+**Query Parameters**: Same as agents (category, pricing_type, search, sort, skip, limit)
+
+**Response**: Similar to agents response but for bases
+
+### Get Base Details
+
+```
+GET /api/marketplace/bases/{base_id}
+```
+
+Returns full details for a project base.
+
+**Response**:
+```json
+{
+  "id": "uuid",
+  "name": "E-commerce Starter",
+  "slug": "ecommerce-starter",
+  "description": "Full e-commerce platform with cart, checkout, admin",
+  "category": "web-development",
+  "pricing_type": "credits",
+  "price_credits": 500,
+  "git_repo_url": "https://github.com/creator/ecommerce-starter",
+  "default_branch": "main",
+  "is_purchased": false,
+  "creator": {...},
+  "screenshots": [...]
+}
+```
+
+### Purchase Base
+
+```
+POST /api/marketplace/bases/{base_id}/purchase
+```
+
+Purchases a project base.
+
+**Response**: Purchase object
+
+After purchasing, users can create projects using this base:
+```json
+{
+  "source_type": "base",
+  "base_id": "uuid"
+}
+```
+
+### Review Base
+
+```
+POST /api/marketplace/bases/{base_id}/reviews
+```
+
+Submit a review for a purchased base. Same structure as agent reviews.
+
+## Creator Endpoints
+
+Creators can publish their own agents and bases to the marketplace.
+
+### Publish Agent
+
+```
+POST /api/marketplace/agents/publish
+```
+
+Publish a new agent to the marketplace.
+
+**Request Body**:
+```json
+{
+  "name": "Vue.js Expert",
+  "description": "Specialized in Vue 3 and Composition API",
+  "system_prompt": "You are an expert Vue.js developer...",
+  "category": "web-development",
+  "pricing_type": "free|credits|subscription",
+  "price_credits": 100,
+  "model": "claude-sonnet-4-5-20250929",
+  "tools": ["read_file", "write_file", "shell_execute"],
+  "tags": ["vue", "javascript", "frontend"]
+}
+```
+
+**Response**: Created agent object with status "pending_review"
+
+**Publishing Workflow**:
+1. Creator submits agent
+2. Status: "pending_review"
+3. Admin reviews in admin panel
+4. Admin approves → Status: "published"
+5. Agent appears in marketplace
+
+### Update Agent
+
+```
+PATCH /api/marketplace/agents/{agent_id}/update
+```
+
+Update an existing agent (creator only).
+
+**Request Body**: Same fields as publish (partial update)
+
+**Restrictions**:
+- Must be agent creator
+- Cannot change pricing_type after purchases
+- Major changes require re-approval
+
+### Publish Base
+
+```
+POST /api/marketplace/bases/publish
+```
+
+Publish a project base to the marketplace.
+
+**Request Body**:
+```json
+{
+  "name": "SaaS Boilerplate",
+  "description": "Full SaaS template with auth, billing, admin",
+  "git_repo_url": "https://github.com/user/saas-boilerplate",
+  "default_branch": "main",
+  "category": "web-development",
+  "pricing_type": "credits",
+  "price_credits": 1000,
+  "frameworks": ["Next.js", "PostgreSQL", "Stripe"],
+  "screenshots": ["url1", "url2"]
+}
+```
+
+**Response**: Created base object with status "pending_review"
+
+### Get My Published Items
+
+```
+GET /api/marketplace/creators/my-items
+```
+
+Returns all agents and bases published by the creator.
+
+**Response**:
+```json
+{
+  "agents": [...],
+  "bases": [...],
+  "total_downloads": 542,
+  "total_revenue": 15420  // In credits
+}
+```
+
+## Admin Endpoints
+
+### Moderate Agent
+
+```
+PATCH /api/marketplace/agents/{agent_id}/moderate
+```
+
+**(Superuser only)**
+
+Approve or reject a pending agent.
+
+**Request Body**:
+```json
+{
+  "action": "approve|reject",
+  "reason": "Optional rejection reason"
+}
+```
+
+### Moderate Base
+
+```
+PATCH /api/marketplace/bases/{base_id}/moderate
+```
+
+**(Superuser only)**
+
+Approve or reject a pending base.
+
+### Get Pending Items
+
+```
+GET /api/marketplace/admin/pending
+```
+
+**(Superuser only)**
+
+Returns all items pending moderation.
+
+**Response**:
+```json
+{
+  "agents": [
+    {
+      "id": "uuid",
+      "name": "Pending Agent",
+      "status": "pending_review",
+      "submitted_at": "2025-01-09T10:00:00Z",
+      "creator": {...}
+    }
+  ],
+  "bases": [...]
+}
+```
+
+## Recommendations
+
+### Get Related Agents
+
+```
+GET /api/marketplace/agents/{agent_id}/related
+```
+
+Returns agents frequently purchased together (collaborative filtering).
+
+**Response**:
+```json
+{
+  "agents": [...],
+  "algorithm": "co_install"
+}
+```
+
+**Implementation**:
+
+Uses `co_install_counts` field on MarketplaceAgent to track purchase correlations:
+```json
+{
+  "agent_uuid_1": 42,  // Purchased together 42 times
+  "agent_uuid_2": 28
+}
+```
+
+## Categories
+
+Standard categories for agents and bases:
+- `web-development`: Frontend, backend, full-stack
+- `data-analysis`: Data science, analytics, ML
+- `devops`: Infrastructure, CI/CD, monitoring
+- `mobile`: iOS, Android, React Native
+- `game-development`: Unity, Unreal, Godot
+- `design`: UI/UX, graphics, prototyping
+- `writing`: Content creation, documentation
+- `testing`: QA, automated testing, debugging
+- `security`: Security audits, penetration testing
+- `other`: Miscellaneous
+
+## Pricing Types
+
+1. **Free**: No cost, anyone can use
+2. **Credits**: One-time credit purchase
+3. **Subscription**: Requires Pro subscription
+
+## Example Workflows
+
+### Publishing an Agent
+
+1. **Creator creates agent**:
+   ```
+   POST /api/marketplace/agents/publish
+   {
+     "name": "Django Expert",
+     "system_prompt": "You are an expert Django developer...",
+     "pricing_type": "credits",
+     "price_credits": 200
+   }
+   ```
+
+2. **Agent created with status "pending_review"**
+
+3. **Admin reviews**:
+   ```
+   GET /api/marketplace/admin/pending
+   ```
+
+4. **Admin approves**:
+   ```
+   PATCH /api/marketplace/agents/{id}/moderate
+   {"action": "approve"}
+   ```
+
+5. **Agent published**, status becomes "published"
+
+6. **Agent appears in marketplace**
+
+### Purchasing and Using an Agent
+
+1. **User browses marketplace**:
+   ```
+   GET /api/marketplace/agents?category=web-development
+   ```
+
+2. **User purchases agent**:
+   ```
+   POST /api/marketplace/agents/{id}/purchase
+   ```
+
+3. **Credits deducted**, purchase recorded
+
+4. **User selects agent in chat**:
+   ```
+   POST /api/chat/agent
+   {
+     "project_id": "uuid",
+     "message": "Create a blog",
+     "agent_id": "purchased-agent-uuid"
+   }
+   ```
+
+5. **Agent runs with custom system prompt**
+
+6. **User leaves review**:
+   ```
+   POST /api/marketplace/agents/{id}/reviews
+   {"rating": 5, "review_text": "Excellent!"}
+   ```
+
+## Revenue Sharing
+
+When users purchase paid agents/bases, credits are distributed:
+- **80%** to creator
+- **20%** to platform
+
+Tracked in `MarketplaceTransaction` with fields:
+- `buyer_id`: User who purchased
+- `seller_id`: Creator who published
+- `amount_credits`: Total cost
+- `platform_fee_credits`: Platform's 20%
+- `creator_payout_credits`: Creator's 80%
+
+Creators can withdraw earnings via Stripe Connect (future feature).
+
+## Security
+
+1. **System Prompt Protection**: Only buyers and creators see full system prompts
+2. **Review Verification**: Must purchase before reviewing
+3. **Moderation**: All items reviewed before publishing
+4. **Content Filtering**: Descriptions and prompts scanned for inappropriate content
+5. **Rate Limiting**: Publish and purchase endpoints rate-limited
+
+## Related Files
+
+- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/models.py` - MarketplaceAgent, MarketplaceBase models
+- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/recommendations.py` - Recommendation engine
+- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/litellm_service.py` - Model management
+- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/agent/factory.py` - Agent instantiation from marketplace models

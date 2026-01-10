@@ -1,0 +1,139 @@
+flowchart TD
+    Start([Code changes committed]) --> ChooseEnv{Deployment<br/>Environment?}
+
+    %% Minikube Local Development Path
+    ChooseEnv -->|Minikube Local| MinikubeStart[Local Development Deploy]
+
+    MinikubeStart --> MinikubeCluster{Minikube<br/>running?}
+    MinikubeCluster -->|No| StartMinikube[minikube start -p tesslate<br/>--driver=docker<br/>--memory=4096 --cpus=2]
+    MinikubeCluster -->|Yes| ChooseImage
+
+    StartMinikube --> EnableIngress[minikube addons enable ingress]
+    EnableIngress --> ChooseImage
+
+    ChooseImage{Which image<br/>to build?}
+
+    ChooseImage -->|Backend| MinikubeBackend[Build Backend Image]
+    ChooseImage -->|Frontend| MinikubeFrontend[Build Frontend Image]
+    ChooseImage -->|DevServer| MinikubeDevServer[Build DevServer Image]
+
+    MinikubeBackend --> DeleteOldBackend[Delete old image:<br/>minikube ssh -- docker rmi -f<br/>tesslate-backend:latest]
+    DeleteOldBackend --> DeleteLocalBackend[Delete local image:<br/>docker rmi -f<br/>tesslate-backend:latest]
+    DeleteLocalBackend --> BuildBackendNoCache[Build with --no-cache:<br/>docker build --no-cache<br/>-t tesslate-backend:latest<br/>-f orchestrator/Dockerfile]
+
+    MinikubeFrontend --> DeleteOldFrontend[Delete old image:<br/>minikube ssh -- docker rmi -f<br/>tesslate-frontend:latest]
+    DeleteOldFrontend --> DeleteLocalFrontend[Delete local image:<br/>docker rmi -f<br/>tesslate-frontend:latest]
+    DeleteLocalFrontend --> BuildFrontendNoCache[Build with --no-cache:<br/>docker build --no-cache<br/>-t tesslate-frontend:latest<br/>-f app/Dockerfile.prod]
+
+    MinikubeDevServer --> DeleteOldDevServer[Delete old image:<br/>minikube ssh -- docker rmi -f<br/>tesslate-devserver:latest]
+    DeleteOldDevServer --> DeleteLocalDevServer[Delete local image:<br/>docker rmi -f<br/>tesslate-devserver:latest]
+    DeleteLocalDevServer --> BuildDevServerNoCache[Build with --no-cache:<br/>docker build --no-cache<br/>-t tesslate-devserver:latest<br/>-f orchestrator/Dockerfile.devserver]
+
+    BuildBackendNoCache --> LoadBackend[Load to Minikube:<br/>minikube image load<br/>tesslate-backend:latest]
+    BuildFrontendNoCache --> LoadFrontend[Load to Minikube:<br/>minikube image load<br/>tesslate-frontend:latest]
+    BuildDevServerNoCache --> LoadDevServer[Load to Minikube:<br/>minikube image load<br/>tesslate-devserver:latest]
+
+    LoadBackend --> DeleteBackendPod[Force pod restart:<br/>kubectl delete pod -n tesslate<br/>-l app=tesslate-backend]
+    LoadFrontend --> DeleteFrontendPod[Force pod restart:<br/>kubectl delete pod -n tesslate<br/>-l app=tesslate-frontend]
+    LoadDevServer --> MinikubeComplete[DevServer image ready<br/>for user containers]
+
+    DeleteBackendPod --> WaitBackend[Wait for rollout:<br/>kubectl rollout status<br/>deployment/tesslate-backend]
+    DeleteFrontendPod --> WaitFrontend[Wait for rollout:<br/>kubectl rollout status<br/>deployment/tesslate-frontend]
+
+    WaitBackend --> VerifyBackend[Verify deployment:<br/>kubectl exec -- grep 'code'<br/>in deployed files]
+    WaitFrontend --> VerifyFrontend[Verify deployment:<br/>kubectl exec -- ls -la /usr/share/nginx/html/assets/]
+
+    VerifyBackend --> MinikubeComplete
+    VerifyFrontend --> MinikubeComplete
+    MinikubeComplete --> AccessMinikube[Access via:<br/>- minikube tunnel<br/>- kubectl port-forward]
+
+    AccessMinikube --> TestLocal[Test on localhost]
+    TestLocal --> DeployEnd([Deploy Complete])
+
+    %% AWS EKS Production Path
+    ChooseEnv -->|AWS EKS Prod| EKSStart[Production Deploy]
+
+    EKSStart --> ConfigureAWS[Configure AWS CLI:<br/>Use <AWS_IAM_USER> credentials]
+    ConfigureAWS --> UpdateKubeconfig[Update kubeconfig:<br/>aws eks update-kubeconfig<br/>--region us-east-1<br/>--name <EKS_CLUSTER_NAME>]
+
+    UpdateKubeconfig --> LoginECR[Login to ECR:<br/>aws ecr get-login-password<br/>| docker login]
+
+    LoginECR --> ChooseEKSImage{Which image<br/>to deploy?}
+
+    ChooseEKSImage -->|Backend| EKSBackend[Backend Pipeline]
+    ChooseEKSImage -->|Frontend| EKSFrontend[Frontend Pipeline]
+    ChooseEKSImage -->|DevServer| EKSDevServer[DevServer Pipeline]
+    ChooseEKSImage -->|All| EKSAll[All Images Pipeline]
+
+    EKSBackend --> BuildEKSBackend[docker build --no-cache<br/>-t tesslate-backend:latest<br/>-f orchestrator/Dockerfile]
+    BuildEKSBackend --> TagEKSBackend[docker tag tesslate-backend:latest<br/>AWS_ACCOUNT.dkr.ecr.us-east-1<br/>.amazonaws.com/tesslate-backend:latest]
+    TagEKSBackend --> PushEKSBackend[docker push AWS_ACCOUNT.dkr.ecr<br/>.us-east-1.amazonaws.com<br/>/tesslate-backend:latest]
+
+    EKSFrontend --> BuildEKSFrontend[docker build --no-cache<br/>-t tesslate-frontend:latest<br/>-f app/Dockerfile.prod]
+    BuildEKSFrontend --> TagEKSFrontend[docker tag tesslate-frontend:latest<br/>AWS_ACCOUNT.dkr.ecr.us-east-1<br/>.amazonaws.com/tesslate-frontend:latest]
+    TagEKSFrontend --> PushEKSFrontend[docker push AWS_ACCOUNT.dkr.ecr<br/>.us-east-1.amazonaws.com<br/>/tesslate-frontend:latest]
+
+    EKSDevServer --> BuildEKSDevServer[docker build --no-cache<br/>-t tesslate-devserver:latest<br/>-f orchestrator/Dockerfile.devserver]
+    BuildEKSDevServer --> TagEKSDevServer[docker tag tesslate-devserver:latest<br/>AWS_ACCOUNT.dkr.ecr.us-east-1<br/>.amazonaws.com/tesslate-devserver:latest]
+    TagEKSDevServer --> PushEKSDevServer[docker push AWS_ACCOUNT.dkr.ecr<br/>.us-east-1.amazonaws.com<br/>/tesslate-devserver:latest]
+
+    EKSAll --> BuildEKSBackend
+    EKSAll --> BuildEKSFrontend
+    EKSAll --> BuildEKSDevServer
+
+    PushEKSBackend --> DeleteBackendPodEKS[Force pull new image:<br/>kubectl delete pod -n tesslate<br/>-l app=tesslate-backend]
+    PushEKSFrontend --> DeleteFrontendPodEKS[Force pull new image:<br/>kubectl delete pod -n tesslate<br/>-l app=tesslate-frontend]
+    PushEKSDevServer --> EKSDevServerReady[DevServer ready<br/>for user containers]
+
+    DeleteBackendPodEKS --> WaitBackendEKS[Wait for pod ready:<br/>kubectl get pods -n tesslate]
+    DeleteFrontendPodEKS --> WaitFrontendEKS[Wait for pod ready:<br/>kubectl get pods -n tesslate]
+
+    WaitBackendEKS --> RestartIngress[Restart NGINX Ingress:<br/>kubectl rollout restart<br/>deployment/ingress-nginx-controller<br/>-n ingress-nginx]
+    WaitFrontendEKS --> RestartIngress
+
+    RestartIngress --> WaitIngressReady[Wait for Ingress ready:<br/>kubectl rollout status<br/>-n ingress-nginx]
+
+    WaitIngressReady --> VerifyEKS[Verify deployment:<br/>kubectl exec -- check files]
+
+    VerifyEKS --> CheckCerts{SSL certs<br/>valid?}
+
+    CheckCerts -->|No| CheckCertManager[Check cert-manager logs:<br/>kubectl logs -n cert-manager<br/>deployment/cert-manager]
+    CheckCertManager --> FixCerts[Fix Cloudflare API token<br/>or DNS configuration]
+    FixCerts --> CheckCerts
+
+    CheckCerts -->|Yes| EKSComplete[Production Deploy Complete]
+    EKSDevServerReady --> EKSComplete
+
+    EKSComplete --> AccessEKS[Access via:<br/>https://your-domain.com<br/>https://api.your-domain.com]
+
+    AccessEKS --> TestProd[Test production site]
+    TestProd --> MonitorLogs[Monitor logs:<br/>kubectl logs -f deployment/tesslate-backend]
+
+    MonitorLogs --> DeployEnd
+
+    %% Image Pull Policy Notes
+    Note1[Note: Image Pull Policies<br/>Minikube: imagePullPolicy: Never<br/>AWS EKS: imagePullPolicy: Always]
+    Note2[Note: --no-cache is REQUIRED<br/>to ensure code changes are included.<br/>Docker layer caching can prevent<br/>updated code from being copied.]
+    Note3[Note: Deleting pods forces K8s<br/>to pull fresh images from registry.<br/>rollout restart may use cached images.]
+
+    MinikubeStart -.->|Reference| Note1
+    EKSStart -.->|Reference| Note1
+    BuildBackendNoCache -.->|Critical| Note2
+    BuildEKSBackend -.->|Critical| Note2
+    DeleteBackendPod -.->|Why?| Note3
+    DeleteBackendPodEKS -.->|Why?| Note3
+
+    %% Styling
+    classDef startEnd fill:#4caf50,stroke:#333,stroke-width:2px,color:#fff
+    classDef process fill:#2196f3,stroke:#333,stroke-width:2px,color:#fff
+    classDef decision fill:#ff9800,stroke:#333,stroke-width:2px,color:#000
+    classDef critical fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
+    classDef success fill:#8bc34a,stroke:#333,stroke-width:2px,color:#000
+    classDef note fill:#e1bee7,stroke:#333,stroke-width:1px,color:#000
+
+    class Start,DeployEnd startEnd
+    class MinikubeStart,StartMinikube,EnableIngress,DeleteOldBackend,DeleteLocalBackend,DeleteOldFrontend,DeleteLocalFrontend,DeleteOldDevServer,DeleteLocalDevServer,LoadBackend,LoadFrontend,LoadDevServer,DeleteBackendPod,DeleteFrontendPod,WaitBackend,WaitFrontend,VerifyBackend,VerifyFrontend,AccessMinikube,TestLocal,ConfigureAWS,UpdateKubeconfig,LoginECR,BuildEKSBackend,TagEKSBackend,PushEKSBackend,BuildEKSFrontend,TagEKSFrontend,PushEKSFrontend,BuildEKSDevServer,TagEKSDevServer,PushEKSDevServer,DeleteBackendPodEKS,DeleteFrontendPodEKS,WaitBackendEKS,WaitFrontendEKS,RestartIngress,WaitIngressReady,VerifyEKS,CheckCertManager,FixCerts,AccessEKS,TestProd,MonitorLogs process
+    class ChooseEnv,MinikubeCluster,ChooseImage,ChooseEKSImage,CheckCerts decision
+    class BuildBackendNoCache,BuildFrontendNoCache,BuildDevServerNoCache critical
+    class MinikubeComplete,EKSComplete,EKSDevServerReady success
+    class Note1,Note2,Note3 note

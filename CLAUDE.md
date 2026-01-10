@@ -187,6 +187,73 @@ tesslate-studio/
 | `todos.py` | Task planning and tracking |
 | `metadata.py` | Query project info |
 
+## Documentation Knowledge Graph
+
+The `docs/` folder contains comprehensive documentation organized as a **knowledge graph** with `CLAUDE.md` files providing context for AI agents.
+
+### Navigating the Documentation
+
+**Quick Start:**
+1. Start at `docs/README.md` for system overview
+2. Navigate to the relevant section based on your task
+3. Load the `CLAUDE.md` file in that section for AI agent context
+4. Follow cross-references to related contexts
+
+**Documentation Structure:**
+```
+docs/
+├── README.md                    # Main entry point, system overview
+├── CLAUDE.md                    # Root agent context
+├── architecture/                # System architecture & diagrams
+│   ├── diagrams/*.mmd          # Mermaid diagrams (7 files)
+│   └── CLAUDE.md               # Architecture context
+├── orchestrator/                # Backend documentation
+│   ├── routers/                # API endpoints
+│   ├── services/               # Business logic
+│   ├── agent/                  # AI agent system
+│   │   └── tools/             # Agent tools
+│   ├── models/                 # Database models
+│   └── orchestration/          # Container management
+├── app/                         # Frontend documentation
+│   ├── pages/                  # Route components
+│   ├── components/             # UI components
+│   ├── api/                    # API client
+│   └── state/                  # State management
+├── infrastructure/              # DevOps documentation
+│   ├── kubernetes/             # K8s manifests
+│   ├── docker/                 # Docker setup
+│   └── terraform/              # AWS IaC
+└── guides/                      # How-to guides
+```
+
+### Using CLAUDE.md Files
+
+Each `CLAUDE.md` file contains:
+- **Purpose**: What this system does
+- **Key Files**: Source files with absolute paths
+- **Related Contexts**: Links to other CLAUDE.md files
+- **Quick Reference**: Common patterns and gotchas
+- **When to Load**: Conditions for loading this context
+
+**Best Practices:**
+1. Load the most specific CLAUDE.md first (e.g., `docs/orchestrator/agent/tools/CLAUDE.md` for agent tools)
+2. Follow "Related Contexts" links when you need broader understanding
+3. Reference diagram files in `docs/architecture/diagrams/` for visual architecture
+4. Use the README.md files for comprehensive documentation, CLAUDE.md for quick context
+
+### Key Entry Points by Task
+
+| Task | Start Here |
+|------|------------|
+| Understanding system architecture | `docs/architecture/CLAUDE.md` |
+| Backend API development | `docs/orchestrator/routers/CLAUDE.md` |
+| AI agent development | `docs/orchestrator/agent/CLAUDE.md` |
+| Frontend development | `docs/app/CLAUDE.md` |
+| Container orchestration | `docs/orchestrator/orchestration/CLAUDE.md` |
+| Kubernetes deployment | `docs/infrastructure/kubernetes/CLAUDE.md` |
+| Database models | `docs/orchestrator/models/CLAUDE.md` |
+| Payment integration | `docs/orchestrator/services/stripe.md` |
+
 ## Deployment Modes
 
 ### Docker (Local Dev)
