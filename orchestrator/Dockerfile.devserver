@@ -5,7 +5,7 @@
 # - K8s: Built and pushed to registry via k8s/scripts/deployment/build-push-images.sh
 # - Docker: Built on-demand by docker_container_manager.py from this file
 
-FROM node:20-alpine
+FROM node:22-alpine
 
 # Install system dependencies for Node.js, Python, and Go development
 # zip/unzip needed for project archiving (S3 ops handled securely by backend)
@@ -31,45 +31,26 @@ RUN mkdir -p /go/bin
 # This is safe because the container is ephemeral
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-# Install Air for Go hot reloading (use v1.61.5 compatible with Go 1.22+)
-RUN go install github.com/air-verse/air@v1.61.5
+# Install Air for Go hot reloading (latest version)
+RUN go install github.com/air-verse/air@latest
 
-WORKDIR /template
+# Install common global npm packages for development
+RUN npm install -g npm@latest typescript vite create-vite eslint prettier
 
-# Copy package files first for better layer caching
-COPY template/package.json template/package-lock.json ./
-
-# Install dependencies with optimizations for production use
-# --prefer-offline: Use cached packages when available
-# --no-audit: Skip security audit (faster builds)
-# --production=false: Install both prod and dev dependencies
-RUN npm ci --prefer-offline --no-audit --production=false
-
-# Copy rest of template files
-COPY template/ ./
-
-# Make helper scripts executable and fix line endings (Windows -> Unix)
-RUN chmod +x bin/dev-server 2>/dev/null || true && \
-    sed -i 's/\r$//' bin/dev-server 2>/dev/null || true
-
-# Add template bin directory to PATH for helper scripts
-ENV PATH="/template/bin:${PATH}"
-
-# Verify critical binaries are present
-RUN test -f node_modules/.bin/vite || (echo "ERROR: Vite not found" && exit 1)
-RUN test -f node_modules/.bin/eslint || (echo "ERROR: ESLint not found" && exit 1)
+# Create project directory (will be mounted/populated at runtime)
+WORKDIR /project
 
 # Set ownership for non-root user (uid 1000)
 # This matches the security context used in both Docker and K8s deployments
-RUN chown -R 1000:1000 /template
+RUN chown -R 1000:1000 /project
 
 # Switch to non-root user for security
 USER 1000
 
 # Metadata
 LABEL maintainer="Tesslate Studio"
-LABEL description="Development server image with pre-installed React/Vite dependencies"
-LABEL version="1.0"
+LABEL description="Development server image with Node.js, Python, and Go support"
+LABEL version="2.0"
 
 # Health check (optional, for container monitoring)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
