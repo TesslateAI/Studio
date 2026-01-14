@@ -59,7 +59,7 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
   return (
     <div
       className="relative group"
-      style={{ contain: 'layout style paint' }}
+      style={{ contain: 'layout style' }}
     >
       {/* Connection handles */}
       <Handle

@@ -115,14 +115,13 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             logger.error(f"Failed to create LiteLLM key for user {user.username}: {e}")
             logger.warning(f"User {user.username} registered WITHOUT LiteLLM key")
 
-        # Auto-add default agents (Tesslate Agent and Stream Builder) to new users
+        # Auto-add default agents (Tesslate Agent) to new users
         try:
             from .models import MarketplaceAgent, UserPurchasedAgent
             from sqlalchemy import select
 
             # Default agents to add to every new user
-            # Note: Added in this order so tesslate-agent appears first (DESC sort by purchase_date)
-            default_agent_slugs = ["stream-builder", "tesslate-agent"]
+            default_agent_slugs = ["tesslate-agent"]
 
             for slug in default_agent_slugs:
                 result = await self.user_db.session.execute(

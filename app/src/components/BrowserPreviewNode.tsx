@@ -195,7 +195,7 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
   return (
     <div
       className="relative group"
-      style={{ contain: 'layout style paint' }}
+      style={{ contain: 'layout style' }}
     >
       {/* Connection handle - connects FROM containers TO this browser */}
       <Handle

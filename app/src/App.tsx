@@ -91,6 +91,9 @@ function AppContent() {
     <>
         <Toaster
           position="top-right"
+          containerStyle={{
+            top: 80, // Clear the header + some margin, works on all screen sizes
+          }}
           toastOptions={{
             // Default options
             duration: 4000,

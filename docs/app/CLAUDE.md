@@ -34,6 +34,7 @@ Load this context when:
 
 ### Utilities
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/fileEvents.ts`**: Event system for file changes
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/autoLayout.ts`**: Graph auto-layout with Dagre algorithm
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/lib/utils.ts`**: Utility functions (classNames, etc.)
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/theme/ThemeContext.tsx`**: Theme state management
 

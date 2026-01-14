@@ -14,8 +14,48 @@ The Project Graph Canvas provides a visual architecture view of the project usin
 - Drag nodes to reposition
 - Zoom and pan
 - Minimap navigation
-- Auto-layout on demand
+- **Auto-layout using Dagre algorithm**
 - Snap to grid
+
+### Auto-Layout with Dagre
+
+The graph canvas uses the Dagre algorithm for intelligent automatic layout of nodes.
+
+**Usage**:
+```typescript
+import { getLayoutedElements } from '../utils/autoLayout';
+
+// Apply auto-layout to nodes and edges
+const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+  nodes,
+  edges,
+  { direction: 'LR', nodeSep: 80, rankSep: 150 }
+);
+
+setNodes(layoutedNodes);
+setEdges(layoutedEdges);
+```
+
+**Layout Options**:
+```typescript
+interface LayoutOptions {
+  direction: 'LR' | 'TB';  // Left-Right or Top-Bottom
+  nodeWidth?: number;       // Default node width (default: 180)
+  nodeHeight?: number;      // Default node height (default: 100)
+  nodeSep?: number;         // Horizontal separation (default: 80)
+  rankSep?: number;         // Vertical/rank separation (default: 150)
+}
+```
+
+**Node Size Handling**:
+- Container nodes: 180x100 (default)
+- Browser preview nodes: 320x280 (automatically detected by node type)
+
+The layout algorithm:
+1. Creates a Dagre graph with all nodes and edges
+2. Calculates optimal positions based on connections
+3. Converts Dagre's center positions to React Flow's top-left positioning
+4. Returns new nodes with updated positions (edges unchanged)
 
 ### 2. Container Nodes
 - Visual representation of each container (frontend, backend, database, etc.)

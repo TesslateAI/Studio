@@ -255,6 +255,7 @@ See: `project-builder.md`
 - Connection edges with semantic types (HTTP, database, cache, etc.)
 - Browser preview nodes
 - Drag-and-drop container positioning
+- **Auto-layout using Dagre algorithm** (`getLayoutedElements` from `utils/autoLayout.ts`)
 - Start/stop all containers
 - Container properties panel
 - AI chat with view-scoped tools

@@ -4515,6 +4515,85 @@ async def stop_single_container(
         raise HTTPException(status_code=500, detail=f"Failed to stop container: {str(e)}")
 
 
+@router.get("/{project_slug}/containers/{container_id}/health")
+async def check_container_health(
+    project_slug: str,
+    container_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Check if a container's web server is responding to HTTP requests.
+
+    This endpoint is used by the frontend to determine when a container is ready
+    to display in the preview iframe, avoiding 404/503 errors during startup.
+
+    Returns:
+        healthy: True if the container responds with 2xx/3xx status
+        status_code: HTTP status code from the container
+        url: The URL that was checked
+        error: Error message if check failed
+    """
+    import httpx
+
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    settings = get_settings()
+
+    # Get container directory (sanitized for K8s naming)
+    container_dir = container.directory or container.name
+    if container_dir in (".", "", None):
+        container_dir = container.name
+    # Sanitize for DNS compliance
+    container_dir = container_dir.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+    container_dir = ''.join(c for c in container_dir if c.isalnum() or c == '-')
+    while '--' in container_dir:
+        container_dir = container_dir.replace('--', '-')
+    container_dir = container_dir.strip('-')[:63]
+
+    # Build container URL based on deployment mode
+    if settings.deployment_mode == "kubernetes":
+        # K8s URL pattern: {project-slug}-{container-dir}.{domain}
+        container_url = f"https://{project.slug}-{container_dir}.{settings.app_domain}"
+    else:
+        # Docker URL pattern: {container}.localhost
+        container_url = f"http://{container.name}.localhost"
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
+            response = await client.get(container_url, follow_redirects=True)
+            is_healthy = response.status_code < 400
+
+            return {
+                "healthy": is_healthy,
+                "status_code": response.status_code,
+                "url": container_url
+            }
+    except httpx.TimeoutException:
+        return {
+            "healthy": False,
+            "url": container_url,
+            "error": "Connection timeout - server not responding"
+        }
+    except httpx.ConnectError:
+        return {
+            "healthy": False,
+            "url": container_url,
+            "error": "Connection refused - server not started"
+        }
+    except Exception as e:
+        logger.debug(f"[HEALTH CHECK] Error checking {container_url}: {e}")
+        return {
+            "healthy": False,
+            "url": container_url,
+            "error": str(e)
+        }
+
+
 @router.post("/{project_slug}/containers/{container_id}/restart", status_code=202)
 async def restart_single_container(
     project_slug: str,

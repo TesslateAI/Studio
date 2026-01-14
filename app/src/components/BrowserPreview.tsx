@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Plus, CaretLeft, CaretRight, ArrowsClockwise } from '@phosphor-icons/react';
+import { ContainerLoadingOverlay } from './ContainerLoadingOverlay';
+import { ContainerStartupStatus } from '../hooks/useContainerStartup';
 
 interface Tab {
   id: string;
@@ -15,6 +17,14 @@ interface BrowserPreviewProps {
   onNavigateForward: () => void;
   onRefresh: () => void;
   onUrlChange: (url: string) => void;
+  // New props for container startup state
+  containerStatus?: ContainerStartupStatus;
+  startupPhase?: string;
+  startupProgress?: number;
+  startupMessage?: string;
+  startupLogs?: string[];
+  startupError?: string;
+  onRetryStart?: () => void;
 }
 
 export function BrowserPreview({
@@ -24,8 +34,17 @@ export function BrowserPreview({
   onNavigateBack,
   onNavigateForward,
   onRefresh,
-  onUrlChange
+  onUrlChange,
+  containerStatus,
+  startupPhase = '',
+  startupProgress = 0,
+  startupMessage = '',
+  startupLogs = [],
+  startupError,
+  onRetryStart,
 }: BrowserPreviewProps) {
+  // Determine if we should show the loading overlay
+  const showLoadingOverlay = containerStatus === 'starting' || containerStatus === 'health_checking' || containerStatus === 'error';
   const [tabs, setTabs] = useState<Tab[]>([
     { id: '1', title: 'Home', url: devServerUrl }
   ]);
@@ -162,18 +181,29 @@ export function BrowserPreview({
         </button>
       </div>
 
-      {/* Preview iframes */}
+      {/* Preview area - either loading overlay or iframes */}
       <div className="flex-1 bg-white relative">
-        {tabs.map(tab => (
-          <iframe
-            key={tab.id}
-            ref={(el) => { iframeRefs.current[tab.id] = el; }}
-            id={`preview-iframe-${tab.id}`}
-            src={tab.id === activeTabId ? devServerUrlWithAuth : tab.url}
-            className={`w-full h-full ${tab.id === activeTabId ? 'block' : 'hidden'}`}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+        {showLoadingOverlay ? (
+          <ContainerLoadingOverlay
+            phase={startupPhase}
+            progress={startupProgress}
+            message={startupMessage}
+            logs={startupLogs}
+            error={startupError}
+            onRetry={onRetryStart}
           />
-        ))}
+        ) : (
+          tabs.map(tab => (
+            <iframe
+              key={tab.id}
+              ref={(el) => { iframeRefs.current[tab.id] = el; }}
+              id={`preview-iframe-${tab.id}`}
+              src={tab.id === activeTabId ? devServerUrlWithAuth : tab.url}
+              className={`w-full h-full ${tab.id === activeTabId ? 'block' : 'hidden'}`}
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            />
+          ))
+        )}
       </div>
     </div>
   );

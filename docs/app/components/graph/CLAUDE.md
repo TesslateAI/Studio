@@ -340,6 +340,112 @@ const onConnect = useCallback((connection) => {
 }, []);
 ```
 
+## Auto-Layout with Dagre
+
+**File**: `app/src/utils/autoLayout.ts`
+
+Apply automatic layout to graph nodes using the Dagre algorithm.
+
+### Basic Usage
+
+```typescript
+import { getLayoutedElements } from '../utils/autoLayout';
+
+// Apply layout when loading nodes
+const loadContainers = async () => {
+  const containers = await projectsApi.getContainers(slug);
+  const connections = await projectsApi.getConnections(slug);
+
+  // Convert to XYFlow format
+  const nodes = containers.map(c => ({
+    id: c.id,
+    type: 'containerNode',
+    position: { x: 0, y: 0 }, // Will be replaced by layout
+    data: { name: c.name, status: c.status },
+  }));
+
+  const edges = connections.map(conn => ({
+    id: conn.id,
+    source: conn.source_container_id,
+    target: conn.target_container_id,
+  }));
+
+  // Apply Dagre layout
+  const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+    nodes,
+    edges,
+    { direction: 'LR' }
+  );
+
+  setNodes(layoutedNodes);
+  setEdges(layoutedEdges);
+};
+```
+
+### Layout Options
+
+```typescript
+interface LayoutOptions {
+  direction: 'LR' | 'TB';  // Left-Right or Top-Bottom
+  nodeWidth?: number;       // Default: 180
+  nodeHeight?: number;      // Default: 100
+  nodeSep?: number;         // Horizontal spacing between nodes (default: 80)
+  rankSep?: number;         // Spacing between ranks/levels (default: 150)
+}
+```
+
+### Auto-Layout on Button Click
+
+```typescript
+const handleAutoLayout = () => {
+  const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+    nodes,
+    edges,
+    { direction: 'LR', nodeSep: 100, rankSep: 200 }
+  );
+
+  setNodes(layoutedNodes);
+  setEdges(layoutedEdges);
+  toast.success('Layout applied');
+};
+
+// In JSX
+<button onClick={handleAutoLayout}>
+  <GridFour /> Auto Layout
+</button>
+```
+
+### Different Node Sizes
+
+The layout automatically handles different node types:
+
+```typescript
+// In getLayoutedElements, nodes are sized by type:
+if (node.type === 'browserPreview') {
+  width = 320;
+  height = 280;
+} else {
+  // Default container node size
+  width = 180;
+  height = 100;
+}
+```
+
+### Position Conversion
+
+Dagre returns center positions, but React Flow uses top-left. The utility handles conversion:
+
+```typescript
+// Dagre gives center position
+const nodeWithPosition = g.node(node.id);
+
+// Convert to top-left for React Flow
+position: {
+  x: nodeWithPosition.x - width / 2,
+  y: nodeWithPosition.y - height / 2,
+}
+```
+
 ---
 
 **Remember**: XYFlow is highly optimized. Don't fight its performance model. Use memo, memoize types, and avoid expensive render logic.

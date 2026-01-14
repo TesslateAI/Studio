@@ -365,6 +365,14 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}/containers/status`);
     return response.data;
   },
+  checkContainerHealth: async (slug: string, containerId: string): Promise<{ healthy: boolean; status_code?: number; url?: string; error?: string }> => {
+    try {
+      const response = await api.get(`/api/projects/${slug}/containers/${containerId}/health`);
+      return response.data;
+    } catch (error) {
+      return { healthy: false, error: error instanceof Error ? error.message : 'Health check failed' };
+    }
+  },
 };
 
 export const chatApi = {

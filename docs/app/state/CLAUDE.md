@@ -10,6 +10,7 @@
 | `app/src/hooks/useTask.ts` | Task tracking hooks |
 | `app/src/hooks/useTaskNotifications.ts` | Toast notifications for tasks |
 | `app/src/hooks/useReferralTracking.ts` | Affiliate tracking |
+| `app/src/hooks/useContainerStartup.ts` | Container startup lifecycle with health checks |
 
 ## Quick Reference
 
@@ -243,5 +244,6 @@ app/src/
 └── hooks/              # Custom hooks
     ├── useTask.ts
     ├── useTaskNotifications.ts
-    └── useReferralTracking.ts
+    ├── useReferralTracking.ts
+    └── useContainerStartup.ts  # Container startup lifecycle
 ```

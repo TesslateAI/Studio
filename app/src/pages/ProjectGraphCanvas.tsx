@@ -49,6 +49,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import toast from 'react-hot-toast';
 import { EnvInjectionEdge, HttpApiEdge, DatabaseEdge, CacheEdge, BrowserPreviewEdge, getEdgeType } from '../components/edges';
+import { getLayoutedElements } from '../utils/autoLayout';
 
 const nodeTypes: NodeTypes = {
   containerNode: ContainerNode,
@@ -1064,6 +1065,48 @@ export const ProjectGraphCanvas = () => {
     [debouncedContainerPositionUpdate, debouncedBrowserPositionUpdate]
   );
 
+  // Auto layout handler - arranges nodes using dagre algorithm
+  const handleAutoLayout = useCallback(async () => {
+    if (nodes.length < 2) {
+      toast('Add more nodes to use auto layout', { icon: 'ℹ️' });
+      return;
+    }
+
+    const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges, {
+      direction: 'LR',
+      nodeWidth: 180,
+      nodeHeight: 100,
+    });
+
+    // Update local state immediately for responsive UI
+    setNodes(layoutedNodes);
+
+    // Save all positions to backend
+    toast.loading('Arranging nodes...', { id: 'autolayout' });
+
+    try {
+      const updates = layoutedNodes.map((node) => {
+        if (node.type === 'browserPreview') {
+          return api.patch(`/api/projects/${slug}/browser-previews/${node.id}`, {
+            position_x: Math.round(node.position.x),
+            position_y: Math.round(node.position.y),
+          });
+        } else {
+          return api.patch(`/api/projects/${slug}/containers/${node.id}`, {
+            position_x: Math.round(node.position.x),
+            position_y: Math.round(node.position.y),
+          });
+        }
+      });
+
+      await Promise.all(updates);
+      toast.success('Layout applied!', { id: 'autolayout' });
+    } catch (error) {
+      console.error('Failed to save layout:', error);
+      toast.error('Failed to save layout', { id: 'autolayout' });
+    }
+  }, [nodes, edges, slug, setNodes]);
+
   const handleStartAll = async () => {
     if (!slug) return;
 
@@ -1194,6 +1237,18 @@ export const ProjectGraphCanvas = () => {
       onClick: () => setActiveView('kanban'),
       active: activeView === 'kanban'
     },
+    // Builder navigation - accessible on mobile via menu
+    {
+      icon: <Code size={18} />,
+      title: 'Open Builder',
+      onClick: () => navigate(`/project/${slug}/builder`),
+    },
+    // Auto Layout - only shows when on graph view
+    ...(activeView === 'graph' ? [{
+      icon: <FlowArrow size={18} />,
+      title: 'Auto Layout',
+      onClick: handleAutoLayout,
+    }] : []),
   ];
 
   const rightSidebarItems = [
@@ -1423,6 +1478,17 @@ export const ProjectGraphCanvas = () => {
             >
               <Code size={18} className="text-[var(--text)]" />
               <span className="text-sm font-medium text-[var(--text)]">Builder</span>
+            </button>
+
+            {/* Auto Layout Button */}
+            <button
+              onClick={handleAutoLayout}
+              disabled={nodes.length < 2}
+              className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Automatically arrange nodes"
+            >
+              <FlowArrow size={18} className="text-[var(--text)]" />
+              <span className="text-sm font-medium text-[var(--text)]">Auto Layout</span>
             </button>
 
             {isRunning ? (

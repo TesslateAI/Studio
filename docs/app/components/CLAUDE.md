@@ -338,6 +338,70 @@ export function Modal({ isOpen, onClose, onConfirm }: ModalProps) {
 }
 ```
 
+### Container Loading Overlay
+
+**Pattern for Container Startup Feedback**:
+
+```typescript
+import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
+import { useContainerStartup } from '../hooks/useContainerStartup';
+
+function BrowserPreview({ projectSlug, containerId }: Props) {
+  const {
+    status,
+    phase,
+    progress,
+    message,
+    logs,
+    error,
+    containerUrl,
+    startContainer,
+    retry,
+    isLoading,
+  } = useContainerStartup(projectSlug, containerId);
+
+  // Show loading overlay during startup or on error
+  if (isLoading || status === 'error') {
+    return (
+      <ContainerLoadingOverlay
+        phase={phase}
+        progress={progress}
+        message={message}
+        logs={logs}
+        error={error ?? undefined}
+        onRetry={retry}
+      />
+    );
+  }
+
+  // Show preview when ready
+  if (status === 'ready' && containerUrl) {
+    return <iframe src={containerUrl} className="w-full h-full" />;
+  }
+
+  return null;
+}
+```
+
+**ContainerLoadingOverlay Props**:
+```typescript
+interface ContainerLoadingOverlayProps {
+  phase: string;      // Current startup phase
+  progress: number;   // 0-100 percentage
+  message: string;    // User-friendly message
+  logs: string[];     // Terminal-style log output
+  error?: string;     // Error message (shows error state if present)
+  onRetry?: () => void; // Retry callback for error state
+}
+```
+
+**Features**:
+- Animated pulsing grid spinner during loading
+- Progress bar with percentage
+- Terminal-style log viewer with auto-scroll
+- Color-coded logs (red=error, yellow=warn, green=success)
+- Error state with retry button and log preview
+
 ### Error Handling
 
 **Component-Level Error Boundaries**:

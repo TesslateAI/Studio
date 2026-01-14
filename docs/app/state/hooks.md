@@ -395,6 +395,132 @@ register: async (name: string, email: string, password: string) => {
 }
 ```
 
+## Container Startup Hook
+
+**File**: `app/src/hooks/useContainerStartup.ts`
+
+Manages the complete container startup lifecycle with progress tracking, health checks, and retry logic.
+
+### Status Types
+
+```typescript
+type ContainerStartupStatus = 'idle' | 'starting' | 'health_checking' | 'ready' | 'error';
+```
+
+### State Interface
+
+```typescript
+interface ContainerStartupState {
+  status: ContainerStartupStatus;
+  phase: string;           // Current startup phase (queued, running, installing_dependencies, etc.)
+  progress: number;        // 0-100 percentage
+  message: string;         // User-friendly phase message
+  logs: string[];          // Startup log messages
+  error: string | null;    // Error message if failed
+  containerUrl: string | null; // Container URL once ready
+}
+```
+
+### Options
+
+```typescript
+interface UseContainerStartupOptions {
+  onReady?: (url: string) => void;     // Called when container is ready
+  onError?: (error: string) => void;   // Called on error
+  healthCheckInterval?: number;         // Interval between health checks (default: 2000ms)
+  healthCheckMaxRetries?: number;       // Max health check attempts (default: 60)
+}
+```
+
+### Usage
+
+```typescript
+import { useContainerStartup } from '../hooks/useContainerStartup';
+
+function ProjectPreview({ projectSlug, containerId }: Props) {
+  const {
+    status,
+    phase,
+    progress,
+    message,
+    logs,
+    error,
+    containerUrl,
+    startContainer,
+    retry,
+    reset,
+    isLoading,
+  } = useContainerStartup(projectSlug, containerId, {
+    onReady: (url) => {
+      console.log('Container ready at:', url);
+    },
+    onError: (error) => {
+      toast.error(error);
+    },
+  });
+
+  // Trigger container start
+  useEffect(() => {
+    if (containerId && status === 'idle') {
+      startContainer();
+    }
+  }, [containerId, status, startContainer]);
+
+  // Show loading overlay during startup
+  if (isLoading || status === 'error') {
+    return (
+      <ContainerLoadingOverlay
+        phase={phase}
+        progress={progress}
+        message={message}
+        logs={logs}
+        error={error}
+        onRetry={retry}
+      />
+    );
+  }
+
+  // Show preview when ready
+  if (status === 'ready' && containerUrl) {
+    return <iframe src={containerUrl} />;
+  }
+
+  return null;
+}
+```
+
+### Startup Phases
+
+The hook transitions through these phases:
+
+| Phase | Message | Description |
+|-------|---------|-------------|
+| `queued` | Preparing environment | Task is queued |
+| `running` | Starting container | Container is starting |
+| `creating_namespace` | Creating project environment | K8s namespace creation |
+| `creating_deployment` | Deploying container | K8s deployment creation |
+| `installing_dependencies` | Installing dependencies | npm install running |
+| `starting_server` | Starting development server | Dev server starting |
+| `health_checking` | Starting development server | Health checks in progress |
+| `completed` | Container ready! | Container is ready |
+| `failed` | Container startup failed | An error occurred |
+
+### Return Values
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `status` | `ContainerStartupStatus` | Current status |
+| `phase` | `string` | Current startup phase |
+| `progress` | `number` | Progress percentage (0-100) |
+| `message` | `string` | User-friendly message |
+| `logs` | `string[]` | Startup log messages |
+| `error` | `string \| null` | Error message if failed |
+| `containerUrl` | `string \| null` | Container URL when ready |
+| `startContainer` | `(overrideContainerId?: string) => Promise<void>` | Start the container |
+| `retry` | `() => void` | Retry startup after failure |
+| `reset` | `() => void` | Reset to idle state |
+| `isLoading` | `boolean` | True when starting or health checking |
+
 ## Hook Summary
 
 | Hook | Purpose | Dependencies |
@@ -405,6 +531,7 @@ register: async (name: string, email: string, password: string) => {
 | `useTaskWebSocket` | Connect WebSocket | taskService |
 | `useTaskNotifications` | Show toast notifications | useTaskWebSocket, react-hot-toast |
 | `useReferralTracking` | Track affiliate referrals | react-router-dom, axios |
+| `useContainerStartup` | Manage container startup lifecycle | tasksApi, projectsApi |
 
 ## Best Practices
 

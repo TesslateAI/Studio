@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -32,7 +32,9 @@ import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
 import { BrowserPreview } from '../components/BrowserPreview';
+import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
 import { DiscordSupport } from '../components/DiscordSupport';
+import { useContainerStartup } from '../hooks/useContainerStartup';
 import {
   GitHubPanel,
   ArchitecturePanel,
@@ -91,6 +93,30 @@ export default function Project() {
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
+
+  // Track if we need to start the container (for the startup hook)
+  const [needsContainerStart, setNeedsContainerStart] = useState(false);
+  const currentContainerIdRef = useRef<string | null>(null);
+
+  // Container startup hook - handles task polling, logs, and health checks
+  const containerStartup = useContainerStartup(
+    slug,
+    needsContainerStart ? currentContainerIdRef.current : null,
+    {
+      onReady: (url) => {
+        // Container is ready - set the URL for the preview
+        setDevServerUrl(url);
+        setDevServerUrlWithAuth(url);
+        setCurrentPreviewUrl(url);
+        setNeedsContainerStart(false);
+        toast.success('Development server ready!', { id: 'container-start', duration: 2000 });
+      },
+      onError: (error) => {
+        setNeedsContainerStart(false);
+        toast.error(`Container failed: ${error}`, { id: 'container-start' });
+      }
+    }
+  );
 
   useEffect(() => {
     if (slug) {
@@ -326,6 +352,13 @@ export default function Project() {
           const containerDir = foundContainer.directory || foundContainer.name?.toLowerCase().replace(/[^a-z0-9-]/g, '-');
           const containerStatus = status?.containers?.[containerDir];
 
+          // Check for hibernation - only explicit hibernated status, not just stopped
+          if (containerStatus?.status === 'hibernated' || status?.environment_status === 'hibernated') {
+            toast('This project has been hibernated. Redirecting to projects...', { duration: 3000 });
+            navigate('/dashboard');
+            return;
+          }
+
           if (containerStatus?.running && containerStatus?.url) {
             // Container already running - just set the URL without starting
             setDevServerUrl(containerStatus.url);
@@ -338,22 +371,12 @@ export default function Project() {
           console.warn('Failed to check container status, will attempt start:', statusError);
         }
 
-        // Container not running - start it
-        try {
-          toast.loading(`Starting container ${foundContainer.name}...`, { id: 'container-start' });
-          const response = await projectsApi.startContainer(slug, foundContainer.id);
-          toast.success(`Container ${foundContainer.name} started!`, { id: 'container-start', duration: 2000 });
-
-          // Set container-specific preview URL for multi-container projects
-          if (response.url) {
-            setDevServerUrl(response.url);
-            setDevServerUrlWithAuth(response.url);
-            setCurrentPreviewUrl(response.url);
-          }
-        } catch (error) {
-          console.error('Failed to start container:', error);
-          toast.error('Failed to start container', { id: 'container-start' });
-        }
+        // Container not running - use the startup hook to start it with real-time logs
+        const containerIdToStart = foundContainer.id as string;
+        currentContainerIdRef.current = containerIdToStart;
+        setNeedsContainerStart(true);
+        // Pass containerId directly to avoid timing issues with React state updates
+        containerStartup.startContainer(containerIdToStart);
       }
     } catch (error) {
       console.error('Failed to load container:', error);
@@ -858,7 +881,17 @@ export default function Project() {
         <div className="flex-1 overflow-hidden bg-[var(--bg)]">
           {/* Preview View */}
           <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-            {devServerUrl ? (
+            {/* Show loading overlay during container startup */}
+            {containerStartup.isLoading || containerStartup.status === 'error' ? (
+              <ContainerLoadingOverlay
+                phase={containerStartup.phase}
+                progress={containerStartup.progress}
+                message={containerStartup.message}
+                logs={containerStartup.logs}
+                error={containerStartup.error || undefined}
+                onRetry={containerStartup.retry}
+              />
+            ) : devServerUrl ? (
               previewMode === 'browser-tabs' ? (
                 <BrowserPreview
                   devServerUrl={devServerUrl}
@@ -868,6 +901,13 @@ export default function Project() {
                   onNavigateForward={navigateForward}
                   onRefresh={refreshPreview}
                   onUrlChange={setCurrentPreviewUrl}
+                  containerStatus={containerStartup.status}
+                  startupPhase={containerStartup.phase}
+                  startupProgress={containerStartup.progress}
+                  startupMessage={containerStartup.message}
+                  startupLogs={containerStartup.logs}
+                  startupError={containerStartup.error || undefined}
+                  onRetryStart={containerStartup.retry}
                 />
               ) : (
                 <>
@@ -917,7 +957,7 @@ export default function Project() {
               )
             ) : (
               <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-                <LoadingSpinner message="Starting development server..." size={60} />
+                <LoadingSpinner message="Loading project..." size={60} />
               </div>
             )}
           </div>
