@@ -54,17 +54,28 @@ Semantic edge types showing relationships:
 - Graph-scoped tools (add_container, create_connection, etc.)
 - View context: 'graph'
 
+## Navigation
+
+The Architecture canvas provides intuitive navigation between views:
+
+- **Back to Projects**: Left sidebar button navigates to `/dashboard` (project list)
+- **Builder Button**: Top bar button navigates to `/project/:slug/builder` (builder view with first container)
+- **Double-click Container**: Opens that container in builder view
+
+This mirrors the builder view which has a reciprocal "Architecture" button, allowing users to seamlessly switch between views like different perspectives of the same project (similar to ClickUp's view system).
+
 ## Component Structure
 
 ```
 ProjectGraphCanvas
 ├── Header
 │   ├── Breadcrumbs
-│   ├── View switcher (graph/code/kanban)
+│   ├── Builder button (→ /project/:slug/builder)
 │   ├── Start/Stop all button
-│   └── Theme toggle
+│   └── View switcher (graph/code/kanban)
 │
 ├── Left Sidebar (collapsible)
+│   ├── Back to Projects button (→ /dashboard)
 │   ├── Panel toggles
 │   │   ├── GitHub
 │   │   ├── Notes

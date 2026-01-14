@@ -478,7 +478,9 @@ fi
         """
         project_id = str(project.id)
         namespace = self._get_namespace(project_id)
-        container_directory = self._sanitize_name(container.directory or container.name)
+        # Use container.name if directory is "." or empty (root directory = use container name)
+        dir_for_k8s = container.name if container.directory in (".", "", None) else container.directory
+        container_directory = self._sanitize_name(dir_for_k8s)
 
         logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
 

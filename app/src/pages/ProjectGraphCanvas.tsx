@@ -1416,6 +1416,15 @@ export const ProjectGraphCanvas = () => {
 
           {/* Control buttons */}
           <div className="flex items-center gap-3">
+            {/* Builder Button */}
+            <button
+              onClick={() => navigate(`/project/${slug}/builder`)}
+              className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
+            >
+              <Code size={18} className="text-[var(--text)]" />
+              <span className="text-sm font-medium text-[var(--text)]">Builder</span>
+            </button>
+
             {isRunning ? (
               <button
                 onClick={handleStopAll}

@@ -114,36 +114,37 @@ const loadProjects = async () => {
 
 ### Creating a Project
 
+Projects are created with a base template selected. After creation, the user is navigated directly to the **Builder view** (not the architecture canvas) for immediate coding.
+
 ```typescript
-const handleCreateProject = async (projectData: ProjectCreate) => {
+const handleCreateProject = async (projectName: string, baseId?: string) => {
   try {
     setIsCreating(true);
-    const response = await projectsApi.create({
-      name: projectData.name,
-      description: projectData.description,
-      base_id: projectData.base_id,
-    });
+    const response = await projectsApi.create(
+      projectName,
+      '',
+      'base',  // Always use 'base' source type
+      undefined,
+      'main',
+      baseId
+    );
 
-    // Show success and start polling for setup task
-    toast.success('Creating project...');
-    setShowCreateDialog(false);
+    const project = response.project;
+    const taskId = response.task_id;
 
-    // Poll task status
-    const checkTask = async () => {
-      const task = await tasksApi.get(response.task_id);
+    // Poll for task completion to get container_id
+    if (taskId) {
+      const result = await tasksApi.pollUntilComplete(taskId);
 
-      if (task.status === 'completed') {
-        toast.success('Project created!');
-        navigate(`/project/${task.result.slug}`);
-      } else if (task.status === 'failed') {
-        toast.error(`Failed: ${task.error}`);
+      // Navigate to builder with container if available
+      if (result?.container_id) {
+        navigate(`/project/${project.slug}/builder?container=${result.container_id}`);
       } else {
-        // Still running, poll again
-        setTimeout(checkTask, 1000);
+        navigate(`/project/${project.slug}/builder`);
       }
-    };
-
-    checkTask();
+    } else {
+      navigate(`/project/${project.slug}/builder`);
+    }
   } catch (error) {
     toast.error('Failed to create project');
   } finally {
@@ -269,10 +270,12 @@ useEffect(() => {
 
 ## Project Card Component
 
+Clicking "Open" on a project card navigates directly to the **Builder view** (`/project/:slug/builder`) rather than the architecture canvas. This provides a more immediate coding experience.
+
 ```typescript
 interface ProjectCardProps {
   project: Project;
-  onOpen: (slug: string) => void;
+  onOpen: (slug: string) => void;  // Navigates to /project/:slug/builder
   onDelete: (project: Project) => void;
   isDeleting: boolean;
 }

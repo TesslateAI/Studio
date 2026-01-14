@@ -143,18 +143,20 @@ async def _perform_project_setup(
                 await asyncio.sleep(0.1)
 
             # Handle different source types
+            container_id = None
             if project_data.source_type in ("github", "gitlab", "bitbucket"):
                 await _setup_git_provider_project(project_data, db_project, user_id, settings, db, task, project_path)
             elif project_data.source_type == "base":
-                await _setup_base_project(project_data, db_project, user_id, settings, db, task, project_path)
+                container_id = await _setup_base_project(project_data, db_project, user_id, settings, db, task, project_path)
             else:
-                # Template mode (default)
-                task.update_progress(10, 100, "Initializing from template")
-                await _setup_template_project(db_project, project_path, settings, db, task)
+                raise ValueError(f"Invalid source_type: {project_data.source_type}. Must be 'base', 'github', 'gitlab', or 'bitbucket'.")
 
             # Final step: Complete
             task.update_progress(100, 100, "Project setup complete")
             logger.info(f"[CREATE] Project {db_project.id} setup completed successfully")
+
+            # Return result with container_id for navigation
+            return {"slug": db_project_slug, "container_id": container_id}
 
         except Exception as e:
             logger.error(f"[CREATE] Background task error: {e}", exc_info=True)
@@ -516,17 +518,17 @@ async def _setup_base_project(
     if not project_data.base_id:
         raise ValueError("base_id is required for source_type 'base'")
 
-    # Check if this is the built-in template
-    if project_data.base_id == 'builtin':
-        task.update_progress(10, 100, "Setting up built-in Tesslate Frontend template")
-        await _setup_template_project(db_project, project_path, settings, db, task)
-        return
-
     task.update_progress(10, 100, f"Loading marketplace base: {project_data.base_id}")
 
-    # Verify purchase
+    # Get base info first
     from ..models import UserPurchasedBase, MarketplaceBase
     from sqlalchemy import select
+
+    base_repo = await db.get(MarketplaceBase, project_data.base_id)
+    if not base_repo:
+        raise ValueError("Project base not found.")
+
+    # Check if user has this base in their library
     purchase = await db.scalar(
         select(UserPurchasedBase).where(
             UserPurchasedBase.user_id == user_id,
@@ -534,12 +536,10 @@ async def _setup_base_project(
             UserPurchasedBase.is_active == True
         )
     )
-    if not purchase:
-        raise ValueError("You have not acquired this project base.")
 
-    base_repo = await db.get(MarketplaceBase, project_data.base_id)
-    if not base_repo:
-        raise ValueError("Project base not found.")
+    if not purchase:
+        # User must add the base to their library first (via "+" button in CreateProjectModal)
+        raise ValueError(f"Please add '{base_repo.name}' to your library first by clicking the + button.")
 
     # Note: MarketplaceBase doesn't have a metadata column - framework detection
     # happens via TESSLATE.md parsing during container startup
@@ -555,14 +555,14 @@ async def _setup_base_project(
 
         task.update_progress(20, 100, "Copying pre-installed base from cache")
 
-        # Get cached base path
+        # Get cached base path (returns None in K8s mode)
         base_cache_manager = get_base_cache_manager()
         cached_base_path = await base_cache_manager.get_base_path(base_repo.slug)
         orchestrator = get_orchestrator()
 
-        if not os.path.exists(cached_base_path):
+        if cached_base_path is None or not os.path.exists(cached_base_path):
             # Base not in local cache - need to git clone
-            logger.warning(f"Base {base_repo.slug} not found in cache, falling back to git clone")
+            logger.info(f"[CREATE] Base {base_repo.slug} not in cache, cloning from git")
 
             if settings.deployment_mode == "kubernetes":
                 # K8s mode: Clone to temp directory on backend pod, save to DB
@@ -694,11 +694,46 @@ async def _setup_base_project(
         db_project.git_remote_url = base_repo.git_repo_url
         await db.commit()
 
+        # Create container linked to the base
+        task.update_progress(95, 100, "Creating container from base")
+
+        # Parse TESSLATE.md from cloned base to get port (uses existing parser)
+        from ..services.base_config_parser import parse_tesslate_md
+        tesslate_path = os.path.join(cached_base_path, "TESSLATE.md")
+        internal_port = 3000  # Default fallback
+        if os.path.exists(tesslate_path):
+            try:
+                tesslate_content = await read_file_async(tesslate_path)
+                base_config = parse_tesslate_md(tesslate_content)
+                internal_port = base_config.port
+                logger.info(f"[CREATE] Parsed port {internal_port} from TESSLATE.md")
+            except Exception as e:
+                logger.warning(f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000")
+
+        container = Container(
+            project_id=db_project.id,
+            base_id=base_repo.id,
+            name=base_repo.slug.lower(),  # e.g., "nextjs", "vite", "fastapi"
+            directory=".",  # Root directory for single-container projects
+            container_name=f"{db_project.slug}-{base_repo.slug.lower()}",
+            internal_port=internal_port,
+            container_type="base",
+            status="stopped",
+            position_x=200,  # Default position for Architecture canvas
+            position_y=200,
+        )
+        db.add(container)
+        await db.commit()
+        await db.refresh(container)
+        logger.info(f"[CREATE] Created container {container.id} for base {base_repo.slug}")
+
+        # Return container_id for navigation
+        return str(container.id)
+
     except Exception as git_error:
-        logger.error(f"[CREATE] Failed to clone base: {git_error}", exc_info=True)
-        # Fallback to template
-        task.update_progress(40, 100, "Base clone failed, using fallback template")
-        await _setup_template_project(db_project, project_path, settings, db, task)
+        logger.error(f"[CREATE] Failed to setup base project: {git_error}", exc_info=True)
+        # Re-raise the error - no fallback, let it fail properly
+        raise
 
     finally:
         # Clean up temp clone directory if created
@@ -710,77 +745,6 @@ async def _setup_base_project(
                 logger.warning(f"[K8S] Failed to cleanup temp directory: {cleanup_error}")
 
 
-async def _setup_template_project(
-    db_project: Project,
-    project_path: str,
-    settings,
-    db: AsyncSession,
-    task: Task
-) -> None:
-    """Setup project from template"""
-    logger.info(f"[CREATE] Initializing from template")
-
-    template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "template"))
-
-    if not os.path.exists(template_dir):
-        raise FileNotFoundError(f"Template directory not found: {template_dir}")
-
-    # Step 1: Save template files to database (10-70%)
-    task.update_progress(20, 100, "Reading template files")
-    files_saved = 0
-
-    walk_results = await walk_directory_async(
-        template_dir,
-        exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
-    )
-
-    for root, dirs, files in walk_results:
-        for file in files:
-            if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico')):
-                continue
-
-            file_path = os.path.join(root, file)
-            relative_path = os.path.relpath(file_path, template_dir).replace('\\', '/')
-
-            try:
-                content = await read_file_async(file_path)
-                db_file = ProjectFile(
-                    project_id=db_project.id,
-                    file_path=relative_path,
-                    content=content
-                )
-                db.add(db_file)
-                files_saved += 1
-            except Exception as e:
-                logger.warning(f"[CREATE] Could not read template file {relative_path}: {e}")
-
-    await db.commit()
-    task.update_progress(70, 100, f"Saved {files_saved} template files to database")
-
-    # Step 2: In Docker mode, copy template files to filesystem (70-95%)
-    if settings.deployment_mode == "docker":
-        task.update_progress(75, 100, "Copying template files to filesystem")
-        try:
-            walk_results = await walk_directory_async(
-                template_dir,
-                exclude_dirs=['node_modules', '.git', 'dist', 'build', '.next']
-            )
-
-            for root, dirs, files in walk_results:
-                for file in files:
-                    src_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(src_path, template_dir)
-                    dst_path = os.path.join(project_path, rel_path)
-
-                    parent_dir = os.path.dirname(dst_path)
-                    if parent_dir:
-                        await makedirs_async(parent_dir)
-
-                    await copy_file_async(src_path, dst_path)
-
-            task.update_progress(95, 100, "Template files copied to filesystem")
-        except Exception as copy_error:
-            logger.error(f"[CREATE] Failed to copy template files: {copy_error}", exc_info=True)
 @router.post("/")
 async def create_project(
     project: ProjectCreate,
@@ -788,11 +752,11 @@ async def create_project(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a new project from a template or GitHub repository.
+    Create a new project from a marketplace base or GitHub repository.
 
-    Supports two source types:
-    - template: Initialize from built-in React/Vite template (default)
-    - github: Import from a GitHub repository
+    Supports source types:
+    - base: Create from a marketplace base (NextJS, Vite, FastAPI, etc.)
+    - github/gitlab/bitbucket: Import from a Git repository
 
     For GitHub import:
     - GitHub authentication is OPTIONAL for public repositories
@@ -4281,8 +4245,12 @@ async def _start_container_background_task(
         if container_info and container_info.get('running'):
             # Container is already running - return immediately!
             task.update_progress(100, 100, "Container already running")
-            sanitized_container_name = f"{project.slug}-{service_name}"
-            container_url = f"http://{sanitized_container_name}.localhost"
+            # Use URL from orchestrator status if available, otherwise build it
+            container_url = container_info.get('url')
+            if not container_url:
+                settings = get_settings()
+                protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+                container_url = f"{protocol}://{project.slug}-{service_name}.{settings.app_domain}"
             task.add_log(f"Container '{container.name}' is already running at {container_url}")
             logger.info(f"[COMPOSE] Container {container.name} already running, skipping startup")
 
@@ -4376,8 +4344,14 @@ async def _start_container_background_task(
             # Stage 6: Wait for container health (85%)
             task.update_progress(85, 100, "Waiting for container to be ready")
 
-            # Get container URL from result
-            container_url = result.get("url", f"http://{project.slug}-{container.name}.localhost")
+            # Get container URL from result (orchestrator returns correct URL)
+            container_url = result.get("url")
+            if not container_url:
+                settings = get_settings()
+                protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+                sanitized_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+                sanitized_name = ''.join(c for c in sanitized_name if c.isalnum() or c == '-').strip('-')
+                container_url = f"{protocol}://{project.slug}-{sanitized_name}.{settings.app_domain}"
 
             # Give container a moment to fully initialize
             import asyncio
@@ -4662,8 +4636,14 @@ async def _restart_container_background_task(
         import asyncio
         await asyncio.sleep(2)
 
-        # Get container URL from result
-        container_url = result.get("url", f"http://{project.slug}-{container.name}.localhost")
+        # Get container URL from result (orchestrator returns correct URL)
+        container_url = result.get("url")
+        if not container_url:
+            settings = get_settings()
+            protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
+            sanitized_name = container.name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
+            sanitized_name = ''.join(c for c in sanitized_name if c.isalnum() or c == '-').strip('-')
+            container_url = f"{protocol}://{project.slug}-{sanitized_name}.{settings.app_domain}"
 
         task.update_progress(100, 100, "Container restarted successfully")
         logger.info(f"[COMPOSE] Successfully restarted container {container.name}")

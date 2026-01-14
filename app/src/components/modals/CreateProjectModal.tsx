@@ -1,12 +1,27 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { FilePlus, X } from '@phosphor-icons/react';
+import { Link } from 'react-router-dom';
+import { marketplaceApi } from '../../lib/api';
+import { TemplateCard, AddMoreCard } from '../TemplateCard';
+
+interface MarketplaceBase {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  icon_url?: string;
+  default_port?: number;
+}
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (projectName: string) => void;
+  onConfirm: (projectName: string, baseId?: string) => void;
   isLoading?: boolean;
 }
+
+// Featured bases shown by default (even if not in user's library)
+const FEATURED_SLUGS = ['nextjs', 'vite', 'fastapi', 'express'];
 
 export function CreateProjectModal({
   isOpen,
@@ -15,18 +30,103 @@ export function CreateProjectModal({
   isLoading = false
 }: CreateProjectModalProps) {
   const [projectName, setProjectName] = useState('');
+  const [selectedBase, setSelectedBase] = useState<MarketplaceBase | null>(null);
+  const [allBases, setAllBases] = useState<MarketplaceBase[]>([]);
+  const [userBases, setUserBases] = useState<MarketplaceBase[]>([]);
+  const [loadingBases, setLoadingBases] = useState(true);
+
+  // Load bases when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      loadBases();
+    }
+  }, [isOpen]);
+
+  const loadBases = async () => {
+    setLoadingBases(true);
+    try {
+      // Load all bases and user's library in parallel
+      const [allBasesRes, userBasesRes] = await Promise.all([
+        marketplaceApi.getAllBases({ limit: 50 }),
+        marketplaceApi.getUserBases().catch(() => ({ bases: [] }))
+      ]);
+
+      const bases = allBasesRes.bases || allBasesRes || [];
+      const userBasesData = userBasesRes.bases || userBasesRes || [];
+
+      setAllBases(bases);
+      setUserBases(userBasesData);
+
+      // Auto-select NextJS as default if available
+      const nextjs = bases.find((b: MarketplaceBase) => b.slug === 'nextjs');
+      if (nextjs && !selectedBase) {
+        setSelectedBase(nextjs);
+      }
+    } catch (error) {
+      console.error('Failed to load bases:', error);
+    } finally {
+      setLoadingBases(false);
+    }
+  };
+
+  // Combine: featured bases first, then user's added bases (deduplicated)
+  const displayBases = useMemo(() => {
+    // Get featured bases in order
+    const featured = FEATURED_SLUGS
+      .map(slug => allBases.find(b => b.slug === slug))
+      .filter(Boolean) as MarketplaceBase[];
+
+    // Get user bases that aren't already in featured
+    const featuredIds = new Set(featured.map(b => b.id));
+    const userOnly = userBases.filter(b => !featuredIds.has(b.id));
+
+    return [...featured, ...userOnly];
+  }, [allBases, userBases]);
+
+  // Check if a base is in user's library
+  const isInLibrary = (baseId: string) => {
+    return userBases.some(b => b.id === baseId);
+  };
+
+  // Add base to library (purchase for free) and optionally select it
+  const handleAddToLibrary = async (base: MarketplaceBase, andSelect: boolean = false) => {
+    try {
+      await marketplaceApi.purchaseBase(Number(base.id));
+      // Refresh user bases
+      const userBasesRes = await marketplaceApi.getUserBases();
+      setUserBases(userBasesRes.bases || userBasesRes || []);
+      // Select the base after adding
+      if (andSelect) {
+        setSelectedBase(base);
+      }
+    } catch (error) {
+      console.error('Failed to add to library:', error);
+    }
+  };
+
+  // Handle base card click - add to library first if needed
+  const handleBaseClick = async (base: MarketplaceBase) => {
+    if (isInLibrary(base.id)) {
+      // Already in library, just select it
+      setSelectedBase(base);
+    } else {
+      // Not in library - add it first, then select it
+      await handleAddToLibrary(base, true);
+    }
+  };
 
   if (!isOpen) return null;
 
   const handleConfirm = () => {
     if (!isLoading && projectName.trim()) {
-      onConfirm(projectName.trim());
+      onConfirm(projectName.trim(), selectedBase?.id);
     }
   };
 
   const handleClose = () => {
     if (!isLoading) {
       setProjectName('');
+      setSelectedBase(null);
       onClose();
     }
   };
@@ -45,7 +145,7 @@ export function CreateProjectModal({
       onClick={handleClose}
     >
       <div
-        className="bg-[var(--surface)] p-6 sm:p-8 rounded-3xl w-full max-w-md shadow-2xl border border-white/10 animate-in fade-in zoom-in-95 duration-200"
+        className="bg-[var(--surface)] p-6 sm:p-8 rounded-3xl w-full max-w-lg shadow-2xl border border-white/10 animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -59,7 +159,7 @@ export function CreateProjectModal({
                 Create New Project
               </h2>
               <p className="text-sm text-gray-400 leading-relaxed">
-                Enter a name for your new project
+                Pick a template and name your project
               </p>
             </div>
           </div>
@@ -70,6 +170,49 @@ export function CreateProjectModal({
             >
               <X className="w-5 h-5" />
             </button>
+          )}
+        </div>
+
+        {/* Template Selection */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-[var(--text)] mb-3">
+            Choose a Template
+          </label>
+
+          {loadingBases ? (
+            <div className="flex items-center justify-center h-36">
+              <div className="w-6 h-6 border-2 border-white/20 border-t-[var(--primary)] rounded-full animate-spin" />
+            </div>
+          ) : (
+            <>
+              {/* Horizontal scroll container */}
+              <div className="overflow-x-auto pb-2 -mx-6 px-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                <div className="flex gap-3 min-w-max">
+                  {displayBases.map(base => (
+                    <TemplateCard
+                      key={base.id}
+                      base={base}
+                      selected={selectedBase?.id === base.id}
+                      onClick={() => handleBaseClick(base)}
+                      inLibrary={isInLibrary(base.id)}
+                    />
+                  ))}
+                  <AddMoreCard onClick={handleClose} />
+                </div>
+              </div>
+
+              {/* Marketplace upsell */}
+              <p className="text-sm text-white/40 mt-3">
+                Looking for something else?{' '}
+                <Link
+                  to="/marketplace?tab=bases"
+                  className="text-[var(--primary)] hover:underline"
+                  onClick={handleClose}
+                >
+                  Explore Marketplace
+                </Link>
+              </p>
+            </>
           )}
         </div>
 

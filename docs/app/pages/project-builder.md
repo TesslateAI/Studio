@@ -52,12 +52,22 @@ Toggle-able sidebar panels for additional features:
 - **Notes**: Rich text notes with TipTap editor
 - **Settings**: Project configuration (env vars, preview mode)
 
+## Navigation
+
+The Builder view provides intuitive navigation between views:
+
+- **Back to Projects**: Left sidebar button navigates to `/dashboard` (project list)
+- **Architecture Button**: Top bar button navigates to `/project/:slug` (architecture canvas)
+- **Container Selector**: Dropdown in top bar to switch between containers in multi-container projects
+
+This mirrors the architecture canvas which has a reciprocal "Builder" button, allowing users to seamlessly switch between views like different perspectives of the same project (similar to ClickUp's view system).
+
 ## Component Structure
 
 ```
 Project Builder
 ├── Left Sidebar (collapsible)
-│   ├── Project breadcrumbs
+│   ├── Back to Projects button (→ /dashboard)
 │   ├── View mode tabs
 │   │   ├── Preview
 │   │   ├── Code
@@ -69,6 +79,12 @@ Project Builder
 │       ├── Architecture
 │       ├── Notes
 │       └── Settings
+│
+├── Top Bar
+│   ├── Breadcrumbs (Projects → Project Name → Builder)
+│   ├── Container Selector (for multi-container projects)
+│   ├── Architecture button (→ /project/:slug)
+│   └── Deploy button
 │
 ├── Main Content Area
 │   └── (Dynamic based on activeView)

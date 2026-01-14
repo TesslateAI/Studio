@@ -103,31 +103,57 @@ export default function Dashboard() {
     }
   };
 
-  const handleCreateProject = async (projectName: string) => {
+  const handleCreateProject = async (projectName: string, baseId?: string) => {
     if (isCreating) return;
 
     setIsCreating(true);
     const creatingToast = toast.loading('Creating project...');
 
     try {
-      // Create empty project (containers with marketplace bases are added later in ProjectGraphCanvas)
+      // Create project with base (creates container automatically)
+      // baseId is required - CreateProjectModal auto-selects a base
       const response = await projectsApi.create(
         projectName,
         '',
-        'template',  // Empty project - no base needed at project level
+        'base',  // Always use 'base' source type
         undefined,
         'main',
-        undefined
+        baseId
       );
 
       const project = response.project;
+      const taskId = response.task_id;
 
-      toast.success('Project created!', { id: creatingToast, duration: 2000 });
-      setShowCreateDialog(false);
-      setIsCreating(false);
+      // Poll for task completion to get container_id
+      if (taskId) {
+        toast.loading('Setting up project...', { id: creatingToast });
+        try {
+          const result = await tasksApi.pollUntilComplete(taskId);
+          toast.success('Project created!', { id: creatingToast, duration: 2000 });
+          setShowCreateDialog(false);
+          setIsCreating(false);
 
-      // Navigate to project graph canvas
-      navigate(`/project/${project.slug}`);
+          // Navigate to builder with container if available
+          if (result?.container_id) {
+            navigate(`/project/${project.slug}/builder?container=${result.container_id}`);
+          } else {
+            // Fallback to builder without container param
+            navigate(`/project/${project.slug}/builder`);
+          }
+        } catch (taskError) {
+          console.error('Project setup task failed:', taskError);
+          toast.error('Project created but setup failed', { id: creatingToast });
+          setIsCreating(false);
+          // Navigate to graph canvas as fallback
+          navigate(`/project/${project.slug}`);
+        }
+      } else {
+        toast.success('Project created!', { id: creatingToast, duration: 2000 });
+        setShowCreateDialog(false);
+        setIsCreating(false);
+        // Navigate to builder without container
+        navigate(`/project/${project.slug}/builder`);
+      }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
       const detail = err?.response?.data?.detail;
@@ -545,7 +571,7 @@ export default function Dashboard() {
                     slug: project.slug,
                     environmentStatus: project.environment_status
                   }}
-                  onOpen={() => navigate(`/project/${project.slug}`)}
+                  onOpen={() => navigate(`/project/${project.slug}/builder`)}
                   onDelete={() => deleteProject(project.id)}
                   onStatusChange={(status) => updateProjectStatus(project.id, status)}
                   onFork={() => handleForkProject(project.id)}
@@ -607,7 +633,7 @@ export default function Dashboard() {
 
             const project = response.project;
             toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
-            navigate(`/project/${project.slug}`);
+            navigate(`/project/${project.slug}/builder`);
           } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };
             const detail = err?.response?.data?.detail;

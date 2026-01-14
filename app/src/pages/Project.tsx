@@ -45,6 +45,7 @@ import {
 import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
+import { ContainerSelector } from '../components/ContainerSelector';
 import { projectsApi, marketplaceApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
@@ -72,6 +73,7 @@ export default function Project() {
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
   const [container, setContainer] = useState<Record<string, unknown> | null>(null);
+  const [containers, setContainers] = useState<Array<Record<string, unknown>>>([]);
   const [agents, setAgents] = useState<UIAgent[]>([]);
   const [activeView, setActiveView] = useState<MainViewType>('preview');
   const [activePanel, setActivePanel] = useState<PanelType>(null);
@@ -99,9 +101,9 @@ export default function Project() {
     }
   }, [slug]);
 
-  // Load container when containerId changes
+  // Load containers on mount and when containerId changes
   useEffect(() => {
-    if (containerId && slug) {
+    if (slug) {
       loadContainer();
     }
   }, [containerId, slug]);
@@ -305,10 +307,16 @@ export default function Project() {
   };
 
   const loadContainer = async () => {
-    if (!slug || !containerId) return;
+    if (!slug) return;
     try {
-      const containers = await projectsApi.getContainers(slug);
-      const foundContainer = containers.find((c: Record<string, unknown>) => c.id === containerId);
+      const allContainers = await projectsApi.getContainers(slug);
+      setContainers(allContainers);
+
+      // Find current container (by ID or default to first)
+      const foundContainer = containerId
+        ? allContainers.find((c: Record<string, unknown>) => c.id === containerId)
+        : allContainers[0];
+
       if (foundContainer) {
         setContainer(foundContainer);
 
@@ -333,7 +341,7 @@ export default function Project() {
         // Container not running - start it
         try {
           toast.loading(`Starting container ${foundContainer.name}...`, { id: 'container-start' });
-          const response = await projectsApi.startContainer(slug, containerId);
+          const response = await projectsApi.startContainer(slug, foundContainer.id);
           toast.success(`Container ${foundContainer.name} started!`, { id: 'container-start', duration: 2000 });
 
           // Set container-specific preview URL for multi-container projects
@@ -640,16 +648,16 @@ export default function Project() {
         {/* Back Button */}
         {isLeftSidebarExpanded ? (
           <button
-            onClick={() => navigate(`/project/${slug}`)}
+            onClick={() => navigate('/dashboard')}
             className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
           >
             <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
-            <span className="text-sm font-medium text-[var(--text)]">Back to Project</span>
+            <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
           </button>
         ) : (
-          <Tooltip content="Back to Project" side="right" delay={200}>
+          <Tooltip content="Back to Projects" side="right" delay={200}>
             <button
-              onClick={() => navigate(`/project/${slug}`)}
+              onClick={() => navigate('/dashboard')}
               className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
             >
               <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
@@ -778,15 +786,44 @@ export default function Project() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar with Project Title */}
         <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center justify-between px-4 md:px-6">
-          <Breadcrumbs
-            items={[
-              { label: 'Projects', href: '/dashboard' },
-              { label: project.name, href: `/project/${slug}` },
-              { label: 'Builder' }
-            ]}
-          />
+          <div className="flex items-center gap-4">
+            <Breadcrumbs
+              items={[
+                { label: 'Projects', href: '/dashboard' },
+                { label: project.name, href: `/project/${slug}` },
+                { label: 'Builder' }
+              ]}
+            />
+
+            {/* Container Selector */}
+            {containers.length > 0 && (
+              <div className="hidden md:flex items-center border-l border-white/10 pl-4">
+                <ContainerSelector
+                  containers={containers.map(c => ({
+                    id: c.id as string,
+                    name: c.name as string,
+                    status: c.status as string,
+                    base: c.base as { slug: string; name: string } | undefined
+                  }))}
+                  currentContainerId={containerId || (container?.id as string)}
+                  onChange={(id) => navigate(`/project/${slug}/builder?container=${id}`)}
+                  onOpenArchitecture={() => navigate(`/project/${slug}`)}
+                />
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-3">
+            {/* Architecture Button (Beta) */}
+            <button
+              onClick={() => navigate(`/project/${slug}`)}
+              className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
+            >
+              <FlowArrow size={18} className="text-[var(--text)]" />
+              <span className="text-sm font-medium text-[var(--text)]">Architecture</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">Beta</span>
+            </button>
+
             {/* Deploy Button with Dropdown */}
             <div className="relative hidden md:block">
               <button
