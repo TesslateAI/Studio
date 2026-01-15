@@ -2,7 +2,7 @@
 
 **File**: `orchestrator/app/services/orchestration/kubernetes_orchestrator.py`
 
-Kubernetes mode provides production-grade container orchestration with namespace isolation, hibernation to S3, and secure multi-tenancy. Each user project gets its own Kubernetes namespace with persistent storage, network policies, and HTTPS ingress.
+Kubernetes mode provides production-grade container orchestration with namespace isolation, EBS VolumeSnapshot hibernation, and secure multi-tenancy. Each user project gets its own Kubernetes namespace with persistent storage, network policies, and HTTPS ingress.
 
 ## Overview
 
@@ -11,10 +11,10 @@ Kubernetes mode is designed for **production deployment** at scale. It supports 
 **Key Features**:
 - **Namespace per project** pattern for complete isolation
 - **File-manager pod** + **dev container pods** (separate lifecycles)
-- **S3 Sandwich pattern** for hibernation/restoration
+- **EBS VolumeSnapshot** for hibernation/restoration (instant restore, node_modules preserved)
 - **Pod affinity** for shared RWO storage (multi-container projects)
 - **NetworkPolicy** for strict network isolation
-- **Secure S3 streaming** (credentials never in user pods)
+- **Timeline UI** - up to 5 snapshots per project for version history
 - **Database-based activity tracking** (survives backend restarts)
 
 ## Architecture
@@ -25,7 +25,7 @@ Kubernetes mode is designed for **production deployment** at scale. It supports 
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │  Backend Pod (KubernetesOrchestrator)                  │  │
 │  │  - Manages all project namespaces                      │  │
-│  │  - Has AWS credentials for S3                          │  │
+│  │  - Creates/restores VolumeSnapshots                    │  │
 │  │  - Streams files to/from pods securely                 │  │
 │  └────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
@@ -37,14 +37,14 @@ Kubernetes mode is designed for **production deployment** at scale. It supports 
 │ proj-{uuid-1}  │ │ proj-{uuid-2}  │ │ proj-{uuid-3}  │
 │ ┌────────────┐ │ │ ┌────────────┐ │ │ (hibernated)   │
 │ │ PVC        │ │ │ │ PVC        │ │ │                │
-│ │ 5Gi RWO    │ │ │ │ 5Gi RWO    │ │ │   [deleted]    │
+│ │ 10Gi RWO   │ │ │ │ 10Gi RWO   │ │ │   [deleted]    │
 │ │ /app       │ │ │ │ /app       │ │ │                │
-│ └────────────┘ │ │ └────────────┘ │ │   [saved to]   │
-│       ▲        │ │       ▲        │ │       ▼        │
-│       │ mounts │ │       │ mounts │ │  ┌──────────┐  │
-│       │        │ │       │        │ │  │ S3       │  │
-│ ┌─────┴──────┐ │ │ ┌─────┴──────┐ │ │  │ Bucket   │  │
-│ │ File Mgr   │ │ │ │ File Mgr   │ │ │  │ (ZIP)    │  │
+│ └────────────┘ │ │ └────────────┘ │ │ [VolumeSnapshot│
+│       ▲        │ │       ▲        │ │  preserved]    │
+│       │ mounts │ │       │ mounts │ │       ▼        │
+│       │        │ │       │        │ │  ┌──────────┐  │
+│ ┌─────┴──────┐ │ │ ┌─────┴──────┐ │ │  │ EBS      │  │
+│ │ File Mgr   │ │ │ │ File Mgr   │ │ │  │ Snapshot │  │
 │ │ (always)   │ │ │ │ (always)   │ │ │  └──────────┘  │
 │ └────────────┘ │ │ └────────────┘ │ └────────────────┘
 │ ┌────────────┐ │ │ ┌────────────┐ │
@@ -91,14 +91,15 @@ CONTAINER LIFECYCLE:
   3. No init containers needed
   4. User clicks "Stop" → delete Deployment (files persist)
 
-S3 LIFECYCLE (Hibernation):
-  1. User leaves or idle timeout → backend zips /app via file-manager
-  2. Backend uploads to S3 (secure streaming, credentials in backend only)
+SNAPSHOT LIFECYCLE (Hibernation):
+  1. User leaves or idle timeout → create VolumeSnapshot from PVC (< 5 seconds)
+  2. Wait for snapshot.status.readyToUse: true
   3. Delete namespace (including PVC)
-  4. User returns → create namespace + PVC, download from S3, extract
+  4. User returns → create namespace + PVC with dataSource pointing to snapshot
+  5. EBS lazy-loads data on first access (near-instant restore)
 ```
 
-**Why this matters**: Old architecture wrongly used S3 for new project setup. New architecture only uses S3 for hibernation/restoration. Git clone happens in the file-manager pod at a different lifecycle stage.
+**Why this matters**: EBS VolumeSnapshots preserve the entire filesystem state including node_modules. No npm install needed on restore - the project is ready in seconds.
 
 ### 3. File-Manager Pod
 
@@ -131,16 +132,16 @@ Dev containers are created **on-demand** when the user clicks "Start":
 
 **Key difference from file-manager**: Dev containers run the actual dev server (Next.js, Express, etc.) while file-manager just keeps the filesystem alive.
 
-### 5. S3 Sandwich Pattern
+### 5. EBS VolumeSnapshot Pattern
 
-The "S3 Sandwich" pattern hibernates idle projects to save resources:
+The EBS VolumeSnapshot pattern hibernates idle projects to save resources:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  ACTIVE STATE                               │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │ Namespace: proj-{uuid}                                │  │
-│  │ ├── PVC (5Gi)                                         │  │
+│  │ ├── PVC (10Gi EBS)                                    │  │
 │  │ ├── File-manager pod                                  │  │
 │  │ └── Dev container pods (if started)                   │  │
 │  └───────────────────────────────────────────────────────┘  │
@@ -149,61 +150,68 @@ The "S3 Sandwich" pattern hibernates idle projects to save resources:
                          │ Idle 30+ minutes
                          ▼
             ┌─────────────────────────────┐
-            │ HIBERNATION (Dehydration)   │
+            │ HIBERNATION (Snapshot)      │
             │                             │
-            │ 1. Zip /app in file-manager │
-            │ 2. Copy zip from pod        │
-            │ 3. Upload to S3 (boto3)     │
-            │ 4. Delete namespace         │
+            │ 1. Create VolumeSnapshot    │
+            │ 2. Wait for readyToUse      │
+            │ 3. Delete namespace         │
+            │                             │
+            │ (< 5 seconds total!)        │
             └─────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                  HIBERNATED STATE                           │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │ S3: tesslate-project-storage-prod/{user}/{proj}.zip   │  │
-│  │ (Compressed project files, no dependencies)           │  │
+│  │ VolumeSnapshot: snap-{project_id}-{timestamp}         │  │
+│  │ (Full EBS volume state, including node_modules!)      │  │
 │  └───────────────────────────────────────────────────────┘  │
 │  Database: Project.environment_status = 'hibernated'        │
+│  Database: ProjectSnapshot record with status = 'ready'     │
 └─────────────────────────────────────────────────────────────┘
                          │
                          │ User returns
                          ▼
             ┌─────────────────────────────┐
-            │ RESTORATION (Hydration)     │
+            │ RESTORATION (Snapshot)      │
             │                             │
-            │ 1. Download from S3 (boto3) │
-            │ 2. Copy zip to pod          │
-            │ 3. Unzip in file-manager    │
-            │ 4. Create namespace + PVC   │
+            │ 1. Create PVC with dataSource│
+            │    pointing to VolumeSnapshot│
+            │ 2. Create namespace + pods  │
+            │ 3. EBS lazy-loads on access │
+            │                             │
+            │ (< 10 seconds total!)       │
             └─────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                  ACTIVE STATE                               │
-│  (Cycle continues...)                                       │
+│  (Cycle continues... node_modules preserved!)               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Security: No AWS Credentials in User Pods**
-
-The S3 operations are performed **by the backend pod** using secure streaming:
+**Key Implementation Details**:
 
 ```python
-# Dehydration (Save to S3)
-1. Backend: kubectl exec → file-manager: zip /app to /tmp/project.zip
-2. Backend: Copy file from pod → backend temp directory (k8s stream API)
-3. Backend: Upload to S3 using boto3 (credentials in backend only)
-4. Backend: Delete namespace
+# Hibernation (via SnapshotManager)
+1. Backend: Create VolumeSnapshot from PVC
+2. Backend: Poll until snapshot.status.readyToUse: true (typically < 60s)
+3. Backend: Delete namespace (cascades to PVC, pods, services, ingresses)
+4. Database: Create ProjectSnapshot record, update project status
 
-# Hydration (Restore from S3)
-1. Backend: Download from S3 using boto3 → backend temp directory
-2. Backend: Copy file to pod → file-manager:/tmp/project.zip (k8s stream API)
-3. Backend: kubectl exec → file-manager: unzip to /app
-4. Backend: Create namespace + PVC + file-manager
+# Restoration (via SnapshotManager)
+1. Backend: Create PVC with dataSource pointing to VolumeSnapshot
+2. EBS provisioner creates new volume from snapshot (lazy-load)
+3. Backend: Create namespace, file-manager pod mounts restored PVC
+4. Database: Update project status to 'active'
 ```
 
-**Why this is secure**: AWS credentials never leave the backend pod. User pods cannot access S3 directly. This prevents malicious code in user projects from accessing or deleting other users' projects.
+**Why VolumeSnapshots are superior**:
+- ✅ Near-instant restore (< 10s vs 30-90s with S3 ZIP)
+- ✅ node_modules preserved (no npm install on restore!)
+- ✅ Non-blocking creation (returns immediately)
+- ✅ Timeline UI - up to 5 manual snapshots per project
+- ✅ 30-day soft delete retention for recovery
 
 ### 6. Pod Affinity (Multi-Container Projects)
 
@@ -340,16 +348,14 @@ success = await orchestrator.hibernate_project(project_id, user_id)
 ```
 
 **Steps**:
-1. **Save to S3** (via `_save_to_s3`):
-   - Zip `/app` in file-manager pod (exclude node_modules, .git, etc.)
-   - Copy zip from pod to backend temp directory
-   - Upload to S3 using boto3
-   - Verify upload succeeded
-   - Cleanup temp files
+1. **Create VolumeSnapshot** (via `SnapshotManager`):
+   - Create VolumeSnapshot pointing to project-storage PVC
+   - Wait for `status.readyToUse: true` (typically < 60 seconds)
+   - Create ProjectSnapshot database record
 2. **Delete namespace**: Cascades to all resources (PVC, pods, services, ingresses)
 3. **Update database**: `Project.environment_status = 'hibernated'`, `hibernated_at = now()`
 
-**Security**: If S3 save fails, namespace is NOT deleted (preserves data). Error is raised to user.
+**Safety**: If snapshot creation fails, namespace is NOT deleted (preserves data). Error is raised to user.
 
 ### Returning to Hibernated Project (Restore)
 
@@ -358,16 +364,15 @@ namespace = await orchestrator.restore_project(project_id, user_id)
 ```
 
 **Steps**:
-1. **Create namespace** + PVC + file-manager
-2. **Restore from S3** (via `_restore_from_s3`):
-   - Download zip from S3 to backend temp directory
-   - Validate zip is not corrupt (check file count, size)
-   - Copy zip to file-manager pod
-   - Unzip to `/app`
-   - Cleanup temp files
-3. **Update database**: `Project.environment_status = 'active'`, `hibernated_at = NULL`
+1. **Create namespace**
+2. **Restore from VolumeSnapshot** (via `SnapshotManager`):
+   - Get latest ProjectSnapshot from database
+   - Create PVC with `dataSource` pointing to VolumeSnapshot
+   - EBS provisioner creates new volume from snapshot (lazy-load)
+3. **Create file-manager pod** (mounts restored PVC)
+4. **Update database**: `Project.environment_status = 'active'`, `hibernated_at = NULL`
 
-**Critical validation**: If downloaded archive is corrupt (empty or invalid ZIP), the restore FAILS and the project is marked as corrupted. We never fall back to git clone for a hibernated project—this would lose user changes.
+**Key benefit**: node_modules and all dependencies are preserved in the snapshot. No npm install needed - the project is ready in seconds!
 
 ### Deleting Project (Permanent)
 
@@ -378,7 +383,8 @@ await orchestrator.delete_project_namespace(project_id, user_id)
 **Steps**:
 1. Check if namespace exists
 2. Delete namespace (cascades all resources)
-3. **Does NOT** delete S3 archive (may want to restore later)
+3. **Soft-delete snapshots**: Marks ProjectSnapshot records for 30-day retention
+4. Daily cleanup CronJob deletes expired snapshots after 30 days
 
 ## File Operations
 
@@ -572,13 +578,13 @@ await track_project_activity(db, project_id, user_id)
 - ✅ Supports horizontal scaling (multiple backend replicas)
 - ✅ Consistent with hibernated projects
 
-### Cleanup Cronjob
+### Cleanup Cronjobs
 
-A Kubernetes CronJob runs periodically:
+Two Kubernetes CronJobs manage hibernation and snapshot cleanup:
 
+**1. Hibernation CronJob** (`cleanup-cronjob.yaml`):
 ```yaml
-# k8s/base/core/cleanup-cronjob.yaml
-schedule: "*/10 * * * *"  # Every 10 minutes
+schedule: "*/2 * * * *"  # Every 2 minutes
 command: ["python", "-c", "
   from orchestrator.app.services.orchestration import get_orchestrator;
   import asyncio;
@@ -587,7 +593,18 @@ command: ["python", "-c", "
 "]
 ```
 
-**Cleanup logic**:
+**2. Snapshot Cleanup CronJob** (`snapshot-cleanup-cronjob.yaml`):
+```yaml
+schedule: "0 3 * * *"  # Daily at 3 AM UTC
+command: ["python", "-c", "
+  from orchestrator.app.services.snapshot_manager import get_snapshot_manager;
+  import asyncio;
+  snapshot_manager = get_snapshot_manager();
+  asyncio.run(snapshot_manager.cleanup_expired_snapshots())
+"]
+```
+
+**Hibernation logic**:
 ```python
 async def cleanup_idle_environments(self, idle_timeout_minutes=30):
     cutoff_time = now() - timedelta(minutes=idle_timeout_minutes)
@@ -599,7 +616,7 @@ async def cleanup_idle_environments(self, idle_timeout_minutes=30):
     ).all()
 
     for project in idle_projects:
-        # Hibernate project (S3 save + delete namespace)
+        # Hibernate project (create VolumeSnapshot + delete namespace)
         await self.hibernate_project(project.id, project.owner_id)
 
         # Update status
@@ -634,14 +651,14 @@ K8S_IMAGE_PULL_SECRET=  # Empty for local images, set for private registry
 
 # Storage
 K8S_STORAGE_CLASS=tesslate-block-storage
-K8S_PVC_SIZE=5Gi
+K8S_PVC_SIZE=10Gi
 K8S_PVC_ACCESS_MODE=ReadWriteOnce
 
-# S3 Sandwich
-K8S_USE_S3_STORAGE=true
-S3_BUCKET_NAME=tesslate-project-storage-prod
-S3_ENDPOINT_URL=https://s3.us-east-1.amazonaws.com
-S3_REGION=us-east-1
+# Snapshots
+K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
+K8S_SNAPSHOT_RETENTION_DAYS=30
+K8S_MAX_SNAPSHOTS_PER_PROJECT=5
+K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=90
 
 # Namespace configuration
 K8S_NAMESPACE_PER_PROJECT=true
@@ -757,28 +774,28 @@ kubectl get endpoints -n $NAMESPACE
 kubectl logs -n ingress-nginx deployment/ingress-nginx-controller
 ```
 
-### S3 Hibernation Failures
+### Snapshot Hibernation Failures
 
-**Problem**: Hibernation fails with "corrupt archive" or "upload failed"
+**Problem**: Hibernation fails with "snapshot not ready" or "snapshot creation failed"
 
 **Debug**:
 ```bash
 # Check backend pod logs
 kubectl logs -n tesslate deployment/tesslate-backend
 
-# Verify S3 credentials
-kubectl exec -n tesslate deployment/tesslate-backend -- env | grep AWS
+# Check VolumeSnapshot status
+kubectl get volumesnapshot -n proj-<uuid>
+kubectl describe volumesnapshot <name> -n proj-<uuid>
 
-# Test S3 access
-kubectl exec -n tesslate deployment/tesslate-backend -- \
-  python -c "import boto3; print(boto3.client('s3').list_buckets())"
+# Check snapshot controller logs
+kubectl logs -n kube-system -l app=snapshot-controller
 ```
 
 **Common causes**:
-- Backend doesn't have S3 credentials
-- S3 bucket doesn't exist or wrong region
+- VolumeSnapshotClass not configured (`tesslate-ebs-snapshots`)
+- EBS CSI driver not installed or misconfigured
 - File-manager pod not found (project environment not created)
-- Zip command failed (out of space, permission denied)
+- PVC doesn't exist or is not bound
 
 ### Pod Affinity Violations
 
@@ -796,17 +813,19 @@ kubectl exec -n tesslate deployment/tesslate-backend -- \
 ### Advantages
 
 ✅ **Scalable**: Thousands of projects, horizontal scaling of backend
-✅ **Cost-efficient**: Hibernation to S3 saves resources
+✅ **Cost-efficient**: Hibernation via EBS snapshots saves compute resources
 ✅ **Isolated**: Namespace + NetworkPolicy = strong multi-tenancy
-✅ **Secure**: AWS credentials never exposed to user pods
+✅ **Fast restore**: Near-instant (< 10s) via EBS lazy-loading
 ✅ **Resilient**: Database-based tracking, survives backend restarts
+✅ **Timeline UI**: Up to 5 snapshots per project for version history
+✅ **Recovery**: 30-day soft delete retention for accidental deletions
 
 ### Limitations
 
 ❌ **Complex**: More moving parts than Docker mode
-❌ **Slower startup**: Pod scheduling, image pulling, PVC mounting
+❌ **Pod scheduling**: Container startup depends on K8s scheduler
 ❌ **RWO constraint**: Multi-container projects need pod affinity (same node)
-❌ **S3 dependency**: Hibernation requires S3 (or MinIO)
+❌ **Single AZ**: EBS snapshots don't replicate across availability zones
 
 ## Next Steps
 

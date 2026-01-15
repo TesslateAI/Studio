@@ -1293,6 +1293,61 @@ export const feedbackApi = {
   },
 };
 
+// =============================================================================
+// Project Snapshots API (Timeline - EBS VolumeSnapshots)
+// =============================================================================
+
+export interface Snapshot {
+  id: string;
+  project_id: string | null;
+  snapshot_name: string;
+  snapshot_type: 'hibernation' | 'manual';
+  status: 'pending' | 'ready' | 'error' | 'deleted';
+  label: string | null;
+  volume_size_bytes: number | null;
+  created_at: string;
+  ready_at: string | null;
+}
+
+export interface SnapshotListResponse {
+  snapshots: Snapshot[];
+  total_count: number;
+  max_snapshots: number;
+}
+
+export interface RestoreSnapshotResponse {
+  success: boolean;
+  message: string;
+  snapshot_id: string;
+  restored_from: string;
+}
+
+export const snapshotsApi = {
+  // List all snapshots for a project (Timeline)
+  list: async (projectId: string): Promise<SnapshotListResponse> => {
+    const response = await api.get(`/api/projects/${projectId}/snapshots/`);
+    return response.data;
+  },
+
+  // Get a specific snapshot
+  get: async (projectId: string, snapshotId: string): Promise<Snapshot> => {
+    const response = await api.get(`/api/projects/${projectId}/snapshots/${snapshotId}`);
+    return response.data;
+  },
+
+  // Create a manual snapshot
+  create: async (projectId: string, label?: string): Promise<Snapshot> => {
+    const response = await api.post(`/api/projects/${projectId}/snapshots/`, { label });
+    return response.data;
+  },
+
+  // Restore from a specific snapshot
+  restore: async (projectId: string, snapshotId: string): Promise<RestoreSnapshotResponse> => {
+    const response = await api.post(`/api/projects/${projectId}/snapshots/${snapshotId}/restore`);
+    return response.data;
+  },
+};
+
 export const createWebSocket = (token: string) => {
   let wsUrl: string;
   if (API_URL) {

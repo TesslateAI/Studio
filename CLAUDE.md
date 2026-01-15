@@ -1,5 +1,8 @@
 You are a senior level coding agent. You will apply real world solutions to all the problems, fixing them in such a way where you do not cheat the solution, break existing functionality, and are scoped in. The solutions you write must be scalable and for the future, not fixing or hardcoding.
 
+On windows use MSYS_NO_PATHCONV=1 while running kubectl or docker exec commands. 
+The ECR IS <AWS_ACCOUNT_ID> not <AWS_ACCOUNT_ID>
+
 CRITICAL -- ENSURE ALL CHANGES ARE NON-BLOCKING
 
 Everything u do or write should be non-blocking so certain actions don't hold up other people on our software. 
@@ -119,8 +122,8 @@ tesslate-studio/
 │       │   │   ├── kubernetes_orchestrator.py  # K8s container mgmt
 │       │   │   └── kubernetes/
 │       │   │       ├── client.py               # K8s API client wrapper
-│       │   │       └── helpers.py              # Deployment manifests, S3 init
-│       │   ├── s3_manager.py                   # S3 Sandwich hydration/dehydration
+│       │   │       └── helpers.py              # Deployment manifests
+│       │   ├── snapshot_manager.py             # EBS VolumeSnapshot for project persistence
 │       │   ├── litellm_service.py              # AI model routing
 │       │   └── ...
 │       └── agent/            # AI agent system
@@ -168,6 +171,7 @@ tesslate-studio/
 
 - **User**: Auth, profile, subscription tier
 - **Project**: Name, slug, owner, files, containers
+- **ProjectSnapshot**: EBS VolumeSnapshot records for project versioning/timeline
 - **Container**: Individual service in a project (frontend, backend, db)
 - **ContainerConnection**: Dependencies between containers
 - **Chat/Message**: Conversation history with AI
@@ -264,31 +268,34 @@ Each `CLAUDE.md` file contains:
 ### Kubernetes (Minikube/Production)
 - `DEPLOYMENT_MODE=kubernetes` in config
 - Per-project namespaces (`proj-{uuid}`) with NetworkPolicy isolation
-- S3 Sandwich pattern: Ephemeral PVC + S3 for persistence
+- EBS VolumeSnapshots for project persistence and versioning
 - NGINX Ingress for routing
 - Pod affinity for multi-container projects (same node)
 
-#### S3 Sandwich Pattern
-User project containers use ephemeral block storage with S3 persistence:
-1. **Hydration**: Init container downloads project from S3 (if exists) or uses template
-2. **Runtime**: Fast local I/O on PVC for file edits, npm install, etc.
-3. **Dehydration**: PreStop hook uploads project to S3 before pod termination
+#### EBS VolumeSnapshot Pattern
+User project containers use persistent EBS block storage with snapshot-based versioning:
+1. **Storage**: Persistent EBS volumes (gp3) that survive pod restarts - no data loss
+2. **Snapshots**: Created on hibernation or manually via Timeline UI (non-blocking)
+3. **Restore**: PVC created from snapshot on project start (lazy-loading, near-instant)
+4. **Timeline**: Up to 5 snapshots per project for version history and restore points
 
 #### Key K8s Config Settings (config.py)
 ```python
-k8s_devserver_image: str      # Image for user containers (tesslate-devserver:latest)
-k8s_image_pull_secret: str    # Registry secret (empty for local images)
-k8s_use_s3_storage: bool      # Enable S3 Sandwich pattern (default: True)
-k8s_storage_class: str        # StorageClass for PVCs (tesslate-block-storage)
-k8s_enable_pod_affinity: bool # Keep multi-container projects on same node
+k8s_devserver_image: str           # Image for user containers (tesslate-devserver:latest)
+k8s_image_pull_secret: str         # Registry secret (empty for local images)
+k8s_storage_class: str             # StorageClass for PVCs (tesslate-block-storage)
+k8s_snapshot_class: str            # VolumeSnapshotClass (tesslate-ebs-snapshots)
+k8s_snapshot_retention_days: int   # Days to keep soft-deleted snapshots (30)
+k8s_max_snapshots_per_project: int # Max snapshots in timeline (5)
+k8s_enable_pod_affinity: bool      # Keep multi-container projects on same node
 ```
 
 #### Minikube vs Production Config
-| Setting | Minikube | Production (DO) |
-|---------|----------|-----------------|
-| `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | `registry.digitalocean.com/.../tesslate-devserver:latest` |
-| `K8S_IMAGE_PULL_SECRET` | `` (empty) | `tesslate-container-registry-nyc3` |
-| `S3_ENDPOINT_URL` | `http://minio.minio-system.svc.cluster.local:9000` | `https://nyc3.digitaloceanspaces.com` |
+| Setting | Minikube | Production (AWS EKS) |
+|---------|----------|----------------------|
+| `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
+| `K8S_IMAGE_PULL_SECRET` | `` (empty) | `ecr-credentials` |
+| `K8S_SNAPSHOT_CLASS` | `tesslate-ebs-snapshots` | `tesslate-ebs-snapshots` |
 
 
 ## Minikube Local Development (Windows)
@@ -422,11 +429,11 @@ kubectl get pods -n proj-<project-uuid>
 # Check pod events
 kubectl describe pod -n proj-<project-uuid>
 
-# Check init container logs (hydration)
-kubectl logs -n proj-<uuid> <pod-name> -c hydrate-project
-
 # Check dev server logs
 kubectl logs -n proj-<uuid> <pod-name> -c dev-server
+
+# Check if PVC is bound
+kubectl get pvc -n proj-<project-uuid>
 ```
 
 **Volume name mismatch error:**
@@ -444,8 +451,8 @@ kubectl logs -n proj-<uuid> <pod-name> -c dev-server
 - **Region**: us-east-1
 - **Cluster**: <EKS_CLUSTER_NAME>
 - **Domain**: your-domain.com (Cloudflare DNS)
-- **ECR Registry**: <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-- **S3 Bucket**: tesslate-project-storage-prod (for project files)
+- **ECR Registry**: <ECR_REGISTRY>
+- **EBS Storage**: gp3 volumes with VolumeSnapshot support for project persistence
 - **AWS User**: Always use `<AWS_IAM_USER>` credentials for deployments
 
 ### Initial Setup / Login
@@ -559,7 +566,7 @@ MSYS_NO_PATHCONV=1 kubectl exec -n tesslate deployment/tesslate-backend -- pytho
 # Check user project pods
 kubectl get pods -n proj-<project-uuid>
 kubectl logs -n proj-<project-uuid> <pod-name> -c dev-server
-kubectl logs -n proj-<project-uuid> <pod-name> -c hydrate-project  # init container
+kubectl get pvc -n proj-<project-uuid>  # Check storage
 
 # Resource usage
 kubectl top pods -n tesslate
@@ -593,10 +600,10 @@ kubectl create secret generic tesslate-secrets -n tesslate \
 
 | Setting | Value |
 |---------|-------|
-| `K8S_DEVSERVER_IMAGE` | `<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest` |
+| `K8S_DEVSERVER_IMAGE` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
 | `K8S_IMAGE_PULL_SECRET` | `ecr-credentials` |
-| `S3_ENDPOINT_URL` | `https://s3.us-east-1.amazonaws.com` |
-| `S3_BUCKET_NAME` | `tesslate-project-storage-prod` |
+| `K8S_SNAPSHOT_CLASS` | `tesslate-ebs-snapshots` |
+| `K8S_SNAPSHOT_RETENTION_DAYS` | `30` |
 | `COOKIE_DOMAIN` | `.your-domain.com` |
 | `replicas` | `1` (single replica - tasks stored in-memory) |
 

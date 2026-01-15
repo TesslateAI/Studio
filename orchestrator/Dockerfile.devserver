@@ -34,8 +34,13 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 # Install Air for Go hot reloading (latest version)
 RUN go install github.com/air-verse/air@latest
 
+# Install bun globally (fastest package manager, creates flat node_modules)
+# Install to /usr/local/bin so it's available for all users
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+ENV PATH="/usr/local/bin:$PATH"
+
 # Install common global npm packages for development
-RUN npm install -g npm@latest typescript vite create-vite eslint prettier
+RUN npm install -g npm@latest pnpm typescript vite create-vite eslint prettier
 
 # Create project directory (will be mounted/populated at runtime)
 WORKDIR /project

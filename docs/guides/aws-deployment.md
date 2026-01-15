@@ -10,7 +10,7 @@ This guide covers deploying Tesslate Studio to AWS Elastic Kubernetes Service (E
 | Cluster | <EKS_CLUSTER_NAME> | EKS cluster name |
 | Domain | your-domain.com | Production domain (Cloudflare DNS) |
 | Registry | ECR | Amazon Elastic Container Registry |
-| Storage | S3 | tesslate-project-storage-prod bucket |
+| Storage | EBS + VolumeSnapshots | Project persistence via snapshots |
 | AWS User | <AWS_IAM_USER> | Deployment credentials |
 
 ## Prerequisites
@@ -264,8 +264,8 @@ Key settings in `k8s/overlays/aws/backend-patch.yaml`:
 |---------|-------|-------------|
 | `K8S_DEVSERVER_IMAGE` | `<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest` | ECR image for user containers |
 | `K8S_IMAGE_PULL_SECRET` | `ecr-credentials` | Registry pull secret |
-| `S3_ENDPOINT_URL` | `https://s3.us-east-1.amazonaws.com` | AWS S3 endpoint |
-| `S3_BUCKET_NAME` | `tesslate-project-storage-prod` | S3 bucket for project files |
+| `K8S_STORAGE_CLASS` | `tesslate-block-storage` | EBS storage class |
+| `K8S_SNAPSHOT_CLASS` | `tesslate-ebs-snapshots` | VolumeSnapshotClass |
 | `COOKIE_DOMAIN` | `.your-domain.com` | Cookie domain for auth |
 | `replicas` | `1` | Single replica (tasks stored in-memory) |
 

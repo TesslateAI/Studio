@@ -9,7 +9,7 @@
 The services layer (`orchestrator/app/services/`) implements core business logic that sits between API routers and data models. Services handle complex operations like:
 
 - **Container Orchestration**: Starting/stopping Docker containers and Kubernetes pods
-- **Storage Management**: S3 hibernation/hydration for project persistence
+- **Storage Management**: EBS VolumeSnapshots for project persistence and timeline
 - **AI Integration**: LiteLLM proxy for multi-model AI access
 - **Payment Processing**: Stripe subscriptions and marketplace transactions
 - **External Deployments**: Vercel, Netlify, Cloudflare deployment automation
@@ -28,9 +28,10 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **kubernetes/manager.py** - Container lifecycle and cleanup
 
 ### Storage & State
-- **s3_manager.py** (583 lines) - `S3Manager` for project hibernation to S3
+- **snapshot_manager.py** - `SnapshotManager` for EBS VolumeSnapshot operations (create, restore, cleanup)
 - **shell_session_manager.py** (632 lines) - `ShellSessionManager` for PTY sessions
 - **pty_broker.py** (700 lines) - Low-level PTY process management
+- **activity_tracker.py** - Database-based activity tracking for idle cleanup
 
 ### AI & Payments
 - **litellm_service.py** (445 lines) - `LiteLLMService` for AI model routing
@@ -62,7 +63,7 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 
 **Related documentation**:
 - [orchestration.md](./orchestration.md) - Detailed Docker/K8s orchestration docs
-- [s3-manager.md](./s3-manager.md) - S3 storage patterns
+- [snapshot-manager.md](./snapshot-manager.md) - EBS VolumeSnapshot patterns
 - [deployment-providers.md](./deployment-providers.md) - External deployment docs
 
 ## Common Service Patterns
@@ -71,15 +72,15 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 Most services use singletons to maintain state and avoid duplication:
 
 ```python
-# orchestrator/app/services/s3_manager.py
-_s3_manager: Optional[S3Manager] = None
+# orchestrator/app/services/snapshot_manager.py
+_snapshot_manager: Optional[SnapshotManager] = None
 
-def get_s3_manager() -> S3Manager:
-    """Get singleton S3Manager instance."""
-    global _s3_manager
-    if _s3_manager is None:
-        _s3_manager = S3Manager()
-    return _s3_manager
+def get_snapshot_manager() -> SnapshotManager:
+    """Get singleton SnapshotManager instance."""
+    global _snapshot_manager
+    if _snapshot_manager is None:
+        _snapshot_manager = SnapshotManager()
+    return _snapshot_manager
 ```
 
 ### 2. Factory Pattern
@@ -153,20 +154,23 @@ def __init__(self):
 All I/O operations use async for non-blocking execution:
 
 ```python
-# orchestrator/app/services/s3_manager.py
-async def upload_project(
+# orchestrator/app/services/snapshot_manager.py
+async def create_snapshot(
     self,
-    user_id: UUID,
     project_id: UUID,
-    source_path: str
-) -> Tuple[bool, Optional[str]]:
-    """Upload project to S3 (dehydration)."""
-    # Run blocking S3 operations in thread pool
+    user_id: UUID,
+    db: AsyncSession,
+    snapshot_type: str = "hibernation"
+) -> Tuple[Optional[ProjectSnapshot], Optional[str]]:
+    """Create EBS VolumeSnapshot (non-blocking)."""
+    # Run K8s API operations in thread pool
     await asyncio.to_thread(
-        self.s3_client.upload_file,
-        temp_zip,
-        self.bucket_name,
-        key
+        self.custom_api.create_namespaced_custom_object,
+        group="snapshot.storage.k8s.io",
+        version="v1",
+        namespace=namespace,
+        plural="volumesnapshots",
+        body=snapshot_manifest
     )
 ```
 
@@ -241,41 +245,40 @@ async def commit_changes(user_id: UUID, project_id: str, message: str):
     return {"commit": commit_sha, "message": message}
 ```
 
-### Example 3: Using S3 Manager (Kubernetes Mode)
+### Example 3: Using Snapshot Manager (Kubernetes Mode)
 
 ```python
-# In orchestration/kubernetes/helpers.py
-from ...s3_manager import get_s3_manager
+# In routers/snapshots.py
+from ..services.snapshot_manager import get_snapshot_manager
 
-async def create_project_init_container(project_id: UUID, user_id: UUID):
-    """Create init container that hydrates project from S3."""
-    s3_manager = get_s3_manager()
+@router.post("/projects/{project_id}/snapshots/")
+async def create_manual_snapshot(
+    project_id: UUID,
+    request: SnapshotCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a manual snapshot (non-blocking)."""
+    snapshot_manager = get_snapshot_manager()
 
-    # Check if project exists in S3
-    exists = await s3_manager.project_exists(user_id, project_id)
+    # Create snapshot - returns immediately with 'pending' status
+    snapshot, error = await snapshot_manager.create_snapshot(
+        project_id=project_id,
+        user_id=current_user.id,
+        db=db,
+        snapshot_type="manual",
+        label=request.label or "Manual save"
+    )
 
-    if exists:
-        # Hydration script: Download from S3 and extract
-        init_script = """
-        echo "Hydrating project from S3..."
-        python3 -c "
-        from s3_manager import get_s3_manager
-        import asyncio
-        s3 = get_s3_manager()
-        asyncio.run(s3.download_project(user_id, project_id, '/app'))
-        "
-        echo "Project hydrated successfully"
-        """
-    else:
-        # Copy from template instead
-        init_script = "cp -r /templates/base/* /app/"
+    if error:
+        raise HTTPException(status_code=500, detail=f"Failed: {error}")
 
-    return {
-        "name": "hydrate-project",
-        "image": "tesslate-devserver:latest",
-        "command": ["/bin/sh", "-c", init_script],
-        "volumeMounts": [{"name": "project-source", "mountPath": "/app"}]
-    }
+    # Return immediately - frontend polls for 'ready' status
+    return SnapshotResponse(
+        id=snapshot.id,
+        status=snapshot.status,  # 'pending'
+        label=snapshot.label
+    )
 ```
 
 ### Example 4: Using Deployment Manager
@@ -469,9 +472,10 @@ async def test_commit_creates_commit():
 from services.orchestration import get_orchestrator
 orchestrator = get_orchestrator()
 
-# Use S3 manager
-from services.s3_manager import get_s3_manager
-s3 = get_s3_manager()
+# Use Snapshot manager (K8s mode)
+from services.snapshot_manager import get_snapshot_manager
+snapshot_mgr = get_snapshot_manager()
+snapshot, error = await snapshot_mgr.create_snapshot(project_id, user_id, db)
 
 # Use Git manager
 from services.git_manager import GitManager

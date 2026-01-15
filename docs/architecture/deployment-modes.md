@@ -11,7 +11,7 @@ Tesslate Studio supports two deployment modes configured via the `DEPLOYMENT_MOD
 | Mode | Use Case | Routing | Storage | Complexity |
 |------|----------|---------|---------|------------|
 | **Docker** | Local development | Traefik (*.localhost) | Local filesystem | Low |
-| **Kubernetes** | Production (cloud) | NGINX Ingress | S3 + PVC (S3 Sandwich) | High |
+| **Kubernetes** | Production (cloud) | NGINX Ingress | EBS + VolumeSnapshots | High |
 
 **Key Setting** (from `config.py`):
 ```python
@@ -199,7 +199,7 @@ volumes:
 **Docker Mode Does NOT Support**:
 - ❌ Multi-container user projects (removed - legacy system)
 - ❌ Container isolation via NetworkPolicy (only K8s)
-- ❌ S3 Sandwich pattern (no hydration/dehydration)
+- ❌ EBS VolumeSnapshot pattern (no hibernation/restore)
 - ❌ Horizontal scaling (single orchestrator instance)
 - ❌ Automatic SSL certificates (localhost only)
 
@@ -213,7 +213,7 @@ volumes:
 
 ### Overview
 
-Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and the S3 Sandwich pattern for storage. Each user project gets a dedicated namespace with strict isolation.
+Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and EBS VolumeSnapshots for storage persistence. Each user project gets a dedicated namespace with strict isolation.
 
 ### Architecture
 
@@ -239,9 +239,9 @@ Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and the S3 
 │  │    Pod     │  │    Pod     │  │    Pod     │           │
 │  └────────────┘  └────────────┘  └────────────┘           │
 │  ┌────────────────────────────────────────────────┐        │
-│  │  PVC (5Gi Block Storage)                       │        │
+│  │  PVC (10Gi EBS Block Storage)                  │        │
 │  │  - Shared by all pods in namespace             │        │
-│  │  - Ephemeral (deleted on project close)        │        │
+│  │  - Persisted via VolumeSnapshot on hibernation │        │
 │  └────────────────────────────────────────────────┘        │
 │  ┌────────────────────────────────────────────────┐        │
 │  │  NetworkPolicy (Zero cross-project traffic)    │        │
@@ -263,13 +263,14 @@ Kubernetes mode runs in a K8s cluster with NGINX Ingress for routing and the S3 
                          │
                          ↓
                 ┌─────────────────┐
-                │   AWS S3 (or    │
-                │  DO Spaces /    │
-                │    MinIO)       │
-                │  Bucket:        │
-                │  tesslate-      │
-                │  project-       │
-                │  storage-prod   │
+                │  EBS Volume     │
+                │  Snapshots      │
+                │  - Auto-created │
+                │    on hibernate │
+                │  - Max 5 per    │
+                │    project      │
+                │  - 30-day soft  │
+                │    delete       │
                 └─────────────────┘
 ```
 
@@ -335,29 +336,29 @@ def create_ingress_manifest(
 
 **File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/base/ingress/certificate.yaml`
 
-### Storage (S3 Sandwich Pattern)
+### Storage (EBS VolumeSnapshot Pattern)
 
-**Concept**: Combine S3 durability with PVC performance
+**Concept**: EBS block storage with VolumeSnapshots for persistence
 
 **Lifecycle**:
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  1. PROJECT OPEN (Hydration)                            │
+│  1. PROJECT OPEN (Restore)                              │
 │                                                         │
 │  User opens project                                     │
 │    ↓                                                    │
-│  Create namespace + PVC                                 │
+│  Create namespace                                       │
 │    ↓                                                    │
-│  Init container runs:                                   │
-│    - Check if S3 backup exists                          │
-│    - If yes: Download from S3 → Unzip to PVC           │
-│    - If no: Copy template files to PVC                  │
+│  Check for existing VolumeSnapshot                      │
+│    - If yes: Create PVC with dataSource pointing to     │
+│              snapshot (EBS lazy-loads data on access)   │
+│    - If no: Create empty PVC, copy template files       │
 │    ↓                                                    │
-│  File manager pod starts                                │
+│  File manager pod starts (< 10 seconds)                 │
 │    ↓                                                    │
 │  Dev containers start (optional)                        │
 │                                                         │
-│  ✅ Project ready for file operations                   │
+│  ✅ Project ready - node_modules preserved!             │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
@@ -369,80 +370,107 @@ def create_ingress_manifest(
 │    - Manual uploads                                     │
 │    ↓                                                    │
 │  File manager pod writes to PVC                         │
-│    - Local disk speed (no S3 latency)                   │
+│    - Local EBS disk speed                               │
 │    - All containers share same PVC (pod affinity)       │
 │                                                         │
-│  ✅ Fast I/O, no network delays                         │
+│  User can manually create snapshots (Timeline UI)       │
+│    - Up to 5 snapshots per project                      │
+│    - Non-blocking: returns immediately, polls for ready │
+│                                                         │
+│  ✅ Fast I/O, instant manual saves                      │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│  3. PROJECT CLOSE (Dehydration)                         │
+│  3. PROJECT HIBERNATION (Snapshot)                      │
 │                                                         │
 │  User leaves project OR project idles for 10+ min       │
 │    ↓                                                    │
-│  PreStop hook runs in file manager pod:                 │
-│    - Zip entire project directory                       │
-│    - Upload to S3: projects/{user_id}/{project_id}.zip  │
-│    - Wait for upload completion                         │
-│    ↓                                                    │
-│  Delete namespace (cascades to all resources)           │
-│    - Pods deleted                                       │
-│    - PVC deleted (ephemeral storage)                    │
+│  Cleanup CronJob triggers:                              │
+│    - Create VolumeSnapshot from PVC (< 5 seconds)       │
+│    - Wait for snapshot.status.readyToUse: true          │
+│    - Delete namespace (cascades to all resources)       │
 │                                                         │
-│  ✅ Project saved to S3, cluster resources freed        │
+│  VolumeSnapshot stored in EBS                           │
+│    - Same AZ, fast restore                              │
+│    - deletionPolicy: Retain                             │
+│                                                         │
+│  ✅ Project hibernated, cluster resources freed         │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  4. PROJECT DELETION (Soft Delete)                      │
+│                                                         │
+│  User deletes project                                   │
+│    ↓                                                    │
+│  Mark all snapshots as soft-deleted                     │
+│    - Set soft_delete_expires_at to 30 days from now     │
+│    - VolumeSnapshots NOT deleted immediately            │
+│    ↓                                                    │
+│  Daily cleanup CronJob (3 AM UTC):                      │
+│    - Find snapshots where soft_delete_expires_at < now  │
+│    - Delete K8s VolumeSnapshot resources                │
+│    - Update database record status to "deleted"         │
+│                                                         │
+│  ✅ 30-day recovery window for accidental deletions     │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Hydration Script** (Init container):
-```bash
-#!/bin/bash
-# From kubernetes/helpers.py
-
-S3_KEY="projects/${USER_ID}/${PROJECT_ID}.zip"
-
-# Download from S3 if exists
-if aws s3 ls "s3://${S3_BUCKET}/${S3_KEY}"; then
-  echo "Hydrating project from S3..."
-  aws s3 cp "s3://${S3_BUCKET}/${S3_KEY}" /tmp/project.zip
-  unzip /tmp/project.zip -d /app
-  echo "Hydration complete"
-else
-  echo "No S3 backup found, using template"
-  # Copy template files (handled by orchestrator)
-fi
+**VolumeSnapshot Creation** (from SnapshotManager):
+```python
+# orchestrator/app/services/snapshot_manager.py
+async def create_snapshot(project_id, user_id, db, snapshot_type="hibernation"):
+    """Create EBS VolumeSnapshot (non-blocking, < 1 second to initiate)."""
+    snapshot_manifest = {
+        "apiVersion": "snapshot.storage.k8s.io/v1",
+        "kind": "VolumeSnapshot",
+        "metadata": {
+            "name": f"snap-{project_id}-{timestamp}",
+            "namespace": f"proj-{project_id}"
+        },
+        "spec": {
+            "volumeSnapshotClassName": "tesslate-ebs-snapshots",
+            "source": {
+                "persistentVolumeClaimName": "project-storage"
+            }
+        }
+    }
+    # Returns immediately - frontend polls for 'ready' status
 ```
 
-**Dehydration Script** (PreStop hook):
-```bash
-#!/bin/bash
-# From kubernetes/helpers.py
-
-S3_KEY="projects/${USER_ID}/${PROJECT_ID}.zip"
-
-echo "Dehydrating project to S3..."
-
-# Zip project (exclude .git to reduce size)
-cd /app
-zip -r /tmp/project.zip . -x ".git/*"
-
-# Upload to S3
-aws s3 cp /tmp/project.zip "s3://${S3_BUCKET}/${S3_KEY}"
-
-echo "Dehydration complete"
+**PVC Restore from Snapshot**:
+```yaml
+# Created by snapshot_manager.restore_from_snapshot()
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: project-storage
+  namespace: proj-{project_id}
+spec:
+  storageClassName: tesslate-block-storage
+  dataSource:
+    name: snap-{project_id}-{timestamp}
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
 ```
 
 **Advantages**:
-- ✅ Fast I/O (PVC is local disk)
-- ✅ Durable (S3 backup prevents data loss)
-- ✅ Cost-efficient (ephemeral PVCs deleted when unused)
-- ✅ Scalable (projects can move across nodes)
+- ✅ Near-instant restore (< 10 seconds) - EBS lazy-loads data
+- ✅ node_modules preserved - no npm install on restore!
+- ✅ Fast I/O (EBS block storage)
+- ✅ Non-blocking snapshot creation (returns immediately)
+- ✅ Timeline UI - up to 5 snapshots for version history
+- ✅ 30-day soft delete retention for recovery
+- ✅ Same AZ storage - fast and cost-effective
 
 **Disadvantages**:
-- ❌ Hydration delay on first access (5-30s depending on project size)
-- ❌ Dehydration delay on shutdown (5-30s)
-- ❌ S3 storage costs (mitigated by lifecycle policies)
+- ❌ Single AZ (snapshots don't replicate across AZs)
+- ❌ Storage costs (mitigated by soft-delete cleanup)
 
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/s3_manager.py`
+**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/snapshot_manager.py`
 
 ### Namespace Isolation
 
@@ -460,7 +488,7 @@ metadata:
     tesslate.io/user-id: "123e4567-e89b-12d3-a456-426614174000"
 
 ---
-# PVC (5Gi block storage)
+# PVC (10Gi EBS block storage)
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -470,7 +498,7 @@ spec:
   storageClassName: tesslate-block-storage
   resources:
     requests:
-      storage: 5Gi
+      storage: 10Gi
 
 ---
 # File Manager Deployment
@@ -598,17 +626,15 @@ DATABASE_URL=postgresql+asyncpg://user:pass@postgres:5432/tesslate
 SECRET_KEY=your-secret-key-here
 
 # Kubernetes
-K8S_DEVSERVER_IMAGE=registry.digitalocean.com/.../tesslate-devserver:latest
-K8S_IMAGE_PULL_SECRET=tesslate-container-registry-nyc3
+K8S_DEVSERVER_IMAGE=<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
+K8S_IMAGE_PULL_SECRET=ecr-credentials
 K8S_STORAGE_CLASS=tesslate-block-storage
-K8S_USE_S3_STORAGE=true
 
-# S3
-S3_ENDPOINT_URL=https://s3.us-east-1.amazonaws.com
-S3_BUCKET_NAME=tesslate-project-storage-prod
-S3_ACCESS_KEY_ID=<YOUR_S3_ACCESS_KEY>
-S3_SECRET_ACCESS_KEY=<YOUR_S3_SECRET_KEY>
-S3_REGION=us-east-1
+# Snapshots
+K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
+K8S_SNAPSHOT_RETENTION_DAYS=30
+K8S_MAX_SNAPSHOTS_PER_PROJECT=5
+K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=90
 
 # App Domain
 APP_DOMAIN=your-domain.com
@@ -620,9 +646,8 @@ COOKIE_DOMAIN=.your-domain.com
 # Kubernetes Advanced
 K8S_ENABLE_POD_AFFINITY=true
 K8S_ENABLE_NETWORK_POLICIES=true
-K8S_PVC_SIZE=5Gi
+K8S_PVC_SIZE=10Gi
 K8S_HIBERNATION_IDLE_MINUTES=10
-K8S_DEHYDRATION_EXCLUDE_PATTERNS=.git
 
 # Ingress
 K8S_INGRESS_CLASS=nginx
@@ -639,11 +664,11 @@ k8s/
   base/                       # Base manifests (shared)
     kustomization.yaml
     namespace/                # tesslate namespace
-    core/                     # Backend, frontend, cleanup
+    core/                     # Backend, frontend, cleanup cronjobs
     database/                 # PostgreSQL deployment
     ingress/                  # NGINX Ingress, SSL cert
     security/                 # RBAC, network policies
-    minio/                    # S3-compatible storage (local)
+    storage/                  # VolumeSnapshotClass (EBS snapshots)
 
   overlays/
     minikube/                 # Local dev patches
@@ -674,10 +699,8 @@ kubectl apply -k k8s/overlays/aws
 | **DEV_SERVER_BASE_URL** | `http://localhost` | N/A | N/A |
 | **K8S_DEVSERVER_IMAGE** | N/A | `tesslate-devserver:latest` | `<ECR>.../tesslate-devserver:latest` |
 | **K8S_IMAGE_PULL_SECRET** | N/A | `` (empty - local image) | `ecr-credentials` |
-| **K8S_USE_S3_STORAGE** | N/A | `true` | `true` |
-| **K8S_STORAGE_CLASS** | N/A | `standard` (minikube) | `gp3` (AWS EBS) |
-| **S3_ENDPOINT_URL** | N/A | `http://minio:9000` (MinIO) | `https://s3.us-east-1.amazonaws.com` |
-| **S3_BUCKET_NAME** | N/A | `tesslate-projects-dev` | `tesslate-project-storage-prod` |
+| **K8S_STORAGE_CLASS** | N/A | `standard` (minikube) | `tesslate-block-storage` (AWS EBS) |
+| **K8S_SNAPSHOT_CLASS** | N/A | `tesslate-ebs-snapshots` | `tesslate-ebs-snapshots` |
 | **APP_DOMAIN** | `localhost` | `localhost` | `your-domain.com` |
 | **COOKIE_DOMAIN** | `` (empty) | `` (empty) | `.your-domain.com` |
 | **K8S_WILDCARD_TLS_SECRET** | N/A | `` (no TLS) | `tesslate-wildcard-tls` |
@@ -723,14 +746,11 @@ SECRET_KEY=your-secret-key-dev
 K8S_DEVSERVER_IMAGE=tesslate-devserver:latest
 K8S_IMAGE_PULL_SECRET=
 K8S_STORAGE_CLASS=standard
-K8S_USE_S3_STORAGE=true
 
-# S3 (MinIO)
-S3_ENDPOINT_URL=http://minio.minio-system.svc.cluster.local:9000
-S3_BUCKET_NAME=tesslate-projects-dev
-S3_ACCESS_KEY_ID=minioadmin
-S3_SECRET_ACCESS_KEY=minioadmin
-S3_REGION=us-east-1
+# Snapshots
+K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
+K8S_SNAPSHOT_RETENTION_DAYS=30
+K8S_MAX_SNAPSHOTS_PER_PROJECT=5
 
 # App Domain
 APP_DOMAIN=localhost
@@ -755,15 +775,13 @@ SECRET_KEY=STRONG_RANDOM_SECRET_KEY_PRODUCTION
 # Kubernetes
 K8S_DEVSERVER_IMAGE=<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
 K8S_IMAGE_PULL_SECRET=ecr-credentials
-K8S_STORAGE_CLASS=gp3
-K8S_USE_S3_STORAGE=true
+K8S_STORAGE_CLASS=tesslate-block-storage
 
-# S3 (AWS S3)
-S3_ENDPOINT_URL=https://s3.us-east-1.amazonaws.com
-S3_BUCKET_NAME=tesslate-project-storage-prod
-S3_ACCESS_KEY_ID=<YOUR_S3_ACCESS_KEY>
-S3_SECRET_ACCESS_KEY=<YOUR_S3_SECRET_KEY>
-S3_REGION=us-east-1
+# Snapshots
+K8S_SNAPSHOT_CLASS=tesslate-ebs-snapshots
+K8S_SNAPSHOT_RETENTION_DAYS=30
+K8S_MAX_SNAPSHOTS_PER_PROJECT=5
+K8S_SNAPSHOT_READY_TIMEOUT_SECONDS=90
 
 # App Domain
 APP_DOMAIN=your-domain.com
@@ -812,17 +830,18 @@ await orchestrator.write_file(project_id, path, content)
 
 **Docker → Kubernetes**:
 1. ✅ Set up Kubernetes cluster (Minikube, EKS, GKE, etc.)
-2. ✅ Configure S3-compatible storage (MinIO, AWS S3, DO Spaces)
-3. ✅ Build and push images to registry
-4. ✅ Create Kubernetes manifests (or use provided in `k8s/`)
-5. ✅ Deploy with `kubectl apply -k k8s/overlays/{env}`
-6. ✅ Update `.env` with K8s-specific settings
+2. ✅ Install EBS CSI driver and snapshot controller
+3. ✅ Create VolumeSnapshotClass (`tesslate-ebs-snapshots`)
+4. ✅ Build and push images to registry
+5. ✅ Create Kubernetes manifests (or use provided in `k8s/`)
+6. ✅ Deploy with `kubectl apply -k k8s/overlays/{env}`
+7. ✅ Update `.env` with K8s-specific settings
 
 **Kubernetes → Docker**:
 1. ✅ Stop Kubernetes cluster
 2. ✅ Update `.env` with `DEPLOYMENT_MODE=docker`
 3. ✅ Start Docker Compose: `docker-compose up`
-4. ✅ Project files in `users/` directory (no S3)
+4. ✅ Project files in `users/` directory (no snapshots)
 
 ## Choosing a Deployment Mode
 
@@ -839,7 +858,8 @@ await orchestrator.write_file(project_id, path, content)
 - ✅ Deploying to production
 - ✅ Need horizontal scaling (multiple orchestrator replicas)
 - ✅ Want container isolation (NetworkPolicy)
-- ✅ Need S3 durability (project persistence)
+- ✅ Need EBS snapshot durability (project persistence)
+- ✅ Want Timeline UI for version history
 - ✅ Serving multiple users concurrently
 - ✅ Require SSL/TLS certificates
 

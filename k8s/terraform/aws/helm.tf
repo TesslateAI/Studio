@@ -407,3 +407,50 @@ resource "helm_release" "metrics_server" {
 
   depends_on = [module.eks]
 }
+
+# -----------------------------------------------------------------------------
+# CSI Snapshot Controller (for EBS VolumeSnapshots)
+# -----------------------------------------------------------------------------
+# Required for EBS CSI driver to create/restore VolumeSnapshots.
+# This installs the snapshot CRDs and controller.
+# -----------------------------------------------------------------------------
+resource "helm_release" "snapshot_controller" {
+  name       = "snapshot-controller"
+  repository = "https://piraeus.io/helm-charts"
+  chart      = "snapshot-controller"
+  version    = "3.0.6"
+  namespace  = "kube-system"
+
+  values = [
+    yamlencode({
+      controller = {
+        resources = {
+          requests = {
+            cpu    = "10m"
+            memory = "32Mi"
+          }
+          limits = {
+            cpu    = "100m"
+            memory = "128Mi"
+          }
+        }
+      }
+
+      webhook = {
+        enabled = true
+        resources = {
+          requests = {
+            cpu    = "10m"
+            memory = "32Mi"
+          }
+          limits = {
+            cpu    = "100m"
+            memory = "128Mi"
+          }
+        }
+      }
+    })
+  ]
+
+  depends_on = [module.eks]
+}

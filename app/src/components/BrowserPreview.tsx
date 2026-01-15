@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Plus, CaretLeft, CaretRight, ArrowsClockwise } from '@phosphor-icons/react';
 import { ContainerLoadingOverlay } from './ContainerLoadingOverlay';
-import { ContainerStartupStatus } from '../hooks/useContainerStartup';
+import type { ContainerStartupStatus } from '../hooks/useContainerStartup';
 
 interface Tab {
   id: string;

@@ -72,37 +72,55 @@ class KubernetesClient:
         """
         Create a Kubernetes namespace if it doesn't exist.
 
+        If namespace is in Terminating state, waits for it to finish (non-blocking).
+
         Args:
             namespace: Namespace name
             project_id: Project ID (for labels)
             user_id: User ID (for labels)
         """
-        try:
-            await asyncio.to_thread(
-                self.core_v1.read_namespace,
-                name=namespace
-            )
-            logger.debug(f"[K8S] Namespace {namespace} already exists")
-        except ApiException as e:
-            if e.status == 404:
-                namespace_manifest = client.V1Namespace(
-                    metadata=client.V1ObjectMeta(
-                        name=namespace,
-                        labels={
-                            "app": "tesslate",
-                            "managed-by": "tesslate-backend",
-                            "project-id": project_id,
-                            "user-id": str(user_id)
-                        }
+        max_wait_seconds = 60
+        wait_interval = 2
+
+        for attempt in range(max_wait_seconds // wait_interval):
+            try:
+                ns = await asyncio.to_thread(
+                    self.core_v1.read_namespace,
+                    name=namespace
+                )
+                # Check if namespace is terminating
+                if ns.status and ns.status.phase == "Terminating":
+                    logger.info(f"[K8S] Namespace {namespace} is terminating, waiting... (attempt {attempt + 1})")
+                    await asyncio.sleep(wait_interval)
+                    continue
+                # Namespace exists and is active
+                logger.debug(f"[K8S] Namespace {namespace} already exists")
+                return
+            except ApiException as e:
+                if e.status == 404:
+                    # Namespace doesn't exist, create it
+                    namespace_manifest = client.V1Namespace(
+                        metadata=client.V1ObjectMeta(
+                            name=namespace,
+                            labels={
+                                "app": "tesslate",
+                                "managed-by": "tesslate-backend",
+                                "project-id": project_id,
+                                "user-id": str(user_id)
+                            }
+                        )
                     )
-                )
-                await asyncio.to_thread(
-                    self.core_v1.create_namespace,
-                    body=namespace_manifest
-                )
-                logger.info(f"[K8S] ✅ Created namespace: {namespace}")
-            else:
-                raise
+                    await asyncio.to_thread(
+                        self.core_v1.create_namespace,
+                        body=namespace_manifest
+                    )
+                    logger.info(f"[K8S] ✅ Created namespace: {namespace}")
+                    return
+                else:
+                    raise
+
+        # If we get here, namespace was stuck terminating for too long
+        raise RuntimeError(f"Namespace {namespace} stuck in Terminating state after {max_wait_seconds}s")
 
     async def namespace_exists(self, namespace: str) -> bool:
         """
@@ -124,122 +142,6 @@ class KubernetesClient:
             if e.status == 404:
                 return False
             raise
-
-    async def create_network_policy(self, namespace: str, project_id: str) -> None:
-        """
-        Create NetworkPolicy for project isolation.
-
-        This policy:
-        - Allows all traffic within the namespace (pod-to-pod)
-        - Allows ingress from nginx-ingress namespace
-        - Allows egress to internet (for npm install, etc.)
-        - Denies cross-namespace traffic by default
-        """
-        if not self.settings.k8s_enable_network_policies:
-            logger.debug(f"[K8S] NetworkPolicy creation disabled, skipping")
-            return
-
-        policy_name = "project-isolation"
-
-        # Check if policy already exists
-        try:
-            await asyncio.to_thread(
-                self.networking_v1.read_namespaced_network_policy,
-                name=policy_name,
-                namespace=namespace
-            )
-            logger.debug(f"[K8S] NetworkPolicy {policy_name} already exists in {namespace}")
-            return
-        except ApiException as e:
-            if e.status != 404:
-                raise
-
-        # Create NetworkPolicy manifest
-        network_policy = client.V1NetworkPolicy(
-            metadata=client.V1ObjectMeta(
-                name=policy_name,
-                namespace=namespace,
-                labels={
-                    "app": "tesslate",
-                    "managed-by": "tesslate-backend",
-                    "project-id": project_id
-                }
-            ),
-            spec=client.V1NetworkPolicySpec(
-                pod_selector=client.V1LabelSelector(match_labels={}),
-                policy_types=["Ingress", "Egress"],
-                ingress=[
-                    # Allow traffic from pods in the SAME namespace
-                    client.V1NetworkPolicyIngressRule(
-                        _from=[
-                            client.V1NetworkPolicyPeer(
-                                pod_selector=client.V1LabelSelector(match_labels={})
-                            )
-                        ]
-                    ),
-                    # Allow traffic from ingress-nginx namespace
-                    client.V1NetworkPolicyIngressRule(
-                        _from=[
-                            client.V1NetworkPolicyPeer(
-                                namespace_selector=client.V1LabelSelector(
-                                    match_labels={
-                                        "kubernetes.io/metadata.name": "ingress-nginx"
-                                    }
-                                )
-                            )
-                        ]
-                    )
-                ],
-                egress=[
-                    # Allow traffic to pods in the SAME namespace
-                    client.V1NetworkPolicyEgressRule(
-                        to=[
-                            client.V1NetworkPolicyPeer(
-                                pod_selector=client.V1LabelSelector(match_labels={})
-                            )
-                        ]
-                    ),
-                    # Allow DNS queries
-                    client.V1NetworkPolicyEgressRule(
-                        to=[
-                            client.V1NetworkPolicyPeer(
-                                namespace_selector=client.V1LabelSelector(
-                                    match_labels={
-                                        "kubernetes.io/metadata.name": "kube-system"
-                                    }
-                                )
-                            )
-                        ],
-                        ports=[
-                            client.V1NetworkPolicyPort(port=53, protocol="UDP"),
-                            client.V1NetworkPolicyPort(port=53, protocol="TCP")
-                        ]
-                    ),
-                    # Allow all egress to internet
-                    client.V1NetworkPolicyEgressRule(
-                        to=[
-                            client.V1NetworkPolicyPeer(
-                                ip_block=client.V1IPBlock(
-                                    cidr="0.0.0.0/0",
-                                    _except=[
-                                        "10.0.0.0/8",
-                                        "172.16.0.0/12",
-                                        "192.168.0.0/16"
-                                    ]
-                                )
-                            )
-                        ]
-                    )
-                ]
-            )
-        )
-
-        await asyncio.to_thread(
-            self.networking_v1.create_namespaced_network_policy,
-            namespace=namespace,
-            body=network_policy
-        )
-        logger.info(f"[K8S] ✅ Created NetworkPolicy: {policy_name} in {namespace}")
 
     async def apply_network_policy(
         self,
@@ -278,76 +180,6 @@ class KubernetesClient:
                 logger.info(f"[K8S] ✅ Updated NetworkPolicy: {policy_name}")
             else:
                 raise
-
-    async def copy_s3_credentials_secret(
-        self,
-        target_namespace: str,
-        source_namespace: str = None,
-        secret_name: str = None
-    ) -> None:
-        """
-        Copy S3 credentials secret from source namespace to target namespace.
-
-        This is required for the S3 Sandwich pattern - user project pods need
-        access to S3/MinIO credentials for hydration/dehydration.
-
-        Args:
-            target_namespace: Namespace to copy the secret to
-            source_namespace: Namespace to copy from (defaults to tesslate)
-            secret_name: Name of the secret (defaults to k8s_s3_credentials_secret)
-        """
-        if source_namespace is None:
-            source_namespace = self.settings.k8s_default_namespace
-        if secret_name is None:
-            secret_name = self.settings.k8s_s3_credentials_secret
-
-        # Check if secret already exists in target namespace
-        try:
-            await asyncio.to_thread(
-                self.core_v1.read_namespaced_secret,
-                name=secret_name,
-                namespace=target_namespace
-            )
-            logger.debug(f"[K8S] Secret {secret_name} already exists in {target_namespace}")
-            return
-        except ApiException as e:
-            if e.status != 404:
-                raise
-
-        # Read secret from source namespace
-        try:
-            source_secret = await asyncio.to_thread(
-                self.core_v1.read_namespaced_secret,
-                name=secret_name,
-                namespace=source_namespace
-            )
-        except ApiException as e:
-            if e.status == 404:
-                logger.warning(f"[K8S] S3 credentials secret {secret_name} not found in {source_namespace}")
-                return
-            raise
-
-        # Create new secret in target namespace (copy data, new metadata)
-        new_secret = client.V1Secret(
-            metadata=client.V1ObjectMeta(
-                name=secret_name,
-                namespace=target_namespace,
-                labels={
-                    "app": "tesslate",
-                    "managed-by": "tesslate-backend",
-                    "copied-from": source_namespace
-                }
-            ),
-            type=source_secret.type,
-            data=source_secret.data
-        )
-
-        await asyncio.to_thread(
-            self.core_v1.create_namespaced_secret,
-            namespace=target_namespace,
-            body=new_secret
-        )
-        logger.info(f"[K8S] ✅ Copied S3 credentials secret to {target_namespace}")
 
     async def copy_wildcard_tls_secret(
         self,

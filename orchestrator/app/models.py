@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Float, JSON, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, ForeignKey, Text, Boolean, Float, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
@@ -34,11 +34,11 @@ class Project(Base):
     deployed_at = Column(DateTime(timezone=True), nullable=True)  # When deployed
     stripe_payment_intent = Column(String, nullable=True)  # For paid deploys
 
-    # Hibernation/Environment status (S3-backed storage mode)
+    # Hibernation/Environment status (EBS Snapshot storage mode)
     environment_status = Column(String(20), default="active", nullable=False)  # active, hibernated, starting, stopping
     last_activity = Column(DateTime(timezone=True), nullable=True)  # Last user activity timestamp
     hibernated_at = Column(DateTime(timezone=True), nullable=True)  # When environment was hibernated
-    s3_archive_size_bytes = Column(Integer, nullable=True)  # Size of S3 archive (for billing/monitoring)
+    latest_snapshot_id = Column(UUID(as_uuid=True), nullable=True)  # Reference to most recent snapshot (for quick restore)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -57,6 +57,56 @@ class Project(Base):
     browser_previews = relationship("BrowserPreview", back_populates="project", cascade="all, delete-orphan")
     deployment_credentials = relationship("DeploymentCredential", back_populates="project", cascade="all, delete-orphan")
     deployments = relationship("Deployment", back_populates="project", cascade="all, delete-orphan")
+    snapshots = relationship("ProjectSnapshot", back_populates="project", cascade="all, delete-orphan")
+
+
+class ProjectSnapshot(Base):
+    """EBS VolumeSnapshot records for project hibernation and versioning.
+
+    Tracks Kubernetes VolumeSnapshots created from project PVCs. Used for:
+    - Fast hibernation (< 5 seconds)
+    - Fast restore (< 10 seconds, lazy loading, node_modules preserved)
+    - Project versioning (up to 5 snapshots per project for Timeline UI)
+    - Soft delete (snapshots retained for 30 days after project deletion)
+
+    CRITICAL: Wait for snapshot.status == 'ready' before deleting source PVC.
+    If PVC is deleted before snapshot is ready, data will be corrupted.
+    """
+    __tablename__ = "project_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Kubernetes VolumeSnapshot references
+    snapshot_name = Column(String(255), nullable=False, index=True)  # K8s VolumeSnapshot name
+    snapshot_namespace = Column(String(255), nullable=False)  # K8s namespace where snapshot was created
+    pvc_name = Column(String(255), nullable=True)  # Original PVC name (for reference)
+    volume_size_bytes = Column(BigInteger, nullable=True)  # Size of the volume at snapshot time
+
+    # Snapshot metadata
+    snapshot_type = Column(String(50), default="hibernation", nullable=False)  # hibernation, manual
+    status = Column(String(50), default="pending", nullable=False)  # pending, ready, error, deleted
+    label = Column(String(255), nullable=True)  # User-provided label for manual snapshots
+    is_latest = Column(Boolean, default=False, nullable=False)  # Track latest snapshot per project
+
+    # Soft delete support (for project deletion recovery)
+    is_soft_deleted = Column(Boolean, default=False, nullable=False)
+    soft_delete_expires_at = Column(DateTime(timezone=True), nullable=True)  # 30 days after project deletion
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    ready_at = Column(DateTime(timezone=True), nullable=True)  # When snapshot became ready
+
+    # Relationships
+    project = relationship("Project", back_populates="snapshots")
+    user = relationship("User")
+
+    # Indexes for common queries
+    __table_args__ = (
+        Index('ix_project_snapshots_project_created', 'project_id', 'created_at'),
+        Index('ix_project_snapshots_soft_delete', 'is_soft_deleted', 'soft_delete_expires_at'),
+    )
 
 
 class Container(Base):

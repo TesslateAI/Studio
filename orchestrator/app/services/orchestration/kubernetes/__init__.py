@@ -1,15 +1,15 @@
 """
-Kubernetes Orchestration Module - S3 Sandwich Architecture
+Kubernetes Orchestration Module - EBS VolumeSnapshot Architecture
 
 This module contains all Kubernetes-specific orchestration code:
 - KubernetesClient: Low-level Kubernetes API interactions
-- KubernetesHelpers: Helper functions for manifests, init containers, S3 lifecycle
+- KubernetesHelpers: Helper functions for manifests, init containers
 - KubernetesContainerManager: Container lifecycle management
 
-S3 Sandwich Pattern:
-1. On start: Hydrate project from S3 (init container)
-2. During use: Work on block storage (fast local I/O)
-3. On stop: Dehydrate project to S3 (preStop hook)
+EBS VolumeSnapshot Pattern (replaces S3 Sandwich):
+1. On stop: Create EBS VolumeSnapshot from PVC (< 5 seconds)
+2. On start: Create PVC from snapshot (lazy load - instant)
+3. Full volume preserved: node_modules included, no npm install needed
 
 Pod Affinity:
 - Multi-container projects share a single PVC
@@ -33,8 +33,6 @@ from .helpers import (
     create_network_policy_manifest,
     # Script generation
     generate_git_clone_script,
-    generate_s3_upload_script,
-    generate_s3_download_script,
 )
 from .manager import KubernetesContainerManager, get_k8s_container_manager
 
@@ -54,8 +52,6 @@ __all__ = [
     "create_network_policy_manifest",
     # Script generation
     "generate_git_clone_script",
-    "generate_s3_upload_script",
-    "generate_s3_download_script",
     # Manager
     "KubernetesContainerManager",
     "get_k8s_container_manager",

@@ -236,7 +236,7 @@ export function MiniAsteroids() {
                        (activeElement?.getAttribute('contenteditable') === 'true');
 
       // Only capture keys if game is focused and not typing in a form
-      if (!gameFocused || isTyping) return;
+      if (!gameFocused || isTyping || !e.key) return;
 
       const key = e.key.toLowerCase();
       gameStateRef.current.keys[e.key] = true;
@@ -257,7 +257,7 @@ export function MiniAsteroids() {
                        (activeElement?.getAttribute('contenteditable') === 'true');
 
       // Only capture keys if game is focused and not typing in a form
-      if (!gameFocused || isTyping) return;
+      if (!gameFocused || isTyping || !e.key) return;
 
       const key = e.key.toLowerCase();
       gameStateRef.current.keys[e.key] = false;

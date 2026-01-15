@@ -1,15 +1,15 @@
 """
-Kubernetes Helpers for New Architecture
+Kubernetes Helpers for VolumeSnapshot Architecture
 
-This module contains helper methods for the new Kubernetes architecture that separates:
+This module contains helper methods for the Kubernetes architecture that separates:
 - File lifecycle (populate files when container added to graph)
 - Container lifecycle (start/stop dev servers)
-- S3 lifecycle (hibernation/restoration only)
+- Snapshot lifecycle (hibernation/restoration via EBS VolumeSnapshots)
 
 Key components:
 - File Manager Pod: Always-running pod for file operations
 - Dev Container Deployment: Simple deployment with no init containers
-- S3 Scripts: Only used for project hibernation/restoration
+- VolumeSnapshots: Near-instant hibernation/restoration (handled by snapshot_manager.py)
 """
 
 from kubernetes import client
@@ -710,8 +710,15 @@ def generate_git_clone_script(
     """
     install_section = """
 # Install dependencies based on project type
-if [ -f "package.json" ]; then
-    echo "[CLONE] Installing Node.js dependencies..."
+# Detect bun (bun.lock or bun.lockb), pnpm (pnpm-lock.yaml), or npm (package.json)
+if [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then
+    echo "[CLONE] Installing Node.js dependencies with bun..."
+    bun install --frozen-lockfile 2>&1 || echo "[CLONE] bun install completed with warnings"
+elif [ -f "pnpm-lock.yaml" ]; then
+    echo "[CLONE] Installing Node.js dependencies with pnpm..."
+    pnpm install --frozen-lockfile 2>&1 || echo "[CLONE] pnpm install completed with warnings"
+elif [ -f "package.json" ]; then
+    echo "[CLONE] Installing Node.js dependencies with npm..."
     npm install --prefer-offline --no-audit 2>&1 || echo "[CLONE] npm install completed with warnings"
 fi
 
@@ -791,130 +798,12 @@ echo "[CLONE] ======================================"
 
 
 # =============================================================================
-# S3 Scripts (for hibernation/restoration ONLY)
+# NOTE: S3 hibernation scripts removed - now using EBS VolumeSnapshots
 # =============================================================================
-
-def generate_s3_upload_script(
-    s3_bucket: str,
-    s3_key: str,
-    s3_endpoint: str,
-    s3_region: str,
-    source_dir: str = "/app",
-    exclude_patterns: list = None
-) -> str:
-    """
-    Generate script to zip and upload project to S3.
-
-    This is ONLY used for project hibernation (when user leaves).
-    NOT used for container startup!
-
-    Args:
-        s3_bucket: S3 bucket name
-        s3_key: S3 key path
-        s3_endpoint: S3 endpoint URL (empty for AWS)
-        s3_region: S3 region
-        source_dir: Directory to archive
-        exclude_patterns: Patterns to exclude from zip
-
-    Returns:
-        Shell script as string
-    """
-    if exclude_patterns is None:
-        exclude_patterns = ["node_modules", ".git", "__pycache__", "venv", ".venv"]
-
-    exclude_args = " ".join([f'-x "{p}/*"' for p in exclude_patterns])
-    endpoint_arg = f'--endpoint-url="{s3_endpoint}"' if s3_endpoint else ""
-
-    return f'''#!/bin/sh
-set -e
-
-echo "[HIBERNATE] ======================================"
-echo "[HIBERNATE] Uploading project to S3"
-echo "[HIBERNATE] Bucket: {s3_bucket}"
-echo "[HIBERNATE] Key: {s3_key}"
-echo "[HIBERNATE] ======================================"
-
-# Configure AWS CLI
-export AWS_DEFAULT_REGION="{s3_region}"
-
-# Create archive
-cd {source_dir}
-zip -r -q /tmp/project.zip . {exclude_args} -x "*.log" -x ".DS_Store"
-
-# Upload to S3
-aws s3 cp /tmp/project.zip s3://{s3_bucket}/{s3_key} {endpoint_arg}
-
-# Verify upload
-if aws s3 ls s3://{s3_bucket}/{s3_key} {endpoint_arg} >/dev/null 2>&1; then
-    echo "[HIBERNATE] ✓ Upload verified"
-else
-    echo "[HIBERNATE] ERROR: Upload failed!"
-    exit 1
-fi
-
-rm -f /tmp/project.zip
-
-echo "[HIBERNATE] ======================================"
-echo "[HIBERNATE] ✅ Hibernation complete"
-echo "[HIBERNATE] ======================================"
-'''
-
-
-def generate_s3_download_script(
-    s3_bucket: str,
-    s3_key: str,
-    s3_endpoint: str,
-    s3_region: str,
-    target_dir: str = "/app"
-) -> str:
-    """
-    Generate script to download and extract project from S3.
-
-    This is ONLY used for project restoration (when user returns to hibernated project).
-    NOT used for new project setup!
-
-    Args:
-        s3_bucket: S3 bucket name
-        s3_key: S3 key path
-        s3_endpoint: S3 endpoint URL (empty for AWS)
-        s3_region: S3 region
-        target_dir: Directory to extract to
-
-    Returns:
-        Shell script as string
-    """
-    endpoint_arg = f'--endpoint-url="{s3_endpoint}"' if s3_endpoint else ""
-
-    return f'''#!/bin/sh
-set -e
-
-echo "[RESTORE] ======================================"
-echo "[RESTORE] Downloading project from S3"
-echo "[RESTORE] Bucket: {s3_bucket}"
-echo "[RESTORE] Key: {s3_key}"
-echo "[RESTORE] ======================================"
-
-# Configure AWS CLI
-export AWS_DEFAULT_REGION="{s3_region}"
-
-# Check if archive exists
-if ! aws s3 ls s3://{s3_bucket}/{s3_key} {endpoint_arg} 2>/dev/null; then
-    echo "[RESTORE] ERROR: Archive not found in S3!"
-    exit 1
-fi
-
-# Download archive
-aws s3 cp s3://{s3_bucket}/{s3_key} /tmp/project.zip {endpoint_arg}
-
-# Extract to target
-mkdir -p {target_dir}
-unzip -q -o /tmp/project.zip -d {target_dir}
-
-rm -f /tmp/project.zip
-
-echo "[RESTORE] ======================================"
-echo "[RESTORE] ✅ Restoration complete"
-echo "[RESTORE] Files:"
-ls -la {target_dir}/ | head -20
-echo "[RESTORE] ======================================"
-'''
+# Hibernation is now handled by snapshot_manager.py using Kubernetes VolumeSnapshots.
+# Benefits:
+# - Near-instant hibernation (< 5 seconds)
+# - Near-instant restore (< 10 seconds, lazy loading)
+# - Full volume preserved (node_modules included - no npm install)
+# - Versioning (up to 5 snapshots per project)
+# =============================================================================

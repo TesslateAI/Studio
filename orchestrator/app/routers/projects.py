@@ -1456,23 +1456,20 @@ async def _perform_project_deletion(
                 logger.warning(f"[DELETE] Failed to delete project directory: {e}")
 
         else:
-            # Kubernetes mode: Delete K8s resources and S3 archive
-            logger.info(f"[DELETE] Kubernetes mode: Cleaning up K8s resources and S3...")
+            # Kubernetes mode: Delete K8s resources and soft-delete snapshots
+            logger.info(f"[DELETE] Kubernetes mode: Cleaning up K8s resources...")
 
-            # 4a. Copy S3 archive to deleted/ prefix for backup retention
-            if settings.k8s_use_s3_storage:
-                try:
-                    from ..services.s3_manager import get_s3_manager
-                    s3_manager = get_s3_manager()
+            # 4a. Soft-delete snapshots (marks for 30-day retention)
+            try:
+                from ..services.snapshot_manager import get_snapshot_manager
+                snapshot_manager = get_snapshot_manager()
 
-                    success, error = await s3_manager.copy_to_deleted(user_id, project_id)
-                    if success:
-                        logger.info(f"[DELETE] Archived project {project_id} to deleted/ prefix")
-                    else:
-                        logger.warning(f"[DELETE] Failed to archive to deleted/: {error}")
-                except Exception as e:
-                    logger.warning(f"[DELETE] Error archiving to deleted/: {e}")
-                    # Continue with deletion even if archive fails
+                deleted_count = await snapshot_manager.soft_delete_project_snapshots(project_id, db)
+                if deleted_count > 0:
+                    logger.info(f"[DELETE] Soft-deleted {deleted_count} snapshots for project {project_id} (30-day retention)")
+            except Exception as e:
+                logger.warning(f"[DELETE] Error soft-deleting snapshots: {e}")
+                # Continue with deletion even if soft delete fails
 
             # 4b. Delete Kubernetes namespace and all resources
             try:
@@ -1484,22 +1481,6 @@ async def _perform_project_deletion(
                 logger.info(f"[DELETE] Deleted K8s namespace and resources for project {project_slug}")
             except Exception as e:
                 logger.warning(f"[DELETE] Error deleting K8s resources: {e}")
-
-            task.update_progress(85, 100, "Cleaning up active S3 archive...")
-
-            # 4c. Delete active S3 archive (backup already saved to deleted/ prefix)
-            if settings.k8s_use_s3_storage:
-                try:
-                    from ..services.s3_manager import get_s3_manager
-                    s3_manager = get_s3_manager()
-
-                    success, error = await s3_manager.delete_project(user_id, project_id)
-                    if success:
-                        logger.info(f"[DELETE] Deleted S3 archive for project {project_id}")
-                    else:
-                        logger.warning(f"[DELETE] Failed to delete S3 archive: {error}")
-                except Exception as e:
-                    logger.warning(f"[DELETE] Error deleting S3 archive: {e}")
 
         task.update_progress(100, 100, "Project deleted successfully")
         logger.info(f"[DELETE] Successfully deleted project {project_id}")
@@ -4924,25 +4905,24 @@ async def admin_get_project_status(
         except Exception as e:
             response["k8s_namespace_error"] = str(e)
 
-    # Check S3 archive if hibernated
+    # Check snapshots if hibernated
     if project.environment_status == 'hibernated':
         try:
-            from ..services.s3_manager import get_s3_manager
-            s3_manager = get_s3_manager()
-            s3_key = s3_manager._get_project_key(project.owner_id, project.id)
+            from ..services.snapshot_manager import get_snapshot_manager
+            snapshot_manager = get_snapshot_manager()
+            snapshots = await snapshot_manager.get_project_snapshots(project.id, db)
 
-            # Check if file exists and get size
-            try:
-                head_response = s3_manager.s3_client.head_object(
-                    Bucket=s3_manager.bucket_name,
-                    Key=s3_key
-                )
-                response["s3_archive_key"] = s3_key
-                response["s3_archive_size_mb"] = round(head_response['ContentLength'] / (1024 * 1024), 2)
-                response["s3_archive_last_modified"] = head_response['LastModified'].isoformat()
-            except Exception:
-                response["s3_archive_exists"] = False
+            response["snapshot_count"] = len(snapshots)
+            if snapshots:
+                latest = snapshots[0]
+                response["latest_snapshot"] = {
+                    "name": latest.snapshot_name,
+                    "status": latest.status,
+                    "type": latest.snapshot_type,
+                    "created_at": latest.created_at.isoformat() if latest.created_at else None,
+                    "size_bytes": latest.volume_size_bytes
+                }
         except Exception as e:
-            response["s3_error"] = str(e)
+            response["snapshot_error"] = str(e)
 
     return response

@@ -21,6 +21,7 @@ resources:
   - core/frontend-deployment.yaml
   - core/frontend-service.yaml
   - core/cleanup-cronjob.yaml
+  - core/snapshot-cleanup-cronjob.yaml
 
   # Database
   - database/postgres-deployment.yaml

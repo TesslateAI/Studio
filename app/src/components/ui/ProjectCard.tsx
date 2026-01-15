@@ -2,7 +2,7 @@ import React, { type ReactNode } from 'react';
 import type { Status } from './StatusBadge';
 import { AgentTag } from './AgentTag';
 
-export type EnvironmentStatus = 'active' | 'hibernated' | 'hibernating' | 'corrupted' | 'creating';
+export type EnvironmentStatus = 'active' | 'hibernated' | 'hibernating' | 'corrupted' | 'creating' | 'starting' | 'stopping' | 'stopped' | 'waking' | 'restoring';
 
 interface Project {
   id: string;
@@ -81,7 +81,46 @@ export function ProjectCard({
       label: 'Creating...',
       icon: '⏳',
       className: 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+    },
+    starting: {
+      label: 'Starting...',
+      icon: '🚀',
+      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+    },
+    stopping: {
+      label: 'Stopping...',
+      icon: '⏳',
+      className: 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+    },
+    stopped: {
+      label: 'Stopped',
+      icon: '⏹️',
+      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+    },
+    waking: {
+      label: 'Waking up...',
+      icon: '☀️',
+      className: 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+    },
+    restoring: {
+      label: 'Restoring...',
+      icon: '🔄',
+      className: 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
     }
+  };
+
+  // Fallback for unknown statuses
+  const getEnvStatusConfig = (status: string | undefined) => {
+    if (!status) return null;
+    if (status in envStatusConfig) {
+      return envStatusConfig[status as EnvironmentStatus];
+    }
+    // Return a generic fallback for unknown statuses
+    return {
+      label: status.charAt(0).toUpperCase() + status.slice(1),
+      icon: '⚙️',
+      className: 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+    };
   };
 
   return (
@@ -143,15 +182,19 @@ export function ProjectCard({
                 {project.name}
               </h3>
               {/* Environment Status Badge */}
-              {project.environmentStatus && project.environmentStatus !== 'active' && (
-                <div
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs flex-shrink-0 ${envStatusConfig[project.environmentStatus].className}`}
-                  title={`Environment: ${envStatusConfig[project.environmentStatus].label}`}
-                >
-                  <span>{envStatusConfig[project.environmentStatus].icon}</span>
-                  <span className="font-medium text-[10px]">{envStatusConfig[project.environmentStatus].label}</span>
-                </div>
-              )}
+              {(() => {
+                const statusConfig = getEnvStatusConfig(project.environmentStatus);
+                if (!statusConfig || project.environmentStatus === 'active') return null;
+                return (
+                  <div
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs flex-shrink-0 ${statusConfig.className}`}
+                    title={`Environment: ${statusConfig.label}`}
+                  >
+                    <span>{statusConfig.icon}</span>
+                    <span className="font-medium text-[10px]">{statusConfig.label}</span>
+                  </div>
+                );
+              })()}
               {project.hasGitRepo && (
                 <div className="flex items-center gap-1 px-2 py-0.5 bg-[rgba(var(--status-green-rgb),0.1)] border border-[rgba(var(--status-green-rgb),0.2)] rounded text-xs text-[var(--status-green)] flex-shrink-0">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 256 256">

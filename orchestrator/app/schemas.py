@@ -786,3 +786,43 @@ class MarketplaceBaseResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# =============================================================================
+# Project Snapshots (EBS VolumeSnapshots for Timeline UI)
+# =============================================================================
+
+class SnapshotCreate(BaseModel):
+    """Request schema for creating a manual snapshot."""
+    label: Optional[str] = None  # User-provided label for the snapshot
+
+
+class SnapshotResponse(BaseModel):
+    """Response schema for a project snapshot."""
+    id: UUID
+    project_id: Optional[UUID] = None
+    snapshot_name: str
+    snapshot_type: str  # hibernation, manual
+    status: str  # pending, ready, error, deleted
+    label: Optional[str] = None
+    volume_size_bytes: Optional[int] = None
+    created_at: datetime
+    ready_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SnapshotListResponse(BaseModel):
+    """Response schema for listing project snapshots (Timeline)."""
+    snapshots: List[SnapshotResponse]
+    total_count: int
+    max_snapshots: int  # Configured max snapshots per project
+
+
+class RestoreSnapshotResponse(BaseModel):
+    """Response schema for restore operation."""
+    success: bool
+    message: str
+    snapshot_id: UUID
+    restored_from: str  # Snapshot name

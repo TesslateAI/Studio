@@ -1,11 +1,12 @@
 """
 Seed initial marketplace bases.
 
-Creates four featured bases:
-1. Next.js 15 (Integrated fullstack)
-2. Vite + React + FastAPI (Separated fullstack - Python)
-3. Vite + React + Go (Separated fullstack - Go)
-4. Expo (Mobile - React Native)
+Creates featured bases:
+1. Next.js 16 (Integrated fullstack - with Turbopack and instant startup)
+2. Next.js 15 (Integrated fullstack - legacy)
+3. Vite + React + FastAPI (Separated fullstack - Python)
+4. Vite + React + Go (Separated fullstack - Go)
+5. Expo (Mobile - React Native)
 
 HOW TO RUN:
 -----------
@@ -53,6 +54,26 @@ async def seed_bases():
 
         bases = [
             MarketplaceBase(
+                name="Next.js 16",
+                slug="nextjs-16",
+                description="Integrated fullstack with Next.js 16, Turbopack, and instant startup",
+                long_description="Modern Next.js 16 starter with App Router, React 19, Turbopack for fast compilation, API routes, TypeScript, and Tailwind CSS v4. Pre-baked dependencies for instant startup - no npm install required.",
+                git_repo_url="https://github.com/TesslateAI/Studio-NextJS-16-Base.git",
+                default_branch="main",
+                category="fullstack",
+                icon="⚡",
+                tags=["nextjs", "react", "typescript", "tailwind", "fullstack", "api-routes", "turbopack"],
+                pricing_type="free",
+                price=0,
+                downloads=0,
+                rating=5.0,
+                reviews_count=0,
+                features=["App Router", "API Routes", "Turbopack", "React 19", "TypeScript", "Tailwind CSS v4", "Instant Startup"],
+                tech_stack=["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4", "Turbopack"],
+                is_featured=True,
+                is_active=True
+            ),
+            MarketplaceBase(
                 name="Next.js 15",
                 slug="nextjs-15",
                 description="Integrated fullstack with Next.js 15 and API routes",
@@ -69,7 +90,7 @@ async def seed_bases():
                 reviews_count=0,
                 features=["App Router", "API Routes", "React Server Components", "TypeScript", "Tailwind CSS", "Hot Reload"],
                 tech_stack=["Next.js 15", "React 19", "TypeScript", "Tailwind CSS"],
-                is_featured=True,
+                is_featured=False,
                 is_active=True
             ),
             MarketplaceBase(

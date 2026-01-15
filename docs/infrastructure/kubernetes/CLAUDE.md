@@ -130,20 +130,20 @@ spec:
 2. Add resource and verbs to `rules` section
 3. Apply: `kubectl apply -k k8s/overlays/{env}`
 
-## S3 Sandwich (Hibernation)
+## EBS VolumeSnapshot (Project Persistence)
 
-**Init container**: Defined in `orchestrator/app/services/orchestration/kubernetes/helpers.py`
-- Function: `_create_deployment_manifest()`
-- Init container name: `hydrate-project`
-- Downloads from S3, extracts to `/workspace`
+**Storage**: Projects use persistent EBS volumes that survive pod restarts.
 
-**PreStop hook**: Also in `helpers.py`
-- Uploads `/workspace` to S3 as zip
+**Snapshots**: Created via `snapshot_manager.py` using K8s VolumeSnapshot API
+- Function: `create_snapshot()` - Creates EBS snapshot (non-blocking)
+- Function: `restore_from_snapshot()` - Creates PVC from snapshot
+- Function: `cleanup_expired_snapshots()` - Removes old soft-deleted snapshots
 
-**Cleanup cronjob**: `k8s/base/core/cleanup-cronjob.yaml`
-- Runs every 2 minutes
-- Calls `orchestrator.cleanup_idle_environments()`
-- Deletes namespaces for idle projects
+**Cleanup cronjobs**: `k8s/base/core/`
+- `cleanup-cronjob.yaml` - Runs every 2 minutes, creates snapshots for idle projects
+- `snapshot-cleanup-cronjob.yaml` - Daily at 3 AM, deletes expired soft-deleted snapshots
+
+**Timeline UI**: Frontend displays up to 5 snapshots per project for version history
 
 ## Debugging
 

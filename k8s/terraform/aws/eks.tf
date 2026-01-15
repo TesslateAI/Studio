@@ -197,6 +197,38 @@ module "ebs_csi_irsa" {
     }
   }
 
+  # Attach snapshot permissions for VolumeSnapshot support
+  role_policy_arns = {
+    ebs_snapshot = aws_iam_policy.ebs_snapshot_policy.arn
+  }
+
+  tags = local.common_tags
+}
+
+# -----------------------------------------------------------------------------
+# EBS Snapshot IAM Policy (for VolumeSnapshots)
+# -----------------------------------------------------------------------------
+resource "aws_iam_policy" "ebs_snapshot_policy" {
+  name        = "${local.cluster_name}-ebs-snapshot"
+  description = "Policy for EBS CSI driver to manage EBS snapshots for project hibernation"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateSnapshot",
+          "ec2:DeleteSnapshot",
+          "ec2:DescribeSnapshots",
+          "ec2:DescribeVolumes",
+          "ec2:CreateTags"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
   tags = local.common_tags
 }
 
@@ -227,4 +259,31 @@ resource "kubernetes_storage_class" "gp3" {
   }
 
   depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
+# VolumeSnapshotClass for EBS Snapshots (project hibernation)
+# -----------------------------------------------------------------------------
+# Used by Tesslate for fast project hibernation via EBS snapshots.
+# CRITICAL: deletionPolicy=Retain ensures snapshots persist when VolumeSnapshotContent
+# is deleted, allowing soft-delete recovery for 30 days.
+# Using kubectl_manifest instead of kubernetes_manifest for proper CRD handling.
+# -----------------------------------------------------------------------------
+resource "kubectl_manifest" "ebs_snapshot_class" {
+  yaml_body = <<-YAML
+    apiVersion: snapshot.storage.k8s.io/v1
+    kind: VolumeSnapshotClass
+    metadata:
+      name: tesslate-ebs-snapshots
+      labels:
+        app.kubernetes.io/name: tesslate
+        app.kubernetes.io/part-of: tesslate-studio
+    driver: ebs.csi.aws.com
+    deletionPolicy: Retain
+  YAML
+
+  depends_on = [
+    module.eks,
+    helm_release.snapshot_controller
+  ]
 }

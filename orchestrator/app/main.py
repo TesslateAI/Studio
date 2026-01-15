@@ -6,7 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
-from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth, creators
+from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth, creators, snapshots
 from .config import get_settings
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
@@ -670,6 +670,7 @@ app.include_router(tasks.router)
 app.include_router(deployments.router)
 app.include_router(deployment_credentials.router)
 app.include_router(deployment_oauth.router)
+app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 
 @app.get("/")
 async def root():

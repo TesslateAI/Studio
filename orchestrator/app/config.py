@@ -191,40 +191,24 @@ class Settings(BaseSettings):
     usage_invoice_day: int = 1  # Day of month to generate usage invoices (1-28)
 
     # ==========================================================================
-    # S3/Object Storage Configuration
+    # EBS VolumeSnapshot Configuration (Project Hibernation)
     # ==========================================================================
-    # S3 is REQUIRED for Kubernetes mode (S3 Sandwich pattern)
-    # Use MinIO for local development, real S3/Spaces for production
+    # Uses Kubernetes VolumeSnapshots backed by AWS EBS CSI driver for:
+    # - Near-instant hibernation (< 5 seconds)
+    # - Near-instant restore (< 10 seconds, lazy loading, node_modules preserved)
+    # - Project versioning (up to 5 snapshots per project for Timeline UI)
+    # - Soft delete (30-day retention after project deletion)
 
-    # S3-compatible storage settings
-    s3_access_key_id: str = ""  # Required for K8s mode
-    s3_secret_access_key: str = ""  # Required for K8s mode
-    s3_bucket_name: str = "tesslate-projects"  # Bucket name for project storage
-    s3_endpoint_url: str = ""  # Empty for AWS S3, set for MinIO/DO Spaces
-    s3_region: str = "us-east-1"  # Region (for signature calculation)
-    s3_projects_prefix: str = "projects"  # Base path: projects/{user_id}/{project_id}/
+    # VolumeSnapshotClass name (must match K8s VolumeSnapshotClass)
+    k8s_snapshot_class: str = "tesslate-ebs-snapshots"
 
-    # S3 credentials secret name in Kubernetes
-    k8s_s3_credentials_secret: str = "s3-credentials"
+    # Snapshot retention settings
+    k8s_snapshot_retention_days: int = 30  # Days to keep soft-deleted snapshots
+    k8s_max_snapshots_per_project: int = 5  # Max snapshots per project (Timeline UI)
 
-    # Enable S3 storage for Kubernetes mode (S3 Sandwich pattern)
-    # When True: Projects are hydrated from S3 on start, dehydrated to S3 on stop
-    # When False: Uses persistent storage mode (requires RWX storage class)
-    # Default is True for K8s mode - only affects kubernetes deployment_mode
-    k8s_use_s3_storage: bool = True
-
-    # ==========================================================================
-    # Kubernetes S3 Sandwich Settings
-    # ==========================================================================
-    # Hibernation/Hydration lifecycle timing
+    # Snapshot timeouts
+    k8s_snapshot_ready_timeout_seconds: int = 90  # Max time to wait for snapshot to become ready (EBS takes ~67s)
     k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
-    k8s_hibernation_grace_seconds: int = 120  # Grace period for dehydration before deletion
-    k8s_hydration_timeout_seconds: int = 300  # Max time to wait for project hydration from S3
-    k8s_dehydration_timeout_seconds: int = 300  # Max time for dehydration (increased for full zips)
-
-    # Dehydration exclusions (comma-separated patterns)
-    # Minimal exclusions - we zip EVERYTHING including node_modules for instant restore
-    k8s_dehydration_exclude_patterns: str = ".git"
 
     # ==========================================================================
     # Kubernetes Storage Settings

@@ -1,34 +1,34 @@
-# Dev Environment Cleanup CronJob
-# Runs periodically to hibernate idle development environments
-# Uses EBS VolumeSnapshots: idle → create snapshot → delete namespace
+# Snapshot Cleanup CronJob
+# Runs daily to delete expired soft-deleted snapshots (30+ days old)
+# This ensures snapshots are properly cleaned up after project deletion
 
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: dev-environment-cleanup
+  name: snapshot-cleanup
   namespace: tesslate
   labels:
     app: tesslate-backend
-    component: cleanup
+    component: snapshot-cleanup
 spec:
-  # Run every 2 minutes to cleanup idle environments
-  schedule: "*/2 * * * *"
-  successfulJobsHistoryLimit: 1
+  # Run daily at 3 AM UTC to clean up expired snapshots
+  schedule: "0 3 * * *"
+  successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  concurrencyPolicy: Forbid  # Don't run multiple cleanup jobs simultaneously
+  concurrencyPolicy: Forbid
   jobTemplate:
     spec:
       template:
         metadata:
           labels:
-            app: tesslate-cleanup
+            app: tesslate-snapshot-cleanup
         spec:
           serviceAccountName: tesslate-backend-sa
           restartPolicy: OnFailure
           containers:
           - name: cleanup
             image: tesslate-backend:latest  # Overridden by kustomization images
-            imagePullPolicy: Always  # Always pull to get latest code changes
+            imagePullPolicy: Always
             command: ["python", "-c"]
             args:
               - |
@@ -36,40 +36,33 @@ spec:
                 import sys
                 sys.path.append('/app')
 
-                from app.services.orchestration import get_orchestrator
+                from app.services.snapshot_manager import get_snapshot_manager
+                from app.database import AsyncSessionLocal
                 from app.config import get_settings
                 import logging
 
                 logging.basicConfig(level=logging.INFO)
                 logger = logging.getLogger(__name__)
 
-                async def cleanup_idle_environments():
-                    """Clean up idle development environments using VolumeSnapshots."""
+                async def cleanup_expired_snapshots():
+                    """Delete expired soft-deleted snapshots from K8s and database."""
                     try:
                         settings = get_settings()
-                        logger.info("Starting idle environment cleanup (VolumeSnapshot mode)...")
-                        logger.info(f"Hibernation idle timeout: {settings.k8s_hibernation_idle_minutes} minutes")
+                        logger.info("Starting expired snapshot cleanup...")
+                        logger.info(f"Retention period: {settings.k8s_snapshot_retention_days} days")
 
-                        # Get the orchestrator (will be KubernetesOrchestrator)
-                        orchestrator = get_orchestrator()
+                        snapshot_manager = get_snapshot_manager()
 
-                        # Run cleanup - creates snapshots and deletes idle projects
-                        cleaned = await orchestrator.cleanup_idle_environments(
-                            idle_timeout_minutes=settings.k8s_hibernation_idle_minutes
-                        )
-
-                        logger.info(f"Cleanup completed. Hibernated {len(cleaned)} environments")
-
-                        if cleaned:
-                            for env in cleaned:
-                                logger.info(f"  - Hibernated: {env}")
+                        async with AsyncSessionLocal() as db:
+                            deleted_count = await snapshot_manager.cleanup_expired_snapshots(db)
+                            logger.info(f"Cleanup completed. Deleted {deleted_count} expired snapshots")
 
                     except Exception as e:
-                        logger.error(f"Cleanup error: {e}", exc_info=True)
+                        logger.error(f"Snapshot cleanup error: {e}", exc_info=True)
                         sys.exit(1)
 
                 # Run the cleanup
-                asyncio.run(cleanup_idle_environments())
+                asyncio.run(cleanup_expired_snapshots())
             env:
               - name: KUBERNETES_NAMESPACE
                 value: tesslate
@@ -104,15 +97,11 @@ spec:
                   secretKeyRef:
                     name: postgres-secret
                     key: POSTGRES_PASSWORD
-              # Kubernetes configuration
-              - name: K8S_NAMESPACE_PER_PROJECT
-                value: "true"
-              - name: K8S_STORAGE_CLASS
-                value: "tesslate-block-storage"
-              - name: K8S_HIBERNATION_IDLE_MINUTES
-                value: "5"
+              # Snapshot configuration
               - name: K8S_SNAPSHOT_CLASS
                 value: "tesslate-ebs-snapshots"
+              - name: K8S_SNAPSHOT_RETENTION_DAYS
+                value: "30"
             resources:
               requests:
                 memory: "128Mi"

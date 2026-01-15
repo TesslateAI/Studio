@@ -22,6 +22,26 @@ async def seed_bases():
         bases = [
             # === Fullstack Bases (Combined Frontend + Backend) ===
             MarketplaceBase(
+                name="Next.js 16",
+                slug="nextjs-16",
+                description="Integrated fullstack with Next.js 16, Turbopack, and instant startup",
+                long_description="Modern Next.js 16 starter with App Router, React 19, Turbopack for fast compilation, API routes, TypeScript, and Tailwind CSS v4. Pre-baked dependencies for instant startup - no npm install required.",
+                git_repo_url="https://github.com/TesslateAI/Studio-NextJS-16-Base.git",
+                default_branch="main",
+                category="fullstack",
+                icon="⚡",
+                tags=["nextjs", "react", "typescript", "tailwind", "fullstack", "api-routes", "turbopack"],
+                pricing_type="free",
+                price=0,
+                downloads=0,
+                rating=5.0,
+                reviews_count=0,
+                features=["App Router", "API Routes", "Turbopack", "React 19", "TypeScript", "Tailwind CSS v4", "Instant Startup"],
+                tech_stack=["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4", "Turbopack"],
+                is_featured=True,
+                is_active=True
+            ),
+            MarketplaceBase(
                 name="Next.js 15",
                 slug="nextjs-15",
                 description="Integrated fullstack with Next.js 15 and API routes",
@@ -38,7 +58,7 @@ async def seed_bases():
                 reviews_count=0,
                 features=["App Router", "API Routes", "React Server Components", "TypeScript", "Tailwind CSS", "Hot Reload"],
                 tech_stack=["Next.js 15", "React 19", "TypeScript", "Tailwind CSS"],
-                is_featured=True,
+                is_featured=False,
                 is_active=True
             ),
             MarketplaceBase(
@@ -85,20 +105,20 @@ async def seed_bases():
             MarketplaceBase(
                 name="Next.js",
                 slug="nextjs",
-                description="Modern React framework with server-side rendering",
-                long_description="Next.js starter with App Router, TypeScript, and Tailwind CSS. Perfect for building frontend applications that can connect to any backend service.",
-                git_repo_url="https://github.com/TesslateAI/Studio-NextJS-15-Base.git",
+                description="Modern React framework with Turbopack and instant startup",
+                long_description="Next.js 16 starter with App Router, Turbopack, TypeScript, and Tailwind CSS v4. Pre-baked dependencies for instant startup.",
+                git_repo_url="https://github.com/TesslateAI/Studio-NextJS-16-Base.git",
                 default_branch="main",
                 category="frontend",
                 icon="⚡",
-                tags=["nextjs", "react", "typescript", "tailwind", "frontend"],
+                tags=["nextjs", "react", "typescript", "tailwind", "frontend", "turbopack"],
                 pricing_type="free",
                 price=0,
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["App Router", "TypeScript", "Tailwind CSS", "Hot Reload"],
-                tech_stack=["Next.js 15", "React 19", "TypeScript", "Tailwind CSS"],
+                features=["App Router", "Turbopack", "TypeScript", "Tailwind CSS v4", "Instant Startup"],
+                tech_stack=["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4"],
                 is_featured=False,
                 is_active=True
             ),
