@@ -8,6 +8,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
 from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth, creators, snapshots
 from .config import get_settings
+import sqlalchemy as sa
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
 from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
 from .schemas_auth import UserRead, UserCreate, UserUpdate
@@ -316,28 +317,69 @@ async def log_requests(request: Request, call_next):
         logger.error(f"Request failed: {str(e)}")
         raise
 
-# Create tables
+# Run database migrations
+def run_alembic_migrations():
+    """Run alembic migrations via subprocess to avoid event loop conflicts.
+
+    Alembic's env.py uses asyncio.run() which creates a new event loop.
+    When called from inside FastAPI startup (which already has an event loop),
+    this causes conflicts. Running as a subprocess avoids this issue.
+    """
+    import subprocess
+
+    # Get the directory where alembic.ini is located
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # Run alembic upgrade head as a subprocess
+    result = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        cwd=base_dir,
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Alembic migration failed: {result.stderr}")
+
+    # Log the output
+    if result.stdout:
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                logger.info(f"[Alembic] {line}")
+    if result.stderr:
+        for line in result.stderr.strip().split('\n'):
+            if line and 'INFO' in line:
+                logger.info(f"[Alembic] {line}")
+            elif line:
+                logger.warning(f"[Alembic] {line}")
+
+
 @app.on_event("startup")
 async def startup():
     import asyncio
 
-    # Retry database connection up to 5 times with exponential backoff
+    # Retry database connection and run migrations up to 5 times with exponential backoff
     max_retries = 5
     for attempt in range(max_retries):
         try:
+            # First, verify database connection
             async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            logger.info("Database tables created successfully")
+                await conn.execute(sa.text("SELECT 1"))
+
+            # Run alembic migrations (synchronous, but that's OK for startup)
+            logger.info("Running database migrations...")
+            run_alembic_migrations()
+            logger.info("Database migrations completed successfully")
             break
         except Exception as e:
             if attempt < max_retries - 1:
                 wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8 seconds
-                logger.warning(f"Database connection attempt {attempt + 1} failed: {type(e).__name__}: {str(e) or 'No error message'}")
+                logger.warning(f"Database connection/migration attempt {attempt + 1} failed: {type(e).__name__}: {str(e) or 'No error message'}")
                 logger.warning(f"Full traceback:", exc_info=True)
                 logger.info(f"Retrying in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
             else:
-                logger.error(f"Failed to connect to database after {max_retries} attempts: {type(e).__name__}: {str(e) or 'No error message'}")
+                logger.error(f"Failed to connect to database/run migrations after {max_retries} attempts: {type(e).__name__}: {str(e) or 'No error message'}")
                 logger.error(f"Full traceback:", exc_info=True)
                 raise
 

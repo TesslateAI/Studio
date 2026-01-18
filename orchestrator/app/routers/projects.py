@@ -4275,6 +4275,7 @@ async def _start_container_background_task(
         # Choose orchestrator based on deployment mode (orchestrator already obtained above)
         if is_kubernetes_mode():
             # Kubernetes mode
+            settings = get_settings()
             task.update_progress(40, 100, "Preparing Kubernetes deployment")
             task.add_log("Using Kubernetes orchestrator")
 
@@ -4300,7 +4301,7 @@ async def _start_container_background_task(
             task.update_progress(85, 100, "Waiting for pod to be ready")
             task.add_log("Pod readiness check completed")
 
-            container_url = result.get("url", f"https://{result.get('hostname', 'unknown')}")
+            container_url = result.get("url", f"{settings.k8s_container_url_protocol}://{result.get('hostname', 'unknown')}")
 
         else:
             # Docker mode: Use Docker Compose orchestrator
@@ -4538,39 +4539,44 @@ async def check_container_health(
 
     # Build container URL based on deployment mode
     if settings.deployment_mode == "kubernetes":
-        # K8s URL pattern: {project-slug}-{container-dir}.{domain}
-        container_url = f"https://{project.slug}-{container_dir}.{settings.app_domain}"
+        # External URL for frontend display (what users access via browser)
+        external_url = f"{settings.k8s_container_url_protocol}://{project.slug}-{container_dir}.{settings.app_domain}"
+        # Internal URL for health check (always reachable from within cluster)
+        # Service naming: dev-{container_dir} in namespace proj-{project.id}
+        service_port = container.port or 3000
+        health_check_url = f"http://dev-{container_dir}.proj-{project.id}.svc.cluster.local:{service_port}"
     else:
         # Docker URL pattern: {container}.localhost
-        container_url = f"http://{container.name}.localhost"
+        external_url = f"http://{container.name}.localhost"
+        health_check_url = external_url
 
     try:
         async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
-            response = await client.get(container_url, follow_redirects=True)
+            response = await client.get(health_check_url, follow_redirects=True)
             is_healthy = response.status_code < 400
 
             return {
                 "healthy": is_healthy,
                 "status_code": response.status_code,
-                "url": container_url
+                "url": external_url  # Return external URL for frontend
             }
     except httpx.TimeoutException:
         return {
             "healthy": False,
-            "url": container_url,
+            "url": external_url,
             "error": "Connection timeout - server not responding"
         }
     except httpx.ConnectError:
         return {
             "healthy": False,
-            "url": container_url,
+            "url": external_url,
             "error": "Connection refused - server not started"
         }
     except Exception as e:
-        logger.debug(f"[HEALTH CHECK] Error checking {container_url}: {e}")
+        logger.debug(f"[HEALTH CHECK] Error checking {health_check_url}: {e}")
         return {
             "healthy": False,
-            "url": container_url,
+            "url": external_url,
             "error": str(e)
         }
 

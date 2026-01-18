@@ -49,7 +49,7 @@ class KubernetesContainerManager:
 
     def _get_container_access_url(self, hostname: str) -> str:
         """Get the access URL for a development environment."""
-        return f"https://{hostname}"
+        return f"{self.settings.k8s_container_url_protocol}://{hostname}"
 
     # =========================================================================
     # CONTAINER LIFECYCLE

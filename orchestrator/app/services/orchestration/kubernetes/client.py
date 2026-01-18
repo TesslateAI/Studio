@@ -1553,7 +1553,7 @@ class KubernetesClient:
 
             return {
                 "hostname": names["hostname"],
-                "url": f"https://{names['hostname']}",
+                "url": f"{self.settings.k8s_container_url_protocol}://{names['hostname']}",
                 "deployment_ready": deployment_status.ready_replicas == deployment_status.replicas,
                 "replicas": {
                     "desired": deployment_status.replicas,

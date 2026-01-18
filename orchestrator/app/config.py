@@ -244,6 +244,11 @@ class Settings(BaseSettings):
     k8s_image_pull_policy: str = "IfNotPresent"  # Never for local dev (minikube), Always/IfNotPresent for production
     k8s_wildcard_tls_secret: str = "tesslate-wildcard-tls"  # Empty string for local dev (no TLS)
 
+    @property
+    def k8s_container_url_protocol(self) -> str:
+        """Get the protocol for container URLs based on TLS configuration."""
+        return "https" if self.k8s_wildcard_tls_secret else "http"
+
     # Kubernetes Namespace Configuration
     k8s_default_namespace: str = "tesslate"
     k8s_user_environments_namespace: str = "tesslate-user-environments"

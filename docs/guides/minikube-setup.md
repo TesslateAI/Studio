@@ -1,6 +1,6 @@
 # Minikube Setup Guide
 
-This guide covers deploying Tesslate Studio to a local Kubernetes cluster using Minikube. This is useful for testing Kubernetes features before deploying to production.
+This guide covers deploying Tesslate Studio to a local Kubernetes cluster using Minikube from a completely fresh start.
 
 ## Prerequisites
 
@@ -30,287 +30,185 @@ choco install kubernetes-cli
 # Or download from https://kubernetes.io/docs/tasks/tools/
 ```
 
-## Starting the Cluster
+## Fresh Start: Complete Setup
 
-### 1. Create Minikube Cluster
+Follow these steps to get Tesslate Studio running on minikube from scratch.
+
+### Step 1: Create Minikube Cluster
 
 ```powershell
 # Start minikube with custom profile name
 minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
 
-# Enable ingress addon
+# Enable ingress addon (required for routing)
 minikube -p tesslate addons enable ingress
 
 # Verify cluster is running
 kubectl get nodes
 ```
 
-### 2. Start Tunnel (Required for Ingress)
+### Step 2: Start Tunnel (Required for Ingress)
 
-Open a separate terminal and run:
+Open a **separate terminal** and run:
 
 ```powershell
 # This must run continuously in the background
 minikube -p tesslate tunnel
 ```
 
-Keep this terminal open while using the cluster.
+Keep this terminal open while using the cluster. The tunnel allows `*.localhost` domains to route to your services.
 
-## Building and Loading Images
+### Step 3: Build All Docker Images
 
-### CRITICAL: Image Caching Behavior
-
-Minikube caches images and does NOT overwrite existing images with the same tag. You MUST delete old images before loading new ones.
-
-### Build and Load Backend Image
+Build all three images with `--no-cache` to ensure fresh builds:
 
 ```powershell
-# 1. Delete old image from minikube's Docker daemon
-minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
-
-# 2. Delete local image and rebuild with --no-cache
-docker rmi -f tesslate-backend:latest
+# Build backend image
 docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
 
-# 3. Load new image to minikube
-minikube -p tesslate image load tesslate-backend:latest
-
-# 4. Force pod restart
-kubectl delete pod -n tesslate -l app=tesslate-backend
-```
-
-### Build and Load Frontend Image
-
-```powershell
-# 1. Delete old image from minikube
-minikube -p tesslate ssh -- docker rmi -f tesslate-frontend:latest
-
-# 2. Rebuild with --no-cache
-docker rmi -f tesslate-frontend:latest
+# Build frontend image
 docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
 
-# 3. Load to minikube
-minikube -p tesslate image load tesslate-frontend:latest
-
-# 4. Restart pod
-kubectl delete pod -n tesslate -l app=tesslate-frontend
+# Build devserver image (for user project containers)
+docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
 ```
 
-### Build and Load Devserver Image
+### Step 4: Load Images into Minikube
 
-The devserver image runs user project containers:
+Minikube runs its own Docker daemon. Load images into it:
 
 ```powershell
-# NOTE: Dockerfile is in orchestrator/, not devserver/
-minikube -p tesslate ssh -- docker rmi -f tesslate-devserver:latest
-docker rmi -f tesslate-devserver:latest
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+minikube -p tesslate image load tesslate-backend:latest
+minikube -p tesslate image load tesslate-frontend:latest
 minikube -p tesslate image load tesslate-devserver:latest
 ```
 
-## Applying Manifests
-
-### 1. Create Secrets
+### Step 5: Configure Secrets
 
 Copy and configure the secrets file:
 
 ```powershell
-# Copy template
+# Copy template if not exists
 cp k8s/.env.example k8s/.env.minikube
 
-# Edit with your values (DATABASE_URL, SECRET_KEY, API keys, etc.)
+# Edit with your values
 notepad k8s/.env.minikube
 ```
 
-### 2. Apply Manifests
+Required values in `.env.minikube`:
+- `DATABASE_URL` - PostgreSQL connection string (default works for local)
+- `SECRET_KEY` - JWT signing key (generate a random string)
+- `LITELLM_API_KEY` - Your LLM API key (OpenAI, Anthropic, etc.)
+
+### Step 6: Apply Kubernetes Manifests
 
 ```powershell
 # Apply all manifests for minikube
 kubectl apply -k k8s/overlays/minikube
 
 # Wait for pods to be ready
+kubectl rollout status deployment/postgres -n tesslate --timeout=120s
 kubectl rollout status deployment/tesslate-backend -n tesslate --timeout=120s
 kubectl rollout status deployment/tesslate-frontend -n tesslate --timeout=120s
 ```
 
-### 3. Verify Deployment
+### Step 7: Run Seed Scripts
+
+Seed the database with marketplace agents and bases:
 
 ```powershell
-# Check all pods are running
-kubectl get pods -n tesslate
+# Get backend pod name
+$POD = kubectl get pods -n tesslate -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}'
 
-# Check services
-kubectl get svc -n tesslate
+# Copy and run seed scripts
+kubectl cp scripts/seed/seed_marketplace_agents.py tesslate/${POD}:/tmp/seed_marketplace_agents.py
+kubectl exec -n tesslate $POD -- python /tmp/seed_marketplace_agents.py
 
-# Check ingress
-kubectl get ingress -n tesslate
+kubectl cp scripts/seed/seed_opensource_agents.py tesslate/${POD}:/tmp/seed_opensource_agents.py
+kubectl exec -n tesslate $POD -- python /tmp/seed_opensource_agents.py
+
+# Seed bases (already in container)
+kubectl exec -n tesslate $POD -- python /app/seed_bases.py
 ```
 
-## Accessing the Application
+### Step 8: Access the Application
 
-### Option 1: Port Forwarding (Recommended)
+With the tunnel running, access at:
+
+- **Frontend**: http://localhost/
+- **Backend API**: http://localhost/api/
+
+User project containers will be accessible at `http://{project-slug}-{container}.localhost`
+
+## Key Differences from AWS EKS
+
+| Feature | Minikube | AWS EKS |
+|---------|----------|---------|
+| **Protocol** | HTTP (no TLS) | HTTPS (TLS) |
+| **VolumeSnapshots** | Not supported | EBS snapshots |
+| **Hibernation** | Pod stops, PVC persists | Snapshot created |
+| **Data persistence** | PVC survives restarts | Snapshot-based |
+| **DNS resolution** | Via tunnel | Public DNS |
+
+### What Works on Minikube
+
+- Creating and running projects
+- Container preview (via `*.localhost`)
+- Code editing and AI chat
+- File management
+- All API functionality
+
+### What Doesn't Work on Minikube
+
+- **VolumeSnapshots/Timeline** - Minikube doesn't support EBS snapshots
+- **Hibernation with snapshots** - Projects just stop, no snapshot created
+- **HTTPS** - Local dev uses HTTP only
+
+### Data Persistence on Minikube
+
+Your project data persists as long as:
+- Pod restarts → Data survives (PVC remains)
+- Minikube stops/starts → Data survives (PVCs persist)
+- Minikube cluster deleted → **Data lost**
+
+## Updating Images
+
+**CRITICAL**: Minikube caches images and does NOT overwrite existing images with the same tag. Always delete old images before loading new ones.
+
+### Update Backend
 
 ```powershell
-# Frontend (in separate terminal)
-kubectl port-forward -n tesslate svc/tesslate-frontend-service 5000:80
-
-# Backend (in separate terminal)
-kubectl port-forward -n tesslate svc/tesslate-backend-service 8000:8000
-```
-
-Access at:
-- Frontend: http://localhost:5000
-- Backend API: http://localhost:8000
-
-### Option 2: Using Tunnel
-
-With `minikube -p tesslate tunnel` running:
-
-```powershell
-# Get the ingress IP
-kubectl get ingress -n tesslate
-```
-
-Add entries to your hosts file (as admin):
-```
-<INGRESS_IP> studio.localhost
-```
-
-## Verifying Deployment
-
-### Check Pod Logs
-
-```powershell
-# Backend logs
-kubectl logs -f deployment/tesslate-backend -n tesslate
-
-# Frontend logs
-kubectl logs -f deployment/tesslate-frontend -n tesslate
-```
-
-### Verify Image Content
-
-```powershell
-# Check if your code changes are deployed
-kubectl exec -n tesslate deployment/tesslate-backend -- grep "your-search-string" /app/app/some_file.py
-```
-
-### Check Images in Minikube
-
-```powershell
-minikube -p tesslate ssh -- docker images | grep tesslate
-```
-
-## Common Issues and Fixes
-
-### Image Not Updating After Rebuild
-
-**Problem**: Code changes not appearing after rebuilding the image.
-
-**Cause**: Minikube caches images and `image load` does not overwrite.
-
-**Solution**:
-```powershell
-# Delete image from minikube first
+# 1. Delete old image from minikube
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 
-# Then rebuild and load
+# 2. Rebuild with --no-cache
 docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+
+# 3. Load new image
 minikube -p tesslate image load tesslate-backend:latest
+
+# 4. Restart pod
 kubectl delete pod -n tesslate -l app=tesslate-backend
+
+# 5. Wait for ready
+kubectl rollout status deployment/tesslate-backend -n tesslate --timeout=120s
 ```
 
-### Pod Stuck in ImagePullBackOff
+### Update Frontend
 
-**Problem**: Pod cannot pull the image.
-
-**Cause**: Image not loaded into minikube.
-
-**Solution**:
 ```powershell
-minikube -p tesslate image load tesslate-backend:latest
-kubectl delete pod -n tesslate -l app=tesslate-backend
+minikube -p tesslate ssh -- docker rmi -f tesslate-frontend:latest
+docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
+minikube -p tesslate image load tesslate-frontend:latest
+kubectl delete pod -n tesslate -l app=tesslate-frontend
 ```
 
-### Tunnel Not Working
-
-**Problem**: Cannot access services through ingress.
-
-**Solution**: Run tunnel as administrator:
-```powershell
-# Run PowerShell as Administrator
-minikube -p tesslate tunnel
-
-# Or use port-forward instead
-kubectl port-forward -n tesslate svc/tesslate-frontend-service 5000:80
-```
-
-### User Container ImagePullBackOff
-
-**Problem**: User project pods fail with ImagePullBackOff.
-
-**Cause**: K8S_DEVSERVER_IMAGE not set correctly.
-
-**Solution**:
-```powershell
-# Check the environment variable
-kubectl exec -n tesslate deployment/tesslate-backend -- env | grep K8S_DEVSERVER
-
-# Should be: K8S_DEVSERVER_IMAGE=tesslate-devserver:latest
-# This is set in k8s/overlays/minikube/backend-patch.yaml
-```
-
-### User Container 503 Error
-
-**Problem**: User project URLs return 503.
-
-**Solution**:
-```powershell
-# Check if pod is running
-kubectl get pods -n proj-<project-uuid>
-
-# Check pod events
-kubectl describe pod -n proj-<project-uuid>
-
-# Check init container logs (hydration)
-kubectl logs -n proj-<uuid> <pod-name> -c hydrate-project
-
-# Check dev server logs
-kubectl logs -n proj-<uuid> <pod-name> -c dev-server
-```
-
-### NGINX Configuration Snippet Blocked
-
-**Problem**: Ingress fails with "annotation not allowed" error.
-
-**Cause**: Minikube's NGINX Ingress Controller has configuration-snippet disabled.
-
-**Solution**: Use proxy-hide-header annotation instead (already configured in kubernetes_orchestrator.py).
-
-## Quick Reference Commands
+### Update Devserver
 
 ```powershell
-# Cluster Management
-minikube start -p tesslate --driver=docker
-minikube stop -p tesslate
-minikube delete -p tesslate
-
-# Pod Management
-kubectl get pods -n tesslate
-kubectl describe pod <pod-name> -n tesslate
-kubectl logs -f <pod-name> -n tesslate
-
-# Image Management
-minikube -p tesslate ssh -- docker images | grep tesslate
-minikube -p tesslate image load <image>:<tag>
-
-# Port Forwarding
-kubectl port-forward -n tesslate svc/tesslate-frontend-service 5000:80
-kubectl port-forward -n tesslate svc/tesslate-backend-service 8000:8000
-
-# Apply Manifests
-kubectl apply -k k8s/overlays/minikube
-kubectl delete -k k8s/overlays/minikube
+minikube -p tesslate ssh -- docker rmi -f tesslate-devserver:latest
+docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+minikube -p tesslate image load tesslate-devserver:latest
 ```
 
 ## Environment Configuration
@@ -321,10 +219,109 @@ Key settings in `k8s/overlays/minikube/backend-patch.yaml`:
 |---------|-------|-------------|
 | `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | Image for user containers |
 | `K8S_IMAGE_PULL_SECRET` | (empty) | No registry secret needed |
-| `S3_ENDPOINT_URL` | `http://minio.minio-system.svc.cluster.local:9000` | MinIO for local S3 |
+| `K8S_IMAGE_PULL_POLICY` | `Never` | Use local images |
+| `K8S_WILDCARD_TLS_SECRET` | (empty) | No TLS, use HTTP |
+
+## Common Issues and Fixes
+
+### Image Not Updating After Rebuild
+
+**Problem**: Code changes not appearing after rebuilding.
+
+**Solution**: Delete image from minikube first:
+```powershell
+minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
+# Then rebuild and load
+```
+
+### Pod Stuck in ImagePullBackOff
+
+**Problem**: Pod cannot pull the image.
+
+**Solution**: Load image into minikube:
+```powershell
+minikube -p tesslate image load tesslate-backend:latest
+kubectl delete pod -n tesslate -l app=tesslate-backend
+```
+
+### Container Preview Stuck on "Health Checking"
+
+**Problem**: Container is running but preview won't load.
+
+**Possible causes**:
+1. Tunnel not running → Start `minikube -p tesslate tunnel`
+2. Ingress not ready → Wait or check `kubectl get ingress -n proj-*`
+
+### User Container 503 Error
+
+**Problem**: Project container URL returns 503.
+
+**Solution**:
+```powershell
+# Check pod status
+kubectl get pods -n proj-<project-uuid>
+
+# Check logs
+kubectl logs -n proj-<project-uuid> <pod-name> -c dev-server
+```
+
+### Database Migration Errors
+
+**Problem**: Backend fails to start with migration errors.
+
+**Solution**: The backend now runs migrations automatically on startup. If you need to reset:
+```powershell
+# Delete postgres PVC to start fresh
+kubectl delete pvc postgres-pvc -n tesslate
+kubectl delete pod -n tesslate -l app=postgres
+# Wait for postgres to restart, then restart backend
+kubectl delete pod -n tesslate -l app=tesslate-backend
+```
+
+## Quick Reference Commands
+
+```powershell
+# Cluster Management
+minikube start -p tesslate --driver=docker
+minikube stop -p tesslate
+minikube delete -p tesslate  # WARNING: Deletes all data
+
+# Check Status
+kubectl get pods -n tesslate
+kubectl get pods --all-namespaces | grep proj-
+kubectl logs -f deployment/tesslate-backend -n tesslate
+
+# Image Management
+minikube -p tesslate ssh -- docker images | grep tesslate
+minikube -p tesslate image load <image>:<tag>
+
+# Apply Manifests
+kubectl apply -k k8s/overlays/minikube
+
+# Port Forwarding (alternative to tunnel)
+kubectl port-forward -n tesslate svc/tesslate-frontend-service 5000:80
+kubectl port-forward -n tesslate svc/tesslate-backend-service 8000:8000
+```
+
+## Clean Restart
+
+To completely reset and start fresh:
+
+```powershell
+# Delete the minikube cluster
+minikube delete -p tesslate
+
+# Remove local Docker images (optional)
+docker rmi tesslate-backend:latest tesslate-frontend:latest tesslate-devserver:latest
+
+# Start fresh
+minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
+minikube -p tesslate addons enable ingress
+
+# Follow "Fresh Start" steps above
+```
 
 ## Next Steps
 
 - [AWS Deployment](aws-deployment.md) - Deploy to production
-- [Image Update Workflow](image-update-workflow.md) - Complete build and deploy workflow
 - [Troubleshooting](troubleshooting.md) - More debugging tips

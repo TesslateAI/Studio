@@ -26,6 +26,9 @@ spec:
           # Use Never for local images (critical for :latest tag to work locally)
           - name: K8S_IMAGE_PULL_POLICY
             value: "Never"
+          # No TLS for local dev (use http:// instead of https://)
+          - name: K8S_WILDCARD_TLS_SECRET
+            value: ""
         resources:
           requests:
             memory: "256Mi"

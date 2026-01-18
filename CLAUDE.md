@@ -295,8 +295,15 @@ k8s_enable_pod_affinity: bool      # Keep multi-container projects on same node
 |---------|----------|----------------------|
 | `K8S_DEVSERVER_IMAGE` | `tesslate-devserver:latest` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
 | `K8S_IMAGE_PULL_SECRET` | `` (empty) | `ecr-credentials` |
-| `K8S_SNAPSHOT_CLASS` | `tesslate-ebs-snapshots` | `tesslate-ebs-snapshots` |
+| `K8S_WILDCARD_TLS_SECRET` | `` (empty, use HTTP) | `tesslate-wildcard-tls` (use HTTPS) |
+| `K8S_SNAPSHOT_CLASS` | N/A (not supported) | `tesslate-ebs-snapshots` |
 
+#### Minikube Limitations
+- **No VolumeSnapshots**: Minikube doesn't support EBS snapshots, so Timeline/hibernation features won't work
+- **HTTP only**: No TLS certificates, all URLs use `http://`
+- **Data persistence**: PVCs persist across restarts, but data is lost if cluster is deleted
+
+**For complete minikube setup instructions, see: [docs/guides/minikube-setup.md](docs/guides/minikube-setup.md)**
 
 ## Minikube Local Development (Windows)
 
