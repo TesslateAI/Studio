@@ -57,9 +57,10 @@ Docker image definitions for Tesslate Studio.
 
 **Installed**:
 - Node.js 20 + npm
+- Bun (JavaScript runtime)
 - Python 3 + pip
 - Go + Air (hot reload)
-- git, curl, bash, tmux
+- git, git-lfs, curl, bash, tmux
 - zip/unzip (for S3 ops)
 
 **Pre-installed Dependencies** (from template):

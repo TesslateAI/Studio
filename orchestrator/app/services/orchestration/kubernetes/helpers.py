@@ -12,10 +12,10 @@ Key components:
 - VolumeSnapshots: Near-instant hibernation/restoration (handled by snapshot_manager.py)
 """
 
-from kubernetes import client
-from typing import Dict, Optional
-from uuid import UUID
 import logging
+from uuid import UUID
+
+from kubernetes import client
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 # Labels and Affinity
 # =============================================================================
 
+
 def create_pod_affinity_spec(
-    project_id: str,
-    topology_key: str = "kubernetes.io/hostname"
+    project_id: str, topology_key: str = "kubernetes.io/hostname"
 ) -> client.V1Affinity:
     """
     Create pod affinity configuration for multi-container projects.
@@ -46,11 +46,9 @@ def create_pod_affinity_spec(
             required_during_scheduling_ignored_during_execution=[
                 client.V1PodAffinityTerm(
                     label_selector=client.V1LabelSelector(
-                        match_labels={
-                            "tesslate.io/project-id": str(project_id)
-                        }
+                        match_labels={"tesslate.io/project-id": str(project_id)}
                     ),
-                    topology_key=topology_key
+                    topology_key=topology_key,
                 )
             ]
         )
@@ -62,8 +60,8 @@ def get_standard_labels(
     user_id: str,
     component: str,
     container_id: str = None,
-    container_directory: str = None
-) -> Dict[str, str]:
+    container_directory: str = None,
+) -> dict[str, str]:
     """
     Get standard labels for project resources.
 
@@ -97,13 +95,14 @@ def get_standard_labels(
 # PVC Manifest
 # =============================================================================
 
+
 def create_pvc_manifest(
     namespace: str,
     project_id: UUID,
     user_id: UUID,
     storage_class: str,
     size: str = "5Gi",
-    access_mode: str = "ReadWriteOnce"
+    access_mode: str = "ReadWriteOnce",
 ) -> client.V1PersistentVolumeClaim:
     """
     Create PVC manifest for project storage.
@@ -128,18 +127,14 @@ def create_pvc_manifest(
             name="project-storage",
             namespace=namespace,
             labels=get_standard_labels(
-                project_id=str(project_id),
-                user_id=str(user_id),
-                component="storage"
-            )
+                project_id=str(project_id), user_id=str(user_id), component="storage"
+            ),
         ),
         spec=client.V1PersistentVolumeClaimSpec(
             storage_class_name=storage_class,
             access_modes=[access_mode],
-            resources=client.V1ResourceRequirements(
-                requests={"storage": size}
-            )
-        )
+            resources=client.V1ResourceRequirements(requests={"storage": size}),
+        ),
     )
 
 
@@ -147,13 +142,14 @@ def create_pvc_manifest(
 # File Manager Pod
 # =============================================================================
 
+
 def create_file_manager_deployment(
     namespace: str,
     project_id: UUID,
     user_id: UUID,
     image: str,
     image_pull_policy: str = "IfNotPresent",
-    image_pull_secret: str = None
+    image_pull_secret: str = None,
 ) -> client.V1Deployment:
     """
     Create file-manager deployment manifest.
@@ -178,9 +174,7 @@ def create_file_manager_deployment(
         V1Deployment manifest
     """
     labels = get_standard_labels(
-        project_id=str(project_id),
-        user_id=str(user_id),
-        component="file-manager"
+        project_id=str(project_id), user_id=str(user_id), component="file-manager"
     )
     labels["app"] = "file-manager"
 
@@ -192,17 +186,12 @@ def create_file_manager_deployment(
         image_pull_policy=image_pull_policy,
         command=["tail", "-f", "/dev/null"],  # Keep alive
         working_dir="/app",
-        volume_mounts=[
-            client.V1VolumeMount(
-                name="project-storage",
-                mount_path="/app"
-            )
-        ],
+        volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
         resources=client.V1ResourceRequirements(
             # File-manager needs enough memory for npm install (Next.js needs ~1GB)
             requests={"memory": "256Mi", "cpu": "100m"},
-            limits={"memory": "1536Mi", "cpu": "1000m"}
-        )
+            limits={"memory": "1536Mi", "cpu": "1000m"},
+        ),
     )
 
     # Pod spec
@@ -213,45 +202,35 @@ def create_file_manager_deployment(
                 name="project-storage",
                 persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
                     claim_name="project-storage"
-                )
+                ),
             )
         ],
         # Security context
         security_context=client.V1PodSecurityContext(
-            run_as_non_root=True,
-            run_as_user=1000,
-            fs_group=1000
-        )
+            run_as_non_root=True, run_as_user=1000, fs_group=1000
+        ),
     )
 
     # Add image pull secret if provided
     if image_pull_secret:
-        pod_spec.image_pull_secrets = [
-            client.V1LocalObjectReference(name=image_pull_secret)
-        ]
+        pod_spec.image_pull_secrets = [client.V1LocalObjectReference(name=image_pull_secret)]
 
     return client.V1Deployment(
-        metadata=client.V1ObjectMeta(
-            name="file-manager",
-            namespace=namespace,
-            labels=labels
-        ),
+        metadata=client.V1ObjectMeta(name="file-manager", namespace=namespace, labels=labels),
         spec=client.V1DeploymentSpec(
             replicas=1,
-            selector=client.V1LabelSelector(
-                match_labels={"app": "file-manager"}
-            ),
+            selector=client.V1LabelSelector(match_labels={"app": "file-manager"}),
             template=client.V1PodTemplateSpec(
-                metadata=client.V1ObjectMeta(labels=labels),
-                spec=pod_spec
-            )
-        )
+                metadata=client.V1ObjectMeta(labels=labels), spec=pod_spec
+            ),
+        ),
     )
 
 
 # =============================================================================
 # Dev Container Deployment
 # =============================================================================
+
 
 def create_container_deployment(
     namespace: str,
@@ -265,7 +244,7 @@ def create_container_deployment(
     image_pull_policy: str = "IfNotPresent",
     image_pull_secret: str = None,
     enable_pod_affinity: bool = True,
-    affinity_topology_key: str = "kubernetes.io/hostname"
+    affinity_topology_key: str = "kubernetes.io/hostname",
 ) -> client.V1Deployment:
     """
     Create dev container deployment manifest.
@@ -298,14 +277,12 @@ def create_container_deployment(
         user_id=str(user_id),
         component="dev-container",
         container_id=str(container_id),
-        container_directory=container_directory
+        container_directory=container_directory,
     )
     labels["app"] = "dev-container"
 
     # Selector labels (must be subset of pod labels)
-    selector_labels = {
-        "tesslate.io/container-id": str(container_id)
-    }
+    selector_labels = {"tesslate.io/container-id": str(container_id)}
 
     # Working directory inside container
     working_dir = f"/app/{container_directory}"
@@ -322,28 +299,19 @@ def create_container_deployment(
         # Agent can: tmux send-keys -t main C-c (stop), tmux send-keys -t main 'npm run dev' Enter (start)
         # Dependencies are installed during file init (generate_git_clone_script)
         # No need to check/install here - just start the dev server
-        args=[f"cd {working_dir} && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"],
-        ports=[
-            client.V1ContainerPort(
-                container_port=port,
-                name="http"
-            )
+        args=[
+            f"cd {working_dir} && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"
         ],
+        ports=[client.V1ContainerPort(container_port=port, name="http")],
         working_dir=working_dir,
-        volume_mounts=[
-            client.V1VolumeMount(
-                name="project-storage",
-                mount_path="/app"
-            )
-        ],
+        volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
         env=[
             client.V1EnvVar(name="HOST", value="0.0.0.0"),
             client.V1EnvVar(name="PORT", value=str(port)),
             client.V1EnvVar(name="NODE_ENV", value="development"),
         ],
         resources=client.V1ResourceRequirements(
-            requests={"memory": "256Mi", "cpu": "100m"},
-            limits={"memory": "1Gi", "cpu": "1000m"}
+            requests={"memory": "256Mi", "cpu": "100m"}, limits={"memory": "1Gi", "cpu": "1000m"}
         ),
         # Startup probe - wait for dev server to be ready
         startup_probe=client.V1Probe(
@@ -351,7 +319,7 @@ def create_container_deployment(
             initial_delay_seconds=5,
             period_seconds=3,
             timeout_seconds=5,
-            failure_threshold=30  # Allow up to 90 seconds for npm install
+            failure_threshold=30,  # Allow up to 90 seconds for npm install
         ),
         # Readiness probe
         readiness_probe=client.V1Probe(
@@ -359,7 +327,7 @@ def create_container_deployment(
             initial_delay_seconds=5,
             period_seconds=5,
             timeout_seconds=3,
-            failure_threshold=3
+            failure_threshold=3,
         ),
         # Liveness probe
         liveness_probe=client.V1Probe(
@@ -367,8 +335,8 @@ def create_container_deployment(
             initial_delay_seconds=30,
             period_seconds=10,
             timeout_seconds=5,
-            failure_threshold=3
-        )
+            failure_threshold=3,
+        ),
     )
 
     # Pod spec
@@ -379,45 +347,33 @@ def create_container_deployment(
                 name="project-storage",
                 persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
                     claim_name="project-storage"
-                )
+                ),
             )
         ],
         security_context=client.V1PodSecurityContext(
-            run_as_non_root=True,
-            run_as_user=1000,
-            fs_group=1000
-        )
+            run_as_non_root=True, run_as_user=1000, fs_group=1000
+        ),
     )
 
     # Add pod affinity if enabled (for shared PVC)
     if enable_pod_affinity:
         pod_spec.affinity = create_pod_affinity_spec(
-            project_id=str(project_id),
-            topology_key=affinity_topology_key
+            project_id=str(project_id), topology_key=affinity_topology_key
         )
 
     # Add image pull secret if provided
     if image_pull_secret:
-        pod_spec.image_pull_secrets = [
-            client.V1LocalObjectReference(name=image_pull_secret)
-        ]
+        pod_spec.image_pull_secrets = [client.V1LocalObjectReference(name=image_pull_secret)]
 
     return client.V1Deployment(
-        metadata=client.V1ObjectMeta(
-            name=deployment_name,
-            namespace=namespace,
-            labels=labels
-        ),
+        metadata=client.V1ObjectMeta(name=deployment_name, namespace=namespace, labels=labels),
         spec=client.V1DeploymentSpec(
             replicas=1,
-            selector=client.V1LabelSelector(
-                match_labels=selector_labels
-            ),
+            selector=client.V1LabelSelector(match_labels=selector_labels),
             template=client.V1PodTemplateSpec(
-                metadata=client.V1ObjectMeta(labels={**labels, **selector_labels}),
-                spec=pod_spec
-            )
-        )
+                metadata=client.V1ObjectMeta(labels={**labels, **selector_labels}), spec=pod_spec
+            ),
+        ),
     )
 
 
@@ -425,12 +381,9 @@ def create_container_deployment(
 # Service and Ingress
 # =============================================================================
 
+
 def create_service_manifest(
-    namespace: str,
-    project_id: UUID,
-    container_id: UUID,
-    container_directory: str,
-    port: int
+    namespace: str, project_id: UUID, container_id: UUID, container_directory: str, port: int
 ) -> client.V1Service:
     """
     Create Service manifest for a dev container.
@@ -454,22 +407,14 @@ def create_service_manifest(
             labels={
                 "tesslate.io/project-id": str(project_id),
                 "tesslate.io/container-id": str(container_id),
-                "tesslate.io/container-directory": container_directory
-            }
+                "tesslate.io/container-directory": container_directory,
+            },
         ),
         spec=client.V1ServiceSpec(
-            selector={
-                "tesslate.io/container-id": str(container_id)
-            },
-            ports=[
-                client.V1ServicePort(
-                    port=port,
-                    target_port=port,
-                    protocol="TCP"
-                )
-            ],
-            type="ClusterIP"
-        )
+            selector={"tesslate.io/container-id": str(container_id)},
+            ports=[client.V1ServicePort(port=port, target_port=port, protocol="TCP")],
+            type="ClusterIP",
+        ),
     )
 
 
@@ -482,7 +427,7 @@ def create_ingress_manifest(
     port: int,
     domain: str,
     ingress_class: str = "nginx",
-    tls_secret: str = None
+    tls_secret: str = None,
 ) -> client.V1Ingress:
     """
     Create Ingress manifest for a dev container.
@@ -519,27 +464,19 @@ def create_ingress_manifest(
                             path_type="Prefix",
                             backend=client.V1IngressBackend(
                                 service=client.V1IngressServiceBackend(
-                                    name=service_name,
-                                    port=client.V1ServiceBackendPort(
-                                        number=port
-                                    )
+                                    name=service_name, port=client.V1ServiceBackendPort(number=port)
                                 )
-                            )
+                            ),
                         )
                     ]
-                )
+                ),
             )
-        ]
+        ],
     )
 
     # Add TLS if secret provided
     if tls_secret:
-        ingress_spec.tls = [
-            client.V1IngressTLS(
-                hosts=[host],
-                secret_name=tls_secret
-            )
-        ]
+        ingress_spec.tls = [client.V1IngressTLS(hosts=[host], secret_name=tls_secret)]
 
     return client.V1Ingress(
         metadata=client.V1ObjectMeta(
@@ -548,16 +485,16 @@ def create_ingress_manifest(
             labels={
                 "tesslate.io/project-id": str(project_id),
                 "tesslate.io/container-id": str(container_id),
-                "tesslate.io/container-directory": container_directory
+                "tesslate.io/container-directory": container_directory,
             },
             annotations={
                 # WebSocket support for HMR
                 "nginx.ingress.kubernetes.io/proxy-http-version": "1.1",
                 "nginx.ingress.kubernetes.io/proxy-read-timeout": "3600",
                 "nginx.ingress.kubernetes.io/proxy-send-timeout": "3600",
-            }
+            },
         ),
-        spec=ingress_spec
+        spec=ingress_spec,
     )
 
 
@@ -565,10 +502,8 @@ def create_ingress_manifest(
 # Network Policy
 # =============================================================================
 
-def create_network_policy_manifest(
-    namespace: str,
-    project_id: UUID
-) -> client.V1NetworkPolicy:
+
+def create_network_policy_manifest(namespace: str, project_id: UUID) -> client.V1NetworkPolicy:
     """
     Create NetworkPolicy for project isolation.
 
@@ -590,9 +525,7 @@ def create_network_policy_manifest(
         metadata=client.V1ObjectMeta(
             name="project-isolation",
             namespace=namespace,
-            labels={
-                "tesslate.io/project-id": str(project_id)
-            }
+            labels={"tesslate.io/project-id": str(project_id)},
         ),
         spec=client.V1NetworkPolicySpec(
             pod_selector=client.V1LabelSelector(),  # Select all pods
@@ -603,9 +536,7 @@ def create_network_policy_manifest(
                     _from=[
                         client.V1NetworkPolicyPeer(
                             namespace_selector=client.V1LabelSelector(
-                                match_labels={
-                                    "kubernetes.io/metadata.name": "ingress-nginx"
-                                }
+                                match_labels={"kubernetes.io/metadata.name": "ingress-nginx"}
                             )
                         )
                     ]
@@ -615,9 +546,7 @@ def create_network_policy_manifest(
                     _from=[
                         client.V1NetworkPolicyPeer(
                             namespace_selector=client.V1LabelSelector(
-                                match_labels={
-                                    "kubernetes.io/metadata.name": "tesslate"
-                                }
+                                match_labels={"kubernetes.io/metadata.name": "tesslate"}
                             )
                         )
                     ]
@@ -630,56 +559,36 @@ def create_network_policy_manifest(
                             pod_selector=client.V1LabelSelector()  # Empty = all pods in same namespace
                         )
                     ]
-                )
+                ),
             ],
             egress=[
                 # Allow DNS
                 client.V1NetworkPolicyEgressRule(
-                    to=[
-                        client.V1NetworkPolicyPeer(
-                            namespace_selector=client.V1LabelSelector()
-                        )
-                    ],
-                    ports=[
-                        client.V1NetworkPolicyPort(protocol="UDP", port=53)
-                    ]
+                    to=[client.V1NetworkPolicyPeer(namespace_selector=client.V1LabelSelector())],
+                    ports=[client.V1NetworkPolicyPort(protocol="UDP", port=53)],
                 ),
                 # Allow HTTPS (npm, git)
                 client.V1NetworkPolicyEgressRule(
-                    to=[
-                        client.V1NetworkPolicyPeer(
-                            ip_block=client.V1IPBlock(cidr="0.0.0.0/0")
-                        )
-                    ],
-                    ports=[
-                        client.V1NetworkPolicyPort(protocol="TCP", port=443)
-                    ]
+                    to=[client.V1NetworkPolicyPeer(ip_block=client.V1IPBlock(cidr="0.0.0.0/0"))],
+                    ports=[client.V1NetworkPolicyPort(protocol="TCP", port=443)],
                 ),
                 # Allow HTTP (some registries)
                 client.V1NetworkPolicyEgressRule(
-                    to=[
-                        client.V1NetworkPolicyPeer(
-                            ip_block=client.V1IPBlock(cidr="0.0.0.0/0")
-                        )
-                    ],
-                    ports=[
-                        client.V1NetworkPolicyPort(protocol="TCP", port=80)
-                    ]
+                    to=[client.V1NetworkPolicyPeer(ip_block=client.V1IPBlock(cidr="0.0.0.0/0"))],
+                    ports=[client.V1NetworkPolicyPort(protocol="TCP", port=80)],
                 ),
                 # Allow MinIO
                 client.V1NetworkPolicyEgressRule(
                     to=[
                         client.V1NetworkPolicyPeer(
                             namespace_selector=client.V1LabelSelector(
-                                match_labels={
-                                    "kubernetes.io/metadata.name": "minio-system"
-                                }
+                                match_labels={"kubernetes.io/metadata.name": "minio-system"}
                             )
                         )
                     ]
-                )
-            ]
-        )
+                ),
+            ],
+        ),
     )
 
 
@@ -687,11 +596,9 @@ def create_network_policy_manifest(
 # Git Clone Script (for container initialization)
 # =============================================================================
 
+
 def generate_git_clone_script(
-    git_url: str,
-    branch: str,
-    target_dir: str,
-    install_deps: bool = True
+    git_url: str, branch: str, target_dir: str, install_deps: bool = True
 ) -> str:
     """
     Generate script to clone a git repository and optionally install dependencies.
@@ -708,7 +615,8 @@ def generate_git_clone_script(
     Returns:
         Shell script as string
     """
-    install_section = """
+    install_section = (
+        """
 # Install dependencies based on project type
 # Detect bun (bun.lock or bun.lockb), pnpm (pnpm-lock.yaml), or npm (package.json)
 if [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then
@@ -731,7 +639,10 @@ if [ -f "go.mod" ]; then
     echo "[CLONE] Downloading Go modules..."
     go mod download 2>&1 || echo "[CLONE] go mod download completed with warnings"
 fi
-""" if install_deps else ""
+"""
+        if install_deps
+        else ""
+    )
 
     return f'''#!/bin/sh
 set -e
@@ -761,7 +672,16 @@ if [ ! -f "$TEMP_CLONE/package.json" ] && [ ! -f "$TEMP_CLONE/requirements.txt" 
     exit 1
 fi
 
-echo "[CLONE] Clone successful, copying files..."
+echo "[CLONE] Clone successful"
+
+# Pull Git LFS files if .gitattributes exists (pre-baked node_modules may use LFS for large binaries)
+if [ -f "$TEMP_CLONE/.gitattributes" ] && command -v git-lfs >/dev/null 2>&1; then
+    echo "[CLONE] Pulling Git LFS files..."
+    cd "$TEMP_CLONE" && git lfs pull 2>&1 || echo "[CLONE] Warning: git lfs pull failed (files may be pointers)"
+    cd /
+fi
+
+echo "[CLONE] Copying files..."
 
 # Remove .git folder to save space
 rm -rf "$TEMP_CLONE/.git"
@@ -773,6 +693,14 @@ cp -a "$TEMP_CLONE"/. "$TARGET_DIR"/
 # Fix ownership: change files to node:node for dev container compatibility
 # File-manager runs as root, but dev containers run as node user
 chown -R node:node "$TARGET_DIR" 2>/dev/null || echo "[CLONE] Warning: could not chown to node:node"
+
+# Fix execute permissions for node_modules binaries (Git on Windows doesn't preserve them)
+# This is needed for pre-baked node_modules to work correctly
+if [ -d "$TARGET_DIR/node_modules" ]; then
+    echo "[CLONE] Fixing execute permissions on node_modules binaries..."
+    find "$TARGET_DIR/node_modules" -path "*/bin/*" -type f -exec chmod +x {{}} \\; 2>/dev/null || true
+    find "$TARGET_DIR/node_modules" -name "*.sh" -type f -exec chmod +x {{}} \\; 2>/dev/null || true
+fi
 
 # Cleanup temp directory
 rm -rf "$TEMP_CLONE"

@@ -6,17 +6,17 @@ in user development pods. It implements allowlists, blocklists, and pattern-base
 detection to prevent malicious or dangerous commands.
 """
 
+import logging
 import re
 import shlex
-from typing import Tuple, List, Optional
 from enum import Enum
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class CommandRisk(Enum):
     """Risk levels for commands."""
+
     SAFE = "safe"
     MODERATE = "moderate"
     HIGH = "high"
@@ -30,8 +30,8 @@ class ValidationResult:
         self,
         is_valid: bool,
         risk_level: CommandRisk,
-        reason: Optional[str] = None,
-        sanitized_command: Optional[List[str]] = None
+        reason: str | None = None,
+        sanitized_command: list[str] | None = None,
     ):
         self.is_valid = is_valid
         self.risk_level = risk_level
@@ -53,46 +53,100 @@ class CommandValidator:
     # Safe commands that are allowed for agent execution
     SAFE_COMMANDS = {
         # File operations
-        "cat", "ls", "mkdir", "touch", "rm", "cp", "mv", "pwd", "find", "tree",
-        "head", "tail", "wc", "grep", "sed", "awk",
-
+        "cat",
+        "ls",
+        "mkdir",
+        "touch",
+        "rm",
+        "cp",
+        "mv",
+        "pwd",
+        "find",
+        "tree",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "sed",
+        "awk",
         # Build and package management
-        "npm", "npx", "node", "yarn", "pnpm",
-        "vite", "webpack", "esbuild", "rollup",
-
+        "npm",
+        "npx",
+        "node",
+        "yarn",
+        "pnpm",
+        "bun",
+        "bunx",
+        "vite",
+        "webpack",
+        "esbuild",
+        "rollup",
         # Git operations
         "git",
-
         # Process management (limited)
-        "ps", "kill", "pkill",
-
+        "ps",
+        "kill",
+        "pkill",
         # Misc utilities
-        "echo", "date", "whoami", "which", "basename", "dirname",
-
+        "echo",
+        "date",
+        "whoami",
+        "which",
+        "basename",
+        "dirname",
         # Archive operations
-        "tar", "gzip", "gunzip", "zip", "unzip",
+        "tar",
+        "gzip",
+        "gunzip",
+        "zip",
+        "unzip",
     }
 
     # Commands that should be blocked entirely
     BLOCKED_COMMANDS = {
         # Privilege escalation
-        "sudo", "su", "doas",
-
+        "sudo",
+        "su",
+        "doas",
         # System modification
-        "systemctl", "service", "init", "reboot", "shutdown", "halt",
-        "mount", "umount", "mkfs", "fdisk", "parted",
-
+        "systemctl",
+        "service",
+        "init",
+        "reboot",
+        "shutdown",
+        "halt",
+        "mount",
+        "umount",
+        "mkfs",
+        "fdisk",
+        "parted",
         # Package installation (system-level)
-        "apt", "apt-get", "yum", "dnf", "apk", "pacman",
-
+        "apt",
+        "apt-get",
+        "yum",
+        "dnf",
+        "apk",
+        "pacman",
         # Network operations (can be enabled if needed)
-        "nc", "netcat", "telnet", "nmap", "tcpdump", "wireshark",
-
+        "nc",
+        "netcat",
+        "telnet",
+        "nmap",
+        "tcpdump",
+        "wireshark",
         # Shell commands that can be abused
-        "eval", "exec", "source", ".",
-
+        "eval",
+        "exec",
+        "source",
+        ".",
         # Compiler/interpreter that could be abused
-        "gcc", "g++", "python3", "python", "perl", "ruby", "php",
+        "gcc",
+        "g++",
+        "python3",
+        "python",
+        "perl",
+        "ruby",
+        "php",
     }
 
     # Dangerous patterns to detect
@@ -113,7 +167,7 @@ class CommandValidator:
     MAX_COMMAND_LENGTH = 1000
     MAX_ARGS = 50
 
-    def __init__(self, allow_network: bool = False, custom_allowed: Optional[List[str]] = None):
+    def __init__(self, allow_network: bool = False, custom_allowed: list[str] | None = None):
         """
         Initialize the command validator.
 
@@ -130,8 +184,10 @@ class CommandValidator:
         if custom_allowed:
             self.allowed_commands.update(custom_allowed)
 
-        logger.info(f"CommandValidator initialized - network_allowed={allow_network}, "
-                   f"total_allowed_commands={len(self.allowed_commands)}")
+        logger.info(
+            f"CommandValidator initialized - network_allowed={allow_network}, "
+            f"total_allowed_commands={len(self.allowed_commands)}"
+        )
 
     def validate(self, command: str, working_dir: str = ".") -> ValidationResult:
         """
@@ -149,16 +205,14 @@ class CommandValidator:
             return ValidationResult(
                 is_valid=False,
                 risk_level=CommandRisk.BLOCKED,
-                reason=f"Command exceeds maximum length of {self.MAX_COMMAND_LENGTH} characters"
+                reason=f"Command exceeds maximum length of {self.MAX_COMMAND_LENGTH} characters",
             )
 
         # 2. Empty command check
         command = command.strip()
         if not command:
             return ValidationResult(
-                is_valid=False,
-                risk_level=CommandRisk.BLOCKED,
-                reason="Empty command"
+                is_valid=False, risk_level=CommandRisk.BLOCKED, reason="Empty command"
             )
 
         # 3. Check for dangerous patterns
@@ -167,7 +221,7 @@ class CommandValidator:
                 return ValidationResult(
                     is_valid=False,
                     risk_level=CommandRisk.BLOCKED,
-                    reason=f"Command contains dangerous pattern: {pattern}"
+                    reason=f"Command contains dangerous pattern: {pattern}",
                 )
 
         # 4. Parse command into tokens
@@ -177,14 +231,14 @@ class CommandValidator:
             return ValidationResult(
                 is_valid=False,
                 risk_level=CommandRisk.BLOCKED,
-                reason=f"Failed to parse command: {str(e)}"
+                reason=f"Failed to parse command: {str(e)}",
             )
 
         if len(tokens) > self.MAX_ARGS:
             return ValidationResult(
                 is_valid=False,
                 risk_level=CommandRisk.BLOCKED,
-                reason=f"Command has too many arguments (max {self.MAX_ARGS})"
+                reason=f"Command has too many arguments (max {self.MAX_ARGS})",
             )
 
         # 5. Extract base command (handle command chaining)
@@ -197,7 +251,7 @@ class CommandValidator:
                 return ValidationResult(
                     is_valid=False,
                     risk_level=CommandRisk.BLOCKED,
-                    reason=f"Command '{base_cmd}' is explicitly blocked for security"
+                    reason=f"Command '{base_cmd}' is explicitly blocked for security",
                 )
 
             # Check if allowed
@@ -205,7 +259,7 @@ class CommandValidator:
                 return ValidationResult(
                     is_valid=False,
                     risk_level=CommandRisk.HIGH,
-                    reason=f"Command '{base_cmd}' is not in the allowed list"
+                    reason=f"Command '{base_cmd}' is not in the allowed list",
                 )
 
         # 7. Check for risky arguments
@@ -214,23 +268,25 @@ class CommandValidator:
         # 8. Sanitize command (ensure it runs in correct directory)
         sanitized = self._sanitize_command(command, working_dir)
 
-        logger.info(f"Command validated successfully: {command[:100]} - risk_level={risk_level.value}")
+        logger.info(
+            f"Command validated successfully: {command[:100]} - risk_level={risk_level.value}"
+        )
 
         return ValidationResult(
             is_valid=True,
             risk_level=risk_level,
             sanitized_command=sanitized,
-            reason="Command passed validation"
+            reason="Command passed validation",
         )
 
-    def _extract_base_commands(self, command: str) -> List[str]:
+    def _extract_base_commands(self, command: str) -> list[str]:
         """
         Extract base commands from a potentially chained command.
 
         Handles: &&, ||, ;, |
         """
         # Split by common command separators
-        parts = re.split(r'[;&|]+', command)
+        parts = re.split(r"[;&|]+", command)
 
         base_commands = []
         for part in parts:
@@ -242,14 +298,20 @@ class CommandValidator:
 
         return base_commands
 
-    def _assess_risk_level(self, tokens: List[str]) -> CommandRisk:
+    def _assess_risk_level(self, tokens: list[str]) -> CommandRisk:
         """
         Assess the risk level of a command based on its tokens.
         """
         # Check for potentially dangerous arguments
         dangerous_flags = {
-            "-rf", "--force", "--recursive", "--no-preserve-root",
-            "-exec", "--exec", "-o", "--output"
+            "-rf",
+            "--force",
+            "--recursive",
+            "--no-preserve-root",
+            "-exec",
+            "--exec",
+            "-o",
+            "--output",
         }
 
         for token in tokens:
@@ -262,7 +324,7 @@ class CommandValidator:
 
         return CommandRisk.SAFE
 
-    def _sanitize_command(self, command: str, working_dir: str) -> List[str]:
+    def _sanitize_command(self, command: str, working_dir: str) -> list[str]:
         """
         Sanitize command to ensure it runs in the correct directory.
 
@@ -280,7 +342,7 @@ class CommandValidator:
 
 
 # Global validator instance
-_validator_instance: Optional[CommandValidator] = None
+_validator_instance: CommandValidator | None = None
 
 
 def get_command_validator(allow_network: bool = False) -> CommandValidator:

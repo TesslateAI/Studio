@@ -87,7 +87,7 @@ KUBERNETES MODE (config.DEPLOYMENT_MODE="kubernetes"):
       ├─ Create PVC (shared storage)
       ├─ Create Deployment + Service per container
       ├─ Create Ingress rules
-      └─> URLs: {container}.studio-test.tesslate.com
+      └─> URLs: {container}.domain.com
 ```
 
 ### 4. External Deployment (Vercel/Netlify/Cloudflare)

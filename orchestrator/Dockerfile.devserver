@@ -11,6 +11,7 @@ FROM node:22-alpine
 # zip/unzip needed for project archiving (S3 ops handled securely by backend)
 RUN apk add --no-cache \
     git \
+    git-lfs \
     curl \
     python3 \
     py3-pip \
