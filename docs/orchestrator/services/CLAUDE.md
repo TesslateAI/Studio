@@ -340,8 +340,8 @@ async def create_resource(self, data: Dict, db: AsyncSession):
 
 # ❌ BAD - Creates own session
 async def create_resource(self, data: Dict):
-    from ..database import async_session_maker
-    async with async_session_maker() as db:  # Don't do this!
+    from ..database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:  # Don't do this!
         resource = Resource(**data)
         db.add(resource)
         await db.commit()

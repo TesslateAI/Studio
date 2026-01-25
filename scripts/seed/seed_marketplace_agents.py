@@ -358,16 +358,16 @@ async def seed_agents():
                 await db.refresh(agent)
                 print(f"✓ Created agent '{agent_data['name']}' (ID: {agent.id})")
 
-        print("\n=== Auto-Adding Stream Builder to All Users ===\n")
+        print("\n=== Auto-Adding Tesslate Agent to All Users ===\n")
 
-        # Get Stream Builder
+        # Get Tesslate Agent (the default agent for all users)
         result = await db.execute(
-            select(MarketplaceAgent).where(MarketplaceAgent.slug == "stream-builder")
+            select(MarketplaceAgent).where(MarketplaceAgent.slug == "tesslate-agent")
         )
-        stream_agent = result.scalar_one_or_none()
+        tesslate_agent = result.scalar_one_or_none()
 
-        if not stream_agent:
-            print("✗ Stream Builder not found!")
+        if not tesslate_agent:
+            print("✗ Tesslate Agent not found!")
             return
 
         # Get all users
@@ -379,7 +379,7 @@ async def seed_agents():
             result = await db.execute(
                 select(UserPurchasedAgent).where(
                     UserPurchasedAgent.user_id == user.id,
-                    UserPurchasedAgent.agent_id == stream_agent.id
+                    UserPurchasedAgent.agent_id == tesslate_agent.id
                 )
             )
             existing = result.scalar_one_or_none()
@@ -388,14 +388,14 @@ async def seed_agents():
                 # Add to user's account
                 purchase = UserPurchasedAgent(
                     user_id=user.id,
-                    agent_id=stream_agent.id,
+                    agent_id=tesslate_agent.id,
                     purchase_type="free",
                     is_active=True
                 )
                 db.add(purchase)
-                print(f"  ✓ Added Stream Builder to user '{user.username}'")
+                print(f"  ✓ Added Tesslate Agent to user '{user.username}'")
             else:
-                print(f"  - User '{user.username}' already has Stream Builder")
+                print(f"  - User '{user.username}' already has Tesslate Agent")
 
         await db.commit()
 

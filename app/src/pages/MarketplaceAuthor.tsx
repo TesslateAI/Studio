@@ -7,10 +7,10 @@ import {
   TwitterLogo,
   GithubLogo,
   Globe,
-  CalendarBlank
+  CalendarBlank,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { AgentCard, MarketplaceItem, formatInstalls } from '../components/marketplace';
+import { AgentCard, type MarketplaceItem, formatInstalls } from '../components/marketplace';
 import { creatorsApi, marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
@@ -52,7 +52,7 @@ export default function MarketplaceAuthor() {
       // Ensure extensions have item_type
       const extensions = (data.extensions || []).map((ext: Record<string, unknown>) => ({
         ...ext,
-        item_type: ext.item_type || 'agent'
+        item_type: ext.item_type || 'agent',
       }));
       setCreator({ ...data, extensions });
     } catch (error) {
@@ -71,21 +71,22 @@ export default function MarketplaceAuthor() {
     }
 
     try {
-      const data = item.item_type === 'base'
-        ? await marketplaceApi.purchaseBase(item.id)
-        : await marketplaceApi.purchaseAgent(item.id);
+      const data =
+        item.item_type === 'base'
+          ? await marketplaceApi.purchaseBase(item.id)
+          : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
       } else {
         toast.success(`${item.name} added to your library!`);
-        setCreator(prev => {
+        setCreator((prev) => {
           if (!prev) return prev;
           return {
             ...prev,
-            extensions: prev.extensions.map(e =>
+            extensions: prev.extensions.map((e) =>
               e.id === item.id ? { ...e, is_purchased: true } : e
-            )
+            ),
           };
         });
       }
@@ -113,9 +114,13 @@ export default function MarketplaceAuthor() {
   }
 
   return (
-    <div className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}>
+    <div
+      className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}
+    >
       {/* Header */}
-      <div className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}>
+      <div
+        className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}
+      >
         <div className="max-w-5xl mx-auto px-6 md:px-12">
           <div className="h-14 flex items-center gap-4">
             <button
@@ -137,10 +142,12 @@ export default function MarketplaceAuthor() {
         <div className="flex flex-col md:flex-row gap-8 items-start">
           {/* Avatar */}
           <div className="flex-shrink-0">
-            <div className={`
+            <div
+              className={`
               w-24 h-24 md:w-32 md:h-32 rounded-full flex items-center justify-center overflow-hidden
               ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-            `}>
+            `}
+            >
               {creator.avatar_url ? (
                 <img
                   src={creator.avatar_url}
@@ -148,7 +155,9 @@ export default function MarketplaceAuthor() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <span className={`text-4xl md:text-5xl font-bold ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}>
+                <span
+                  className={`text-4xl md:text-5xl font-bold ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+                >
                   {creator.name?.charAt(0).toUpperCase() || '?'}
                 </span>
               )}
@@ -158,7 +167,9 @@ export default function MarketplaceAuthor() {
           {/* Info */}
           <div className="flex-1">
             {/* Name */}
-            <h1 className={`font-heading text-3xl md:text-4xl font-bold mb-2 ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+            <h1
+              className={`font-heading text-3xl md:text-4xl font-bold mb-2 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+            >
               {creator.name}
             </h1>
 
@@ -169,7 +180,9 @@ export default function MarketplaceAuthor() {
 
             {/* Bio */}
             {creator.bio && (
-              <p className={`text-base mb-6 max-w-2xl ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
+              <p
+                className={`text-base mb-6 max-w-2xl ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
+              >
                 {creator.bio}
               </p>
             )}
@@ -219,7 +232,9 @@ export default function MarketplaceAuthor() {
                 </a>
               )}
               {creator.joined_at && (
-                <div className={`flex items-center gap-2 text-sm ${theme === 'light' ? 'text-black/40' : 'text-white/40'}`}>
+                <div
+                  className={`flex items-center gap-2 text-sm ${theme === 'light' ? 'text-black/40' : 'text-white/40'}`}
+                >
                   <CalendarBlank size={18} />
                   <span>Joined {formatDate(creator.joined_at)}</span>
                 </div>
@@ -231,15 +246,19 @@ export default function MarketplaceAuthor() {
 
       {/* Stats Bar */}
       <div className="max-w-5xl mx-auto px-6 md:px-12 mb-12">
-        <div className={`
+        <div
+          className={`
           flex flex-wrap items-center gap-8 py-6 px-8 rounded-2xl
           ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-        `}>
+        `}
+        >
           {/* Extensions Count */}
           <div className="flex items-center gap-3">
             <Package size={24} className="text-[var(--primary)]" weight="fill" />
             <div>
-              <div className={`text-2xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+              <div
+                className={`text-2xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+              >
                 {creator.stats.extensions_count}
               </div>
               <div className={`text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}>
@@ -255,7 +274,9 @@ export default function MarketplaceAuthor() {
           <div className="flex items-center gap-3">
             <Lightning size={24} className="text-[var(--primary)]" weight="fill" />
             <div>
-              <div className={`text-2xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+              <div
+                className={`text-2xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+              >
                 {formatInstalls(creator.stats.total_downloads)}
               </div>
               <div className={`text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}>
@@ -268,26 +289,29 @@ export default function MarketplaceAuthor() {
 
       {/* Extensions Grid */}
       <div className="max-w-5xl mx-auto px-6 md:px-12 pb-16">
-        <h2 className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+        <h2
+          className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+        >
           Extensions by {creator.name}
         </h2>
 
         {creator.extensions.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {creator.extensions.map(item => (
-              <AgentCard
-                key={item.id}
-                item={item}
-                onInstall={handleInstall}
-              />
+            {creator.extensions.map((item) => (
+              <AgentCard key={item.id} item={item} onInstall={handleInstall} />
             ))}
           </div>
         ) : (
-          <div className={`
+          <div
+            className={`
             text-center py-16 rounded-2xl
             ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-          `}>
-            <Package size={48} className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`} />
+          `}
+          >
+            <Package
+              size={48}
+              className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+            />
             <p className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>
               No extensions published yet
             </p>

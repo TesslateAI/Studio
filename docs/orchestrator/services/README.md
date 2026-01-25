@@ -240,7 +240,8 @@ async def get_user(self, user_id: UUID, db: AsyncSession) -> User:
 
 # ❌ Bad - Creates own session
 async def get_user(self, user_id: UUID) -> User:
-    async with async_session_maker() as db:  # Don't do this!
+    from ..database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:  # Don't do this!
         result = await db.execute(select(User).where(User.id == user_id))
         return result.scalar_one()
 ```

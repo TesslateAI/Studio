@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, Lightning, GitFork, Star } from '@phosphor-icons/react';
 import { useTheme } from '../../theme/ThemeContext';
-import { MarketplaceItem, formatInstalls } from './AgentCard';
+import { type MarketplaceItem, formatInstalls } from './AgentCard';
 
 interface FeaturedCardProps {
   item: MarketplaceItem;
@@ -40,9 +40,10 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
         group relative flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 rounded-2xl border cursor-pointer
         transition-all duration-200 ease-out
         hover:-translate-y-1 hover:shadow-2xl
-        ${theme === 'light'
-          ? 'bg-white border-black/10 hover:border-[var(--primary)]/40'
-          : 'bg-[#1a1a1c] border-white/10 hover:border-[var(--primary)]/40'
+        ${
+          theme === 'light'
+            ? 'bg-white border-black/10 hover:border-[var(--primary)]/40'
+            : 'bg-[#1a1a1c] border-white/10 hover:border-[var(--primary)]/40'
         }
         ${!item.is_active ? 'opacity-60' : ''}
       `}
@@ -55,22 +56,16 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
 
       {/* Large Icon */}
       <div className="flex-shrink-0">
-        <div className={`
+        <div
+          className={`
           w-20 h-20 md:w-24 md:h-24 rounded-2xl flex items-center justify-center overflow-hidden
           ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-        `}>
+        `}
+        >
           {item.avatar_url ? (
-            <img
-              src={item.avatar_url}
-              alt={item.name}
-              className="w-full h-full object-cover"
-            />
+            <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover" />
           ) : (
-            <img
-              src="/favicon.svg"
-              alt="Tesslate"
-              className="w-12 h-12 md:w-16 md:h-16"
-            />
+            <img src="/favicon.svg" alt="Tesslate" className="w-12 h-12 md:w-16 md:h-16" />
           )}
         </div>
       </div>
@@ -79,11 +74,13 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
       <div className="flex-1 min-w-0">
         {/* Title Row */}
         <div className="flex items-start gap-3 mb-2">
-          <h3 className={`
+          <h3
+            className={`
             font-heading font-bold text-lg leading-tight
             group-hover:text-[var(--primary)] transition-colors
             ${theme === 'light' ? 'text-black' : 'text-white'}
-          `}>
+          `}
+          >
             {item.name}
           </h3>
           {item.source_type === 'open' && (
@@ -95,10 +92,12 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
         </div>
 
         {/* Description */}
-        <p className={`
+        <p
+          className={`
           text-xs sm:text-sm leading-relaxed line-clamp-2 mb-4
           ${theme === 'light' ? 'text-black/60' : 'text-white/60'}
-        `}>
+        `}
+        >
           {item.description}
         </p>
 
@@ -114,10 +113,12 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
               `}
             >
-              <div className={`
+              <div
+                className={`
                 w-6 h-6 rounded-full overflow-hidden flex-shrink-0
                 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}
-              `}>
+              `}
+              >
                 {item.creator_avatar_url ? (
                   <img
                     src={item.creator_avatar_url}
@@ -139,10 +140,12 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
             <span className={theme === 'light' ? 'text-black/20' : 'text-white/20'}>•</span>
 
             {/* Uses Count */}
-            <div className={`
+            <div
+              className={`
               flex items-center gap-1.5 text-xs sm:text-sm
               ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
-            `}>
+            `}
+            >
               <Lightning size={14} weight="fill" />
               <span>{formatInstalls(usageCount)} uses</span>
             </div>
@@ -160,18 +163,20 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
               disabled={!item.is_active}
               className={`
                 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all
-                ${item.is_active
-                  ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-md hover:shadow-lg'
-                  : theme === 'light'
-                    ? 'bg-black/5 text-black/40 cursor-not-allowed'
-                    : 'bg-white/5 text-white/40 cursor-not-allowed'
+                ${
+                  item.is_active
+                    ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-md hover:shadow-lg'
+                    : theme === 'light'
+                      ? 'bg-black/5 text-black/40 cursor-not-allowed'
+                      : 'bg-white/5 text-white/40 cursor-not-allowed'
                 }
               `}
             >
               {item.is_active
-                ? (item.pricing_type === 'free' ? 'Install' : `$${item.price}/mo`)
-                : 'Coming Soon'
-              }
+                ? item.pricing_type === 'free'
+                  ? 'Install'
+                  : `$${item.price}/mo`
+                : 'Coming Soon'}
             </button>
           )}
         </div>

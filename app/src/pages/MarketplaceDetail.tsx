@@ -15,10 +15,17 @@ import {
   Package,
   ChatCircle,
   Trash,
-  X
+  X,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { StatsBar, MarketplaceItem, AgentCard, ReviewCard, RatingPicker, Review } from '../components/marketplace';
+import {
+  StatsBar,
+  type MarketplaceItem,
+  AgentCard,
+  ReviewCard,
+  RatingPicker,
+  type Review,
+} from '../components/marketplace';
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
@@ -74,7 +81,9 @@ export default function MarketplaceDetail() {
       // Load related items using recommendations API (co-install based)
       try {
         const related = await marketplaceApi.getRelatedAgents(slug!, 4);
-        setRelatedItems(related.map((a: Record<string, unknown>) => ({ ...a, item_type: 'agent' })));
+        setRelatedItems(
+          related.map((a: Record<string, unknown>) => ({ ...a, item_type: 'agent' }))
+        );
       } catch {
         // Fallback to same category if recommendations fail
         const allAgents = await marketplaceApi.getAllAgents();
@@ -124,9 +133,10 @@ export default function MarketplaceDetail() {
 
     setInstalling(true);
     try {
-      const data = item.item_type === 'base'
-        ? await marketplaceApi.purchaseBase(item.id)
-        : await marketplaceApi.purchaseAgent(item.id);
+      const data =
+        item.item_type === 'base'
+          ? await marketplaceApi.purchaseBase(item.id)
+          : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
@@ -149,16 +159,17 @@ export default function MarketplaceDetail() {
     }
 
     try {
-      const data = relatedItem.item_type === 'base'
-        ? await marketplaceApi.purchaseBase(relatedItem.id)
-        : await marketplaceApi.purchaseAgent(relatedItem.id);
+      const data =
+        relatedItem.item_type === 'base'
+          ? await marketplaceApi.purchaseBase(relatedItem.id)
+          : await marketplaceApi.purchaseAgent(relatedItem.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
       } else {
         toast.success(`${relatedItem.name} added to your library!`);
-        setRelatedItems(prev =>
-          prev.map(i => i.id === relatedItem.id ? { ...i, is_purchased: true } : i)
+        setRelatedItems((prev) =>
+          prev.map((i) => (i.id === relatedItem.id ? { ...i, is_purchased: true } : i))
         );
       }
     } catch {
@@ -251,9 +262,13 @@ export default function MarketplaceDetail() {
   }
 
   return (
-    <div className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}>
+    <div
+      className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}
+    >
       {/* Header */}
-      <div className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}>
+      <div
+        className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}
+      >
         <div className="max-w-5xl mx-auto px-6 md:px-12">
           <div className="h-14 flex items-center gap-4">
             <button
@@ -275,22 +290,16 @@ export default function MarketplaceDetail() {
         <div className="flex flex-col md:flex-row gap-8">
           {/* Icon */}
           <div className="flex-shrink-0">
-            <div className={`
+            <div
+              className={`
               w-24 h-24 md:w-32 md:h-32 rounded-3xl flex items-center justify-center overflow-hidden
               ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-            `}>
+            `}
+            >
               {item.avatar_url ? (
-                <img
-                  src={item.avatar_url}
-                  alt={item.name}
-                  className="w-full h-full object-cover"
-                />
+                <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover" />
               ) : (
-                <img
-                  src="/favicon.svg"
-                  alt="Tesslate"
-                  className="w-16 h-16 md:w-20 md:h-20"
-                />
+                <img src="/favicon.svg" alt="Tesslate" className="w-16 h-16 md:w-20 md:h-20" />
               )}
             </div>
           </div>
@@ -299,7 +308,9 @@ export default function MarketplaceDetail() {
           <div className="flex-1">
             {/* Title Row */}
             <div className="flex items-start gap-3 mb-3">
-              <h1 className={`font-heading text-3xl md:text-4xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+              <h1
+                className={`font-heading text-3xl md:text-4xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+              >
                 {item.name}
               </h1>
               {item.source_type === 'open' && (
@@ -325,10 +336,12 @@ export default function MarketplaceDetail() {
                     ${theme === 'light' ? 'text-black/60' : 'text-white/60'}
                   `}
                 >
-                  <div className={`
+                  <div
+                    className={`
                     w-6 h-6 rounded-full overflow-hidden flex-shrink-0
                     ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}
-                  `}>
+                  `}
+                  >
                     {item.creator_avatar_url ? (
                       <img
                         src={item.creator_avatar_url}
@@ -346,7 +359,9 @@ export default function MarketplaceDetail() {
                   </span>
                 </Link>
               ) : (
-                <span className={`text-sm ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
+                <span
+                  className={`text-sm ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}
+                >
                   By Tesslate
                 </span>
               )}
@@ -368,11 +383,12 @@ export default function MarketplaceDetail() {
                   disabled={!item.is_active || installing}
                   className={`
                     flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all
-                    ${item.is_active
-                      ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-lg hover:shadow-xl'
-                      : theme === 'light'
-                        ? 'bg-black/5 text-black/40 cursor-not-allowed'
-                        : 'bg-white/5 text-white/40 cursor-not-allowed'
+                    ${
+                      item.is_active
+                        ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-lg hover:shadow-xl'
+                        : theme === 'light'
+                          ? 'bg-black/5 text-black/40 cursor-not-allowed'
+                          : 'bg-white/5 text-white/40 cursor-not-allowed'
                     }
                   `}
                 >
@@ -384,7 +400,9 @@ export default function MarketplaceDetail() {
                   ) : item.is_active ? (
                     <>
                       <Download size={18} weight="bold" />
-                      {item.pricing_type === 'free' ? 'Install Extension' : `Subscribe for $${item.price}/mo`}
+                      {item.pricing_type === 'free'
+                        ? 'Install Extension'
+                        : `Subscribe for $${item.price}/mo`}
                     </>
                   ) : (
                     'Coming Soon'
@@ -394,7 +412,9 @@ export default function MarketplaceDetail() {
 
               {/* Price Badge */}
               {item.pricing_type === 'free' && (
-                <span className={`text-sm font-medium ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}>
+                <span
+                  className={`text-sm font-medium ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
+                >
                   Free
                 </span>
               )}
@@ -405,10 +425,7 @@ export default function MarketplaceDetail() {
 
       {/* Stats Bar */}
       <div className="max-w-5xl mx-auto px-6 md:px-12 mb-12">
-        <StatsBar
-          usageCount={item.usage_count || 0}
-          category={item.category}
-        />
+        <StatsBar usageCount={item.usage_count || 0} category={item.category} />
       </div>
 
       {/* Content Sections */}
@@ -416,11 +433,17 @@ export default function MarketplaceDetail() {
         {/* Long Description */}
         {item.long_description && (
           <section className="mb-12">
-            <h2 className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+            <h2
+              className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+            >
               About
             </h2>
-            <div className={`prose max-w-none ${theme === 'light' ? 'prose-gray' : 'prose-invert'}`}>
-              <p className={`text-base leading-relaxed ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
+            <div
+              className={`prose max-w-none ${theme === 'light' ? 'prose-gray' : 'prose-invert'}`}
+            >
+              <p
+                className={`text-base leading-relaxed ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
+              >
                 {item.long_description}
               </p>
             </div>
@@ -430,14 +453,18 @@ export default function MarketplaceDetail() {
         {/* Features */}
         {item.features && item.features.length > 0 && (
           <section className="mb-12">
-            <h2 className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+            <h2
+              className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+            >
               Features
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {item.features.map((feature, idx) => (
                 <div key={idx} className="flex items-center gap-3">
                   <Check size={18} className="text-green-500 flex-shrink-0" weight="bold" />
-                  <span className={`text-sm ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
+                  <span
+                    className={`text-sm ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
+                  >
                     {feature}
                   </span>
                 </div>
@@ -449,29 +476,34 @@ export default function MarketplaceDetail() {
         {/* Tools (for agents) */}
         {item.item_type === 'agent' && (
           <section className="mb-12">
-            <h2 className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+            <h2
+              className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+            >
               Available Tools
             </h2>
             <div className="flex flex-wrap gap-2">
-              {(item.tools && item.tools.length > 0 ? item.tools : ALL_TOOLS).map((toolName, idx) => {
-                const tool = toolIcons[toolName];
-                if (!tool) return null;
-                return (
-                  <div
-                    key={idx}
-                    className={`
+              {(item.tools && item.tools.length > 0 ? item.tools : ALL_TOOLS).map(
+                (toolName, idx) => {
+                  const tool = toolIcons[toolName];
+                  if (!tool) return null;
+                  return (
+                    <div
+                      key={idx}
+                      className={`
                       flex items-center gap-2 px-3 py-2 rounded-lg text-sm
-                      ${theme === 'light'
-                        ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                        : 'bg-[var(--primary)]/20 text-[var(--primary)]'
+                      ${
+                        theme === 'light'
+                          ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
+                          : 'bg-[var(--primary)]/20 text-[var(--primary)]'
                       }
                     `}
-                  >
-                    {tool.icon}
-                    <span className="font-medium">{tool.label}</span>
-                  </div>
-                );
-              })}
+                    >
+                      {tool.icon}
+                      <span className="font-medium">{tool.label}</span>
+                    </div>
+                  );
+                }
+              )}
             </div>
           </section>
         )}
@@ -479,7 +511,9 @@ export default function MarketplaceDetail() {
         {/* Tags */}
         {item.tags && item.tags.length > 0 && (
           <section className="mb-12">
-            <h2 className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+            <h2
+              className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+            >
               Tags
             </h2>
             <div className="flex flex-wrap gap-2">
@@ -502,7 +536,9 @@ export default function MarketplaceDetail() {
         {item.item_type === 'agent' && (
           <section className="mb-12">
             <div className="flex items-center justify-between mb-6">
-              <h2 className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+              <h2
+                className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+              >
                 Reviews
               </h2>
               {item.is_purchased && !showReviewForm && (
@@ -510,9 +546,10 @@ export default function MarketplaceDetail() {
                   onClick={() => setShowReviewForm(true)}
                   className={`
                     flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                    ${theme === 'light'
-                      ? 'bg-black/5 hover:bg-black/10 text-black/70'
-                      : 'bg-white/5 hover:bg-white/10 text-white/70'
+                    ${
+                      theme === 'light'
+                        ? 'bg-black/5 hover:bg-black/10 text-black/70'
+                        : 'bg-white/5 hover:bg-white/10 text-white/70'
                     }
                   `}
                 >
@@ -524,31 +561,42 @@ export default function MarketplaceDetail() {
 
             {/* Review Form */}
             {showReviewForm && (
-              <div className={`
+              <div
+                className={`
                 p-6 rounded-xl mb-6
                 ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-              `}>
+              `}
+              >
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className={`font-semibold ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+                  <h3
+                    className={`font-semibold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                  >
                     {editingReview ? 'Edit Your Review' : 'Write a Review'}
                   </h3>
                   <button
                     onClick={() => setShowReviewForm(false)}
                     className={`p-1 rounded-lg transition-colors ${theme === 'light' ? 'hover:bg-black/10' : 'hover:bg-white/10'}`}
                   >
-                    <X size={18} className={theme === 'light' ? 'text-black/50' : 'text-white/50'} />
+                    <X
+                      size={18}
+                      className={theme === 'light' ? 'text-black/50' : 'text-white/50'}
+                    />
                   </button>
                 </div>
 
                 <div className="mb-4">
-                  <label className={`block text-sm font-medium mb-2 ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
+                  <label
+                    className={`block text-sm font-medium mb-2 ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
+                  >
                     Rating
                   </label>
                   <RatingPicker value={reviewRating} onChange={setReviewRating} />
                 </div>
 
                 <div className="mb-4">
-                  <label className={`block text-sm font-medium mb-2 ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
+                  <label
+                    className={`block text-sm font-medium mb-2 ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
+                  >
                     Comment (optional)
                   </label>
                   <textarea
@@ -564,9 +612,10 @@ export default function MarketplaceDetail() {
                     rows={4}
                     className={`
                       w-full px-4 py-3 rounded-lg text-sm resize-none
-                      ${theme === 'light'
-                        ? 'bg-white border border-black/10 text-black placeholder:text-black/40'
-                        : 'bg-white/5 border border-white/10 text-white placeholder:text-white/40'
+                      ${
+                        theme === 'light'
+                          ? 'bg-white border border-black/10 text-black placeholder:text-black/40'
+                          : 'bg-white/5 border border-white/10 text-white placeholder:text-white/40'
                       }
                       focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/50
                     `}
@@ -596,9 +645,10 @@ export default function MarketplaceDetail() {
                       onClick={handleDeleteReview}
                       className={`
                         flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
-                        ${theme === 'light'
-                          ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
-                          : 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                        ${
+                          theme === 'light'
+                            ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                            : 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
                         }
                       `}
                     >
@@ -612,7 +662,9 @@ export default function MarketplaceDetail() {
 
             {/* Reviews List */}
             {loadingReviews ? (
-              <div className={`text-center py-8 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}>
+              <div
+                className={`text-center py-8 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
+              >
                 <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                 Loading reviews...
               </div>
@@ -628,11 +680,17 @@ export default function MarketplaceDetail() {
                 ))}
               </div>
             ) : (
-              <div className={`
+              <div
+                className={`
                 text-center py-12 rounded-xl
                 ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-              `}>
-                <ChatCircle size={40} weight="duotone" className={`mx-auto mb-3 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`} />
+              `}
+              >
+                <ChatCircle
+                  size={40}
+                  weight="duotone"
+                  className={`mx-auto mb-3 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+                />
                 <p className={`text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}>
                   No reviews yet. {item.is_purchased && 'Be the first to review!'}
                 </p>
@@ -644,11 +702,13 @@ export default function MarketplaceDetail() {
         {/* Related Items */}
         {relatedItems.length > 0 && (
           <section>
-            <h2 className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+            <h2
+              className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+            >
               People also like
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {relatedItems.map(relatedItem => (
+              {relatedItems.map((relatedItem) => (
                 <AgentCard
                   key={relatedItem.id}
                   item={relatedItem}
