@@ -108,7 +108,8 @@ Each container gets Traefik labels for automatic routing:
 ```yaml
 labels:
   traefik.enable: 'true'
-  traefik.docker.network: 'tesslate-regional-traefik-network'
+  com.tesslate.routable: 'true'
+  traefik.docker.network: 'tesslate-my-app-abc123'  # Project network
   traefik.http.routers.my-app-abc123-frontend.rule: 'Host(`my-app-abc123-frontend.localhost`)'
   traefik.http.services.my-app-abc123-frontend.loadbalancer.server.port: '3000'
 ```
@@ -119,7 +120,7 @@ labels:
 - Frontend: `http://my-app-abc123-frontend.localhost`
 - Backend: `http://my-app-abc123-backend.localhost`
 
-**Regional Traefik**: For scalability, the orchestrator uses a regional Traefik manager that distributes projects across multiple Traefik instances. Each Traefik handles a subset of projects to avoid hitting Docker's network limit (32 networks per container).
+**Simplified Routing**: Main Traefik connects directly to each project network. When a project starts, the orchestrator runs `docker network connect tesslate-{project-slug} tesslate-traefik` to enable routing.
 
 ## File Operations
 
@@ -265,7 +266,6 @@ services:
     working_dir: /app/frontend
     networks:
       - tesslate-my-app-abc123
-      - tesslate-regional-traefik-network
     volumes:
       - type: volume
         source: tesslate-projects-data
@@ -278,6 +278,8 @@ services:
       PORT: '3000'
     labels:
       traefik.enable: 'true'
+      com.tesslate.routable: 'true'
+      traefik.docker.network: 'tesslate-my-app-abc123'
       traefik.http.routers.my-app-abc123-frontend.rule: 'Host(`my-app-abc123-frontend.localhost`)'
       traefik.http.services.my-app-abc123-frontend.loadbalancer.server.port: '3000'
     command: 'npm run dev'
@@ -291,8 +293,6 @@ networks:
   tesslate-my-app-abc123:
     driver: bridge
     name: tesslate-my-app-abc123
-  tesslate-regional-traefik-network:
-    external: true
 
 volumes:
   tesslate-projects-data:
@@ -376,15 +376,15 @@ fetch('http://backend:8000/api/data')
 
 The `backend` hostname resolves via Docker DNS within the project network.
 
-### Traefik Network
+### Traefik Network Connection
 
-All project containers also connect to the Traefik network for routing:
+When a project starts, main Traefik connects to the project network:
 
-```yaml
-networks:
-  - tesslate-my-app-abc123            # Project network (inter-container)
-  - tesslate-regional-traefik-network  # Traefik network (public routing)
+```bash
+docker network connect tesslate-my-app-abc123 tesslate-traefik
 ```
+
+This allows Traefik to route traffic to containers in the project network.
 
 ### Security: Blocking Internal Services
 
@@ -428,25 +428,42 @@ stdout, stderr = await process.communicate()
 
 ## Activity Tracking & Cleanup
 
-Docker mode uses **in-memory activity tracking** (single orchestrator instance):
+Docker mode uses **database-based activity tracking** (consistent with Kubernetes mode):
 
 ```python
-# Track activity
-self.activity_tracker[project_key] = time.time()
-
-# Cleanup idle projects
-async def cleanup_idle_environments(self, idle_timeout_minutes=30):
-    current_time = time.time()
-    for project_key, last_activity in self.activity_tracker.items():
-        if current_time - last_activity > (idle_timeout_minutes * 60):
-            # Clean up project
+# Activity is tracked in Project.last_activity field
+await db.execute(
+    update(Project)
+    .where(Project.id == project_id)
+    .values(last_activity=datetime.now(timezone.utc))
+)
 ```
 
-**Two-Tier Cleanup** (future enhancement):
-1. **Tier 1** (30 min idle): Scale containers to 0 replicas (pause)
-2. **Tier 2** (2 hours idle): Delete containers entirely
+**Benefits:**
+- Persists across orchestrator restarts
+- Consistent with Kubernetes mode
+- Queryable for cleanup jobs
 
-Currently only Tier 2 is implemented.
+**Cleanup Strategy:**
+The `cleanup_idle_environments()` method queries for idle projects and stops their containers:
+
+```python
+async def cleanup_idle_environments(self, idle_timeout_minutes=30):
+    cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=idle_timeout_minutes)
+
+    # Find projects with no recent activity
+    idle_projects = await db.execute(
+        select(Project).where(
+            Project.environment_status == 'active',
+            Project.last_activity < cutoff_time
+        )
+    )
+
+    for project in idle_projects:
+        await self.stop_project(project.slug, project.id, project.owner_id)
+```
+
+**Note:** Unlike Kubernetes mode, Docker does not support hibernation (VolumeSnapshots). Idle containers are simply stopped; files remain in the shared volume.
 
 ## Debugging
 
@@ -565,10 +582,46 @@ DEPLOYMENT_MODE=docker
 
 # Volume configuration
 USE_DOCKER_VOLUMES=true  # Use volumes vs bind mounts
-
-# Traefik
-TRAEFIK_NETWORK=tesslate-regional-traefik-network
 ```
+
+## Recent Improvements (January 2026)
+
+### Fast Container Status Check
+
+When a container is already running, the system now returns instantly without creating a background task.
+
+**How it works:**
+1. `start_single_container` endpoint checks if container is running BEFORE creating a task
+2. Uses Docker SDK directly (`docker.from_env().containers.get()`) - no subprocess
+3. Returns immediately with container URL if already running
+
+**Benefits:**
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Page reload with running container | ~1-2s (background task) | <100ms (instant) |
+| Container start from stopped | Normal task flow | Same |
+
+**Code locations:**
+- `docker.py:324-354` - `is_container_running()` method
+- `projects.py:4435-4458` - Fast path check in endpoint
+
+### HTTP Protocol Fix
+
+Docker mode correctly uses HTTP for localhost URLs (not HTTPS).
+
+**Implementation:**
+- Checks `deployment_mode == "docker"` before determining protocol
+- Docker always uses HTTP on localhost (no TLS)
+- K8s uses HTTPS only when `k8s_wildcard_tls_secret` is configured
+
+### Simplified Routing
+
+Regional Router was removed in favor of direct Traefik routing:
+- **Before**: User → Main Traefik → Regional Router → Regional Traefik → Container
+- **After**: User → Single Traefik → Container
+
+This eliminates unnecessary complexity and latency.
 
 ## Next Steps
 

@@ -172,8 +172,7 @@ async def _generate_compose_config(self, project, containers, connections, user_
 
     compose_config = {
         'networks': {
-            network_name: {'driver': 'bridge'},
-            'tesslate-regional-traefik-network': {'external': True}
+            network_name: {'driver': 'bridge'}
         },
         'services': {},
         'volumes': {'tesslate-projects-data': {'external': True}}
@@ -193,6 +192,8 @@ async def _generate_compose_config(self, project, containers, connections, user_
         # Traefik labels for routing
         labels = {
             'traefik.enable': 'true',
+            'com.tesslate.routable': 'true',
+            f'traefik.docker.network': network_name,
             'traefik.http.routers.{name}.rule': f'Host(`{project.slug}-{service_name}.localhost`)',
             'traefik.http.services.{name}.loadbalancer.server.port': str(port),
         }
@@ -200,7 +201,7 @@ async def _generate_compose_config(self, project, containers, connections, user_
         compose_config['services'][service_name] = {
             'image': 'tesslate-devserver:latest',
             'container_name': f"{project.slug}-{service_name}",
-            'networks': [network_name, 'tesslate-regional-traefik-network'],
+            'networks': [network_name],
             'volumes': volumes,
             'labels': labels,
             'restart': 'unless-stopped'
@@ -230,19 +231,15 @@ async def read_file(self, user_id, project_id, container_name, file_path, projec
 
 #### 3. Traefik Integration
 
-Connects Traefik to project networks for routing:
+Connects main Traefik directly to project networks for routing:
 
 ```python
 async def _connect_traefik_to_network(self, project_slug: str):
-    """Connect regional Traefik to project network."""
+    """Connect main Traefik directly to project network."""
     network_name = f"tesslate-{project_slug}"
-    regional_manager = get_regional_traefik_manager()
-
-    regional_index = await regional_manager.ensure_regional_for_project(project_slug)
-    regional_traefik_name = regional_manager.get_regional_traefik_name(regional_index)
 
     await asyncio.create_subprocess_exec(
-        'docker', 'network', 'connect', network_name, regional_traefik_name
+        'docker', 'network', 'connect', network_name, 'tesslate-traefik'
     )
 ```
 

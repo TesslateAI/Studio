@@ -60,10 +60,6 @@ The services layer sits between the API routers and the data models, providing r
 - **[service_definitions.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/service_definitions.py)** (1,385 lines) - Database, cache, and service container definitions
 - **[framework_detector.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/framework_detector.py)** - Auto-detect project frameworks
 
-### Networking & Traffic
-- **[regional_traefik_manager.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/regional_traefik_manager.py)** (634 lines) - Multi-region Traefik routing (Docker mode)
-- **[traefik_config_generator.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/traefik_config_generator.py)** - Dynamic Traefik configuration
-
 ### Security & Validation
 - **[command_validator.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/command_validator.py)** (358 lines) - Shell command security validation
 - **[deployment_encryption.py](c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/deployment_encryption.py)** - Credential encryption/decryption

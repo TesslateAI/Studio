@@ -31,15 +31,10 @@ Detailed documentation of docker-compose.yml services.
 - Hot module replacement enabled
 - Volume mounts: src/, public/, config files
 
-### regional-router
-- Routes *.localhost to regions
-- Currently single-region (no-op)
-- Future: Multi-region support
-
 ## Networks
 
 **tesslate-network**: Main network for all services
-**tesslate-regional-traefik-network**: For regional routers
+**Project networks**: Created on-demand (tesslate-{project-slug})
 
 ## Volumes
 

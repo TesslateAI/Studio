@@ -53,13 +53,13 @@ localhost/                → app:5173 (frontend)
 localhost/api/*           → orchestrator:8000 (backend)
 localhost/ws/*            → orchestrator:8000 (WebSocket)
 localhost/traefik         → traefik:8080 (dashboard)
-*.localhost               → regional-router:8080
+*.localhost               → project containers (via labels)
 ```
 
 **Configuration**:
 - Docker provider (auto-discover containers)
-- Constraint: `com.tesslate.traefik=main` (only route main services)
-- Network: `tesslate-network`
+- Constraint: `com.tesslate.routable=true` (route project containers)
+- Network: `tesslate-network` (connects to project networks on-demand)
 
 ### postgres
 
@@ -125,14 +125,6 @@ CHOKIDAR_USEPOLLING: true  # For file watcher
 
 **Hot Module Replacement**: Vite dev server provides HMR
 
-### regional-router
-
-**Build**: `./orchestrator/regional_router/Dockerfile`
-**Port**: 8080 (internal)
-**Purpose**: Route *.localhost to correct regional Traefik
-
-**Note**: Currently single-region, router is no-op (future multi-region support)
-
 ## Networks
 
 **tesslate-network**:
@@ -140,9 +132,10 @@ CHOKIDAR_USEPOLLING: true  # For file watcher
 - Connected services: traefik, postgres, orchestrator, app
 - Internal DNS: Service name resolves to container IP
 
-**tesslate-regional-traefik-network**:
+**Project Networks** (created on-demand):
 - Type: Bridge
-- For future multi-region Traefik instances
+- Named: `tesslate-{project-slug}`
+- Traefik connects when project starts
 
 ## Volumes
 

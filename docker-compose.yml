@@ -17,7 +17,7 @@ services:
     networks:
       - tesslate-network
     labels:
-      - "com.tesslate.traefik=main"
+      - "com.tesslate.routable=true"
       - "traefik.enable=true"
       # Traefik dashboard at /traefik
       - "traefik.http.routers.traefik.rule=Host(`${APP_DOMAIN:-localhost}`) && PathPrefix(`/traefik`)"
@@ -36,7 +36,7 @@ services:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=tesslate-network"
-      - "--providers.docker.constraints=Label(`com.tesslate.traefik`,`main`)"
+      - "--providers.docker.constraints=Label(`com.tesslate.routable`,`true`)"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
@@ -175,7 +175,7 @@ services:
     networks:
       - tesslate-network
     labels:
-      - "com.tesslate.traefik=main"
+      - "com.tesslate.routable=true"
       - "traefik.enable=true"
       # API routes - handle both /api and websocket paths
       # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
@@ -190,29 +190,6 @@ services:
       - "traefik.http.routers.orchestrator.middlewares=orchestrator-headers"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  regional-router:
-    build: ./orchestrator/regional_router
-    container_name: tesslate-regional-router
-    restart: unless-stopped
-    networks:
-      - tesslate-network
-      - tesslate-regional-traefik-network
-    labels:
-      - "com.tesslate.traefik=main"
-      - "traefik.enable=true"
-      # Catch-all route: Route all *.localhost traffic (except localhost) to regional-router
-      # This allows regional-router to hash the project slug and proxy to the correct regional Traefik
-      - "traefik.http.routers.regional-router.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.localhost`) && !Host(`${APP_DOMAIN:-localhost}`)"
-      - "traefik.http.routers.regional-router.entrypoints=web"
-      - "traefik.http.routers.regional-router.priority=10"
-      - "traefik.http.services.regional-router.loadbalancer.server.port=8080"
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -247,7 +224,7 @@ services:
     networks:
       - tesslate-network
     labels:
-      - "com.tesslate.traefik=main"
+      - "com.tesslate.routable=true"
       - "traefik.enable=true"
       # Frontend routes - everything except /api, /ws, and /preview
       # TRAEFIK_ADDITIONAL_HOST_RULE: Add extra host rules (e.g., for Google OAuth localhost)
@@ -270,9 +247,6 @@ services:
 networks:
   tesslate-network:
     name: tesslate-network
-    driver: bridge
-  tesslate-regional-traefik-network:
-    name: tesslate-regional-traefik-network
     driver: bridge
 
 volumes:
