@@ -32,6 +32,7 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **shell_session_manager.py** (632 lines) - `ShellSessionManager` for PTY sessions
 - **pty_broker.py** (700 lines) - Low-level PTY process management
 - **activity_tracker.py** - Database-based activity tracking for idle cleanup
+- **cache_service.py** - `DistributedCache` for Redis + in-memory caching
 
 ### AI & Payments
 - **litellm_service.py** (445 lines) - `LiteLLMService` for AI model routing
@@ -65,6 +66,7 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - [orchestration.md](./orchestration.md) - Detailed Docker/K8s orchestration docs
 - [snapshot-manager.md](./snapshot-manager.md) - EBS VolumeSnapshot patterns
 - [deployment-providers.md](./deployment-providers.md) - External deployment docs
+- [cache.md](./cache.md) - Distributed cache with Redis + in-memory fallback
 
 ## Common Service Patterns
 
@@ -493,4 +495,10 @@ checkout = await stripe.create_subscription_checkout(user, success_url, cancel_u
 # Use deployment manager
 from services.deployment.manager import DeploymentManager
 result = await DeploymentManager.deploy_project(path, "vercel", creds, config)
+
+# Use distributed cache (Redis + in-memory fallback)
+from services.cache_service import cache
+value = await cache.get("my_key")
+await cache.set("my_key", data, ttl=300)
+models = await cache.get_or_set("models", lambda: fetch_models(), ttl=600)
 ```

@@ -3,10 +3,12 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
+import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { refreshUserTheme } = useTheme();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -20,6 +22,9 @@ export default function Login() {
     try {
       const response = await authApi.login(formData.email, formData.password);
       localStorage.setItem('token', response.access_token);
+
+      // Load user's theme preference (non-blocking)
+      refreshUserTheme();
 
       toast.success('Logged in successfully!');
       setLoading(false);

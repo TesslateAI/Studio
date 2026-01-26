@@ -14,6 +14,8 @@ import { AgentCard, type MarketplaceItem, formatInstalls } from '../components/m
 import { creatorsApi, marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
+import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
+import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
 interface CreatorProfile {
   id: string;
@@ -37,6 +39,7 @@ export default function MarketplaceAuthor() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const { theme } = useTheme();
+  const { isAuthenticated } = useMarketplaceAuth();
   const [creator, setCreator] = useState<CreatorProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -113,10 +116,27 @@ export default function MarketplaceAuthor() {
     return null;
   }
 
+  // Generate SEO data
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://tesslate.com';
+  const breadcrumbData = generateBreadcrumbStructuredData([
+    { name: 'Marketplace', url: `${baseUrl}/marketplace` },
+    { name: creator.name || creator.username, url: `${baseUrl}/marketplace/creator/${userId}` },
+  ]);
+
   return (
-    <div
-      className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}
-    >
+    <>
+      <SEO
+        title={`${creator.name || creator.username} - Creator Profile`}
+        description={creator.bio || `View ${creator.name || creator.username}'s AI agents and templates on Tesslate Marketplace. ${creator.stats.extensions_count} extensions with ${formatInstalls(creator.stats.total_downloads)} total installs.`}
+        keywords={[creator.name || '', creator.username, 'AI agent creator', 'Tesslate', 'developer']}
+        image={creator.avatar_url || undefined}
+        url={`${baseUrl}/marketplace/creator/${userId}`}
+        author={creator.name || creator.username}
+        structuredData={breadcrumbData}
+      />
+      <div
+        className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}
+      >
       {/* Header */}
       <div
         className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}
@@ -298,7 +318,7 @@ export default function MarketplaceAuthor() {
         {creator.extensions.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {creator.extensions.map((item) => (
-              <AgentCard key={item.id} item={item} onInstall={handleInstall} />
+              <AgentCard key={item.id} item={item} onInstall={handleInstall} isAuthenticated={isAuthenticated} />
             ))}
           </div>
         ) : (
@@ -319,5 +339,6 @@ export default function MarketplaceAuthor() {
         )}
       </div>
     </div>
+    </>
   );
 }

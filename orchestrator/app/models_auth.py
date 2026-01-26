@@ -58,6 +58,7 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
 
     # User preferences
     diagram_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # Model for architecture diagrams
+    theme_preset: Mapped[Optional[str]] = mapped_column(String, nullable=True, default="default-dark")  # UI theme preset
 
     # Public profile fields
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Profile picture URL

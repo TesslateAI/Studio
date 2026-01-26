@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, Lightning, GitFork } from '@phosphor-icons/react';
+import { Check, Lightning, GitFork, Star } from '@phosphor-icons/react';
 import { useTheme } from '../../theme/ThemeContext';
 
 export interface MarketplaceItem {
@@ -41,6 +41,8 @@ export interface MarketplaceItem {
 interface AgentCardProps {
   item: MarketplaceItem;
   onInstall: (item: MarketplaceItem) => void;
+  /** If false, shows "Sign Up" CTA instead of install button */
+  isAuthenticated?: boolean;
 }
 
 // Format install/download counts like Raycast (1.2k, 1.2M)
@@ -55,7 +57,7 @@ export function formatInstalls(count: number): string {
   return count.toString();
 }
 
-export function AgentCard({ item, onInstall }: AgentCardProps) {
+export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCardProps) {
   const navigate = useNavigate();
   const { theme } = useTheme();
 
@@ -65,6 +67,11 @@ export function AgentCard({ item, onInstall }: AgentCardProps) {
 
   const handleInstall = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!isAuthenticated) {
+      // Redirect to register with return URL
+      navigate(`/register?redirect=${encodeURIComponent(`/marketplace/${item.slug}`)}`);
+      return;
+    }
     onInstall(item);
   };
 
@@ -174,6 +181,17 @@ export function AgentCard({ item, onInstall }: AgentCardProps) {
               </span>
             </button>
 
+            {/* Rating */}
+            {item.rating > 0 && (
+              <div className={`
+                flex items-center gap-1 text-xs
+                ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
+              `}>
+                <Star size={12} weight="fill" className="text-amber-400" />
+                <span>{item.rating.toFixed(1)}</span>
+              </div>
+            )}
+
             {/* Uses Count */}
             <div className={`
               flex items-center gap-1 text-xs
@@ -185,11 +203,18 @@ export function AgentCard({ item, onInstall }: AgentCardProps) {
           </div>
 
           {/* Install Button */}
-          {item.is_purchased ? (
+          {item.is_purchased && isAuthenticated ? (
             <span className="flex items-center gap-1 px-2.5 py-1 bg-green-500/15 text-green-500 rounded-lg text-xs font-medium">
               <Check size={12} weight="bold" />
               Installed
             </span>
+          ) : !isAuthenticated ? (
+            <button
+              onClick={handleInstall}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md"
+            >
+              Sign Up
+            </button>
           ) : (
             <button
               onClick={handleInstall}

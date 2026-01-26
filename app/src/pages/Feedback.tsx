@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { feedbackApi } from '../lib/api';
+import { feedbackApi, authApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
-import { MobileMenu } from '../components/ui';
+import { MobileMenu, UserDropdown } from '../components/ui';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { CreateFeedbackModal } from '../components/modals/CreateFeedbackModal';
 import { FeedbackModal } from '../components/modals/FeedbackModal';
@@ -50,9 +50,29 @@ export default function Feedback() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedFeedback, setSelectedFeedback] = useState<FeedbackPost | null>(null);
 
+  // User state for dropdown
+  const [userName, setUserName] = useState<string>('');
+  const [userCredits, setUserCredits] = useState<number>(0);
+  const [userTier, setUserTier] = useState<string>('free');
+
   useEffect(() => {
     loadFeedback();
   }, [filter, sortBy]);
+
+  // Fetch user data for dropdown
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const user = await authApi.getCurrentUser();
+        setUserName(user.name || user.username || 'there');
+        setUserCredits(user.credits_balance || 0);
+        setUserTier(user.subscription_tier || 'free');
+      } catch (e) {
+        console.error('Failed to fetch user data:', e);
+      }
+    };
+    fetchUserData();
+  }, []);
 
   const loadFeedback = async () => {
     try {
@@ -205,14 +225,23 @@ export default function Feedback() {
             </select>
           </div>
 
-          {/* New Feedback Button */}
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-          >
-            <Plus size={16} weight="bold" />
-            <span className="hidden md:inline">New Feedback</span>
-          </button>
+          <div className="flex items-center gap-3">
+            {/* New Feedback Button */}
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+            >
+              <Plus size={16} weight="bold" />
+              <span className="hidden md:inline">New Feedback</span>
+            </button>
+
+            {/* User Dropdown */}
+            <UserDropdown
+              userName={userName}
+              userCredits={userCredits}
+              userTier={userTier}
+            />
+          </div>
         </div>
 
         {/* Filter Tabs - Mobile */}

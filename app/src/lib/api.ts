@@ -76,17 +76,23 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     // If error is 401, redirect to login
-    // BUT: Don't log out for task polling errors - they might be transient during background operations
+    // BUT: Don't redirect for certain cases where 401 is expected
     if (error.response?.status === 401) {
       const isTasksApi = error.config?.url?.includes('/api/tasks/');
+      const isMarketplacePage = window.location.pathname.startsWith('/marketplace');
+      const isPreferencesApi = error.config?.url?.includes('/api/users/preferences');
 
-      if (!isTasksApi) {
+      // Skip redirect for:
+      // - Tasks API (transient errors during background operations)
+      // - Marketplace pages (public access, 401 is expected for unauthenticated)
+      // - Preferences API (optional, fails silently for unauthenticated)
+      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi) {
         localStorage.removeItem('token');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
         }
       }
-      // For tasks API, just reject the error without logging out
+      // For skipped cases, just reject the error without logging out/redirecting
     }
 
     // If error is 403 and mentions CSRF, refetch token and retry
@@ -136,10 +142,16 @@ export const authApi = {
     return response.data;
   },
 
-  // Logout
+  // Logout - clears both JWT token and cookie auth
   logout: async () => {
+    // Call both logout endpoints to clear all auth state
+    // JWT logout clears the Bearer token mechanism
+    // Cookie logout clears the httpOnly auth cookie (for OAuth users)
     try {
-      await api.post('/api/auth/jwt/logout');
+      await Promise.all([
+        api.post('/api/auth/jwt/logout').catch(() => {}),
+        api.post('/api/auth/cookie/logout').catch(() => {}),
+      ]);
     } catch {
       // Ignore errors, we're logging out anyway
     }
@@ -466,9 +478,31 @@ export const chatApi = {
 };
 
 export const marketplaceApi = {
-  // Get all marketplace agents
-  getAllAgents: async () => {
-    const response = await api.get('/api/marketplace/agents');
+  // Get all marketplace agents with optional filtering and request cancellation
+  getAllAgents: async (
+    params?: {
+      category?: string;
+      pricing_type?: string;
+      search?: string;
+      sort?: string;
+      page?: number;
+      limit?: number;
+    },
+    options?: { signal?: AbortSignal }
+  ) => {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.pricing_type) queryParams.append('pricing_type', params.pricing_type);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.sort) queryParams.append('sort', params.sort);
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+    const queryString = queryParams.toString();
+    const response = await api.get(
+      `/api/marketplace/agents${queryString ? `?${queryString}` : ''}`,
+      { signal: options?.signal }
+    );
     return response.data;
   },
 
@@ -808,7 +842,7 @@ export const usersApi = {
   },
 
   // Update user preferences
-  updatePreferences: async (data: { diagram_model?: string }) => {
+  updatePreferences: async (data: { diagram_model?: string; theme_preset?: string }) => {
     const response = await api.patch('/api/users/preferences', data);
     return response.data;
   },
@@ -822,6 +856,134 @@ export const usersApi = {
   // Update user profile
   updateProfile: async (data: UserProfileUpdate): Promise<UserProfile> => {
     const response = await api.patch('/api/users/profile', data);
+    return response.data;
+  },
+};
+
+// ============================================================================
+// Themes API (public, no auth required)
+// ============================================================================
+
+export interface ThemeColors {
+  primary: string;
+  primaryHover: string;
+  primaryRgb: string;
+  accent: string;
+  background: string;
+  surface: string;
+  surfaceHover: string;
+  text: string;
+  textMuted: string;
+  textSubtle: string;
+  border: string;
+  borderHover: string;
+  sidebar: {
+    background: string;
+    text: string;
+    border: string;
+    hover: string;
+    active: string;
+  };
+  input: {
+    background: string;
+    border: string;
+    borderFocus: string;
+    text: string;
+    placeholder: string;
+  };
+  scrollbar: {
+    thumb: string;
+    thumbHover: string;
+    track: string;
+  };
+  code: {
+    inlineBackground: string;
+    inlineText: string;
+    blockBackground: string;
+    blockBorder: string;
+    blockText: string;
+  };
+  status: {
+    error: string;
+    errorRgb: string;
+    success: string;
+    successRgb: string;
+    warning: string;
+    warningRgb: string;
+    info: string;
+    infoRgb: string;
+  };
+  shadow: {
+    small: string;
+    medium: string;
+    large: string;
+  };
+}
+
+export interface ThemeTypography {
+  fontFamily: string;
+  fontFamilyMono: string;
+  fontSizeBase: string;
+  lineHeight: string;
+}
+
+export interface ThemeSpacing {
+  radiusSmall: string;
+  radiusMedium: string;
+  radiusLarge: string;
+  radiusXl: string;
+}
+
+export interface ThemeAnimation {
+  durationFast: string;
+  durationNormal: string;
+  durationSlow: string;
+  easing: string;
+}
+
+export interface Theme {
+  id: string;
+  name: string;
+  mode: 'dark' | 'light';
+  author?: string;
+  version?: string;
+  description?: string;
+  colors: ThemeColors;
+  typography: ThemeTypography;
+  spacing: ThemeSpacing;
+  animation: ThemeAnimation;
+}
+
+export interface ThemeListItem {
+  id: string;
+  name: string;
+  mode: 'dark' | 'light';
+  author?: string;
+  description?: string;
+}
+
+export const themesApi = {
+  // List all themes (lightweight)
+  list: async (): Promise<ThemeListItem[]> => {
+    const response = await api.get('/api/themes');
+    return response.data;
+  },
+
+  // List all themes with full data
+  listFull: async (): Promise<Theme[]> => {
+    const response = await api.get('/api/themes/full');
+    return response.data;
+  },
+
+  // Get a single theme by ID
+  get: async (themeId: string): Promise<Theme> => {
+    const response = await api.get(`/api/themes/${themeId}`);
+    return response.data;
+  },
+
+  // Get default theme for a mode
+  getDefault: async (mode: 'dark' | 'light'): Promise<Theme> => {
+    const response = await api.get(`/api/themes/default/${mode}`);
     return response.data;
   },
 };

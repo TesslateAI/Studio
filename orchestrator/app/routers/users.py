@@ -15,10 +15,12 @@ router = APIRouter()
 
 class UserPreferencesUpdate(BaseModel):
     diagram_model: str | None = None
+    theme_preset: str | None = None
 
 
 class UserPreferencesResponse(BaseModel):
     diagram_model: str | None = None
+    theme_preset: str | None = None
 
 
 class UserProfileUpdate(BaseModel):
@@ -35,9 +37,10 @@ async def get_user_preferences(
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get user preferences including diagram generation model."""
+    """Get user preferences including diagram generation model and theme."""
     return UserPreferencesResponse(
-        diagram_model=current_user.diagram_model
+        diagram_model=current_user.diagram_model,
+        theme_preset=current_user.theme_preset or "default-dark"
     )
 
 
@@ -54,12 +57,18 @@ async def update_user_preferences(
             current_user.diagram_model = preferences.diagram_model
             logger.info(f"Updated diagram_model for user {current_user.id} to {preferences.diagram_model}")
 
+        # Update theme preset if provided
+        if preferences.theme_preset is not None:
+            current_user.theme_preset = preferences.theme_preset
+            logger.info(f"Updated theme_preset for user {current_user.id} to {preferences.theme_preset}")
+
         await db.commit()
         await db.refresh(current_user)
 
         return {
             "message": "Preferences updated successfully",
-            "diagram_model": current_user.diagram_model
+            "diagram_model": current_user.diagram_model,
+            "theme_preset": current_user.theme_preset or "default-dark"
         }
     except Exception as e:
         await db.rollback()

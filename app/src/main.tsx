@@ -1,10 +1,14 @@
 import { createRoot } from 'react-dom/client'
 import { PostHogProvider } from 'posthog-js/react'
+import { initPostHog } from './lib/posthog'
 import './theme/variables.css'
 import './index.css'
 import App from './App.tsx'
 
-// Easter egg for curious developers 👀
+// Initialize PostHog once at app startup (singleton pattern)
+const posthogClient = initPostHog()
+
+// Easter egg for curious developers
 console.log(
   '%c' +
   '\n' +
@@ -34,27 +38,10 @@ console.log(
   'color: #a855f7; font-size: 12px; font-style: italic;'
 );
 
-// PostHog configuration - only enable if API key is configured
-const posthogApiKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY
-const posthogHost = import.meta.env.VITE_PUBLIC_POSTHOG_HOST
-
-const options = {
-  api_host: posthogHost || 'https://app.posthog.com',
-  // Disable autocapture and other features when no key is configured
-  autocapture: !!posthogApiKey,
-  capture_pageview: !!posthogApiKey,
-  capture_pageleave: !!posthogApiKey,
-  disable_session_recording: !posthogApiKey,
-} as const
-
-// Render app - PostHogProvider handles missing apiKey gracefully
-// but we suppress the console warning by providing a dummy key when not configured
+// Render app - PostHogProvider uses the already initialized client (singleton)
 createRoot(document.getElementById('root')!).render(
-  posthogApiKey ? (
-    <PostHogProvider
-      apiKey={posthogApiKey}
-      options={options}
-    >
+  posthogClient ? (
+    <PostHogProvider client={posthogClient}>
       <App />
     </PostHogProvider>
   ) : (

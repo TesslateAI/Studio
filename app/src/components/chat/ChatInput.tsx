@@ -44,7 +44,7 @@ export function ChatInput({
   onSendMessage,
   projectFiles = [],
   projectName = 'project',
-  placeholder: _placeholder = 'Ask AI to build something... (Enter to send, Shift+Enter for new line, / for commands)',
+  placeholder: _placeholder = 'Ask AI to build something... (Enter or ⌃↵ to send, Shift+Enter for new line)',
   disabled = false,
   isExecuting = false,
   onStop,
@@ -285,12 +285,7 @@ export function ChatInput({
       )}
 
       {/* Two-row layout */}
-      <div className={`flex flex-col bg-[var(--surface)] border w-full ${isExpanded ? 'rounded-b-3xl' : 'rounded-3xl'} max-md:rounded-b-none ${
-        editMode === 'ask' ? 'border-gray-400' :
-        editMode === 'allow' ? 'border-orange-400' :
-        editMode === 'plan' ? 'border-green-400' :
-        'border-[var(--border-color)]'
-      }`}>
+      <div className={`flex flex-col bg-[var(--text)]/10 w-full ${isExpanded ? 'rounded-b-3xl' : 'rounded-3xl'} max-md:rounded-b-none`}>
         {/* First row: Growing textarea */}
         <div className="px-3 flex items-center border-b border-[var(--border-color)]" style={{ minHeight: '44px' }}>
           <textarea
@@ -381,7 +376,7 @@ export function ChatInput({
             onClick={isExecuting ? onStop : sendMessage}
             disabled={!isExecuting && (!message.trim() || disabled)}
             className="w-8 h-8 bg-[var(--text)]/10 hover:bg-[var(--text)]/20 rounded-lg border-2 border-[var(--border-color)] text-[var(--text)] flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            title={isExecuting ? "Stop execution" : "Send message (Enter)"}
+            title={isExecuting ? "Stop execution (Escape)" : "Send message (Enter or Ctrl+Enter)"}
           >
             {isExecuting ? (
               <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 256 256">

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { XCircle } from '@phosphor-icons/react';
+import { useTheme } from '../theme/ThemeContext';
+import { fetchCsrfToken } from '../lib/api';
 import toast from 'react-hot-toast';
 
 /**
@@ -11,6 +13,7 @@ import toast from 'react-hot-toast';
  */
 export default function OAuthLoginCallback() {
   const navigate = useNavigate();
+  const { refreshUserTheme } = useTheme();
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('Completing sign in...');
@@ -18,7 +21,7 @@ export default function OAuthLoginCallback() {
 
   useEffect(() => {
     handleOAuthCallback();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOAuthCallback = async () => {
     // Check for errors in URL
@@ -43,16 +46,29 @@ export default function OAuthLoginCallback() {
     if (accessToken) {
       // Store token and redirect to dashboard immediately
       localStorage.setItem('token', accessToken);
+      // Refresh CSRF token for the new session, then load theme
+      await fetchCsrfToken();
+      refreshUserTheme();
       navigate('/dashboard', { state: { fromLogin: true } });
       return;
     }
 
     // If no token and no error, the backend should have set a cookie
+    // Clear any stale bearer token so cookie auth takes precedence
+    // (stale tokens in localStorage interfere with cookie-based auth)
+    localStorage.removeItem('token');
+
     // Try to verify we're authenticated by checking if we can access a protected endpoint
     try {
+      // Refresh CSRF token first - it may have changed with the new session
+      await fetchCsrfToken();
+
       // Import api from lib to use configured axios instance with credentials
       const { authApi } = await import('../lib/api');
       await authApi.getCurrentUser();
+
+      // Load user's theme preference (non-blocking)
+      refreshUserTheme();
 
       // Successfully authenticated via cookie - redirect immediately
       navigate('/dashboard', { state: { fromLogin: true } });

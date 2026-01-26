@@ -344,11 +344,16 @@ class DockerOrchestrator(BaseOrchestrator):
                 for line in stdout.decode().strip().split("\n"):
                     if line:
                         container_info = json.loads(line)
-                        containers_status[container_info["Service"]] = {
+                        service_name = container_info["Service"]
+                        is_running = container_info["State"] == "running"
+                        # Include URL for running containers so frontend doesn't re-start them
+                        container_url = f"http://{project_slug}-{service_name}.localhost" if is_running else None
+                        containers_status[service_name] = {
                             "name": container_info["Name"],
                             "state": container_info["State"],
                             "status": container_info["Status"],
-                            "running": container_info["State"] == "running",
+                            "running": is_running,
+                            "url": container_url,
                         }
 
             all_running = (

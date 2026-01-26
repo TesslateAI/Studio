@@ -30,6 +30,7 @@ Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 - `auth.py` (222 lines) - Pod access verification, custom auth
 - `users.py` (128 lines) - User profile management
 - `agents.py` (108 lines) - User agent management
+- `themes.py` - Public theme API (no auth required)
 - `webhooks.py` (52 lines) - Webhook endpoints
 - `referrals.py` (46 lines) - Referral program
 
@@ -102,6 +103,35 @@ async def websocket_endpoint(websocket: WebSocket, id: str):
     except WebSocketDisconnect:
         pass
 ```
+
+### Public and Optional Auth Patterns
+
+Some endpoints are publicly accessible (no auth required) or support optional authentication:
+
+```python
+# Public endpoint (themes, marketplace browsing)
+@router.get("/themes")
+async def get_themes(db: AsyncSession = Depends(get_db)):
+    # No current_user dependency - anyone can access
+    return await get_all_themes(db)
+
+# Optional auth - works for both authenticated and anonymous users
+@router.get("/marketplace/agents")
+async def get_agents(
+    current_user: Optional[User] = Depends(current_optional_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # current_user is None for anonymous, User for authenticated
+    agents = await get_public_agents(db)
+    if current_user:
+        # Add user-specific data (purchased, in library, etc.)
+        agents = add_user_context(agents, current_user)
+    return agents
+```
+
+**Public Routers:**
+- `themes.py` - Theme presets (needed before login for UI)
+- `marketplace.py` - Agent browsing (public access, optional auth for user context)
 
 ### Authentication Patterns
 
@@ -410,5 +440,6 @@ See individual router documentation files for detailed examples:
 - `projects.md` - Project management workflows
 - `chat.md` - Agent chat streaming
 - `marketplace.md` - Agent publishing and purchasing
+- `themes.md` - Theme API (public endpoints)
 - `deployments.md` - External deployment workflows
 - `billing.md` - Subscription and payment flows

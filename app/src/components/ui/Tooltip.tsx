@@ -4,12 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 interface TooltipProps {
   content: string;
+  shortcut?: string;
   children: ReactNode;
   side?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;
 }
 
-export function Tooltip({ content, children, side = 'right', delay = 300 }: TooltipProps) {
+export function Tooltip({ content, shortcut, children, side = 'right', delay = 300 }: TooltipProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -112,8 +113,11 @@ export function Tooltip({ content, children, side = 'right', delay = 300 }: Tool
             />
           )}
 
-          <div className="bg-black rounded-md px-2.5 py-1.5 shadow-2xl">
+          <div className="bg-black rounded-md px-2.5 py-1.5 shadow-2xl flex items-center gap-3">
             <span className="text-xs font-medium text-white">{content}</span>
+            {shortcut && (
+              <span className="text-xs text-white/50 font-mono">{shortcut}</span>
+            )}
           </div>
 
           {/* Arrow for other sides */}

@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useInView } from 'react-intersection-observer';
+import { debounce } from 'lodash';
 import {
   MagnifyingGlass,
   Cpu,
@@ -14,28 +16,120 @@ import {
   Moon,
   Gear,
   SignOut,
-  Command,
+  X,
+  Funnel,
 } from '@phosphor-icons/react';
-import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { MobileMenu } from '../components/ui';
-import { AgentCard, FeaturedCard, type MarketplaceItem } from '../components/marketplace';
-import { marketplaceApi } from '../lib/api';
+import { MobileMenu, UserDropdown } from '../components/ui';
+import { AgentCard, FeaturedCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
+import { marketplaceApi, authApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
+import { SEO, generateMarketplaceStructuredData } from '../components/SEO';
+import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
 type ItemType = 'agent' | 'base' | 'tool' | 'integration';
-type SortOption = 'featured' | 'popular' | 'newest' | 'name';
+type SortOption = 'featured' | 'popular' | 'newest' | 'name' | 'rating' | 'price_asc' | 'price_desc';
+type PricingFilter = 'all' | 'free' | 'paid';
+
+const ITEMS_PER_PAGE = 20;
+
+// Category definitions with descriptions for category tiles
+const categories = [
+  { id: 'builder', label: 'Builder', description: 'General-purpose AI coding assistants' },
+  { id: 'frontend', label: 'Frontend', description: 'Build beautiful user interfaces' },
+  { id: 'fullstack', label: 'Fullstack', description: 'End-to-end web development' },
+  { id: 'backend', label: 'Backend', description: 'APIs, databases, and servers' },
+  { id: 'data', label: 'Data', description: 'Analytics, ML, and visualization' },
+  { id: 'devops', label: 'DevOps', description: 'CI/CD and infrastructure' },
+  { id: 'mobile', label: 'Mobile', description: 'iOS and Android apps' },
+];
 
 export default function Marketplace() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { theme, toggleTheme } = useTheme();
-  const [items, setItems] = useState<MarketplaceItem[]>([]);
-  const [filteredItems, setFilteredItems] = useState<MarketplaceItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedItemType, setSelectedItemType] = useState<ItemType>('agent');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<SortOption>('featured');
+  const { isAuthenticated } = useMarketplaceAuth();
+
+  // Refs
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // State - Filters
+  const [selectedItemType, setSelectedItemType] = useState<ItemType>(
+    (searchParams.get('type') as ItemType) || 'agent'
+  );
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
+  const [sortBy, setSortBy] = useState<SortOption>(
+    (searchParams.get('sort') as SortOption) || 'featured'
+  );
+  const [pricingFilter, setPricingFilter] = useState<PricingFilter>(
+    (searchParams.get('pricing') as PricingFilter) || 'all'
+  );
   const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+
+  // State - Data
+  const [items, setItems] = useState<MarketplaceItem[]>([]);
+  const [basesCache, setBasesCache] = useState<MarketplaceItem[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+
+  // State - Loading (isolated for non-blocking UI)
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [filtering, setFiltering] = useState(false);
+
+  // State - User (for dropdown)
+  const [userName, setUserName] = useState<string>('');
+  const [userCredits, setUserCredits] = useState<number>(0);
+  const [userTier, setUserTier] = useState<string>('free');
+
+  // Intersection observer for infinite scroll
+  const { ref: loadMoreRef, inView } = useInView({
+    threshold: 0,
+    rootMargin: '100px',
+  });
+
+  // "/" keyboard shortcut to focus search (like GitHub, Slack, etc.)
+  // Using native event listener because useHotkeys doesn't reliably handle "/" key
+  useEffect(() => {
+    const handleSlashKey = (e: KeyboardEvent) => {
+      // Don't trigger if focused on form element
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      if (e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleSlashKey);
+    return () => document.removeEventListener('keydown', handleSlashKey);
+  }, []);
+
+  // Fetch user data for dropdown (only when authenticated)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const fetchUserData = async () => {
+      try {
+        const user = await authApi.getCurrentUser();
+        setUserName(user.name || user.username || 'there');
+        setUserCredits(user.credits_balance || 0);
+        setUserTier(user.subscription_tier || 'free');
+      } catch (e) {
+        console.error('Failed to fetch user data:', e);
+      }
+    };
+    fetchUserData();
+  }, [isAuthenticated]);
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -99,51 +193,127 @@ export default function Marketplace() {
     { id: 'popular', label: 'Most Popular' },
     { id: 'newest', label: 'Recently Added' },
     { id: 'name', label: 'Name A-Z' },
+    { id: 'rating', label: 'Highest Rated' },
+    { id: 'price_asc', label: 'Price: Low to High' },
+    { id: 'price_desc', label: 'Price: High to Low' },
   ];
 
-  useEffect(() => {
-    loadMarketplaceItems();
-  }, []);
+  const pricingOptions: { id: PricingFilter; label: string }[] = [
+    { id: 'all', label: 'All Prices' },
+    { id: 'free', label: 'Free Only' },
+    { id: 'paid', label: 'Paid Only' },
+  ];
 
-  useEffect(() => {
-    filterAndSortItems();
-  }, [items, selectedItemType, searchQuery, sortBy]);
+  // Load items with server-side filtering
+  const loadItems = useCallback(
+    async (params: {
+      itemType: ItemType;
+      category: string;
+      search: string;
+      sort: SortOption;
+      pricing: PricingFilter;
+      pageNum: number;
+      append?: boolean;
+    }) => {
+      const { itemType, category, search, sort, pricing, pageNum, append = false } = params;
 
-  const loadMarketplaceItems = async () => {
-    try {
-      const [agentsData, basesData] = await Promise.all([
-        marketplaceApi.getAllAgents(),
-        marketplaceApi.getAllBases(),
-      ]);
+      // Cancel any in-flight request
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
 
-      const agents = (agentsData.agents || []).map((agent: Record<string, unknown>) => ({
-        ...agent,
-        item_type: 'agent' as ItemType,
-      }));
+      // Set appropriate loading state
+      if (pageNum === 1 && !append) {
+        if (initialLoading) {
+          // Keep initial loading
+        } else {
+          setFiltering(true);
+        }
+      } else {
+        setLoadingMore(true);
+      }
 
-      const bases = (basesData.bases || []).map((base: Record<string, unknown>) => ({
-        ...base,
-        item_type: 'base' as ItemType,
-      }));
+      try {
+        let data: MarketplaceItem[];
 
-      setItems([...agents, ...bases]);
-    } catch (error) {
-      console.error('Failed to load marketplace:', error);
-      toast.error('Failed to load marketplace');
-    } finally {
-      setLoading(false);
+        if (itemType === 'agent') {
+          // Server-side filtering for agents
+          const result = await marketplaceApi.getAllAgents(
+            {
+              category: category !== 'all' ? category : undefined,
+              pricing_type: pricing !== 'all' ? pricing : undefined,
+              search: search || undefined,
+              sort,
+              page: pageNum,
+              limit: ITEMS_PER_PAGE,
+            },
+            { signal: abortControllerRef.current.signal }
+          );
+          data = (result.agents || []).map((agent: Record<string, unknown>) => ({
+            ...agent,
+            item_type: 'agent' as ItemType,
+          }));
+
+          // Check if there are more items
+          setHasMore(data.length === ITEMS_PER_PAGE);
+        } else if (itemType === 'base') {
+          // Bases use client-side filtering (API doesn't support same params)
+          if (basesCache.length === 0) {
+            const result = await marketplaceApi.getAllBases();
+            const bases = (result.bases || []).map((base: Record<string, unknown>) => ({
+              ...base,
+              item_type: 'base' as ItemType,
+            }));
+            setBasesCache(bases);
+            data = filterBasesClientSide(bases, { category, search, sort, pricing });
+          } else {
+            data = filterBasesClientSide(basesCache, { category, search, sort, pricing });
+          }
+          setHasMore(false); // Bases loaded all at once
+        } else {
+          // Tools and integrations - coming soon
+          data = [];
+          setHasMore(false);
+        }
+
+        // Update items
+        if (append && pageNum > 1) {
+          setItems((prev) => [...prev, ...data]);
+        } else {
+          setItems(data);
+        }
+      } catch (err) {
+        // Silently ignore cancelled requests
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
+        console.error('Failed to load marketplace:', err);
+        toast.error('Failed to load marketplace');
+      } finally {
+        setInitialLoading(false);
+        setLoadingMore(false);
+        setFiltering(false);
+      }
+    },
+    [basesCache, initialLoading]
+  );
+
+  // Client-side filtering for bases (until backend supports it)
+  const filterBasesClientSide = (
+    bases: MarketplaceItem[],
+    filters: { category: string; search: string; sort: SortOption; pricing: PricingFilter }
+  ): MarketplaceItem[] => {
+    let filtered = [...bases];
+
+    // Category filter
+    if (filters.category !== 'all') {
+      filtered = filtered.filter(
+        (item) => item.category?.toLowerCase() === filters.category.toLowerCase()
+      );
     }
-  };
 
-  const filterAndSortItems = () => {
-    let filtered = [...items];
-
-    // Filter by item type
-    filtered = filtered.filter((item) => item.item_type === selectedItemType);
-
-    // Filter by search query
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+    // Search filter
+    if (filters.search) {
+      const query = filters.search.toLowerCase();
       filtered = filtered.filter(
         (item) =>
           item.name.toLowerCase().includes(query) ||
@@ -152,8 +322,15 @@ export default function Marketplace() {
       );
     }
 
-    // Sort items
-    switch (sortBy) {
+    // Pricing filter
+    if (filters.pricing === 'free') {
+      filtered = filtered.filter((item) => item.pricing_type === 'free' || item.price === 0);
+    } else if (filters.pricing === 'paid') {
+      filtered = filtered.filter((item) => item.pricing_type !== 'free' && item.price > 0);
+    }
+
+    // Sort
+    switch (filters.sort) {
       case 'featured':
         filtered.sort((a, b) => (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0));
         break;
@@ -163,16 +340,118 @@ export default function Marketplace() {
         );
         break;
       case 'newest':
-        // Assuming newer items have higher IDs or we'd need created_at
         filtered.sort((a, b) => b.id.localeCompare(a.id));
         break;
       case 'name':
         filtered.sort((a, b) => a.name.localeCompare(b.name));
         break;
+      case 'rating':
+        filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+        break;
+      case 'price_asc':
+        filtered.sort((a, b) => (a.price || 0) - (b.price || 0));
+        break;
+      case 'price_desc':
+        filtered.sort((a, b) => (b.price || 0) - (a.price || 0));
+        break;
     }
 
-    setFilteredItems(filtered);
+    return filtered;
   };
+
+  // Debounced search
+  const debouncedLoadItems = useMemo(
+    () =>
+      debounce(
+        (params: {
+          itemType: ItemType;
+          category: string;
+          search: string;
+          sort: SortOption;
+          pricing: PricingFilter;
+        }) => {
+          setPage(1);
+          loadItems({ ...params, pageNum: 1 });
+        },
+        300
+      ),
+    [loadItems]
+  );
+
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      debouncedLoadItems.cancel();
+      abortControllerRef.current?.abort();
+    };
+  }, [debouncedLoadItems]);
+
+  // Initial load
+  useEffect(() => {
+    loadItems({
+      itemType: selectedItemType,
+      category: 'all', // Main page always shows all categories
+      search: searchQuery,
+      sort: sortBy,
+      pricing: pricingFilter,
+      pageNum: 1,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle filter changes (with debounce for search)
+  useEffect(() => {
+    if (initialLoading) return;
+
+    // Update URL params (category is handled by dedicated category pages)
+    const params = new URLSearchParams();
+    if (selectedItemType !== 'agent') params.set('type', selectedItemType);
+    if (searchQuery) params.set('search', searchQuery);
+    if (sortBy !== 'featured') params.set('sort', sortBy);
+    if (pricingFilter !== 'all') params.set('pricing', pricingFilter);
+    setSearchParams(params, { replace: true });
+
+    // Debounce search, immediate for others
+    if (searchQuery) {
+      debouncedLoadItems({
+        itemType: selectedItemType,
+        category: 'all', // Main page always shows all categories
+        search: searchQuery,
+        sort: sortBy,
+        pricing: pricingFilter,
+      });
+    } else {
+      debouncedLoadItems.cancel();
+      setPage(1);
+      loadItems({
+        itemType: selectedItemType,
+        category: 'all', // Main page always shows all categories
+        search: searchQuery,
+        sort: sortBy,
+        pricing: pricingFilter,
+        pageNum: 1,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedItemType, searchQuery, sortBy, pricingFilter]);
+
+  // Infinite scroll - load more when intersection triggers
+  useEffect(() => {
+    if (inView && hasMore && !loadingMore && !initialLoading && !filtering) {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      loadItems({
+        itemType: selectedItemType,
+        category: 'all', // Main page always shows all categories
+        search: searchQuery,
+        sort: sortBy,
+        pricing: pricingFilter,
+        pageNum: nextPage,
+        append: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inView, hasMore, loadingMore, initialLoading, filtering]);
 
   const handleInstall = async (item: MarketplaceItem) => {
     if (item.is_purchased) {
@@ -181,7 +460,6 @@ export default function Marketplace() {
     }
 
     if (!item.is_active) {
-      // Button already shows "Soon" - no toast needed
       return;
     }
 
@@ -203,19 +481,29 @@ export default function Marketplace() {
     }
   };
 
-  const featuredItems = filteredItems.filter((item) => item.is_featured);
-  const regularItems = filteredItems.filter((item) => !item.is_featured);
+  // Handle item type change
+  const handleItemTypeChange = (type: ItemType) => {
+    setSelectedItemType(type);
+    setPage(1);
+  };
 
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-[var(--bg)]">
-        <LoadingSpinner message="Loading marketplace..." size={80} />
-      </div>
-    );
-  }
+
+  // Separate featured and regular items
+  const featuredItems = items.filter((item) => item.is_featured);
+  const regularItems = items.filter((item) => !item.is_featured);
+
+  // Check if any filters are active
+  const hasActiveFilters = pricingFilter !== 'all' || searchQuery !== '';
 
   return (
     <>
+      <SEO
+        title="AI Agents & Templates Marketplace"
+        description="Discover AI-powered coding agents, project templates, and developer tools. Build faster with pre-built solutions from the Tesslate Marketplace."
+        keywords={['AI agents', 'coding agents', 'project templates', 'developer tools', 'code generation', 'web development', 'Tesslate']}
+        url={typeof window !== 'undefined' ? window.location.href : undefined}
+        structuredData={generateMarketplaceStructuredData()}
+      />
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
 
       <div className="h-screen overflow-y-auto bg-[var(--bg)]">
@@ -232,38 +520,48 @@ export default function Marketplace() {
                 Marketplace
               </h1>
 
-              {/* Mobile hamburger */}
-              <button
-                onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-                className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
-              >
-                <svg
-                  className="w-6 h-6 text-[var(--text)]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 6h16M4 12h16M4 18h16"
+              <div className="flex items-center gap-3">
+                {/* User Dropdown - Only show when authenticated */}
+                {isAuthenticated && (
+                  <UserDropdown
+                    userName={userName}
+                    userCredits={userCredits}
+                    userTier={userTier}
                   />
-                </svg>
-              </button>
+                )}
+
+                {/* Mobile hamburger */}
+                <button
+                  onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+                  className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+                >
+                  <svg
+                    className="w-6 h-6 text-[var(--text)]"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 6h16M4 12h16M4 18h16"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
 
-            {/* Search Bar - Raycast Style */}
+            {/* Search Bar */}
             <div className="py-6">
               <div
                 className={`
                 relative max-w-2xl mx-auto flex items-center gap-3 px-4 py-3 rounded-xl border
                 ${
                   theme === 'light'
-                    ? 'bg-black/5 border-black/10 focus-within:border-[var(--primary)] focus-within:bg-white'
-                    : 'bg-white/5 border-white/10 focus-within:border-[var(--primary)] focus-within:bg-white/10'
+                    ? 'bg-black/5 border-black/10'
+                    : 'bg-white/5 border-white/10'
                 }
-                transition-all
               `}
               >
                 <MagnifyingGlass
@@ -271,37 +569,49 @@ export default function Marketplace() {
                   className={theme === 'light' ? 'text-black/40' : 'text-white/40'}
                 />
                 <input
+                  ref={searchInputRef}
                   type="text"
-                  placeholder="Search extensions..."
+                  placeholder="Search extensions... (press / to focus)"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className={`
-                    flex-1 bg-transparent outline-none text-sm
+                    flex-1 bg-transparent outline-none focus-visible:outline-none text-sm
                     ${theme === 'light' ? 'text-black placeholder-black/40' : 'text-white placeholder-white/40'}
                   `}
                 />
-                <div
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className={`
+                      p-1 rounded-full transition-colors
+                      ${theme === 'light' ? 'hover:bg-black/10 text-black/40' : 'hover:bg-white/10 text-white/40'}
+                    `}
+                    aria-label="Clear search"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+                <kbd
                   className={`
-                  hidden sm:flex items-center gap-1 px-2 py-1 rounded text-xs
+                  hidden sm:flex items-center gap-1 px-2 py-1 rounded text-xs font-mono
                   ${theme === 'light' ? 'bg-black/10 text-black/50' : 'bg-white/10 text-white/50'}
                 `}
                 >
-                  <Command size={12} />
-                  <span>K</span>
-                </div>
+                  /
+                </kbd>
               </div>
             </div>
 
             {/* Tab Navigation */}
-            <div className="flex items-center justify-between pb-4">
+            <div className="flex items-center justify-between pb-4 gap-4">
               {/* Item Type Tabs */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 overflow-x-auto">
                 {itemTypes.map((type) => (
                   <button
                     key={type.id}
-                    onClick={() => setSelectedItemType(type.id)}
+                    onClick={() => handleItemTypeChange(type.id)}
                     className={`
-                      flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                      flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap
                       ${
                         selectedItemType === type.id
                           ? 'bg-[var(--primary)] text-white'
@@ -317,119 +627,315 @@ export default function Marketplace() {
                 ))}
               </div>
 
-              {/* Sort Dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSortDropdown(!showSortDropdown)}
-                  className={`
-                    flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all
-                    ${
-                      theme === 'light'
-                        ? 'text-black/60 hover:text-black hover:bg-black/5'
-                        : 'text-white/60 hover:text-white hover:bg-white/5'
-                    }
-                  `}
-                >
-                  <span>{sortOptions.find((o) => o.id === sortBy)?.label}</span>
-                  <CaretDown size={14} />
-                </button>
-
-                {showSortDropdown && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowSortDropdown(false)}
-                    />
-                    <div
-                      className={`
-                      absolute right-0 top-full mt-2 py-2 rounded-xl border shadow-xl z-50 min-w-[160px]
+              {/* Filter & Sort */}
+              <div className="flex items-center gap-2">
+                {/* Filter Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowFilterDropdown(!showFilterDropdown)}
+                    className={`
+                      flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all
+                      ${hasActiveFilters ? 'bg-[var(--primary)]/10 text-[var(--primary)]' : ''}
                       ${
                         theme === 'light'
-                          ? 'bg-white border-black/10'
-                          : 'bg-[#1a1a1c] border-white/10'
+                          ? 'text-black/60 hover:text-black hover:bg-black/5'
+                          : 'text-white/60 hover:text-white hover:bg-white/5'
                       }
                     `}
-                    >
-                      {sortOptions.map((option) => (
-                        <button
-                          key={option.id}
-                          onClick={() => {
-                            setSortBy(option.id);
-                            setShowSortDropdown(false);
-                          }}
-                          className={`
-                            w-full px-4 py-2 text-left text-sm transition-colors
-                            ${
-                              sortBy === option.id
-                                ? 'text-[var(--primary)]'
-                                : theme === 'light'
-                                  ? 'text-black/70 hover:bg-black/5'
-                                  : 'text-white/70 hover:bg-white/5'
-                            }
-                          `}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                  >
+                    <Funnel size={16} />
+                    <span className="hidden sm:inline">Filter</span>
+                    {hasActiveFilters && (
+                      <span className="w-2 h-2 rounded-full bg-[var(--primary)]" />
+                    )}
+                  </button>
+
+                  {showFilterDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowFilterDropdown(false)}
+                      />
+                      <div
+                        className={`
+                        absolute right-0 top-full mt-2 py-3 px-4 rounded-xl border shadow-xl z-50 min-w-[200px]
+                        ${
+                          theme === 'light'
+                            ? 'bg-white border-black/10'
+                            : 'bg-[#1a1a1c] border-white/10'
+                        }
+                      `}
+                      >
+                        <div className="mb-3">
+                          <label
+                            className={`text-xs font-medium uppercase tracking-wider ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
+                          >
+                            Price
+                          </label>
+                          <div className="mt-2 space-y-1">
+                            {pricingOptions.map((option) => (
+                              <button
+                                key={option.id}
+                                onClick={() => {
+                                  setPricingFilter(option.id);
+                                }}
+                                className={`
+                                  w-full px-3 py-2 text-left text-sm rounded-lg transition-colors
+                                  ${
+                                    pricingFilter === option.id
+                                      ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
+                                      : theme === 'light'
+                                        ? 'text-black/70 hover:bg-black/5'
+                                        : 'text-white/70 hover:bg-white/5'
+                                  }
+                                `}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {hasActiveFilters && (
+                          <button
+                            onClick={() => {
+                              setPricingFilter('all');
+                              setSearchQuery('');
+                              setShowFilterDropdown(false);
+                            }}
+                            className={`
+                              w-full px-3 py-2 text-sm rounded-lg border mt-2
+                              ${
+                                theme === 'light'
+                                  ? 'border-black/10 text-black/60 hover:bg-black/5'
+                                  : 'border-white/10 text-white/60 hover:bg-white/5'
+                              }
+                            `}
+                          >
+                            Clear All Filters
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Sort Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowSortDropdown(!showSortDropdown)}
+                    className={`
+                      flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all
+                      ${
+                        theme === 'light'
+                          ? 'text-black/60 hover:text-black hover:bg-black/5'
+                          : 'text-white/60 hover:text-white hover:bg-white/5'
+                      }
+                    `}
+                  >
+                    <span className="hidden sm:inline">
+                      {sortOptions.find((o) => o.id === sortBy)?.label}
+                    </span>
+                    <CaretDown size={14} />
+                  </button>
+
+                  {showSortDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowSortDropdown(false)}
+                      />
+                      <div
+                        className={`
+                        absolute right-0 top-full mt-2 py-2 rounded-xl border shadow-xl z-50 min-w-[180px]
+                        ${
+                          theme === 'light'
+                            ? 'bg-white border-black/10'
+                            : 'bg-[#1a1a1c] border-white/10'
+                        }
+                      `}
+                      >
+                        {sortOptions.map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => {
+                              setSortBy(option.id);
+                              setShowSortDropdown(false);
+                            }}
+                            className={`
+                              w-full px-4 py-2 text-left text-sm transition-colors
+                              ${
+                                sortBy === option.id
+                                  ? 'text-[var(--primary)]'
+                                  : theme === 'light'
+                                    ? 'text-black/70 hover:bg-black/5'
+                                    : 'text-white/70 hover:bg-white/5'
+                              }
+                            `}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+
           </div>
         </div>
 
         {/* Main Content */}
-        <div className="max-w-6xl mx-auto px-6 md:px-12 py-8">
-          {/* Featured Section */}
-          {featuredItems.length > 0 && (
-            <section className="mb-12">
-              <h2
-                className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-              >
-                Featured
-              </h2>
-              <div className="space-y-4">
-                {featuredItems.slice(0, 3).map((item) => (
-                  <FeaturedCard key={item.id} item={item} onInstall={handleInstall} />
-                ))}
-              </div>
-            </section>
+        <div className={`max-w-6xl mx-auto px-6 md:px-12 py-8 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
+          {/* Initial Loading - Skeleton */}
+          {initialLoading ? (
+            <>
+              {/* Featured skeleton */}
+              <section className="mb-12">
+                <div className={`h-6 w-32 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`} />
+                <div className="space-y-4">
+                  <SkeletonCard variant="featured" />
+                  <SkeletonCard variant="featured" />
+                </div>
+              </section>
+
+              {/* Grid skeleton */}
+              <section>
+                <div className={`h-6 w-40 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`} />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <SkeletonCard key={i} />
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : (
+            <>
+              {/* Featured Section */}
+              {featuredItems.length > 0 && (
+                <section className="mb-12">
+                  <h2
+                    className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                  >
+                    Featured
+                  </h2>
+                  <div className="space-y-4">
+                    {featuredItems.slice(0, 3).map((item) => (
+                      <FeaturedCard key={item.id} item={item} onInstall={handleInstall} isAuthenticated={isAuthenticated} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Browse by Category Section */}
+              <section className="mb-12">
+                <h2
+                  className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                >
+                  Browse by Category
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => navigate(`/marketplace/category/${cat.id}`)}
+                      className={`
+                        p-4 rounded-xl border text-left transition-all group
+                        ${
+                          theme === 'light'
+                            ? 'bg-white border-black/10 hover:border-[var(--primary)] hover:shadow-lg'
+                            : 'bg-white/5 border-white/10 hover:border-[var(--primary)] hover:bg-white/10'
+                        }
+                      `}
+                    >
+                      <div
+                        className={`font-medium text-sm ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                      >
+                        {cat.label}
+                      </div>
+                      <div
+                        className={`text-xs mt-1 line-clamp-2 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
+                      >
+                        {cat.description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {/* All Items Section */}
+              <section>
+                <div className="flex items-center justify-between mb-6">
+                  <h2
+                    className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                  >
+                    {searchQuery
+                      ? `Results for "${searchQuery}"`
+                      : `All ${itemTypes.find((t) => t.id === selectedItemType)?.label}`}
+                  </h2>
+                  {!searchQuery && (
+                    <button
+                      onClick={() => navigate(`/marketplace/browse/${selectedItemType}`)}
+                      className={`
+                        flex items-center gap-1 text-sm font-medium transition-colors
+                        ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}
+                      `}
+                    >
+                      See All
+                      <span className="text-lg">→</span>
+                    </button>
+                  )}
+                </div>
+
+                {regularItems.length > 0 || loadingMore ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {regularItems.map((item) => (
+                        <AgentCard key={item.id} item={item} onInstall={handleInstall} isAuthenticated={isAuthenticated} />
+                      ))}
+                      {/* Loading more skeletons */}
+                      {loadingMore &&
+                        Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`loading-${i}`} />)}
+                    </div>
+
+                    {/* Infinite scroll trigger */}
+                    {hasMore && !loadingMore && (
+                      <div ref={loadMoreRef} className="h-10 mt-4" />
+                    )}
+                  </>
+                ) : (
+                  <div
+                    className={`
+                    text-center py-16 rounded-2xl
+                    ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
+                  `}
+                  >
+                    <Package
+                      size={48}
+                      className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+                    />
+                    <p className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>
+                      {searchQuery
+                        ? `No ${selectedItemType}s found matching "${searchQuery}"`
+                        : `No ${selectedItemType}s available yet`}
+                    </p>
+                    {hasActiveFilters && (
+                      <button
+                        onClick={() => {
+                          setPricingFilter('all');
+                          setSearchQuery('');
+                        }}
+                        className="mt-4 px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)] transition-colors"
+                      >
+                        Clear Filters
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
+            </>
           )}
-
-          {/* All Extensions Section */}
-          <section>
-            <h2
-              className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-            >
-              All {itemTypes.find((t) => t.id === selectedItemType)?.label}
-            </h2>
-
-            {regularItems.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {regularItems.map((item) => (
-                  <AgentCard key={item.id} item={item} onInstall={handleInstall} />
-                ))}
-              </div>
-            ) : (
-              <div
-                className={`
-                text-center py-16 rounded-2xl
-                ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-              `}
-              >
-                <Package
-                  size={48}
-                  className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
-                />
-                <p className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>
-                  {searchQuery
-                    ? `No ${selectedItemType}s found matching "${searchQuery}"`
-                    : `No ${selectedItemType}s available yet`}
-                </p>
-              </div>
-            )}
-          </section>
         </div>
       </div>
     </>

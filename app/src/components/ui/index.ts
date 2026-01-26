@@ -20,3 +20,6 @@ export type { MarkerEditorHandle } from './MarkerEditor';
 export { MarkerPill } from './MarkerPill';
 export { MarkerPalette, AVAILABLE_MARKERS } from './MarkerPalette';
 export type { Marker } from './MarkerPalette';
+export { HelpButton } from './HelpButton';
+export { UserDropdown } from './UserDropdown';
+export { HelpMenu } from './HelpMenu';

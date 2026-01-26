@@ -7,9 +7,11 @@ import { type MarketplaceItem, formatInstalls } from './AgentCard';
 interface FeaturedCardProps {
   item: MarketplaceItem;
   onInstall: (item: MarketplaceItem) => void;
+  /** If false, shows "Sign Up" CTA instead of install button */
+  isAuthenticated?: boolean;
 }
 
-export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
+export function FeaturedCard({ item, onInstall, isAuthenticated = true }: FeaturedCardProps) {
   const navigate = useNavigate();
   const { theme } = useTheme();
 
@@ -19,6 +21,11 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
 
   const handleInstall = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!isAuthenticated) {
+      // Redirect to register with return URL
+      navigate(`/register?redirect=${encodeURIComponent(`/marketplace/${item.slug}`)}`);
+      return;
+    }
     onInstall(item);
   };
 
@@ -139,6 +146,27 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
             {/* Separator */}
             <span className={theme === 'light' ? 'text-black/20' : 'text-white/20'}>•</span>
 
+            {/* Rating */}
+            {item.rating > 0 && (
+              <>
+                <div
+                  className={`
+                    flex items-center gap-1.5 text-xs sm:text-sm
+                    ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
+                  `}
+                >
+                  <Star size={14} weight="fill" className="text-amber-400" />
+                  <span>{item.rating.toFixed(1)}</span>
+                  {item.reviews_count > 0 && (
+                    <span className={theme === 'light' ? 'text-black/30' : 'text-white/30'}>
+                      ({item.reviews_count})
+                    </span>
+                  )}
+                </div>
+                <span className={theme === 'light' ? 'text-black/20' : 'text-white/20'}>•</span>
+              </>
+            )}
+
             {/* Uses Count */}
             <div
               className={`
@@ -152,11 +180,18 @@ export function FeaturedCard({ item, onInstall }: FeaturedCardProps) {
           </div>
 
           {/* Install Button */}
-          {item.is_purchased ? (
+          {item.is_purchased && isAuthenticated ? (
             <span className="flex items-center gap-1.5 px-4 py-2 bg-green-500/15 text-green-500 rounded-xl text-sm font-medium">
               <Check size={16} weight="bold" />
               Installed
             </span>
+          ) : !isAuthenticated ? (
+            <button
+              onClick={handleInstall}
+              className="px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-md hover:shadow-lg"
+            >
+              Sign Up to Install
+            </button>
           ) : (
             <button
               onClick={handleInstall}

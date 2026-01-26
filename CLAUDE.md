@@ -1,5 +1,7 @@
 You are a senior level coding agent. You will apply real world solutions to all the problems, fixing them in such a way where you do not cheat the solution, break existing functionality, and are scoped in. The solutions you write must be scalable and for the future, not fixing or hardcoding.
 
+Use subagents generously if you are doing bulk task items that have a small / atomic scope. 
+
 don't do conditional logic for k8s and docker implementation differences. try to keep it as similar as possible unless if a platform requires differeces. Prioritize the k8s (keep that logic more intact than docker. )
 
 On windows use MSYS_NO_PATHCONV=1 while running kubectl or docker exec commands. 
@@ -171,7 +173,7 @@ tesslate-studio/
 
 ## Key Database Models (models.py)
 
-- **User**: Auth, profile, subscription tier
+- **User**: Auth, profile, subscription tier, theme_preset
 - **Project**: Name, slug, owner, files, containers
 - **ProjectSnapshot**: EBS VolumeSnapshot records for project versioning/timeline
 - **Container**: Individual service in a project (frontend, backend, db)
@@ -180,6 +182,7 @@ tesslate-studio/
 - **MarketplaceAgent**: Pre-built AI agents for purchase
 - **Deployment**: External deployment records
 - **DeploymentCredential**: OAuth tokens for Vercel/Netlify/etc.
+- **Theme**: Customizable theme presets with colors, typography, spacing, animations
 
 ## Agent Tools (orchestrator/app/agent/tools/)
 
@@ -224,12 +227,17 @@ docs/
 │   ├── pages/                  # Route components
 │   ├── components/             # UI components
 │   ├── api/                    # API client
-│   └── state/                  # State management
+│   ├── state/                  # State management
+│   ├── contexts/               # React contexts (Auth, Command, Marketplace)
+│   ├── hooks/                  # Custom hooks (useCancellable, useAuth, useTask)
+│   ├── keyboard-shortcuts/     # Command palette & shortcuts system
+│   └── layouts/                # Page layouts (Settings, Marketplace)
 ├── infrastructure/              # DevOps documentation
 │   ├── kubernetes/             # K8s manifests
-│   ├── docker/                 # Docker setup
+│   ├── docker/                 # Docker setup (symlink fix, etc.)
 │   └── terraform/              # AWS IaC
 └── guides/                      # How-to guides
+    └── theme-system.md         # Theme system complete guide
 ```
 
 ### Using CLAUDE.md Files
@@ -259,6 +267,11 @@ Each `CLAUDE.md` file contains:
 | Kubernetes deployment | `docs/infrastructure/kubernetes/CLAUDE.md` |
 | Database models | `docs/orchestrator/models/CLAUDE.md` |
 | Payment integration | `docs/orchestrator/services/stripe.md` |
+| Theme system | `docs/guides/theme-system.md` |
+| Keyboard shortcuts & commands | `docs/app/keyboard-shortcuts/CLAUDE.md` |
+| Settings pages | `docs/app/pages/settings.md` |
+| Marketplace pages | `docs/app/pages/marketplace-browse.md` |
+| Page layouts | `docs/app/layouts/CLAUDE.md` |
 
 ## Deployment Modes
 

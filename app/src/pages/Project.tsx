@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useHotkeys } from 'react-hotkeys-hook';
 import {
   ArrowLeft,
   CaretLeft,
@@ -28,6 +29,7 @@ import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
 import { Tooltip } from '../components/ui/Tooltip';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
+import { UserDropdown } from '../components/ui/UserDropdown';
 import { ChatContainer } from '../components/chat/ChatContainer';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileWarning } from '../components/MobileWarning';
@@ -48,8 +50,9 @@ import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector } from '../components/ContainerSelector';
-import { projectsApi, marketplaceApi } from '../lib/api';
+import { projectsApi, marketplaceApi, authApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
+import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
@@ -89,6 +92,11 @@ export default function Project() {
   });
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
+
+  // User state for dropdown
+  const [userName, setUserName] = useState<string>('');
+  const [userCredits, setUserCredits] = useState<number>(0);
+  const [userTier, setUserTier] = useState<string>('free');
   // Note: We still have projectId for internal use, but it comes from the loaded project object
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -118,6 +126,83 @@ export default function Project() {
     }
   );
 
+  // ============================================================================
+  // PROJECT KEYBOARD SHORTCUTS
+  // ============================================================================
+
+  // View switching shortcuts (Cmd/Ctrl + 1-5)
+  useHotkeys('mod+1', (e) => {
+    e.preventDefault();
+    setActiveView('preview');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+2', (e) => {
+    e.preventDefault();
+    setActiveView('code');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+3', (e) => {
+    e.preventDefault();
+    setActiveView('kanban');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+4', (e) => {
+    e.preventDefault();
+    setActiveView('assets');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+5', (e) => {
+    e.preventDefault();
+    setActiveView('terminal');
+  }, { enableOnFormTags: false });
+
+  // Refresh preview (Cmd/Ctrl + R)
+  useHotkeys('mod+r', (e) => {
+    e.preventDefault();
+    if (activeView === 'preview') {
+      refreshPreview();
+    }
+  }, { enableOnFormTags: false });
+
+  // Sidebar toggle (Cmd/Ctrl + [ and ])
+  useHotkeys('mod+[', (e) => {
+    e.preventDefault();
+    setIsLeftSidebarExpanded(false);
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+]', (e) => {
+    e.preventDefault();
+    setIsLeftSidebarExpanded(true);
+  }, { enableOnFormTags: false });
+
+  // Panel shortcuts (Cmd/Ctrl + Shift + G/N/S/A)
+  useHotkeys('mod+shift+g', (e) => {
+    e.preventDefault();
+    togglePanel('github');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+shift+n', (e) => {
+    e.preventDefault();
+    togglePanel('notes');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+shift+s', (e) => {
+    e.preventDefault();
+    togglePanel('settings');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+shift+a', (e) => {
+    e.preventDefault();
+    togglePanel('architecture');
+  }, { enableOnFormTags: false });
+
+  // Escape to close active panel
+  useHotkeys('escape', () => {
+    if (activePanel) {
+      setActivePanel(null);
+    }
+  }, { enableOnFormTags: false });
+
   useEffect(() => {
     if (slug) {
       loadProject();
@@ -126,6 +211,21 @@ export default function Project() {
       loadAgents(); // Load user's enabled agents from library
     }
   }, [slug]);
+
+  // Fetch user data for dropdown
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const user = await authApi.getCurrentUser();
+        setUserName(user.name || user.username || 'there');
+        setUserCredits(user.credits_balance || 0);
+        setUserTier(user.subscription_tier || 'free');
+      } catch (e) {
+        console.error('Failed to fetch user data:', e);
+      }
+    };
+    fetchUserData();
+  }, []);
 
   // Load containers on mount and when containerId changes
   useEffect(() => {
@@ -536,6 +636,14 @@ export default function Project() {
     setActivePanel(activePanel === panel ? null : panel);
   };
 
+  // Register command handlers for CommandPalette
+  // These handlers allow the command palette to execute project-specific commands
+  useCommandHandlers({
+    switchView: (view: ViewType) => setActiveView(view as MainViewType),
+    togglePanel: (panel) => togglePanel(panel as PanelType),
+    refreshPreview,
+  });
+
   if (!project) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -863,6 +971,13 @@ export default function Project() {
                 onOpenDeployModal={() => setShowDeployModal(true)}
               />
             </div>
+
+            {/* User Dropdown */}
+            <UserDropdown
+              userName={userName}
+              userCredits={userCredits}
+              userTier={userTier}
+            />
 
             {/* Mobile hamburger menu */}
             <button

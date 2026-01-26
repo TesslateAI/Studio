@@ -29,6 +29,8 @@ import {
 import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
+import { SEO, generateProductStructuredData, generateBreadcrumbStructuredData } from '../components/SEO';
+import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
 // Tool icons mapping
 const toolIcons: Record<string, { icon: React.ReactNode; label: string }> = {
@@ -52,6 +54,7 @@ export default function MarketplaceDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { theme } = useTheme();
+  const { isAuthenticated } = useMarketplaceAuth();
   const [item, setItem] = useState<MarketplaceItem | null>(null);
   const [relatedItems, setRelatedItems] = useState<MarketplaceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +124,12 @@ export default function MarketplaceDetail() {
   const handleInstall = async () => {
     if (!item) return;
 
+    // Redirect unauthenticated users to sign up
+    if (!isAuthenticated) {
+      navigate(`/register?redirect=${encodeURIComponent(`/marketplace/${item.slug}`)}`);
+      return;
+    }
+
     if (item.is_purchased) {
       toast.success(`${item.name} already in your library`);
       return;
@@ -153,6 +162,12 @@ export default function MarketplaceDetail() {
   };
 
   const handleRelatedInstall = async (relatedItem: MarketplaceItem) => {
+    // Redirect unauthenticated users to sign up
+    if (!isAuthenticated) {
+      navigate(`/register?redirect=${encodeURIComponent(`/marketplace/${relatedItem.slug}`)}`);
+      return;
+    }
+
     if (relatedItem.is_purchased) {
       toast.success(`${relatedItem.name} already in your library`);
       return;
@@ -261,10 +276,45 @@ export default function MarketplaceDetail() {
     return null;
   }
 
+  // Generate SEO structured data
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://tesslate.com';
+  const productStructuredData = generateProductStructuredData({
+    name: item.name,
+    description: item.description,
+    slug: item.slug,
+    price: item.price || 0,
+    pricing_type: item.pricing_type,
+    rating: item.rating,
+    review_count: item.review_count,
+    creator_name: item.creator_name,
+    avatar_url: item.avatar_url,
+    category: item.category,
+  });
+
+  const breadcrumbData = generateBreadcrumbStructuredData([
+    { name: 'Marketplace', url: `${baseUrl}/marketplace` },
+    { name: item.category || 'Agents', url: `${baseUrl}/marketplace/category/${item.category || 'builder'}` },
+    { name: item.name, url: `${baseUrl}/marketplace/${item.slug}` },
+  ]);
+
   return (
-    <div
-      className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}
-    >
+    <>
+      <SEO
+        title={`${item.name} - AI ${item.item_type === 'base' ? 'Template' : 'Agent'}`}
+        description={item.description || `${item.name} is an AI-powered ${item.item_type === 'base' ? 'project template' : 'coding agent'} on Tesslate Marketplace.`}
+        keywords={[item.name, item.category || '', item.item_type || 'agent', 'AI agent', 'Tesslate', ...(item.tags || [])].filter(Boolean)}
+        image={item.avatar_url || item.preview_image}
+        url={`${baseUrl}/marketplace/${item.slug}`}
+        type="product"
+        author={item.creator_name}
+        structuredData={{
+          '@context': 'https://schema.org',
+          '@graph': [productStructuredData, breadcrumbData],
+        }}
+      />
+      <div
+        className={`h-screen overflow-y-auto ${theme === 'light' ? 'bg-white' : 'bg-[var(--bg)]'}`}
+      >
       {/* Header */}
       <div
         className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}
@@ -397,6 +447,11 @@ export default function MarketplaceDetail() {
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       Installing...
                     </>
+                  ) : !isAuthenticated ? (
+                    <>
+                      <Download size={18} weight="bold" />
+                      Sign Up to Install
+                    </>
                   ) : item.is_active ? (
                     <>
                       <Download size={18} weight="bold" />
@@ -518,15 +573,20 @@ export default function MarketplaceDetail() {
             </h2>
             <div className="flex flex-wrap gap-2">
               {item.tags.map((tag, idx) => (
-                <span
+                <button
                   key={idx}
+                  onClick={() => navigate(`/marketplace?search=${encodeURIComponent(tag)}`)}
                   className={`
-                    px-3 py-1.5 rounded-lg text-sm
-                    ${theme === 'light' ? 'bg-black/5 text-black/60' : 'bg-white/5 text-white/60'}
+                    px-3 py-1.5 rounded-lg text-sm transition-colors cursor-pointer
+                    ${
+                      theme === 'light'
+                        ? 'bg-black/5 text-black/60 hover:bg-[var(--primary)]/10 hover:text-[var(--primary)]'
+                        : 'bg-white/5 text-white/60 hover:bg-[var(--primary)]/20 hover:text-[var(--primary)]'
+                    }
                   `}
                 >
                   {tag}
-                </span>
+                </button>
               ))}
             </div>
           </section>
@@ -713,6 +773,7 @@ export default function MarketplaceDetail() {
                   key={relatedItem.id}
                   item={relatedItem}
                   onInstall={handleRelatedInstall}
+                  isAuthenticated={isAuthenticated}
                 />
               ))}
             </div>
@@ -720,5 +781,6 @@ export default function MarketplaceDetail() {
         )}
       </div>
     </div>
+    </>
   );
 }

@@ -1,7 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useState, useEffect } from 'react';
-import { ThemeProvider } from './theme';
+import { useHotkeys } from 'react-hotkeys-hook';
+import { ThemeProvider, useTheme } from './theme';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { CommandProvider } from './contexts/CommandContext';
 import { DashboardLayout } from './components/DashboardLayout';
 import Landing from './pages/Landing';
 import NewLandingPage from './pages/NewLandingPage';
@@ -13,6 +16,8 @@ import { ProjectGraphCanvas } from './pages/ProjectGraphCanvas';
 import Marketplace from './pages/Marketplace';
 import MarketplaceDetail from './pages/MarketplaceDetail';
 import MarketplaceAuthor from './pages/MarketplaceAuthor';
+import MarketplaceCategory from './pages/MarketplaceCategory';
+import MarketplaceBrowse from './pages/MarketplaceBrowse';
 import Library from './pages/Library';
 import Feedback from './pages/Feedback';
 import AdminDashboard from './pages/AdminDashboard';
@@ -20,10 +25,19 @@ import AuthCallback from './pages/AuthCallback';
 import OAuthLoginCallback from './pages/OAuthLoginCallback';
 import Logout from './pages/Logout';
 import Referrals from './pages/Referrals';
-import AccountSettings from './pages/AccountSettings';
+import { SettingsLayout } from './layouts/SettingsLayout';
+import { MarketplaceLayout } from './layouts/MarketplaceLayout';
+import ProfileSettings from './pages/settings/ProfileSettings';
+import PreferencesSettings from './pages/settings/PreferencesSettings';
+import SecuritySettings from './pages/settings/SecuritySettings';
+import DeploymentSettings from './pages/settings/DeploymentSettings';
+import ApiKeysSettings from './pages/settings/ApiKeysSettings';
+import BillingSettings from './pages/settings/BillingSettings';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
 import axios from 'axios';
+import { CommandPalette } from './components/CommandPalette';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 // Billing components
 import SubscriptionPlans from './components/billing/SubscriptionPlans';
 import BillingDashboard from './components/billing/BillingDashboard';
@@ -33,41 +47,15 @@ import MarketplaceSuccess from './pages/MarketplaceSuccess';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+/**
+ * PrivateRoute - Protects routes that require authentication
+ * Uses the centralized AuthContext for consistent auth state
+ */
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const { isAuthenticated, isLoading } = useAuth();
 
-  useEffect(() => {
-    // Check authentication by trying to get current user
-    // This works for both Bearer token (localStorage) and cookie-based auth
-    const checkAuth = async () => {
-      try {
-        // Check if we have a token in localStorage (regular login)
-        const token = localStorage.getItem('token');
-        if (token) {
-          setIsAuthenticated(true);
-          return;
-        }
-
-        // No token in localStorage, check if we have a valid cookie (OAuth login)
-        const response = await axios.get(`${API_URL}/api/users/me`, {
-          withCredentials: true, // Send cookies
-        });
-
-        if (response.status === 200) {
-          setIsAuthenticated(true);
-        } else {
-          setIsAuthenticated(false);
-        }
-      } catch {
-        setIsAuthenticated(false);
-      }
-    };
-
-    checkAuth();
-  }, []);
-
-  // Loading state - show nothing while checking
-  if (isAuthenticated === null) {
+  // Loading state - show nothing while checking auth
+  if (isLoading) {
     return null;
   }
 
@@ -87,8 +75,47 @@ function AppContent() {
   // Enable task notifications via WebSocket
   useTaskNotifications();
 
+  // Navigation and theme for global shortcuts
+  const navigate = useNavigate();
+  const { toggleTheme } = useTheme();
+
+  // State for keyboard shortcuts modal
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  // Global navigation shortcuts
+  useHotkeys('mod+l', (e) => {
+    e.preventDefault();
+    navigate('/library');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+d', (e) => {
+    e.preventDefault();
+    navigate('/dashboard');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+m', (e) => {
+    e.preventDefault();
+    navigate('/marketplace');
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+t', (e) => {
+    e.preventDefault();
+    toggleTheme();
+  }, { enableOnFormTags: false });
+
+  useHotkeys('mod+comma', (e) => {
+    e.preventDefault();
+    navigate('/settings');
+  }, { enableOnFormTags: false });
+
   return (
     <>
+        {/* Global Command Palette (Cmd+K) */}
+        <CommandPalette onShowShortcuts={() => setShowShortcuts(true)} />
+
+        {/* Keyboard Shortcuts Modal */}
+        <KeyboardShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
         <Toaster
           position="top-right"
           containerStyle={{
@@ -196,6 +223,16 @@ function AppContent() {
           <Route path="/referral" element={<Referrals />} />
           <Route path="/referrals" element={<Referrals />} />
 
+          {/* Marketplace Routes - Adaptive layout based on auth state */}
+          {/* Non-blocking: defaults to public view, upgrades to authenticated view if logged in */}
+          <Route element={<MarketplaceLayout />}>
+            <Route path="/marketplace" element={<Marketplace />} />
+            <Route path="/marketplace/category/:category" element={<MarketplaceCategory />} />
+            <Route path="/marketplace/browse/:itemType" element={<MarketplaceBrowse />} />
+            <Route path="/marketplace/:slug" element={<MarketplaceDetail />} />
+            <Route path="/marketplace/creator/:userId" element={<MarketplaceAuthor />} />
+          </Route>
+
           {/* Dashboard Layout Routes - These share the NavigationSidebar */}
           <Route
             element={
@@ -205,13 +242,9 @@ function AppContent() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/marketplace" element={<Marketplace />} />
             <Route path="/marketplace/success" element={<MarketplaceSuccess />} />
-            <Route path="/marketplace/:slug" element={<MarketplaceDetail />} />
-            <Route path="/marketplace/creator/:userId" element={<MarketplaceAuthor />} />
             <Route path="/library" element={<Library />} />
             <Route path="/feedback" element={<Feedback />} />
-            <Route path="/settings" element={<AccountSettings />} />
           </Route>
 
           {/* Standalone Routes */}
@@ -239,15 +272,25 @@ function AppContent() {
               </PrivateRoute>
             }
           />
-          {/* Account Settings Route */}
+
+          {/* Settings Routes - Has its own layout with settings sidebar */}
           <Route
             path="/settings"
             element={
               <PrivateRoute>
-                <AccountSettings />
+                <SettingsLayout />
               </PrivateRoute>
             }
-          />
+          >
+            <Route index element={<Navigate to="/settings/profile" replace />} />
+            <Route path="profile" element={<ProfileSettings />} />
+            <Route path="preferences" element={<PreferencesSettings />} />
+            <Route path="security" element={<SecuritySettings />} />
+            <Route path="deployment" element={<DeploymentSettings />} />
+            <Route path="api-keys" element={<ApiKeysSettings />} />
+            <Route path="billing" element={<BillingSettings />} />
+          </Route>
+
           {/* Billing Routes */}
           <Route
             path="/billing"
@@ -385,15 +428,19 @@ function AppContent() {
 function App() {
   return (
     <ThemeProvider>
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
+      <AuthProvider>
+        <CommandProvider>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </CommandProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

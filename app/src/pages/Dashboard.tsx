@@ -4,7 +4,8 @@ import { projectsApi, authApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import {
   MobileMenu,
-  ProjectCard
+  ProjectCard,
+  UserDropdown
 } from '../components/ui';
 import type { Status, EnvironmentStatus } from '../components/ui';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
@@ -20,10 +21,6 @@ import {
   FilePlus,
   Books,
   SignOut,
-  CaretDown,
-  Coins,
-  CreditCard,
-  User,
   GitBranch
 } from '@phosphor-icons/react';
 
@@ -53,7 +50,6 @@ export default function Dashboard() {
   const [userName, setUserName] = useState<string>('');
   const [userCredits, setUserCredits] = useState<number>(0);
   const [userTier, setUserTier] = useState<string>('free');
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
 
   // Fetch current user data
   useEffect(() => {
@@ -379,104 +375,12 @@ export default function Dashboard() {
 
           {/* Right side - User Profile */}
           <div className="flex items-center gap-3">
-            {/* Credits Display */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg">
-              <Coins size={16} className="text-[var(--primary)]" weight="fill" />
-              <span className="text-sm font-semibold text-[var(--primary)]">
-                {userCredits.toLocaleString()}
-              </span>
-            </div>
-
             {/* User Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setShowUserDropdown(!showUserDropdown)}
-                className="hidden md:flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 rounded-lg transition-colors"
-              >
-                <User size={18} className="text-[var(--text)]" weight="fill" />
-                <span className="text-sm font-medium text-[var(--text)]">{userName}</span>
-                {userTier === 'pro' && (
-                  <span className="px-2 py-0.5 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-xs font-bold rounded-md">
-                    PRO
-                  </span>
-                )}
-                <CaretDown
-                  size={14}
-                  className={`text-[var(--text)]/60 transition-transform ${showUserDropdown ? 'rotate-180' : ''}`}
-                />
-              </button>
-
-              {/* Dropdown Menu */}
-              {showUserDropdown && (
-                <>
-                  {/* Backdrop */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowUserDropdown(false)}
-                  />
-
-                  {/* Menu */}
-                  <div className="absolute right-0 mt-2 w-56 bg-[var(--surface)] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden">
-                    <div className="py-2">
-                      {/* Credits Item */}
-                      <button
-                        onClick={() => {
-                          setShowUserDropdown(false);
-                          navigate('/billing');
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
-                      >
-                        <Coins size={18} className="text-[var(--primary)]" weight="fill" />
-                        <div className="flex-1">
-                          <div className="text-sm font-medium text-[var(--text)]">Credits</div>
-                          <div className="text-xs text-[var(--text)]/60">{userCredits.toLocaleString()} available</div>
-                        </div>
-                      </button>
-
-                      <div className="h-px bg-white/10 my-2" />
-
-                      {/* Subscriptions */}
-                      <button
-                        onClick={() => {
-                          setShowUserDropdown(false);
-                          navigate('/billing/plans');
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
-                      >
-                        <CreditCard size={18} className="text-[var(--text)]/80" />
-                        <span className="text-sm font-medium text-[var(--text)]">Subscriptions</span>
-                      </button>
-
-                      {/* Settings */}
-                      <button
-                        onClick={() => {
-                          setShowUserDropdown(false);
-                          navigate('/settings');
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
-                      >
-                        <Gear size={18} className="text-[var(--text)]/80" />
-                        <span className="text-sm font-medium text-[var(--text)]">Settings</span>
-                      </button>
-
-                      <div className="h-px bg-white/10 my-2" />
-
-                      {/* Logout */}
-                      <button
-                        onClick={() => {
-                          setShowUserDropdown(false);
-                          navigate('/logout');
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-left group"
-                      >
-                        <SignOut size={18} className="text-red-400 group-hover:text-red-400" />
-                        <span className="text-sm font-medium text-red-400">Logout</span>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+            <UserDropdown
+              userName={userName}
+              userCredits={userCredits}
+              userTier={userTier}
+            />
 
             {/* Mobile hamburger menu */}
             <button

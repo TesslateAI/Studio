@@ -6,7 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from .database import engine, Base
-from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth, creators, snapshots
+from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth, creators, snapshots, themes
 from .config import get_settings
 import sqlalchemy as sa
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
@@ -50,6 +50,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         # Define allowed origin patterns (dynamically generated based on app_domain)
         # Local development patterns (always allowed)
         local_patterns = [
+            r"^http://localhost$",                                  # Local dev (port 80, no port in origin)
             r"^http://localhost:\d+$",                              # Local dev server (any port)
             r"^http://studio\.localhost$",                          # Local main app
             r"^http://[\w-]+\.studio\.localhost$",                  # Local user dev environments (subdomain)
@@ -451,6 +452,10 @@ app.include_router(
     tags=["auth"],
 )
 
+# Custom user endpoints (preferences, profile) - must be registered BEFORE fastapi_users router
+# so that /preferences and /profile are matched before the /{id} catch-all pattern
+app.include_router(users.router, prefix="/api/users", tags=["users"])
+
 # User management router (get/update current user)
 app.include_router(
     fastapi_users.get_users_router(UserRead, UserUpdate),
@@ -713,6 +718,7 @@ app.include_router(deployments.router)
 app.include_router(deployment_credentials.router)
 app.include_router(deployment_oauth.router)
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
+app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 
 @app.get("/")
 async def root():

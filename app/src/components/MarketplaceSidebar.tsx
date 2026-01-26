@@ -239,7 +239,7 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                     <div
                       draggable
                       onDragStart={onBrowserDragStart}
-                      className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-move bg-purple-500/10 border border-purple-500/30 hover:border-purple-400 transition-colors"
+                      className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-move bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 hover:border-purple-400 transition-colors"
                     >
                       <Browser size={18} weight="fill" className="text-purple-400" />
                       <div className="flex-1 min-w-0">

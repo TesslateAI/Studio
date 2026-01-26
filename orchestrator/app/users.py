@@ -486,7 +486,7 @@ bearer_backend = AuthenticationBackend(
 
 fastapi_users = FastAPIUsers[User, uuid.UUID](
     get_user_manager,
-    [cookie_backend, bearer_backend],  # Support both authentication methods
+    [bearer_backend, cookie_backend],  # Bearer token takes priority over cookie auth
 )
 
 # Dependency to get current user (from either cookie or bearer token)

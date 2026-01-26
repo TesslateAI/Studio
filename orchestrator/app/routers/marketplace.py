@@ -4,6 +4,7 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 
 import logging
 from datetime import UTC, datetime
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, func, select
@@ -24,11 +25,42 @@ from ..models import (
     UserPurchasedBase,
 )
 from ..services.recommendations import get_related_agents, update_co_install_counts
-from ..users import current_active_user
+from ..services.cache_service import cache
+from ..users import current_active_user, current_optional_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+# Cache TTL for LiteLLM models (5 minutes - models rarely change)
+_MODELS_CACHE_TTL = 300
+
+
+async def _get_cached_litellm_models() -> List[Dict[str, Any]]:
+    """
+    Get LiteLLM models with distributed caching.
+
+    Uses Redis when available for cross-replica consistency,
+    with automatic in-memory fallback for single-replica deployments.
+    """
+    cache_key = "litellm_models"
+
+    # Try to get from distributed cache
+    cached_models = await cache.get(cache_key)
+    if cached_models is not None:
+        logger.debug("Returning cached LiteLLM models (distributed cache)")
+        return cached_models
+
+    # Cache miss - fetch fresh from LiteLLM
+    from ..services.litellm_service import litellm_service
+
+    models = await litellm_service.get_available_models()
+
+    # Store in distributed cache
+    await cache.set(cache_key, models, ttl=_MODELS_CACHE_TTL)
+    logger.info(f"Refreshed LiteLLM models cache ({len(models)} models)")
+
+    return models
 
 
 # ============================================================================
@@ -46,10 +78,9 @@ async def get_available_models(
     Returns models that users can select for open source agents.
     """
     from ..models import UserAPIKey, UserCustomModel
-    from ..services.litellm_service import litellm_service
 
-    # Get models from LiteLLM
-    litellm_models = await litellm_service.get_available_models()
+    # Get models from LiteLLM (cached to avoid blocking on external calls)
+    litellm_models = await _get_cached_litellm_models()
 
     # Model pricing database (approximate, in USD per 1M tokens)
     # These are typical costs - actual costs may vary
@@ -260,19 +291,23 @@ async def get_marketplace_agents(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(current_active_user),
+    current_user: User | None = Depends(current_optional_user),
 ):
     """
     Browse marketplace agents with filtering and sorting.
     Shows official Tesslate agents and published community agents.
+
+    Public endpoint - authentication is optional:
+    - Authenticated: Shows purchase status (is_purchased) for each item
+    - Unauthenticated: Shows catalog without purchase status
     """
     # Base query - show official agents AND published community agents
     query = (
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
-            MarketplaceAgent.is_active,
-            (MarketplaceAgent.forked_by_user_id is None) | (MarketplaceAgent.is_published),
+            MarketplaceAgent.is_active == True,
+            (MarketplaceAgent.forked_by_user_id.is_(None)) | (MarketplaceAgent.is_published == True),
         )
     )
 
@@ -313,13 +348,15 @@ async def get_marketplace_agents(
     result = await db.execute(query)
     agents = result.scalars().all()
 
-    # Get user's purchased agents
-    purchased_result = await db.execute(
-        select(UserPurchasedAgent.agent_id).where(
-            UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.is_active
+    # Get user's purchased agents (only if authenticated)
+    purchased_agent_ids = []
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedAgent.agent_id).where(
+                UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.is_active
+            )
         )
-    )
-    purchased_agent_ids = [row[0] for row in purchased_result.fetchall()]
+        purchased_agent_ids = [row[0] for row in purchased_result.fetchall()]
 
     # Format response
     response = []
@@ -382,10 +419,12 @@ async def get_marketplace_agents(
 
 @router.get("/agents/{slug}")
 async def get_agent_details(
-    slug: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(current_active_user)
+    slug: str, db: AsyncSession = Depends(get_db), current_user: User | None = Depends(current_optional_user)
 ):
     """
     Get detailed information about a specific agent.
+
+    Public endpoint - authentication is optional.
     """
     # Get agent with forked_by_user relationship
     result = await db.execute(
@@ -398,15 +437,17 @@ async def get_agent_details(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    # Check if user has purchased this agent
-    purchased_result = await db.execute(
-        select(UserPurchasedAgent).where(
-            UserPurchasedAgent.user_id == current_user.id,
-            UserPurchasedAgent.agent_id == agent.id,
-            UserPurchasedAgent.is_active,
+    # Check if user has purchased this agent (only if authenticated)
+    is_purchased = False
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == current_user.id,
+                UserPurchasedAgent.agent_id == agent.id,
+                UserPurchasedAgent.is_active,
+            )
         )
-    )
-    is_purchased = purchased_result.scalar_one_or_none() is not None
+        is_purchased = purchased_result.scalar_one_or_none() is not None
 
     # Get recent reviews
     reviews_result = await db.execute(
@@ -484,21 +525,24 @@ async def get_related_agents_endpoint(
     slug: str,
     limit: int = Query(default=6, ge=1, le=12),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(current_active_user),
+    current_user: User | None = Depends(current_optional_user),
 ):
     """
     Get agents that are frequently co-installed with the specified agent.
     Uses co-installation tracking to provide "People also like" recommendations.
 
+    Public endpoint - authentication is optional.
     Algorithm: O(1) lookup - queries pre-computed co-install counts.
     """
-    # Get user's already installed agents to exclude them
-    purchased_result = await db.execute(
-        select(UserPurchasedAgent.agent_id).where(
-            UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.is_active
+    # Get user's already installed agents to exclude them (only if authenticated)
+    exclude_ids = []
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedAgent.agent_id).where(
+                UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.is_active
+            )
         )
-    )
-    exclude_ids = [row[0] for row in purchased_result.fetchall()]
+        exclude_ids = [row[0] for row in purchased_result.fetchall()]
 
     # Get related agents from recommendations service
     related = await get_related_agents(
@@ -1797,10 +1841,11 @@ async def get_agent_reviews(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(current_active_user),
+    current_user: User | None = Depends(current_optional_user),
 ):
     """
     Get all reviews for an agent with user info.
+    Public endpoint - authentication is optional.
     Returns paginated reviews with user avatar and name.
     """
     # Check agent exists
@@ -1906,9 +1951,15 @@ async def get_marketplace_bases(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(current_active_user),
+    current_user: User | None = Depends(current_optional_user),
 ):
-    """Browse marketplace bases with filtering and sorting."""
+    """
+    Browse marketplace bases with filtering and sorting.
+
+    Public endpoint - authentication is optional:
+    - Authenticated: Shows purchase status (is_purchased) for each item
+    - Unauthenticated: Shows catalog without purchase status
+    """
     query = select(MarketplaceBase).where(MarketplaceBase.is_active)
 
     # Apply filters
@@ -1941,13 +1992,15 @@ async def get_marketplace_bases(
     result = await db.execute(query)
     bases = result.scalars().all()
 
-    # Get user's purchased bases
-    purchased_result = await db.execute(
-        select(UserPurchasedBase.base_id).where(
-            UserPurchasedBase.user_id == current_user.id, UserPurchasedBase.is_active
+    # Get user's purchased bases (only if authenticated)
+    purchased_base_ids = []
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedBase.base_id).where(
+                UserPurchasedBase.user_id == current_user.id, UserPurchasedBase.is_active
+            )
         )
-    )
-    purchased_base_ids = [row[0] for row in purchased_result.fetchall()]
+        purchased_base_ids = [row[0] for row in purchased_result.fetchall()]
 
     # Format response
     response = []
@@ -1986,24 +2039,31 @@ async def get_marketplace_bases(
 
 @router.get("/bases/{slug}")
 async def get_base_details(
-    slug: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(current_active_user)
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
 ):
-    """Get detailed information about a specific base."""
+    """
+    Get detailed information about a specific base.
+    Public endpoint - authentication is optional.
+    """
     result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.slug == slug))
     base = result.scalar_one_or_none()
 
     if not base:
         raise HTTPException(status_code=404, detail="Base not found")
 
-    # Check if user has purchased this base
-    purchased_result = await db.execute(
-        select(UserPurchasedBase).where(
-            UserPurchasedBase.user_id == current_user.id,
-            UserPurchasedBase.base_id == base.id,
-            UserPurchasedBase.is_active,
+    # Check if user has purchased this base (only if authenticated)
+    is_purchased = False
+    if current_user:
+        purchased_result = await db.execute(
+            select(UserPurchasedBase).where(
+                UserPurchasedBase.user_id == current_user.id,
+                UserPurchasedBase.base_id == base.id,
+                UserPurchasedBase.is_active,
+            )
         )
-    )
-    is_purchased = purchased_result.scalar_one_or_none() is not None
+        is_purchased = purchased_result.scalar_one_or_none() is not None
 
     # Get recent reviews
     reviews_result = await db.execute(

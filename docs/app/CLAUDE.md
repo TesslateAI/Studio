@@ -31,6 +31,57 @@ Load this context when:
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/billing.ts`**: Subscription and payment types
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/git.ts`**: Git operation types
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/assets.ts`**: File and asset types
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/types/theme.ts`**: Theme types + runtime validation
+
+### Contexts
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/contexts/AuthContext.tsx`**: Centralized auth state
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/contexts/CommandContext.tsx`**: Command palette dispatch
+
+### Hooks
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/hooks/useCancellableRequest.ts`**: AbortController-based request hook
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/hooks/useAuth.ts`**: Auth status and user info
+
+### SEO
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/lib/seo-manager.ts`**: SEO tag registry singleton
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/SEO.tsx`**: Declarative SEO component
+
+### Command System & Keyboard Shortcuts
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/CommandPalette.tsx`**: Cmd+K command menu
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/KeyboardShortcutsModal.tsx`**: Shortcuts help (? key)
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/lib/keyboard-registry.ts`**: Shortcut definitions (50+ shortcuts)
+
+### UI Components
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/ui/HelpButton.tsx`**: Help button with "?" key trigger
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/ui/HelpMenu.tsx`**: Comprehensive help menu with submenus
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/ui/UserDropdown.tsx`**: User account dropdown menu
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/ui/Tooltip.tsx`**: Accessible tooltip component
+
+### Analytics
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/lib/posthog.ts`**: PostHog analytics with DNT respect, singleton pattern
+
+### Layouts
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/layouts/SettingsLayout.tsx`**: Two-column settings layout
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/layouts/MarketplaceLayout.tsx`**: Marketplace page wrapper
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/layouts/PublicMarketplaceHeader.tsx`**: Marketplace header
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/layouts/PublicMarketplaceFooter.tsx`**: Marketplace footer
+
+### Settings Pages
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/ProfileSettings.tsx`**: User profile, avatar, bio
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/PreferencesSettings.tsx`**: Theme, diagram model
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/SecuritySettings.tsx`**: Password, 2FA, sessions
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/DeploymentSettings.tsx`**: Provider credentials
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/ApiKeysSettings.tsx`**: API key management
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/BillingSettings.tsx`**: Subscription, invoices
+
+### Marketplace Pages
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceBrowse.tsx`**: Browse with filtering
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceCategory.tsx`**: Category-specific browse
+
+### Settings Components
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/settings/SettingsSection.tsx`**: Container with title
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/settings/SettingsGroup.tsx`**: Related items group
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/settings/SettingsItem.tsx`**: Single setting row
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/settings/SettingsSidebar.tsx`**: Navigation links
 
 ### Utilities
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/fileEvents.ts`**: Event system for file changes
@@ -42,12 +93,23 @@ Load this context when:
 
 When working on specific features, also load:
 
+### Core Systems (NEW)
+- **`docs/app/contexts/CLAUDE.md`**: AuthContext, CommandContext, MarketplaceAuthContext documentation
+- **`docs/app/hooks/CLAUDE.md`**: Custom hooks (useCancellableRequest, useAuth, useTask, useReferralTracking)
+- **`docs/app/seo/CLAUDE.md`**: SEOManager and SEO component patterns
+- **`docs/app/types/CLAUDE.md`**: Theme types and runtime validation
+- **`docs/app/state/CLAUDE.md`**: Theme context and state management
+- **`docs/app/keyboard-shortcuts/CLAUDE.md`**: Command palette and keyboard shortcuts system
+- **`docs/app/layouts/CLAUDE.md`**: SettingsLayout and MarketplaceLayout patterns
+
 ### Pages
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/docs/app/pages/`**: Detailed page documentation
   - `dashboard.md`: Project list and creation
   - `project-builder.md`: Main editor interface
   - `project-graph.md`: Architecture visualization
   - `marketplace.md`: Agent/base browsing and purchase
+  - `marketplace-browse.md`: Browse and category pages with filtering
+  - `settings.md`: Modular settings architecture (6 pages)
   - `billing.md`: Subscription management
   - `auth.md`: Login/register/OAuth
 
@@ -57,7 +119,11 @@ For specific UI work, reference the actual component files:
 - **Panels**: `app/src/components/panels/`
 - **Modals**: `app/src/components/modals/`
 - **Billing**: `app/src/components/billing/`
-- **Marketplace**: `app/src/components/marketplace/`
+- **Marketplace**: `app/src/components/marketplace/` (includes `SkeletonCard` for loading states)
+- **Settings**: `app/src/components/settings/` (see `docs/app/components/settings.md`)
+- **Command**: `app/src/components/CommandPalette.tsx`, `KeyboardShortcutsModal.tsx`
+- **UI**: `app/src/components/ui/` (HelpButton, HelpMenu, UserDropdown, Tooltip)
+- **SEO**: `app/src/components/SEO.tsx`
 
 ### Backend Integration
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/docs/orchestrator/routers/`**: API endpoint documentation
@@ -412,6 +478,429 @@ function MyGraph() {
   );
 }
 ```
+
+### 11. Cancellable API Requests
+
+**Pattern**: Use `useCancellableRequest` to prevent memory leaks
+
+```typescript
+import { useCancellableRequest } from '../hooks/useCancellableRequest';
+
+function MySettings() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const { execute } = useCancellableRequest<MyDataType>();
+
+  useEffect(() => {
+    execute(
+      () => api.getData(),
+      {
+        onSuccess: setData,
+        onError: (err) => toast.error(err.message),
+        onFinally: () => setLoading(false),
+      }
+    );
+  }, [execute]);
+
+  // Cleanup happens automatically on unmount
+  // No more "Can't perform state update on unmounted component"
+}
+```
+
+### 12. Auth Context
+
+**Pattern**: Use `useAuth` for consistent authentication state
+
+```typescript
+import { useAuth } from '../contexts/AuthContext';
+
+function MyComponent() {
+  const { isAuthenticated, isLoading, user, login, logout, checkAuth } = useAuth();
+
+  if (isLoading) return <Spinner />;
+  if (!isAuthenticated) return <Navigate to="/login" />;
+
+  return <div>Hello, {user?.name}</div>;
+}
+```
+
+### 13. Command Palette Integration
+
+**Pattern**: Use `useCommandHandlers` to register page commands
+
+```typescript
+import { useCommandHandlers, useCommandContext } from '../contexts/CommandContext';
+
+// In page component
+function ProjectPage() {
+  const [view, setView] = useState('builder');
+
+  useCommandHandlers({
+    switchView: setView,
+    togglePanel: (panel) => setActivePanel(prev => prev === panel ? null : panel),
+    refreshPreview: () => iframeRef.current?.contentWindow?.location.reload(),
+  });
+
+  // Commands from Cmd+K palette will now work
+}
+
+// In CommandPalette
+function CommandPalette() {
+  const { executeCommand, isCommandAvailable } = useCommandContext();
+
+  const handleSelect = (command) => {
+    if (!executeCommand(command.id, command.args)) {
+      toast.error(`Command "${command.id}" not available on this page`);
+    }
+  };
+}
+```
+
+### 14. SEO for Dynamic Pages
+
+**Pattern**: Use `<SEO>` component with proper cleanup
+
+```typescript
+import { SEO, generateProductStructuredData } from '../components/SEO';
+
+function AgentDetailPage({ agent }) {
+  if (!agent) return <Spinner />;
+
+  return (
+    <>
+      <SEO
+        title={agent.name}
+        description={agent.description}
+        url={`https://tesslate.com/marketplace/${agent.slug}`}
+        image={agent.og_image_url}
+        structuredData={generateProductStructuredData({
+          name: agent.name,
+          description: agent.description,
+          slug: agent.slug,
+          price: agent.price,
+          rating: agent.average_rating,
+        })}
+      />
+      <AgentContent agent={agent} />
+    </>
+  );
+}
+```
+
+### 15. Theme Validation
+
+**Pattern**: Validate themes before applying to prevent crashes
+
+```typescript
+import { isValidTheme, DEFAULT_FALLBACK_THEME } from '../types/theme';
+
+async function loadTheme(themeId: string) {
+  try {
+    const theme = await themesApi.get(themeId);
+
+    if (!isValidTheme(theme)) {
+      console.warn(`Theme ${themeId} failed validation`);
+      return DEFAULT_FALLBACK_THEME;
+    }
+
+    return theme;
+  } catch {
+    return DEFAULT_FALLBACK_THEME;
+  }
+}
+```
+
+### 16. Keyboard Shortcuts Registry
+
+**Pattern**: Use centralized keyboard registry for platform-aware shortcuts
+
+```typescript
+import { getShortcutsForContext, getAllShortcuts } from '../lib/keyboard-registry';
+
+// Get shortcuts for current context (dashboard, project, marketplace, etc.)
+const context = getContextFromPath(location.pathname);
+const shortcuts = getShortcutsForContext(context);
+
+// Shortcut structure
+interface Shortcut {
+  id: string;           // Unique identifier
+  label: string;        // Display name
+  keys: string[];       // Visual keys ['⌘', 'K'] (Mac) or ['Ctrl', 'K'] (Win)
+  hotkey: string;       // Hotkeys-js format 'mod+k'
+  context: string[];    // Where it's active: ['global', 'project']
+  category: string;     // Grouping: 'Navigation', 'Actions', etc.
+}
+
+// In CommandPalette
+function CommandPalette() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Open with Cmd+K
+  useHotkeys('mod+k', (e) => {
+    e.preventDefault();
+    setIsOpen(true);
+  });
+
+  const commands = useMemo(() =>
+    getAllShortcuts()
+      .filter(s => s.context.includes(currentContext) || s.context.includes('global'))
+      .map(s => ({
+        id: s.id,
+        label: s.label,
+        keys: s.keys,
+        action: () => executeCommand(s.id),
+      })),
+    [currentContext]
+  );
+}
+```
+
+### 17. Settings Layout & Components
+
+**Pattern**: Use modular settings pages with shared layout and components
+
+```typescript
+// SettingsLayout provides two-column layout
+import { Outlet } from 'react-router-dom';
+
+function SettingsLayout() {
+  return (
+    <div className="settings-layout">
+      <SettingsSidebar />
+      <main className="settings-content">
+        <Outlet /> {/* Page content renders here */}
+      </main>
+    </div>
+  );
+}
+
+// Settings component hierarchy
+function ProfileSettings() {
+  return (
+    <SettingsSection title="Profile">
+      <SettingsGroup label="Personal Information">
+        <SettingsItem
+          label="Display Name"
+          description="Your public name"
+        >
+          <Input value={name} onChange={setName} />
+        </SettingsItem>
+        <SettingsItem label="Email">
+          <Input value={email} disabled />
+        </SettingsItem>
+      </SettingsGroup>
+
+      <SettingsGroup label="Avatar">
+        <SettingsItem label="Profile Picture">
+          <AvatarUploader />
+        </SettingsItem>
+      </SettingsGroup>
+    </SettingsSection>
+  );
+}
+
+// Route configuration
+<Route path="/settings" element={<SettingsLayout />}>
+  <Route index element={<Navigate to="/settings/profile" replace />} />
+  <Route path="profile" element={<ProfileSettings />} />
+  <Route path="preferences" element={<PreferencesSettings />} />
+  <Route path="security" element={<SecuritySettings />} />
+  <Route path="deployment" element={<DeploymentSettings />} />
+  <Route path="api-keys" element={<ApiKeysSettings />} />
+  <Route path="billing" element={<BillingSettings />} />
+</Route>
+```
+
+### 18. Marketplace Filtering
+
+**Pattern**: Server-side filtering for agents, client-side for bases
+
+```typescript
+// Server-side filtering (agents) - preferred for large datasets
+function MarketplaceBrowse() {
+  const [filters, setFilters] = useState({
+    category: 'all',
+    pricing_type: 'all',
+    search: '',
+    sort: 'popular',
+  });
+  const [page, setPage] = useState(1);
+  const { execute } = useCancellableRequest();
+
+  // Fetch with server-side filtering
+  useEffect(() => {
+    execute(
+      () => marketplaceApi.getAllAgents({
+        category: filters.category !== 'all' ? filters.category : undefined,
+        pricing_type: filters.pricing_type !== 'all' ? filters.pricing_type : undefined,
+        search: filters.search || undefined,
+        sort: filters.sort,
+        page,
+        limit: 20,
+      }),
+      { onSuccess: (data) => setAgents(data.agents) }
+    );
+  }, [filters, page, execute]);
+
+  // Filter controls update state, triggering new API call
+  return (
+    <div>
+      <FilterBar
+        filters={filters}
+        onChange={setFilters}
+      />
+      <AgentGrid agents={agents} />
+      <InfiniteScrollTrigger onVisible={() => setPage(p => p + 1)} />
+    </div>
+  );
+}
+
+// Client-side filtering (bases) - used when dataset is small
+function BasesBrowse() {
+  const [allBases, setAllBases] = useState([]);
+  const [filters, setFilters] = useState({ category: 'all' });
+
+  // Fetch all once
+  useEffect(() => {
+    marketplaceApi.getAllBases().then(setAllBases);
+  }, []);
+
+  // Filter in memory
+  const filteredBases = useMemo(() =>
+    allBases.filter(base =>
+      filters.category === 'all' || base.category === filters.category
+    ),
+    [allBases, filters]
+  );
+
+  return <BaseGrid bases={filteredBases} />;
+}
+```
+
+### 19. Analytics Integration
+
+**Pattern**: Use PostHog with privacy-respecting initialization
+
+```typescript
+import { initPostHog, capture, getPostHog } from '../lib/posthog';
+
+// Initialize once in main.tsx (non-blocking)
+initPostHog();
+
+// Safe event capture (never throws)
+capture('project_created', {
+  project_type: 'react',
+  from_template: true,
+});
+
+// Check if analytics available
+const ph = getPostHog();
+if (ph) {
+  ph.identify(user.id, { email: user.email });
+}
+```
+
+Features:
+- Respects Do Not Track (DNT) browser setting
+- Singleton pattern prevents multiple initializations
+- Non-blocking: initialization errors don't crash the app
+- `capture()` helper silently fails if PostHog unavailable
+
+### 20. Skeleton Loading States
+
+**Pattern**: Use SkeletonCard for loading placeholders in grids
+
+```typescript
+import { SkeletonCard } from '../components/marketplace/SkeletonCard';
+
+function AgentGrid({ loading, agents }) {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-3 gap-4">
+        {/* Show 6 skeleton cards while loading */}
+        {Array.from({ length: 6 }).map((_, i) => (
+          <SkeletonCard key={i} variant="card" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      {agents.map(agent => <AgentCard key={agent.id} agent={agent} />)}
+    </div>
+  );
+}
+
+// Featured variant for hero sections
+<SkeletonCard variant="featured" />
+```
+
+### 21. Help Menu System
+
+**Pattern**: Use HelpButton and HelpMenu for contextual help
+
+```typescript
+import { HelpButton } from '../components/ui/HelpButton';
+import { HelpMenu } from '../components/ui/HelpMenu';
+
+// Simple: Just the help button (opens shortcuts modal)
+function NavigationBar() {
+  return (
+    <nav>
+      {/* Shows "?" button, opens KeyboardShortcutsModal */}
+      <HelpButton />
+    </nav>
+  );
+}
+
+// Advanced: Full help menu with nested submenus
+function Sidebar() {
+  const [showHelp, setShowHelp] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <>
+      <button ref={helpButtonRef} onClick={() => setShowHelp(!showHelp)}>
+        Help
+      </button>
+      <HelpMenu
+        isOpen={showHelp}
+        onClose={() => setShowHelp(false)}
+        onOpenShortcuts={() => setShowShortcuts(true)}
+        anchorRef={helpButtonRef}
+      />
+      <KeyboardShortcutsModal
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
+    </>
+  );
+}
+```
+
+### 22. User Dropdown Menu
+
+**Pattern**: Use UserDropdown for account actions
+
+```typescript
+import { UserDropdown } from '../components/ui/UserDropdown';
+
+function Header({ user }) {
+  return (
+    <header>
+      <UserDropdown
+        userName={user.name}
+        userCredits={user.credits_balance}
+        userTier={user.subscription_tier}
+      />
+    </header>
+  );
+}
+```
+
+Includes: Credits display, Subscriptions, Settings, Logout
 
 ## Best Practices
 

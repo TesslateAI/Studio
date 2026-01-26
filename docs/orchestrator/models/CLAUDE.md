@@ -27,8 +27,9 @@
 ### Core Application Models
 **User** (models_auth.py)
 - Purpose: User accounts with subscription, billing, and profile data
-- Key fields: `email`, `username`, `subscription_tier`, `stripe_customer_id`, `credits_balance`
+- Key fields: `email`, `username`, `subscription_tier`, `stripe_customer_id`, `credits_balance`, `theme_preset`
 - Related: FastAPI-Users compatible (email/password + OAuth)
+- Theme: `theme_preset` field stores user's selected theme ID (default: "default-dark")
 
 **Project** (models.py)
 - Purpose: User projects with multi-container support

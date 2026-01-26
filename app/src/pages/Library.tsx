@@ -38,11 +38,11 @@ import {
   Coins
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { MobileMenu, MarkerEditor, MarkerPalette, type MarkerEditorHandle } from '../components/ui';
+import { MobileMenu, MarkerEditor, MarkerPalette, UserDropdown, type MarkerEditorHandle } from '../components/ui';
 import { ConfirmDialog } from '../components/modals';
 import { ToolManagement } from '../components/ToolManagement';
 import { ImageUpload } from '../components/ImageUpload';
-import { marketplaceApi, secretsApi, usersApi, billingApi } from '../lib/api';
+import { marketplaceApi, secretsApi, usersApi, billingApi, authApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
 
@@ -164,6 +164,11 @@ export default function Library() {
   const [externalProviders, setExternalProviders] = useState<ExternalProvider[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
+  // User state for dropdown
+  const [userName, setUserName] = useState<string>('');
+  const [userCredits, setUserCredits] = useState<number>(0);
+  const [userTier, setUserTier] = useState<string>('free');
+
   const logout = () => {
     localStorage.removeItem('token');
     navigate('/login');
@@ -214,24 +219,45 @@ export default function Library() {
   };
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
 
   useEffect(() => {
     loadData();
   }, [activeTab]);
 
+  // Fetch user data for dropdown
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const user = await authApi.getCurrentUser();
+        setUserName(user.name || user.username || 'there');
+        setUserCredits(user.credits_balance || 0);
+        setUserTier(user.subscription_tier || 'free');
+      } catch (e) {
+        console.error('Failed to fetch user data:', e);
+      }
+    };
+    fetchUserData();
+  }, []);
+
   const loadData = async () => {
     setLoading(true);
     try {
       if (activeTab === 'agents') {
-        await Promise.all([loadLibraryAgents(), loadModels()]); // Load models for agent tab
+        // Progressive loading: show agents immediately, load models in background
+        await loadLibraryAgents();
+        setLoading(false);
+        loadModelsInBackground();
       } else if (activeTab === 'models') {
         await loadModels();
+        setLoading(false);
       } else if (activeTab === 'api-keys') {
         await loadApiKeys();
         await loadProviders();
+        setLoading(false);
       }
-    } finally {
+    } catch {
       setLoading(false);
     }
   };
@@ -247,6 +273,7 @@ export default function Library() {
   };
 
   const loadModels = async () => {
+    setModelsLoading(true);
     try {
       const data = await marketplaceApi.getAvailableModels();
       setModels(data.models || []);
@@ -254,6 +281,22 @@ export default function Library() {
     } catch (error) {
       console.error('Failed to load models:', error);
       toast.error('Failed to load models');
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  const loadModelsInBackground = async () => {
+    setModelsLoading(true);
+    try {
+      const data = await marketplaceApi.getAvailableModels();
+      setModels(data.models || []);
+      setExternalProviders(data.external_providers || []);
+    } catch (error) {
+      console.error('Failed to load models:', error);
+      // Graceful degradation - no toast, just log (agents still work without models)
+    } finally {
+      setModelsLoading(false);
     }
   };
 
@@ -345,15 +388,24 @@ export default function Library() {
           <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
             <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Library</h1>
 
-            {/* Mobile hamburger menu */}
-            <button
-              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
-            >
-              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-3">
+              {/* User Dropdown */}
+              <UserDropdown
+                userName={userName}
+                userCredits={userCredits}
+                userTier={userTier}
+              />
+
+              {/* Mobile hamburger menu */}
+              <button
+                onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+                className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+              >
+                <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}
@@ -425,6 +477,7 @@ export default function Library() {
           <AgentsTab
             agents={agents}
             models={models}
+            modelsLoading={modelsLoading}
             onToggleEnable={handleToggleEnable}
             onEdit={setEditingAgent}
             onTogglePublish={handleTogglePublish}
@@ -518,6 +571,7 @@ export default function Library() {
 function AgentsTab({
   agents,
   models,
+  modelsLoading,
   onToggleEnable,
   onEdit,
   onTogglePublish,
@@ -526,6 +580,7 @@ function AgentsTab({
 }: {
   agents: LibraryAgent[];
   models: Model[];
+  modelsLoading: boolean;
   onToggleEnable: (agent: LibraryAgent) => void;
   onEdit: (agent: LibraryAgent) => void;
   onTogglePublish: (agent: LibraryAgent) => void;
@@ -566,7 +621,7 @@ function AgentsTab({
         <p className="text-[var(--text)]/60 mb-4">Your library is empty</p>
         <button
           onClick={() => navigate('/marketplace')}
-          className="px-6 py-3 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors"
+          className="px-6 py-3 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors"
         >
           Browse Marketplace
         </button>
@@ -629,10 +684,20 @@ function AgentsTab({
             };
             onEdit(newAgent);
           }}
-          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg transition-colors flex items-center gap-2"
+          disabled={modelsLoading}
+          className={`px-4 py-2 ${modelsLoading ? 'bg-[var(--primary)]/50 cursor-wait' : 'bg-[var(--primary)] hover:bg-[var(--primary)]/90'} text-white rounded-lg transition-colors flex items-center gap-2`}
         >
-          <Plus size={18} />
-          Create New Agent
+          {modelsLoading ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Loading Models...
+            </>
+          ) : (
+            <>
+              <Plus size={18} />
+              Create New Agent
+            </>
+          )}
         </button>
       </div>
 
@@ -643,6 +708,7 @@ function AgentsTab({
             key={agent.id}
             agent={agent}
             availableModels={models.map(m => m.id)}
+            modelsLoading={modelsLoading}
             onToggleEnable={() => onToggleEnable(agent)}
             onEdit={() => onEdit(agent)}
             onTogglePublish={() => onTogglePublish(agent)}
@@ -764,23 +830,23 @@ function ModelsTab({
   return (
     <div className="space-y-8">
       {/* OpenRouter Integration Section */}
-      <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-6">
+      <div className="bg-gradient-to-r from-[var(--status-info)]/10 to-[var(--accent)]/10 border border-[var(--status-info)]/20 rounded-xl p-6">
         <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-blue-500/20 rounded-lg">
-            <Key size={24} className="text-blue-400" />
+          <div className="p-3 bg-[var(--status-info)]/20 rounded-lg">
+            <Key size={24} className="text-[var(--status-info)]" />
           </div>
           <div className="flex-1">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-3">
                 <h2 className="text-xl font-bold text-[var(--text)]">OpenRouter Integration</h2>
-                <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+                <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
                   FREE (Limited Time)
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowAddApiKey(true)}
-                  className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-lg transition-colors flex items-center gap-2"
+                  className="px-4 py-2 bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/20 text-[var(--status-info)] rounded-lg transition-colors flex items-center gap-2"
                 >
                   <Plus size={16} />
                   Add API Key
@@ -788,7 +854,7 @@ function ModelsTab({
                 {hasOpenRouterKey && (
                   <button
                     onClick={() => setShowAddCustomModel(true)}
-                    className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center gap-2"
+                    className="px-4 py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 border border-[var(--primary)]/20 text-[var(--primary)] rounded-lg transition-colors flex items-center gap-2"
                   >
                     <Plus size={16} />
                     Add Custom Model
@@ -797,7 +863,7 @@ function ModelsTab({
               </div>
             </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
-              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more. <span className="text-orange-400 font-medium">Currently free for all users</span> — this will become a premium subscription feature in the future.
+              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more. <span className="text-[var(--primary)] font-medium">Currently free for all users</span> — this will become a premium subscription feature in the future.
             </p>
 
             {/* API Keys List */}
@@ -813,8 +879,8 @@ function ModelsTab({
                     className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-3 flex items-center justify-between"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-green-500/10 rounded-lg">
-                        <CheckCircle size={16} className="text-green-400" weight="fill" />
+                      <div className="p-2 bg-[var(--status-success)]/10 rounded-lg">
+                        <CheckCircle size={16} className="text-[var(--status-success)]" weight="fill" />
                       </div>
                       <div>
                         {key.key_name && (
@@ -837,7 +903,7 @@ function ModelsTab({
                           toast.error('Failed to delete API key');
                         }
                       }}
-                      className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
+                      className="p-2 hover:bg-[var(--status-error)]/10 rounded-lg text-[var(--status-error)] transition-colors"
                     >
                       <Trash size={16} />
                     </button>
@@ -845,9 +911,9 @@ function ModelsTab({
                 ))}
               </div>
             ) : (
-              <div className="px-4 py-3 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center gap-2">
-                <Circle size={16} className="text-orange-400" />
-                <span className="text-sm text-orange-400">No API key configured. Add one to get started.</span>
+              <div className="px-4 py-3 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg flex items-center gap-2">
+                <Circle size={16} className="text-[var(--primary)]" />
+                <span className="text-sm text-[var(--primary)]">No API key configured. Add one to get started.</span>
               </div>
             )}
           </div>
@@ -855,21 +921,21 @@ function ModelsTab({
       </div>
 
       {/* Diagram Model Selection */}
-      <div className="bg-gradient-to-r from-orange-500/10 to-purple-500/10 border border-orange-500/20 rounded-xl p-6">
+      <div className="bg-gradient-to-r from-[var(--primary)]/10 to-[var(--accent)]/10 border border-[var(--primary)]/20 rounded-xl p-6">
         <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-orange-500/20 rounded-lg">
-            <ChartLine size={24} className="text-orange-400" />
+          <div className="p-3 bg-[var(--primary)]/20 rounded-lg">
+            <ChartLine size={24} className="text-[var(--primary)]" />
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
               <h2 className="text-xl font-bold text-[var(--text)]">Architecture Diagram Generation</h2>
-              <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+              <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
                 FREE (Limited Time)
               </span>
             </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
               Select which AI model to use for generating architecture diagrams of your projects.
-              This model will analyze your code and create Mermaid diagrams showing component relationships. <span className="text-orange-400 font-medium">Currently free for all users</span> — this feature will become paid in the future.
+              This model will analyze your code and create Mermaid diagrams showing component relationships. <span className="text-[var(--primary)] font-medium">Currently free for all users</span> — this feature will become paid in the future.
             </p>
           </div>
         </div>
@@ -886,7 +952,7 @@ function ModelsTab({
             <select
               value={diagramModel}
               onChange={(e) => handleDiagramModelChange(e.target.value)}
-              className="w-full px-4 py-3 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 transition-colors [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+              className="w-full px-4 py-3 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 transition-colors [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
             >
               <option value="">Select a model...</option>
               {[...systemModels, ...customModels].map((model) => (
@@ -897,9 +963,9 @@ function ModelsTab({
             </select>
           )}
           {diagramModel && (
-            <div className="mt-3 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-2">
-              <CheckCircle size={16} className="text-green-400" weight="fill" />
-              <span className="text-xs text-green-400">
+            <div className="mt-3 px-3 py-2 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 rounded-lg flex items-center gap-2">
+              <CheckCircle size={16} className="text-[var(--status-success)]" weight="fill" />
+              <span className="text-xs text-[var(--status-success)]">
                 Diagram generation configured with {models.find(m => m.id === diagramModel)?.name || diagramModel}
               </span>
             </div>
@@ -926,17 +992,17 @@ function ModelsTab({
             {customModels.map((model) => (
               <div
                 key={model.id}
-                className="bg-[var(--surface)] border border-orange-500/20 rounded-lg p-4 hover:border-orange-500/40 transition-all"
+                className="bg-[var(--surface)] border border-[var(--primary)]/20 rounded-lg p-4 hover:border-[var(--primary)]/40 transition-all"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3 flex-1">
-                    <div className="p-2 bg-orange-500/10 rounded-lg">
-                      <Cpu size={24} className="text-orange-400" />
+                    <div className="p-2 bg-[var(--primary)]/10 rounded-lg">
+                      <Cpu size={24} className="text-[var(--primary)]" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-[var(--text)] truncate">{model.name}</h3>
-                        <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded shrink-0">
+                        <span className="px-2 py-0.5 bg-[var(--primary)]/20 text-[var(--primary)] text-xs rounded shrink-0">
                           Custom
                         </span>
                       </div>
@@ -947,7 +1013,7 @@ function ModelsTab({
                   </div>
                   <button
                     onClick={() => model.custom_id && handleDeleteCustomModel(model.custom_id)}
-                    className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors shrink-0"
+                    className="p-2 hover:bg-[var(--status-error)]/10 rounded-lg text-[var(--status-error)] transition-colors shrink-0"
                   >
                     <Trash size={18} />
                   </button>
@@ -980,12 +1046,12 @@ function ModelsTab({
           <div>
             <div className="flex items-center gap-3 mb-1">
               <h2 className="text-2xl font-bold text-[var(--text)]">Available Models</h2>
-              <span className="px-2.5 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-semibold rounded-full">
+              <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
                 FREE (Limited Time)
               </span>
             </div>
             <p className="text-[var(--text)]/60">
-              <span className="text-orange-400 font-medium">Currently free for all users</span> — these models will become paid features in the future. Use them now while they're complimentary!
+              <span className="text-[var(--primary)] font-medium">Currently free for all users</span> — these models will become paid features in the future. Use them now while they're complimentary!
             </p>
           </div>
           <div className="text-sm text-[var(--text)]/40">
@@ -997,19 +1063,19 @@ function ModelsTab({
           {systemModels.map((model) => (
             <div
               key={model.id}
-              className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4 hover:border-orange-500/30 transition-all"
+              className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4 hover:border-[var(--primary)]/30 transition-all"
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-500/10 rounded-lg">
-                    <Cpu size={24} className="text-blue-400" />
+                  <div className="p-2 bg-[var(--status-info)]/10 rounded-lg">
+                    <Cpu size={24} className="text-[var(--status-info)]" />
                   </div>
                   <div>
                     <h3 className="font-semibold text-[var(--text)]">{model.name}</h3>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs text-[var(--text)]/40 capitalize">{model.provider}</span>
                       {model.pricing.input === 0 && model.pricing.output === 0 && (
-                        <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
+                        <span className="px-2 py-0.5 bg-[var(--status-success)]/20 text-[var(--status-success)] text-xs rounded">
                           Free
                         </span>
                       )}
@@ -1058,10 +1124,10 @@ function ModelsTab({
                   <div>
                     <h3 className="font-semibold text-[var(--text)] mb-1">{provider.name}</h3>
                     <p className="text-xs text-[var(--text)]/60 mb-2">{provider.description}</p>
-                    <div className="text-xs text-orange-400">{provider.models_count} models</div>
+                    <div className="text-xs text-[var(--primary)]">{provider.models_count} models</div>
                   </div>
                   {provider.has_key ? (
-                    <CheckCircle size={20} className="text-green-400" weight="fill" />
+                    <CheckCircle size={20} className="text-[var(--status-success)]" weight="fill" />
                   ) : (
                     <Circle size={20} className="text-[var(--text)]/20" />
                   )}
@@ -1070,7 +1136,7 @@ function ModelsTab({
                 {provider.setup_required && (
                   <button
                     onClick={() => onSetupProvider(provider.provider)}
-                    className="w-full mt-3 px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    className="w-full mt-3 px-4 py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 border border-[var(--primary)]/20 text-[var(--primary)] rounded-lg transition-colors flex items-center justify-center gap-2"
                   >
                     <Key size={16} />
                     Add API Key
@@ -1078,9 +1144,9 @@ function ModelsTab({
                 )}
 
                 {provider.has_key && (
-                  <div className="mt-3 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center justify-center gap-2">
-                    <CheckCircle size={16} className="text-green-400" weight="fill" />
-                    <span className="text-xs text-green-400">Configured</span>
+                  <div className="mt-3 px-3 py-2 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 rounded-lg flex items-center justify-center gap-2">
+                    <CheckCircle size={16} className="text-[var(--status-success)]" weight="fill" />
+                    <span className="text-xs text-[var(--status-success)]">Configured</span>
                   </div>
                 )}
               </div>
@@ -1138,7 +1204,7 @@ function ApiKeysTab({
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors flex items-center gap-2"
+          className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors flex items-center gap-2"
         >
           <Plus size={18} />
           Add API Key
@@ -1152,7 +1218,7 @@ function ApiKeysTab({
           <p className="text-[var(--text)]/60 mb-4">No API keys configured</p>
           <button
             onClick={() => setShowAddModal(true)}
-            className="px-6 py-3 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors"
+            className="px-6 py-3 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors"
           >
             Add Your First API Key
           </button>
@@ -1217,8 +1283,8 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
   return (
     <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4 flex items-center justify-between">
       <div className="flex items-center gap-4">
-        <div className="p-3 bg-purple-500/10 rounded-lg">
-          <Key size={20} className="text-purple-400" />
+        <div className="p-3 bg-[var(--accent)]/10 rounded-lg">
+          <Key size={20} className="text-[var(--accent)]" />
         </div>
         <div>
           <div className="font-semibold text-[var(--text)] capitalize">{apiKey.provider}</div>
@@ -1234,7 +1300,7 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
 
       <button
         onClick={() => setShowDelete(true)}
-        className="p-2 hover:bg-red-500/10 rounded-lg text-red-400 transition-colors"
+        className="p-2 hover:bg-[var(--status-error)]/10 rounded-lg text-[var(--status-error)] transition-colors"
       >
         <Trash size={18} />
       </button>
@@ -1256,7 +1322,7 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
               </button>
               <button
                 onClick={handleDelete}
-                className="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-lg text-white transition-colors"
+                className="px-4 py-2 bg-[var(--status-error)] hover:bg-[var(--status-error)]/90 rounded-lg text-white transition-colors"
               >
                 Delete
               </button>
@@ -1326,7 +1392,7 @@ function AddApiKeyModal({
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
-              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
               required
             >
               <option value="">Select a provider...</option>
@@ -1347,7 +1413,7 @@ function AddApiKeyModal({
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="w-full px-4 py-2 pr-12 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm"
+                className="w-full px-4 py-2 pr-12 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
                 placeholder="sk-..."
                 required
               />
@@ -1369,7 +1435,7 @@ function AddApiKeyModal({
               type="text"
               value={keyName}
               onChange={(e) => setKeyName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
               placeholder="My API Key"
             />
             <p className="mt-1 text-xs text-[var(--text)]/40">
@@ -1388,7 +1454,7 @@ function AddApiKeyModal({
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="px-6 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
               disabled={loading}
             >
               {loading ? (
@@ -1408,9 +1474,18 @@ function AddApiKeyModal({
 }
 
 // Agent Card Component (keeping original)
+function AgentCardModelSkeleton() {
+  return (
+    <div className="w-full px-3 py-2 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 rounded-lg animate-pulse">
+      <div className="h-4 bg-[var(--status-info)]/20 rounded w-3/4"></div>
+    </div>
+  );
+}
+
 function AgentCard({
   agent,
   availableModels,
+  modelsLoading,
   onToggleEnable,
   onEdit,
   onTogglePublish,
@@ -1419,6 +1494,7 @@ function AgentCard({
 }: {
   agent: LibraryAgent;
   availableModels: string[];
+  modelsLoading: boolean;
   onToggleEnable: () => void;
   onEdit: () => void;
   onTogglePublish: () => void;
@@ -1432,13 +1508,13 @@ function AgentCard({
   return (
     <div className={`relative bg-[var(--surface)] border rounded-2xl p-6 transition-all ${
       agent.is_enabled
-        ? 'border-[var(--text)]/15 hover:border-orange-500/30'
+        ? 'border-[var(--text)]/15 hover:border-[var(--primary)]/30'
         : 'border-white/5 opacity-60'
     }`}>
       {/* Status Badge - Top Right */}
       <div className="absolute top-4 right-4">
         {agent.is_enabled ? (
-          <span className="px-2.5 py-1 bg-green-500/20 text-green-400 text-xs rounded-md font-medium">
+          <span className="px-2.5 py-1 bg-[var(--status-success)]/20 text-[var(--status-success)] text-xs rounded-md font-medium">
             Active
           </span>
         ) : (
@@ -1465,24 +1541,24 @@ function AgentCard({
           <h3 className="font-heading font-bold text-[var(--text)] text-xl mb-2">{agent.name}</h3>
           <div className="flex flex-wrap items-center gap-2">
             {agent.source_type === 'open' ? (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-success)]/20 text-[var(--status-success)] text-xs rounded">
                 <LockSimpleOpen size={10} />
                 Open Source
               </span>
             ) : (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded">
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent)]/20 text-[var(--accent)] text-xs rounded">
                 <LockKey size={10} />
                 Closed Source
               </span>
             )}
             {agent.is_custom && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded">
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--primary)]/20 text-[var(--primary)] text-xs rounded">
                 <GitFork size={10} />
                 Custom
               </span>
             )}
             {agent.parent_agent_id && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">
+              <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-info)]/20 text-[var(--status-info)] text-xs rounded">
                 <GitFork size={10} />
                 Forked
               </span>
@@ -1497,33 +1573,37 @@ function AgentCard({
       {/* Model Selection */}
       <div className="mb-4">
         {canChangeModel ? (
-          <div className="relative">
-            <select
-              value={currentModel}
-              onChange={(e) => onModelChange(e.target.value)}
-              className="w-full px-3 py-2 pl-8 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 text-xs font-medium focus:outline-none focus:border-blue-500/40 hover:bg-blue-500/15 transition-colors cursor-pointer appearance-none pr-8 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-            >
-              {availableModels.length > 0 ? (
-                availableModels.map((modelName) => (
-                  <option key={modelName} value={modelName}>
-                    {modelName}
-                  </option>
-                ))
-              ) : (
-                <option value={currentModel}>{currentModel}</option>
-              )}
-            </select>
-            <Cpu size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none" />
-            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-blue-400">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+          modelsLoading ? (
+            <AgentCardModelSkeleton />
+          ) : (
+            <div className="relative">
+              <select
+                value={currentModel}
+                onChange={(e) => onModelChange(e.target.value)}
+                className="w-full px-3 py-2 pl-8 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 rounded-lg text-[var(--status-info)] text-xs font-medium focus:outline-none focus:border-[var(--status-info)]/40 hover:bg-[var(--status-info)]/15 transition-colors cursor-pointer appearance-none pr-8 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+              >
+                {availableModels.length > 0 ? (
+                  availableModels.map((modelName) => (
+                    <option key={modelName} value={modelName}>
+                      {modelName}
+                    </option>
+                  ))
+                ) : (
+                  <option value={currentModel}>{currentModel}</option>
+                )}
+              </select>
+              <Cpu size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--status-info)] pointer-events-none" />
+              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--status-info)]">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
             </div>
-          </div>
+          )
         ) : (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg w-fit">
-            <Cpu size={14} className="text-blue-400" />
-            <span className="text-xs text-blue-400 font-medium">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 rounded-lg w-fit">
+            <Cpu size={14} className="text-[var(--status-info)]" />
+            <span className="text-xs text-[var(--status-info)] font-medium">
               {currentModel || 'Model not disclosed (closed source)'}
             </span>
           </div>
@@ -1534,7 +1614,7 @@ function AgentCard({
       <div className="mb-4">
         <div className="flex flex-wrap gap-1.5">
           {!agent.tools || agent.tools.length === 0 ? (
-            <div className="flex items-center gap-1 px-2 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs rounded-md font-medium">
+            <div className="flex items-center gap-1 px-2 py-1 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 text-[var(--status-info)] text-xs rounded-md font-medium">
               <Wrench size={12} />
               <span>All Tools</span>
             </div>
@@ -1545,7 +1625,7 @@ function AgentCard({
               return (
                 <div
                   key={idx}
-                  className="flex items-center gap-1 px-2 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs rounded-md font-medium"
+                  className="flex items-center gap-1 px-2 py-1 bg-[var(--primary)]/10 border border-[var(--primary)]/20 text-[var(--primary)] text-xs rounded-md font-medium"
                   title={tool.label}
                 >
                   {tool.icon}
@@ -1574,7 +1654,7 @@ function AgentCard({
         {canEdit && (
           <button
             onClick={onEdit}
-            className="flex-1 py-2 px-3 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 text-orange-400 rounded-lg transition-colors flex items-center justify-center gap-2"
+            className="flex-1 py-2 px-3 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 border border-[var(--primary)]/20 text-[var(--primary)] rounded-lg transition-colors flex items-center justify-center gap-2"
           >
             <Pencil size={16} />
             Edit
@@ -1585,8 +1665,8 @@ function AgentCard({
             onClick={onTogglePublish}
             className={`flex-1 py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-2 ${
               agent.is_published
-                ? 'bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400'
-                : 'bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-purple-400'
+                ? 'bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/20 text-[var(--status-info)]'
+                : 'bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 border border-[var(--accent)]/20 text-[var(--accent)]'
             }`}
           >
             {agent.is_published ? (
@@ -1606,8 +1686,8 @@ function AgentCard({
           onClick={onToggleEnable}
           className={`flex-1 py-2 px-3 rounded-lg transition-colors flex items-center justify-center gap-2 ${
             agent.is_enabled
-              ? 'bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400'
-              : 'bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400'
+              ? 'bg-[var(--status-error)]/10 hover:bg-[var(--status-error)]/20 border border-[var(--status-error)]/20 text-[var(--status-error)]'
+              : 'bg-[var(--status-success)]/10 hover:bg-[var(--status-success)]/20 border border-[var(--status-success)]/20 text-[var(--status-success)]'
           }`}
         >
           {agent.is_enabled ? (
@@ -1628,7 +1708,7 @@ function AgentCard({
       <div className="mt-3">
         <button
           onClick={onRemove}
-          className="w-full py-2 px-3 bg-white/5 hover:bg-red-500/10 border border-[var(--text)]/15 hover:border-red-500/20 text-[var(--text)]/60 hover:text-red-400 rounded-lg transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2 px-3 bg-white/5 hover:bg-[var(--status-error)]/10 border border-[var(--text)]/15 hover:border-[var(--status-error)]/20 text-[var(--text)]/60 hover:text-[var(--status-error)] rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           <Trash size={16} />
           Remove from Library
@@ -1729,7 +1809,7 @@ function EditAgentModal({
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
                   required
                 />
               </div>
@@ -1742,7 +1822,7 @@ function EditAgentModal({
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                  className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
                   required
                 />
               </div>
@@ -1754,7 +1834,7 @@ function EditAgentModal({
                 <select
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+                  className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   disabled={agent.source_type !== 'open' && !agent.is_custom}
                 >
                   {availableModels.length > 0 ? (
@@ -1783,7 +1863,7 @@ function EditAgentModal({
                     <button
                       type="button"
                       onClick={handleReset}
-                      className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 text-xs rounded transition-colors"
+                      className="px-3 py-1 bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/20 text-[var(--status-info)] text-xs rounded transition-colors"
                     >
                       Reset to Default
                     </button>
@@ -1838,7 +1918,7 @@ function EditAgentModal({
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors flex items-center gap-2"
+              className="px-6 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors flex items-center gap-2"
             >
               <Check size={18} />
               Save Changes
@@ -1910,7 +1990,7 @@ function AddCustomModelModal({
               type="text"
               value={modelId}
               onChange={(e) => setModelId(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50 font-mono text-sm"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
               placeholder="openrouter/model-name"
               required
             />
@@ -1927,7 +2007,7 @@ function AddCustomModelModal({
               type="text"
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
               placeholder="My Custom Model"
               required
             />
@@ -1943,7 +2023,7 @@ function AddCustomModelModal({
                 step="0.01"
                 value={pricingInput}
                 onChange={(e) => setPricingInput(e.target.value)}
-                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
                 placeholder="0.00"
               />
             </div>
@@ -1956,7 +2036,7 @@ function AddCustomModelModal({
                 step="0.01"
                 value={pricingOutput}
                 onChange={(e) => setPricingOutput(e.target.value)}
-                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-orange-500/50"
+                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
                 placeholder="0.00"
               />
             </div>
@@ -1973,7 +2053,7 @@ function AddCustomModelModal({
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="px-6 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
               disabled={loading}
             >
               {loading ? (
@@ -2115,7 +2195,7 @@ function SubscriptionsTab() {
       <div>
         <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
           <div className="flex items-center gap-2">
-            <Sparkle size={20} weight="fill" className="text-orange-500" />
+            <Sparkle size={20} weight="fill" className="text-[var(--primary)]" />
             Premium Subscription
           </div>
         </h2>
@@ -2131,7 +2211,7 @@ function SubscriptionsTab() {
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle size={20} weight="fill" className="text-green-500" />
+                  <CheckCircle size={20} weight="fill" className="text-[var(--status-success)]" />
                   <span className="font-medium" style={{ color: 'var(--text)' }}>
                     Active Premium Subscription
                   </span>
@@ -2143,7 +2223,7 @@ function SubscriptionsTab() {
                     <div>Started: {new Date(premiumSubscription.current_period_start).toLocaleDateString()}</div>
                   )}
                   {premiumSubscription.cancel_at_period_end && premiumSubscription.current_period_end ? (
-                    <div className="text-orange-500">
+                    <div className="text-[var(--primary)]">
                       Cancels on: {new Date(premiumSubscription.current_period_end).toLocaleDateString()} ({Math.ceil((new Date(premiumSubscription.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days remaining)
                     </div>
                   ) : premiumSubscription.current_period_end ? (
@@ -2153,15 +2233,15 @@ function SubscriptionsTab() {
 
                 <div className="space-y-2 text-sm" style={{ color: 'var(--text)', opacity: 0.8 }}>
                   <div className="flex items-center gap-2">
-                    <Check size={16} className="text-green-500" />
+                    <Check size={16} className="text-[var(--status-success)]" />
                     <span>5 projects & deploys</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Check size={16} className="text-green-500" />
+                    <Check size={16} className="text-[var(--status-success)]" />
                     <span>24/7 running mode</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Check size={16} className="text-green-500" />
+                    <Check size={16} className="text-[var(--status-success)]" />
                     <span>Use your own API keys</span>
                   </div>
                 </div>
@@ -2171,7 +2251,7 @@ function SubscriptionsTab() {
                 <button
                   onClick={() => handleCancelSubscription(premiumSubscription.subscription_id, 'premium')}
                   disabled={cancelingId === premiumSubscription.subscription_id}
-                  className="px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+                  className="px-4 py-2 text-sm font-medium text-[var(--status-error)] hover:bg-[var(--status-error)]/10 rounded-lg transition disabled:opacity-50"
                 >
                   {cancelingId === premiumSubscription.subscription_id ? 'Canceling...' : 'Cancel'}
                 </button>
@@ -2179,7 +2259,7 @@ function SubscriptionsTab() {
                 <button
                   onClick={() => handleRenewSubscription(premiumSubscription.subscription_id, 'premium')}
                   disabled={cancelingId === premiumSubscription.subscription_id}
-                  className="px-4 py-2 text-sm font-medium text-green-500 hover:bg-green-500/10 rounded-lg transition disabled:opacity-50"
+                  className="px-4 py-2 text-sm font-medium text-[var(--status-success)] hover:bg-[var(--status-success)]/10 rounded-lg transition disabled:opacity-50"
                 >
                   {cancelingId === premiumSubscription.subscription_id ? 'Renewing...' : 'Renew'}
                 </button>
@@ -2199,7 +2279,7 @@ function SubscriptionsTab() {
             </p>
             <button
               onClick={() => window.location.href = '/billing/plans'}
-              className="px-6 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-lg transition font-medium text-sm"
+              className="px-6 py-2 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary)] text-white rounded-lg transition font-medium text-sm"
             >
               Upgrade to Premium - $5/month
             </button>
@@ -2269,7 +2349,7 @@ function SubscriptionsTab() {
                       <button
                         onClick={() => handleCancelSubscription(sub.subscription_id, 'agent')}
                         disabled={cancelingId === sub.subscription_id}
-                        className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition disabled:opacity-50"
+                        className="p-2 text-[var(--status-error)] hover:bg-[var(--status-error)]/10 rounded-lg transition disabled:opacity-50"
                         title="Cancel subscription"
                       >
                         <XCircle size={20} />
@@ -2279,7 +2359,7 @@ function SubscriptionsTab() {
                       <button
                         onClick={() => handleRenewSubscription(sub.subscription_id, 'agent')}
                         disabled={cancelingId === sub.subscription_id}
-                        className="p-2 text-green-500 hover:bg-green-500/10 rounded-lg transition disabled:opacity-50"
+                        className="p-2 text-[var(--status-success)] hover:bg-[var(--status-success)]/10 rounded-lg transition disabled:opacity-50"
                         title="Renew subscription"
                       >
                         <CheckCircle size={20} />
@@ -2290,12 +2370,12 @@ function SubscriptionsTab() {
                   <div className="text-xs space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
                     <div>Purchased: {new Date(sub.purchase_date).toLocaleDateString()}</div>
                     <div className="flex items-center gap-1">
-                      <CheckCircle size={12} className="text-green-500" />
+                      <CheckCircle size={12} className="text-[var(--status-success)]" />
                       <span>{isSubscription ? 'Active Subscription' : 'Owned'}</span>
                     </div>
                     {/* Show cancellation info for monthly subscriptions */}
                     {isSubscription && sub.cancel_at_period_end && sub.current_period_end && (
-                      <div className="text-orange-500 font-medium">
+                      <div className="text-[var(--primary)] font-medium">
                         Cancels: {new Date(sub.current_period_end).toLocaleDateString()}
                         ({Math.ceil((new Date(sub.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days left)
                       </div>
@@ -2393,7 +2473,7 @@ function CreditsTab() {
       <div>
         <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
           <div className="flex items-center gap-2">
-            <Coins size={20} weight="fill" className="text-yellow-500" />
+            <Coins size={20} weight="fill" className="text-[var(--status-warning)]" />
             Credits Balance
           </div>
         </h2>
@@ -2460,7 +2540,7 @@ function CreditsTab() {
                   disabled={purchasing !== null}
                   className={`w-full px-6 py-3 rounded-lg font-medium text-sm transition ${
                     pkg.popular
-                      ? 'bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white'
+                      ? 'bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary)] text-white'
                       : 'bg-white/5 hover:bg-white/10 text-white'
                   } disabled:opacity-50`}
                 >

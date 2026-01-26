@@ -6,11 +6,23 @@
 |------|---------|
 | `app/src/services/taskService.ts` | Background task WebSocket singleton |
 | `app/src/theme/ThemeContext.tsx` | Theme state and provider |
+| `app/src/theme/themePresets.ts` | Theme preset loading and caching |
 | `app/src/theme/variables.css` | CSS custom properties |
 | `app/src/hooks/useTask.ts` | Task tracking hooks |
 | `app/src/hooks/useTaskNotifications.ts` | Toast notifications for tasks |
 | `app/src/hooks/useReferralTracking.ts` | Affiliate tracking |
 | `app/src/hooks/useContainerStartup.ts` | Container startup lifecycle with health checks |
+| `app/src/hooks/useCancellableRequest.ts` | AbortController-based API request hook |
+| `app/src/hooks/useAuth.ts` | Auth status and user info |
+| `app/src/contexts/AuthContext.tsx` | Centralized auth state (single source of truth) |
+| `app/src/contexts/CommandContext.tsx` | Command palette dispatch system |
+| `app/src/types/theme.ts` | Theme types + runtime validation |
+
+## Related Documentation
+
+- **`docs/app/contexts/CLAUDE.md`**: AuthContext and CommandContext details
+- **`docs/app/hooks/CLAUDE.md`**: Custom hooks documentation
+- **`docs/app/types/CLAUDE.md`**: Theme types and validation
 
 ## Quick Reference
 
@@ -52,6 +64,76 @@ function MyComponent() {
 }
 ```
 
+### Theme Loading States
+
+The theme system has explicit loading states to handle async theme fetching:
+
+```typescript
+import { useTheme } from '../theme';
+
+function PreferencesSettings() {
+  const {
+    themePreset,           // Current theme object
+    availablePresets,      // All available themes
+    setThemePreset,        // Change theme by ID
+    loadingState,          // 'idle' | 'loading' | 'success' | 'error'
+    isReady,               // true when themes loaded OR fallback available
+    error,                 // Error message if loading failed
+  } = useTheme();
+
+  // Wait for themes to be ready before rendering picker
+  if (!isReady) {
+    return <SkeletonLoader />;
+  }
+
+  return (
+    <ThemePicker
+      themes={availablePresets}
+      selected={themePreset?.id}
+      onChange={setThemePreset}
+    />
+  );
+}
+```
+
+### Theme State Flow
+
+```
+App Mount
+    ↓
+loadingState: 'idle'
+    ↓
+Theme API called
+    ↓
+loadingState: 'loading'
+    ↓
+┌─────────────────┬──────────────────┐
+│ Success         │ Error            │
+│ loadingState:   │ loadingState:    │
+│ 'success'       │ 'error'          │
+│ isReady: true   │ isReady: true    │
+│ themes loaded   │ fallback used    │
+└─────────────────┴──────────────────┘
+```
+
+The `isReady` flag is true in both cases - either themes loaded successfully, or the fallback theme is available. This ensures the UI never blocks waiting for themes.
+
+### Using useThemeWhenReady
+
+For components that must wait for themes:
+
+```typescript
+import { useThemeWhenReady } from '../theme';
+
+function ThemeSettings() {
+  // Automatically uses fallback if themes not loaded
+  const { availablePresets, isReady } = useThemeWhenReady();
+
+  // Always has at least one theme (the fallback)
+  return <ThemeGrid themes={availablePresets} />;
+}
+```
+
 ### Subscribing to Tasks
 
 ```typescript
@@ -65,6 +147,82 @@ const { tasks, loading } = useActiveTasks();
 
 // Poll task until completion
 const { task, loading, error } = useTaskPolling(taskId);
+```
+
+### Using Cancellable Requests
+
+```typescript
+import { useCancellableRequest } from '../hooks/useCancellableRequest';
+
+function MySettings() {
+  const [data, setData] = useState(null);
+  const { execute } = useCancellableRequest<MyDataType>();
+
+  useEffect(() => {
+    execute(
+      () => api.getData(),
+      {
+        onSuccess: setData,
+        onError: (err) => toast.error(err.message),
+        onFinally: () => setLoading(false),
+      }
+    );
+    // Cleanup happens automatically on unmount
+  }, [execute]);
+}
+```
+
+### Using Auth Context
+
+```typescript
+import { useAuth } from '../contexts/AuthContext';
+
+function MyComponent() {
+  const { isAuthenticated, isLoading, user, login, logout } = useAuth();
+
+  if (isLoading) return <Spinner />;
+  if (!isAuthenticated) return <Navigate to="/login" />;
+
+  return <div>Hello, {user?.name}</div>;
+}
+```
+
+### Using Command Context
+
+```typescript
+import { useCommandHandlers, useCommandContext } from '../contexts/CommandContext';
+
+// Register handlers in page component
+function ProjectPage() {
+  useCommandHandlers({
+    switchView: setView,
+    togglePanel: (panel) => setActivePanel(p => p === panel ? null : panel),
+  });
+}
+
+// Execute commands from CommandPalette
+function CommandPalette() {
+  const { executeCommand } = useCommandContext();
+
+  const handleSelect = (cmd) => executeCommand(cmd.id, cmd.args);
+}
+```
+
+### Using Theme Validation
+
+```typescript
+import { isValidTheme, DEFAULT_FALLBACK_THEME } from '../types/theme';
+
+async function loadTheme(themeId: string) {
+  const theme = await themesApi.get(themeId);
+
+  if (!isValidTheme(theme)) {
+    console.warn('Invalid theme, using fallback');
+    return DEFAULT_FALLBACK_THEME;
+  }
+
+  return theme;
+}
 ```
 
 ### Using Task Service Directly
@@ -237,7 +395,8 @@ app/src/
 ├── services/           # Singleton services
 │   └── taskService.ts
 ├── theme/              # Theme system
-│   ├── ThemeContext.tsx
+│   ├── ThemeContext.tsx    # Theme provider with loading states
+│   ├── themePresets.ts     # Theme loading/caching
 │   ├── variables.css
 │   ├── fonts.ts
 │   └── index.ts

@@ -3,10 +3,12 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
+import { useTheme } from '../theme/ThemeContext';
 import toast from 'react-hot-toast';
 
 export default function Register() {
   const navigate = useNavigate();
+  const { refreshUserTheme } = useTheme();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -34,6 +36,9 @@ export default function Register() {
       // Auto-login after registration
       const loginResponse = await authApi.login(formData.email, formData.password);
       localStorage.setItem('token', loginResponse.access_token);
+
+      // Load user's theme preference (non-blocking)
+      refreshUserTheme();
 
       navigate('/dashboard', { state: { fromLogin: true } });
     } catch (error: unknown) {

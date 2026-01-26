@@ -946,6 +946,33 @@ class UsageLog(Base):
 
 
 # ============================================================================
+# Theme System Models
+# ============================================================================
+
+class Theme(Base):
+    """UI themes stored as JSON. Loaded from scripts/themes/ and served via API."""
+    __tablename__ = "themes"
+
+    id = Column(String(100), primary_key=True, index=True)  # e.g., "midnight-dark"
+    name = Column(String(100), nullable=False)  # Display name: "Midnight"
+    mode = Column(String(10), nullable=False)  # "dark" or "light"
+    author = Column(String(100), default="Tesslate")
+    version = Column(String(20), default="1.0.0")
+    description = Column(Text, nullable=True)
+
+    # Full theme JSON (colors, typography, spacing, animation)
+    theme_json = Column(JSON, nullable=False)
+
+    # Theme metadata
+    is_default = Column(Boolean, default=False)  # Default theme for new users
+    is_active = Column(Boolean, default=True)  # Can be disabled without deletion
+    sort_order = Column(Integer, default=0)  # For ordering in UI
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ============================================================================
 # Feedback System Models
 # ============================================================================
 
