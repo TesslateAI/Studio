@@ -2,30 +2,38 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useInView } from 'react-intersection-observer';
 import { debounce } from 'lodash';
-import {
-  ArrowLeft,
-  CaretDown,
-  Package,
-  MagnifyingGlass,
-  X,
-} from '@phosphor-icons/react';
+import { ArrowLeft, CaretDown, Package, MagnifyingGlass, X } from '@phosphor-icons/react';
 import { AgentCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
 import { UserDropdown } from '../components/ui';
 import { marketplaceApi, authApi } from '../lib/api';
 import toast from 'react-hot-toast';
+import { isCanceledError } from '../lib/utils';
 import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
-type SortOption = 'featured' | 'popular' | 'newest' | 'name' | 'rating' | 'price_asc' | 'price_desc';
+type SortOption =
+  | 'featured'
+  | 'popular'
+  | 'newest'
+  | 'name'
+  | 'rating'
+  | 'price_asc'
+  | 'price_desc';
 type PricingFilter = 'all' | 'free' | 'paid';
 
 const ITEMS_PER_PAGE = 20;
 
 // Category definitions with metadata
 const categoryMeta: Record<string, { label: string; description: string }> = {
-  builder: { label: 'Builder', description: 'General-purpose AI coding assistants for any project' },
-  frontend: { label: 'Frontend', description: 'Build beautiful user interfaces with modern frameworks' },
+  builder: {
+    label: 'Builder',
+    description: 'General-purpose AI coding assistants for any project',
+  },
+  frontend: {
+    label: 'Frontend',
+    description: 'Build beautiful user interfaces with modern frameworks',
+  },
   fullstack: { label: 'Fullstack', description: 'End-to-end web application development' },
   backend: { label: 'Backend', description: 'APIs, databases, and server-side logic' },
   data: { label: 'Data', description: 'Data analysis, visualization, and machine learning' },
@@ -80,11 +88,7 @@ export default function MarketplaceCategory() {
   useEffect(() => {
     const handleSlashKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
 
@@ -191,7 +195,8 @@ export default function MarketplaceCategory() {
           setItems(data);
         }
       } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
+        // Silently ignore cancelled requests (both native AbortError and Axios CanceledError)
+        if (isCanceledError(err)) {
           return;
         }
         console.error('Failed to load category:', err);
@@ -208,13 +213,10 @@ export default function MarketplaceCategory() {
   // Debounced search
   const debouncedLoadItems = useMemo(
     () =>
-      debounce(
-        (params: { search: string; sort: SortOption; pricing: PricingFilter }) => {
-          setPage(1);
-          loadItems({ ...params, pageNum: 1 });
-        },
-        300
-      ),
+      debounce((params: { search: string; sort: SortOption; pricing: PricingFilter }) => {
+        setPage(1);
+        loadItems({ ...params, pageNum: 1 });
+      }, 300),
     [loadItems]
   );
 
@@ -336,7 +338,14 @@ export default function MarketplaceCategory() {
       <SEO
         title={`${meta.label} AI Agents & Templates`}
         description={`${meta.description}. Discover the best ${meta.label.toLowerCase()} AI agents and templates on Tesslate Marketplace.`}
-        keywords={[meta.label, `${meta.label.toLowerCase()} agents`, 'AI agents', 'coding agents', 'project templates', 'Tesslate']}
+        keywords={[
+          meta.label,
+          `${meta.label.toLowerCase()} agents`,
+          'AI agents',
+          'coding agents',
+          'project templates',
+          'Tesslate',
+        ]}
         url={`${baseUrl}/marketplace/category/${category}`}
         structuredData={breadcrumbData}
       />
@@ -345,94 +354,88 @@ export default function MarketplaceCategory() {
         <div
           className={`border-b ${theme === 'light' ? 'border-black/10 bg-white/80' : 'border-white/10 bg-[#0a0a0a]/80'} backdrop-blur-xl sticky top-0 z-40`}
         >
-        <div className="max-w-6xl mx-auto px-6 md:px-12">
-          {/* Back Button & Title */}
-          <div className="py-6">
-            <button
-              onClick={() => navigate('/marketplace')}
-              className={`
+          <div className="max-w-6xl mx-auto px-6 md:px-12">
+            {/* Back Button & Title */}
+            <div className="py-6">
+              <button
+                onClick={() => navigate('/marketplace')}
+                className={`
                 flex items-center gap-2 mb-4 text-sm transition-colors
                 ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}
               `}
-            >
-              <ArrowLeft size={16} />
-              Back to Marketplace
-            </button>
+              >
+                <ArrowLeft size={16} />
+                Back to Marketplace
+              </button>
 
-            <div className="flex items-center justify-between">
-              <div>
-                <h1
-                  className={`font-heading text-2xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                >
-                  {meta.label}
-                </h1>
-                <p className={`text-sm mt-1 ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}>
-                  {meta.description}
-                </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1
+                    className={`font-heading text-2xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                  >
+                    {meta.label}
+                  </h1>
+                  <p
+                    className={`text-sm mt-1 ${theme === 'light' ? 'text-black/60' : 'text-white/60'}`}
+                  >
+                    {meta.description}
+                  </p>
+                </div>
+
+                {/* User Dropdown - Only show when authenticated */}
+                {isAuthenticated && (
+                  <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
+                )}
               </div>
-
-              {/* User Dropdown - Only show when authenticated */}
-              {isAuthenticated && (
-                <UserDropdown
-                  userName={userName}
-                  userCredits={userCredits}
-                  userTier={userTier}
-                />
-              )}
             </div>
-          </div>
 
-          {/* Search Bar */}
-          <div className="pb-4">
-            <div
-              className={`
-                relative max-w-xl flex items-center gap-3 px-4 py-2.5 rounded-xl border
-                ${
-                  theme === 'light'
-                    ? 'bg-black/5 border-black/10'
-                    : 'bg-white/5 border-white/10'
-                }
-              `}
-            >
-              <MagnifyingGlass
-                size={18}
-                className={theme === 'light' ? 'text-black/40' : 'text-white/40'}
-              />
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search in this category... (press / to focus)"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+            {/* Search Bar */}
+            <div className="pb-4">
+              <div
                 className={`
+                relative max-w-xl flex items-center gap-3 px-4 py-2.5 rounded-xl border
+                ${theme === 'light' ? 'bg-black/5 border-black/10' : 'bg-white/5 border-white/10'}
+              `}
+              >
+                <MagnifyingGlass
+                  size={18}
+                  className={theme === 'light' ? 'text-black/40' : 'text-white/40'}
+                />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  placeholder="Search in this category... (press / to focus)"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className={`
                   flex-1 bg-transparent outline-none focus-visible:outline-none text-sm
                   ${theme === 'light' ? 'text-black placeholder-black/40' : 'text-white placeholder-white/40'}
                 `}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className={`
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className={`
                     p-1 rounded-full transition-colors
                     ${theme === 'light' ? 'hover:bg-black/10 text-black/40' : 'hover:bg-white/10 text-white/40'}
                   `}
-                  aria-label="Clear search"
-                >
-                  <X size={14} />
-                </button>
-              )}
+                    aria-label="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
 
-          {/* Filters Bar */}
-          <div className="flex items-center justify-between pb-4 gap-4">
-            {/* Left: Dropdowns */}
-            <div className="flex items-center gap-2">
-              {/* Price Filter */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowPriceDropdown(!showPriceDropdown)}
-                  className={`
+            {/* Filters Bar */}
+            <div className="flex items-center justify-between pb-4 gap-4">
+              {/* Left: Dropdowns */}
+              <div className="flex items-center gap-2">
+                {/* Price Filter */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowPriceDropdown(!showPriceDropdown)}
+                    className={`
                     flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all border
                     ${pricingFilter !== 'all' ? 'border-[var(--primary)] text-[var(--primary)]' : ''}
                     ${
@@ -441,19 +444,19 @@ export default function MarketplaceCategory() {
                         : 'border-white/10 text-white/60 hover:text-white hover:bg-white/5'
                     }
                   `}
-                >
-                  {pricingOptions.find((o) => o.id === pricingFilter)?.label}
-                  <CaretDown size={14} />
-                </button>
+                  >
+                    {pricingOptions.find((o) => o.id === pricingFilter)?.label}
+                    <CaretDown size={14} />
+                  </button>
 
-                {showPriceDropdown && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowPriceDropdown(false)}
-                    />
-                    <div
-                      className={`
+                  {showPriceDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowPriceDropdown(false)}
+                      />
+                      <div
+                        className={`
                         absolute left-0 top-full mt-2 py-2 rounded-xl border shadow-xl z-50 min-w-[140px]
                         ${
                           theme === 'light'
@@ -461,15 +464,15 @@ export default function MarketplaceCategory() {
                             : 'bg-[#1a1a1c] border-white/10'
                         }
                       `}
-                    >
-                      {pricingOptions.map((option) => (
-                        <button
-                          key={option.id}
-                          onClick={() => {
-                            setPricingFilter(option.id);
-                            setShowPriceDropdown(false);
-                          }}
-                          className={`
+                      >
+                        {pricingOptions.map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => {
+                              setPricingFilter(option.id);
+                              setShowPriceDropdown(false);
+                            }}
+                            className={`
                             w-full px-4 py-2 text-left text-sm transition-colors
                             ${
                               pricingFilter === option.id
@@ -479,20 +482,20 @@ export default function MarketplaceCategory() {
                                   : 'text-white/70 hover:bg-white/5'
                             }
                           `}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
 
-              {/* Sort Dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSortDropdown(!showSortDropdown)}
-                  className={`
+                {/* Sort Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowSortDropdown(!showSortDropdown)}
+                    className={`
                     flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all border
                     ${
                       theme === 'light'
@@ -500,19 +503,19 @@ export default function MarketplaceCategory() {
                         : 'border-white/10 text-white/60 hover:text-white hover:bg-white/5'
                     }
                   `}
-                >
-                  Sort: {sortOptions.find((o) => o.id === sortBy)?.label}
-                  <CaretDown size={14} />
-                </button>
+                  >
+                    Sort: {sortOptions.find((o) => o.id === sortBy)?.label}
+                    <CaretDown size={14} />
+                  </button>
 
-                {showSortDropdown && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowSortDropdown(false)}
-                    />
-                    <div
-                      className={`
+                  {showSortDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowSortDropdown(false)}
+                      />
+                      <div
+                        className={`
                         absolute left-0 top-full mt-2 py-2 rounded-xl border shadow-xl z-50 min-w-[180px]
                         ${
                           theme === 'light'
@@ -520,15 +523,15 @@ export default function MarketplaceCategory() {
                             : 'bg-[#1a1a1c] border-white/10'
                         }
                       `}
-                    >
-                      {sortOptions.map((option) => (
-                        <button
-                          key={option.id}
-                          onClick={() => {
-                            setSortBy(option.id);
-                            setShowSortDropdown(false);
-                          }}
-                          className={`
+                      >
+                        {sortOptions.map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => {
+                              setSortBy(option.id);
+                              setShowSortDropdown(false);
+                            }}
+                            className={`
                             w-full px-4 py-2 text-left text-sm transition-colors
                             ${
                               sortBy === option.id
@@ -538,78 +541,87 @@ export default function MarketplaceCategory() {
                                   : 'text-white/70 hover:bg-white/5'
                             }
                           `}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* Right: Count */}
-            {totalCount !== null && (
-              <span className={`text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}>
-                {totalCount} {totalCount === 1 ? 'item' : 'items'}
-              </span>
-            )}
+              {/* Right: Count */}
+              {totalCount !== null && (
+                <span
+                  className={`text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
+                >
+                  {totalCount} {totalCount === 1 ? 'item' : 'items'}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Main Content */}
-      <div className={`max-w-6xl mx-auto px-6 md:px-12 py-8 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
-        {initialLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <SkeletonCard key={i} />
-            ))}
-          </div>
-        ) : items.length > 0 || loadingMore ? (
-          <>
+        {/* Main Content */}
+        <div
+          className={`max-w-6xl mx-auto px-6 md:px-12 py-8 ${filtering ? 'opacity-60' : ''} transition-opacity`}
+        >
+          {initialLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {items.map((item) => (
-                <AgentCard key={item.id} item={item} onInstall={handleInstall} isAuthenticated={isAuthenticated} />
+              {Array.from({ length: 8 }).map((_, i) => (
+                <SkeletonCard key={i} />
               ))}
-              {loadingMore &&
-                Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`loading-${i}`} />)}
             </div>
+          ) : items.length > 0 || loadingMore ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {items.map((item) => (
+                  <AgentCard
+                    key={item.id}
+                    item={item}
+                    onInstall={handleInstall}
+                    isAuthenticated={isAuthenticated}
+                  />
+                ))}
+                {loadingMore &&
+                  Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`loading-${i}`} />)}
+              </div>
 
-            {/* Infinite scroll trigger */}
-            {hasMore && !loadingMore && <div ref={loadMoreRef} className="h-10 mt-4" />}
-          </>
-        ) : (
-          <div
-            className={`
+              {/* Infinite scroll trigger */}
+              {hasMore && !loadingMore && <div ref={loadMoreRef} className="h-10 mt-4" />}
+            </>
+          ) : (
+            <div
+              className={`
               text-center py-16 rounded-2xl
               ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
             `}
-          >
-            <Package
-              size={48}
-              className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
-            />
-            <p className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>
-              {searchQuery
-                ? `No items found matching "${searchQuery}"`
-                : `No items available in ${meta.label} yet`}
-            </p>
-            {(searchQuery || pricingFilter !== 'all') && (
-              <button
-                onClick={() => {
-                  setPricingFilter('all');
-                  setSearchQuery('');
-                }}
-                className="mt-4 px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)] transition-colors"
-              >
-                Clear Filters
-              </button>
-            )}
-          </div>
-        )}
+            >
+              <Package
+                size={48}
+                className={`mx-auto mb-4 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+              />
+              <p className={theme === 'light' ? 'text-black/40' : 'text-white/40'}>
+                {searchQuery
+                  ? `No items found matching "${searchQuery}"`
+                  : `No items available in ${meta.label} yet`}
+              </p>
+              {(searchQuery || pricingFilter !== 'all') && (
+                <button
+                  onClick={() => {
+                    setPricingFilter('all');
+                    setSearchQuery('');
+                  }}
+                  className="mt-4 px-4 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)] transition-colors"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
     </>
   );
 }

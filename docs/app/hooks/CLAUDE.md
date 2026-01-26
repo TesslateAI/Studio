@@ -36,7 +36,9 @@ Prevents memory leaks and race conditions by:
 - Tracking component mount state
 - Aborting in-flight requests on unmount
 - Only calling callbacks if component is still mounted
-- Silently ignoring AbortError exceptions
+- Silently ignoring AbortError and Axios CanceledError exceptions
+
+**Note**: For manual AbortController patterns (like in Marketplace pages), use `isCanceledError()` from `lib/utils.ts` to check for cancelled requests, as it handles both native AbortError and Axios CanceledError.
 
 ### Basic Usage
 

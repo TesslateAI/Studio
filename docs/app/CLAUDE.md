@@ -86,7 +86,7 @@ Load this context when:
 ### Utilities
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/fileEvents.ts`**: Event system for file changes
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/utils/autoLayout.ts`**: Graph auto-layout with Dagre algorithm
-- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/lib/utils.ts`**: Utility functions (classNames, etc.)
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/lib/utils.ts`**: Utility functions (cn, isCanceledError)
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/theme/ThemeContext.tsx`**: Theme state management
 
 ## Related Contexts
@@ -481,7 +481,7 @@ function MyGraph() {
 
 ### 11. Cancellable API Requests
 
-**Pattern**: Use `useCancellableRequest` to prevent memory leaks
+**Pattern**: Use `useCancellableRequest` to prevent memory leaks, or `isCanceledError` for manual AbortController patterns.
 
 ```typescript
 import { useCancellableRequest } from '../hooks/useCancellableRequest';
@@ -505,6 +505,38 @@ function MySettings() {
   // Cleanup happens automatically on unmount
   // No more "Can't perform state update on unmounted component"
 }
+```
+
+**Manual AbortController pattern** (for fine-grained control like search/filtering):
+
+```typescript
+import { isCanceledError } from '../lib/utils';
+
+const abortControllerRef = useRef<AbortController | null>(null);
+
+const loadItems = useCallback(async () => {
+  // Cancel any in-flight request
+  abortControllerRef.current?.abort();
+  abortControllerRef.current = new AbortController();
+
+  try {
+    const result = await api.getData({ signal: abortControllerRef.current.signal });
+    setData(result);
+  } catch (err) {
+    // Silently ignore cancelled requests (both native AbortError and Axios CanceledError)
+    if (isCanceledError(err)) {
+      return;
+    }
+    console.error('Failed to load:', err);
+    toast.error('Failed to load');
+  }
+}, []);
+```
+
+**Important**: Always use `isCanceledError()` instead of checking `err.name === 'AbortError'` directly, because:
+- Native fetch throws `AbortError` with `name: 'AbortError'`
+- Axios throws `CanceledError` with `code: 'ERR_CANCELED'`
+- `isCanceledError()` handles both cases
 ```
 
 ### 12. Auth Context

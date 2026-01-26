@@ -416,6 +416,8 @@ useEffect(() => {
 Both pages use `AbortController` to cancel in-flight requests when new requests are made:
 
 ```typescript
+import { isCanceledError } from '../lib/utils';
+
 const abortControllerRef = useRef<AbortController | null>(null);
 
 const loadItems = useCallback(async (params) => {
@@ -430,8 +432,8 @@ const loadItems = useCallback(async (params) => {
     );
     // Process result...
   } catch (err) {
-    // Ignore AbortError (expected when request is cancelled)
-    if (err instanceof Error && err.name === 'AbortError') {
+    // Silently ignore cancelled requests (both native AbortError and Axios CanceledError)
+    if (isCanceledError(err)) {
       return;
     }
     console.error('Failed to load:', err);
@@ -446,6 +448,11 @@ useEffect(() => {
   };
 }, []);
 ```
+
+**Important**: Always use `isCanceledError()` instead of `err.name === 'AbortError'`:
+- Native fetch throws `AbortError` with `name: 'AbortError'`
+- Axios throws `CanceledError` with `code: 'ERR_CANCELED'`
+- `isCanceledError()` handles both cases
 
 **Why This Matters**:
 - Prevents race conditions when filters change rapidly
@@ -754,9 +761,11 @@ GET /api/marketplace/bases?category={category}&pricing_type={pricing}&search={se
 
 **Solution**: Check debounce timing and AbortController:
 ```typescript
+import { isCanceledError } from '../lib/utils';
+
 // Ensure debounce is not cancelled prematurely
-// Check that AbortError is being handled correctly
-if (err instanceof Error && err.name === 'AbortError') {
+// Check that cancelled requests are being handled correctly
+if (isCanceledError(err)) {
   return; // Don't show error for cancelled requests
 }
 ```

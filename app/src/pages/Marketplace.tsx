@@ -20,15 +20,28 @@ import {
   Funnel,
 } from '@phosphor-icons/react';
 import { MobileMenu, UserDropdown } from '../components/ui';
-import { AgentCard, FeaturedCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
+import {
+  AgentCard,
+  FeaturedCard,
+  SkeletonCard,
+  type MarketplaceItem,
+} from '../components/marketplace';
 import { marketplaceApi, authApi } from '../lib/api';
 import toast from 'react-hot-toast';
+import { isCanceledError } from '../lib/utils';
 import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateMarketplaceStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
 type ItemType = 'agent' | 'base' | 'tool' | 'integration';
-type SortOption = 'featured' | 'popular' | 'newest' | 'name' | 'rating' | 'price_asc' | 'price_desc';
+type SortOption =
+  | 'featured'
+  | 'popular'
+  | 'newest'
+  | 'name'
+  | 'rating'
+  | 'price_asc'
+  | 'price_desc';
 type PricingFilter = 'all' | 'free' | 'paid';
 
 const ITEMS_PER_PAGE = 20;
@@ -96,11 +109,7 @@ export default function Marketplace() {
     const handleSlashKey = (e: KeyboardEvent) => {
       // Don't trigger if focused on form element
       const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
 
@@ -282,8 +291,8 @@ export default function Marketplace() {
           setItems(data);
         }
       } catch (err) {
-        // Silently ignore cancelled requests
-        if (err instanceof Error && err.name === 'AbortError') {
+        // Silently ignore cancelled requests (both native AbortError and Axios CanceledError)
+        if (isCanceledError(err)) {
           return;
         }
         console.error('Failed to load marketplace:', err);
@@ -487,7 +496,6 @@ export default function Marketplace() {
     setPage(1);
   };
 
-
   // Separate featured and regular items
   const featuredItems = items.filter((item) => item.is_featured);
   const regularItems = items.filter((item) => !item.is_featured);
@@ -500,7 +508,15 @@ export default function Marketplace() {
       <SEO
         title="AI Agents & Templates Marketplace"
         description="Discover AI-powered coding agents, project templates, and developer tools. Build faster with pre-built solutions from the Tesslate Marketplace."
-        keywords={['AI agents', 'coding agents', 'project templates', 'developer tools', 'code generation', 'web development', 'Tesslate']}
+        keywords={[
+          'AI agents',
+          'coding agents',
+          'project templates',
+          'developer tools',
+          'code generation',
+          'web development',
+          'Tesslate',
+        ]}
         url={typeof window !== 'undefined' ? window.location.href : undefined}
         structuredData={generateMarketplaceStructuredData()}
       />
@@ -523,11 +539,7 @@ export default function Marketplace() {
               <div className="flex items-center gap-3">
                 {/* User Dropdown - Only show when authenticated */}
                 {isAuthenticated && (
-                  <UserDropdown
-                    userName={userName}
-                    userCredits={userCredits}
-                    userTier={userTier}
-                  />
+                  <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
                 )}
 
                 {/* Mobile hamburger */}
@@ -557,11 +569,7 @@ export default function Marketplace() {
               <div
                 className={`
                 relative max-w-2xl mx-auto flex items-center gap-3 px-4 py-3 rounded-xl border
-                ${
-                  theme === 'light'
-                    ? 'bg-black/5 border-black/10'
-                    : 'bg-white/5 border-white/10'
-                }
+                ${theme === 'light' ? 'bg-black/5 border-black/10' : 'bg-white/5 border-white/10'}
               `}
               >
                 <MagnifyingGlass
@@ -782,18 +790,21 @@ export default function Marketplace() {
                 </div>
               </div>
             </div>
-
           </div>
         </div>
 
         {/* Main Content */}
-        <div className={`max-w-6xl mx-auto px-6 md:px-12 py-8 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
+        <div
+          className={`max-w-6xl mx-auto px-6 md:px-12 py-8 ${filtering ? 'opacity-60' : ''} transition-opacity`}
+        >
           {/* Initial Loading - Skeleton */}
           {initialLoading ? (
             <>
               {/* Featured skeleton */}
               <section className="mb-12">
-                <div className={`h-6 w-32 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`} />
+                <div
+                  className={`h-6 w-32 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`}
+                />
                 <div className="space-y-4">
                   <SkeletonCard variant="featured" />
                   <SkeletonCard variant="featured" />
@@ -802,7 +813,9 @@ export default function Marketplace() {
 
               {/* Grid skeleton */}
               <section>
-                <div className={`h-6 w-40 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`} />
+                <div
+                  className={`h-6 w-40 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`}
+                />
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {Array.from({ length: 8 }).map((_, i) => (
                     <SkeletonCard key={i} />
@@ -822,7 +835,12 @@ export default function Marketplace() {
                   </h2>
                   <div className="space-y-4">
                     {featuredItems.slice(0, 3).map((item) => (
-                      <FeaturedCard key={item.id} item={item} onInstall={handleInstall} isAuthenticated={isAuthenticated} />
+                      <FeaturedCard
+                        key={item.id}
+                        item={item}
+                        onInstall={handleInstall}
+                        isAuthenticated={isAuthenticated}
+                      />
                     ))}
                   </div>
                 </section>
@@ -892,17 +910,22 @@ export default function Marketplace() {
                   <>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                       {regularItems.map((item) => (
-                        <AgentCard key={item.id} item={item} onInstall={handleInstall} isAuthenticated={isAuthenticated} />
+                        <AgentCard
+                          key={item.id}
+                          item={item}
+                          onInstall={handleInstall}
+                          isAuthenticated={isAuthenticated}
+                        />
                       ))}
                       {/* Loading more skeletons */}
                       {loadingMore &&
-                        Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`loading-${i}`} />)}
+                        Array.from({ length: 4 }).map((_, i) => (
+                          <SkeletonCard key={`loading-${i}`} />
+                        ))}
                     </div>
 
                     {/* Infinite scroll trigger */}
-                    {hasMore && !loadingMore && (
-                      <div ref={loadMoreRef} className="h-10 mt-4" />
-                    )}
+                    {hasMore && !loadingMore && <div ref={loadMoreRef} className="h-10 mt-4" />}
                   </>
                 ) : (
                   <div
