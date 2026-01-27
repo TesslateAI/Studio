@@ -35,10 +35,15 @@ import {
   Gear,
   SignOut,
   Repeat,
-  Coins
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
-import { MobileMenu, MarkerEditor, MarkerPalette, UserDropdown, type MarkerEditorHandle } from '../components/ui';
+import {
+  MobileMenu,
+  MarkerEditor,
+  MarkerPalette,
+  UserDropdown,
+  type MarkerEditorHandle,
+} from '../components/ui';
 import { ConfirmDialog } from '../components/modals';
 import { ToolManagement } from '../components/ToolManagement';
 import { ImageUpload } from '../components/ImageUpload';
@@ -63,7 +68,10 @@ interface LibraryAgent {
   pricing_type: string;
   features: string[];
   tools?: string[] | null;
-  tool_configs?: Record<string, { description?: string; examples?: string[]; system_prompt?: string }> | null;
+  tool_configs?: Record<
+    string,
+    { description?: string; examples?: string[]; system_prompt?: string }
+  > | null;
   purchase_date: string;
   purchase_type: string;
   expires_at: string | null;
@@ -116,7 +124,7 @@ interface Provider {
   requires_key: boolean;
 }
 
-type TabType = 'agents' | 'models' | 'api-keys' | 'subscriptions' | 'credits';
+type TabType = 'agents' | 'models' | 'api-keys' | 'subscriptions';
 
 // All available tools in the system
 const _ALL_TOOLS = [
@@ -131,7 +139,7 @@ const _ALL_TOOLS = [
   'get_project_info',
   'todo_read',
   'todo_write',
-  'web_fetch'
+  'web_fetch',
 ];
 
 // Tool icon mapping helper
@@ -180,42 +188,47 @@ export default function Library() {
       {
         icon: <Folder className="w-5 h-5" weight="fill" />,
         title: 'Projects',
-        onClick: () => navigate('/dashboard')
+        onClick: () => navigate('/dashboard'),
       },
       {
         icon: <Storefront className="w-5 h-5" weight="fill" />,
         title: 'Marketplace',
-        onClick: () => navigate('/marketplace')
+        onClick: () => navigate('/marketplace'),
       },
       {
         icon: <Books className="w-5 h-5" weight="fill" />,
         title: 'Library',
         onClick: () => {},
-        active: true
+        active: true,
       },
       {
         icon: <Package className="w-5 h-5" weight="fill" />,
         title: 'Components',
-        onClick: () => toast('Components library coming soon!')
-      }
+        onClick: () => toast('Components library coming soon!'),
+      },
     ],
     right: [
       {
-        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        icon:
+          theme === 'dark' ? (
+            <Sun className="w-5 h-5" weight="fill" />
+          ) : (
+            <Moon className="w-5 h-5" weight="fill" />
+          ),
         title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
-        onClick: toggleTheme
+        onClick: toggleTheme,
       },
       {
         icon: <Gear className="w-5 h-5" weight="fill" />,
         title: 'Settings',
-        onClick: () => navigate('/settings')
+        onClick: () => navigate('/settings'),
       },
       {
         icon: <SignOut className="w-5 h-5" weight="fill" />,
         title: 'Logout',
-        onClick: logout
-      }
-    ]
+        onClick: logout,
+      },
+    ],
   };
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -224,6 +237,7 @@ export default function Library() {
 
   useEffect(() => {
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   // Fetch user data for dropdown
@@ -351,10 +365,8 @@ export default function Library() {
   const handleModelChange = async (agent: LibraryAgent, model: string) => {
     try {
       // Optimistically update the UI
-      setAgents(prevAgents =>
-        prevAgents.map(a =>
-          a.id === agent.id ? { ...a, selected_model: model } : a
-        )
+      setAgents((prevAgents) =>
+        prevAgents.map((a) => (a.id === agent.id ? { ...a, selected_model: model } : a))
       );
 
       await marketplaceApi.selectAgentModel(agent.id, model);
@@ -383,140 +395,125 @@ export default function Library() {
     <>
       {/* Mobile Menu */}
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
-        {/* Top Bar with Tabs */}
-        <div className="bg-[var(--surface)] border-b border-white/10">
-          <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
-            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Library</h1>
+      {/* Top Bar with Tabs */}
+      <div className="bg-[var(--surface)] border-b border-white/10">
+        <div className="h-12 flex items-center px-4 md:px-6 justify-between border-b border-white/10">
+          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Library</h1>
 
-            <div className="flex items-center gap-3">
-              {/* User Dropdown */}
-              <UserDropdown
-                userName={userName}
-                userCredits={userCredits}
-                userTier={userTier}
-              />
+          <div className="flex items-center gap-3">
+            {/* User Dropdown */}
+            <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
 
-              {/* Mobile hamburger menu */}
-              <button
-                onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-                className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+            {/* Mobile hamburger menu */}
+            <button
+              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+            >
+              <svg
+                className="w-6 h-6 text-[var(--text)]"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="px-4 md:px-6 pb-3 pt-2">
-            <div className="flex items-center gap-2 overflow-x-auto">
-              <button
-                onClick={() => setActiveTab('agents')}
-                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
-                  activeTab === 'agents'
-                    ? 'bg-[var(--primary)] text-white'
-                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-                }`}
-              >
-                <Package size={16} weight={activeTab === 'agents' ? 'fill' : 'regular'} />
-                Agents ({agents.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('models')}
-                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
-                  activeTab === 'models'
-                    ? 'bg-[var(--primary)] text-white'
-                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-                }`}
-              >
-                <Cpu size={16} weight={activeTab === 'models' ? 'fill' : 'regular'} />
-                Model Management
-              </button>
-              <button
-                onClick={() => setActiveTab('api-keys')}
-                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
-                  activeTab === 'api-keys'
-                    ? 'bg-[var(--primary)] text-white'
-                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-                }`}
-              >
-                <Key size={16} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
-                API Keys ({apiKeys.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('subscriptions')}
-                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
-                  activeTab === 'subscriptions'
-                    ? 'bg-[var(--primary)] text-white'
-                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-                }`}
-              >
-                <Repeat size={16} weight={activeTab === 'subscriptions' ? 'fill' : 'regular'} />
-                Subscriptions
-              </button>
-              <button
-                onClick={() => setActiveTab('credits')}
-                className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
-                  activeTab === 'credits'
-                    ? 'bg-[var(--primary)] text-white'
-                    : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-                }`}
-              >
-                <Coins size={16} weight={activeTab === 'credits' ? 'fill' : 'regular'} />
-                Credits
-              </button>
-            </div>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
           </div>
         </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-auto bg-[var(--bg)]">
-          <div className="p-4 md:p-6">
-        {activeTab === 'agents' && (
-          <AgentsTab
-            agents={agents}
-            models={models}
-            modelsLoading={modelsLoading}
-            onToggleEnable={handleToggleEnable}
-            onEdit={setEditingAgent}
-            onTogglePublish={handleTogglePublish}
-            onModelChange={handleModelChange}
-            onReload={loadLibraryAgents}
-          />
-        )}
-
-        {activeTab === 'models' && (
-          <ModelsTab
-            models={models}
-            externalProviders={externalProviders}
-            onSetupProvider={() => setActiveTab('api-keys')}
-          />
-        )}
-
-        {activeTab === 'api-keys' && (
-          <ApiKeysTab
-            apiKeys={apiKeys}
-            providers={providers}
-            onReload={loadApiKeys}
-          />
-        )}
-
-        {activeTab === 'subscriptions' && (
-          <SubscriptionsTab />
-        )}
-
-        {activeTab === 'credits' && (
-          <CreditsTab />
-        )}
+        {/* Tabs */}
+        <div className="px-4 md:px-6 pb-3 pt-2">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('agents')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'agents'
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+              }`}
+            >
+              <Package size={16} weight={activeTab === 'agents' ? 'fill' : 'regular'} />
+              Agents ({agents.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('models')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'models'
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+              }`}
+            >
+              <Cpu size={16} weight={activeTab === 'models' ? 'fill' : 'regular'} />
+              Model Management
+            </button>
+            <button
+              onClick={() => setActiveTab('api-keys')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'api-keys'
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+              }`}
+            >
+              <Key size={16} weight={activeTab === 'api-keys' ? 'fill' : 'regular'} />
+              API Keys ({apiKeys.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('subscriptions')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'subscriptions'
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+              }`}
+            >
+              <Repeat size={16} weight={activeTab === 'subscriptions' ? 'fill' : 'regular'} />
+              Subscriptions
+            </button>
           </div>
         </div>
+      </div>
+
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-auto bg-[var(--bg)]">
+        <div className="p-4 md:p-6">
+          {activeTab === 'agents' && (
+            <AgentsTab
+              agents={agents}
+              models={models}
+              modelsLoading={modelsLoading}
+              onToggleEnable={handleToggleEnable}
+              onEdit={setEditingAgent}
+              onTogglePublish={handleTogglePublish}
+              onModelChange={handleModelChange}
+              onReload={loadLibraryAgents}
+            />
+          )}
+
+          {activeTab === 'models' && (
+            <ModelsTab
+              models={models}
+              externalProviders={externalProviders}
+              onSetupProvider={() => setActiveTab('api-keys')}
+            />
+          )}
+
+          {activeTab === 'api-keys' && (
+            <ApiKeysTab apiKeys={apiKeys} providers={providers} onReload={loadApiKeys} />
+          )}
+
+          {activeTab === 'subscriptions' && <SubscriptionsTab />}
+        </div>
+      </div>
 
       {/* Edit Agent Modal */}
       {editingAgent && (
         <EditAgentModal
           agent={editingAgent}
-          availableModels={models.map(m => m.id)}
+          availableModels={models.map((m) => m.id)}
           onClose={() => setEditingAgent(null)}
           onSave={async (updatedData) => {
             try {
@@ -562,7 +559,6 @@ export default function Library() {
           }}
         />
       )}
-
     </>
   );
 }
@@ -576,7 +572,7 @@ function AgentsTab({
   onEdit,
   onTogglePublish,
   onModelChange,
-  onReload
+  onReload,
 }: {
   agents: LibraryAgent[];
   models: Model[];
@@ -639,13 +635,13 @@ function AgentsTab({
         </div>
         <div className="p-4 bg-white/5 border border-[var(--text)]/15 rounded-lg">
           <div className="text-2xl font-bold text-[var(--text)] mb-1">
-            {agents.filter(a => a.is_enabled).length}
+            {agents.filter((a) => a.is_enabled).length}
           </div>
           <div className="text-sm text-[var(--text)]/60">Active</div>
         </div>
         <div className="p-4 bg-white/5 border border-[var(--text)]/15 rounded-lg">
           <div className="text-2xl font-bold text-[var(--text)] mb-1">
-            {agents.filter(a => a.is_custom).length}
+            {agents.filter((a) => a.is_custom).length}
           </div>
           <div className="text-sm text-[var(--text)]/60">Custom</div>
         </div>
@@ -680,7 +676,7 @@ function AgentsTab({
               system_prompt: '',
               is_enabled: true,
               is_published: false,
-              usage_count: 0
+              usage_count: 0,
             };
             onEdit(newAgent);
           }}
@@ -703,11 +699,11 @@ function AgentsTab({
 
       {/* Agents Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {agents.map(agent => (
+        {agents.map((agent) => (
           <AgentCard
             key={agent.id}
             agent={agent}
-            availableModels={models.map(m => m.id)}
+            availableModels={models.map((m) => m.id)}
             modelsLoading={modelsLoading}
             onToggleEnable={() => onToggleEnable(agent)}
             onEdit={() => onEdit(agent)}
@@ -740,7 +736,7 @@ function AgentsTab({
 function ModelsTab({
   models,
   externalProviders,
-  onSetupProvider
+  onSetupProvider,
 }: {
   models: Model[];
   externalProviders: ExternalProvider[];
@@ -758,8 +754,8 @@ function ModelsTab({
 
   useEffect(() => {
     // Separate custom and system models
-    setCustomModels(models.filter(m => m.source === 'custom'));
-    setSystemModels(models.filter(m => m.source !== 'custom'));
+    setCustomModels(models.filter((m) => m.source === 'custom'));
+    setSystemModels(models.filter((m) => m.source !== 'custom'));
   }, [models]);
 
   useEffect(() => {
@@ -824,12 +820,12 @@ function ModelsTab({
     }
   };
 
-  const openRouterProvider = externalProviders.find(p => p.provider === 'openrouter');
+  const openRouterProvider = externalProviders.find((p) => p.provider === 'openrouter');
   const hasOpenRouterKey = openRouterProvider?.has_key || openRouterKeys.length > 0;
 
   return (
     <div className="space-y-8">
-      {/* OpenRouter Integration Section */}
+      {/* BYOK (Bring Your Own Key) Section */}
       <div className="bg-gradient-to-r from-[var(--status-info)]/10 to-[var(--accent)]/10 border border-[var(--status-info)]/20 rounded-xl p-6">
         <div className="flex items-start gap-4 mb-4">
           <div className="p-3 bg-[var(--status-info)]/20 rounded-lg">
@@ -838,7 +834,7 @@ function ModelsTab({
           <div className="flex-1">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-3">
-                <h2 className="text-xl font-bold text-[var(--text)]">OpenRouter Integration</h2>
+                <h2 className="text-xl font-bold text-[var(--text)]">Bring Your Own Key</h2>
                 <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
                   FREE (Limited Time)
                 </span>
@@ -863,7 +859,12 @@ function ModelsTab({
               </div>
             </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
-              Access 200+ AI models through OpenRouter. Add your API key to unlock access to models from Anthropic, OpenAI, Google, Meta, and more. <span className="text-[var(--primary)] font-medium">Currently free for all users</span> — this will become a premium subscription feature in the future.
+              Add your own API keys to use models from OpenRouter, OpenAI, Anthropic, Groq, and
+              more.{' '}
+              <span className="text-[var(--primary)] font-medium">
+                Currently free for all users
+              </span>{' '}
+              — this will become a premium subscription feature in the future.
             </p>
 
             {/* API Keys List */}
@@ -880,13 +881,21 @@ function ModelsTab({
                   >
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-[var(--status-success)]/10 rounded-lg">
-                        <CheckCircle size={16} className="text-[var(--status-success)]" weight="fill" />
+                        <CheckCircle
+                          size={16}
+                          className="text-[var(--status-success)]"
+                          weight="fill"
+                        />
                       </div>
                       <div>
                         {key.key_name && (
-                          <div className="text-sm font-medium text-[var(--text)]">{key.key_name}</div>
+                          <div className="text-sm font-medium text-[var(--text)]">
+                            {key.key_name}
+                          </div>
                         )}
-                        <div className="text-xs text-[var(--text)]/40 font-mono">{key.key_preview}</div>
+                        <div className="text-xs text-[var(--text)]/40 font-mono">
+                          {key.key_preview}
+                        </div>
                         <div className="text-xs text-[var(--text)]/40 mt-0.5">
                           Added {new Date(key.created_at).toLocaleDateString()}
                         </div>
@@ -913,7 +922,9 @@ function ModelsTab({
             ) : (
               <div className="px-4 py-3 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg flex items-center gap-2">
                 <Circle size={16} className="text-[var(--primary)]" />
-                <span className="text-sm text-[var(--primary)]">No API key configured. Add one to get started.</span>
+                <span className="text-sm text-[var(--primary)]">
+                  No API key configured. Add one to get started.
+                </span>
               </div>
             )}
           </div>
@@ -928,14 +939,21 @@ function ModelsTab({
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">Architecture Diagram Generation</h2>
+              <h2 className="text-xl font-bold text-[var(--text)]">
+                Architecture Diagram Generation
+              </h2>
               <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
                 FREE (Limited Time)
               </span>
             </div>
             <p className="text-[var(--text)]/60 text-sm mb-4">
               Select which AI model to use for generating architecture diagrams of your projects.
-              This model will analyze your code and create Mermaid diagrams showing component relationships. <span className="text-[var(--primary)] font-medium">Currently free for all users</span> — this feature will become paid in the future.
+              This model will analyze your code and create Mermaid diagrams showing component
+              relationships.{' '}
+              <span className="text-[var(--primary)] font-medium">
+                Currently free for all users
+              </span>{' '}
+              — this feature will become paid in the future.
             </p>
           </div>
         </div>
@@ -966,7 +984,8 @@ function ModelsTab({
             <div className="mt-3 px-3 py-2 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 rounded-lg flex items-center gap-2">
               <CheckCircle size={16} className="text-[var(--status-success)]" weight="fill" />
               <span className="text-xs text-[var(--status-success)]">
-                Diagram generation configured with {models.find(m => m.id === diagramModel)?.name || diagramModel}
+                Diagram generation configured with{' '}
+                {models.find((m) => m.id === diagramModel)?.name || diagramModel}
               </span>
             </div>
           )}
@@ -1007,7 +1026,9 @@ function ModelsTab({
                         </span>
                       </div>
                       <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-[var(--text)]/40 capitalize">{model.provider}</span>
+                        <span className="text-xs text-[var(--text)]/40 capitalize">
+                          {model.provider}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1051,7 +1072,11 @@ function ModelsTab({
               </span>
             </div>
             <p className="text-[var(--text)]/60">
-              <span className="text-[var(--primary)] font-medium">Currently free for all users</span> — these models will become paid features in the future. Use them now while they're complimentary!
+              <span className="text-[var(--primary)] font-medium">
+                Currently free for all users
+              </span>{' '}
+              — these models will become paid features in the future. Use them now while they're
+              complimentary!
             </p>
           </div>
           <div className="text-sm text-[var(--text)]/40">
@@ -1073,7 +1098,9 @@ function ModelsTab({
                   <div>
                     <h3 className="font-semibold text-[var(--text)]">{model.name}</h3>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-[var(--text)]/40 capitalize">{model.provider}</span>
+                      <span className="text-xs text-[var(--text)]/40 capitalize">
+                        {model.provider}
+                      </span>
                       {model.pricing.input === 0 && model.pricing.output === 0 && (
                         <span className="px-2 py-0.5 bg-[var(--status-success)]/20 text-[var(--status-success)] text-xs rounded">
                           Free
@@ -1124,7 +1151,9 @@ function ModelsTab({
                   <div>
                     <h3 className="font-semibold text-[var(--text)] mb-1">{provider.name}</h3>
                     <p className="text-xs text-[var(--text)]/60 mb-2">{provider.description}</p>
-                    <div className="text-xs text-[var(--primary)]">{provider.models_count} models</div>
+                    <div className="text-xs text-[var(--primary)]">
+                      {provider.models_count} models
+                    </div>
                   </div>
                   {provider.has_key ? (
                     <CheckCircle size={20} className="text-[var(--status-success)]" weight="fill" />
@@ -1155,14 +1184,16 @@ function ModelsTab({
         </div>
       )}
 
-      {/* Add OpenRouter API Key Modal */}
+      {/* Add API Key Modal - Shows all LLM providers */}
       {showAddApiKey && (
         <AddApiKeyModal
-          providers={providers.filter(p => p.id === 'openrouter')}
+          providers={providers.filter((p) => p.requires_key)}
           onClose={() => setShowAddApiKey(false)}
           onSuccess={() => {
             setShowAddApiKey(false);
             loadOpenRouterKeys();
+            // Reload to update all provider statuses
+            window.location.reload();
           }}
         />
       )}
@@ -1186,7 +1217,7 @@ function ModelsTab({
 function ApiKeysTab({
   apiKeys,
   providers,
-  onReload
+  onReload,
 }: {
   apiKeys: ApiKey[];
   providers: Provider[];
@@ -1311,7 +1342,8 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
           <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-6 max-w-md">
             <h3 className="text-lg font-semibold text-[var(--text)] mb-4">Delete API Key?</h3>
             <p className="text-[var(--text)]/60 mb-6">
-              Are you sure you want to delete this {apiKey.provider} API key? This action cannot be undone.
+              Are you sure you want to delete this {apiKey.provider} API key? This action cannot be
+              undone.
             </p>
             <div className="flex items-center gap-3 justify-end">
               <button
@@ -1338,7 +1370,7 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
 function AddApiKeyModal({
   providers,
   onClose,
-  onSuccess
+  onSuccess,
 }: {
   providers: Provider[];
   onClose: () => void;
@@ -1386,9 +1418,7 @@ function AddApiKeyModal({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Provider
-            </label>
+            <label className="block text-sm font-medium text-[var(--text)] mb-2">Provider</label>
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
@@ -1396,18 +1426,18 @@ function AddApiKeyModal({
               required
             >
               <option value="">Select a provider...</option>
-              {providers.filter(p => p.requires_key).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              {providers
+                .filter((p) => p.requires_key)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              API Key
-            </label>
+            <label className="block text-sm font-medium text-[var(--text)] mb-2">API Key</label>
             <div className="relative">
               <input
                 type={showKey ? 'text' : 'password'}
@@ -1490,7 +1520,7 @@ function AgentCard({
   onEdit,
   onTogglePublish,
   onModelChange,
-  onRemove
+  onRemove,
 }: {
   agent: LibraryAgent;
   availableModels: string[];
@@ -1506,11 +1536,13 @@ function AgentCard({
   const currentModel = agent.selected_model || agent.model;
 
   return (
-    <div className={`relative bg-[var(--surface)] border rounded-2xl p-6 transition-all ${
-      agent.is_enabled
-        ? 'border-[var(--text)]/15 hover:border-[var(--primary)]/30'
-        : 'border-white/5 opacity-60'
-    }`}>
+    <div
+      className={`relative bg-[var(--surface)] border rounded-2xl p-6 transition-all ${
+        agent.is_enabled
+          ? 'border-[var(--text)]/15 hover:border-[var(--primary)]/30'
+          : 'border-white/5 opacity-60'
+      }`}
+    >
       {/* Status Badge - Top Right */}
       <div className="absolute top-4 right-4">
         {agent.is_enabled ? (
@@ -1592,10 +1624,19 @@ function AgentCard({
                   <option value={currentModel}>{currentModel}</option>
                 )}
               </select>
-              <Cpu size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--status-info)] pointer-events-none" />
+              <Cpu
+                size={14}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--status-info)] pointer-events-none"
+              />
               <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--status-info)]">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path
+                    d="M3 4.5L6 7.5L9 4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
               </div>
             </div>
@@ -1640,10 +1681,7 @@ function AgentCard({
       {/* Features */}
       <div className="flex flex-wrap gap-2 mb-4">
         {(agent.features || []).slice(0, 3).map((feature, idx) => (
-          <span
-            key={idx}
-            className="px-2 py-1 bg-white/5 text-[var(--text)]/60 text-xs rounded"
-          >
+          <span key={idx} className="px-2 py-1 bg-white/5 text-[var(--text)]/60 text-xs rounded">
             {feature}
           </span>
         ))}
@@ -1728,12 +1766,23 @@ function EditAgentModal({
   agent,
   availableModels,
   onClose,
-  onSave
+  onSave,
 }: {
   agent: LibraryAgent;
   availableModels: string[];
   onClose: () => void;
-  onSave: (data: { name?: string; description?: string; system_prompt?: string; model?: string; tools?: string[]; tool_configs?: Record<string, { description?: string; examples?: string[]; system_prompt?: string }>; avatar_url?: string | null }) => void;
+  onSave: (data: {
+    name?: string;
+    description?: string;
+    system_prompt?: string;
+    model?: string;
+    tools?: string[];
+    tool_configs?: Record<
+      string,
+      { description?: string; examples?: string[]; system_prompt?: string }
+    >;
+    avatar_url?: string | null;
+  }) => void;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description);
@@ -1742,7 +1791,9 @@ function EditAgentModal({
   const [model, setModel] = useState(currentModel);
   const [originalPrompt] = useState(agent.system_prompt || '');
   const [tools, setTools] = useState<string[]>(agent.tools || []);
-  const [toolConfigs, setToolConfigs] = useState<Record<string, { description?: string; examples?: string[]; system_prompt?: string }>>(agent.tool_configs || {});
+  const [toolConfigs, setToolConfigs] = useState<
+    Record<string, { description?: string; examples?: string[]; system_prompt?: string }>
+  >(agent.tool_configs || {});
   const [avatarUrl, setAvatarUrl] = useState<string | null>(agent.avatar_url || null);
   const editorRef = useRef<MarkerEditorHandle>(null);
 
@@ -1764,7 +1815,7 @@ function EditAgentModal({
       model,
       tools,
       tool_configs: toolConfigs,
-      avatar_url: avatarUrl
+      avatar_url: avatarUrl,
     });
   };
 
@@ -1794,11 +1845,7 @@ function EditAgentModal({
                 <label className="block text-sm font-medium text-[var(--text)] mb-2">
                   Agent Logo
                 </label>
-                <ImageUpload
-                  value={avatarUrl}
-                  onChange={setAvatarUrl}
-                  maxSizeKB={200}
-                />
+                <ImageUpload value={avatarUrl} onChange={setAvatarUrl} maxSizeKB={200} />
               </div>
 
               <div>
@@ -1828,9 +1875,7 @@ function EditAgentModal({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                  Model
-                </label>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">Model</label>
                 <select
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
@@ -1879,7 +1924,8 @@ function EditAgentModal({
                   placeholder="Enter your agent's system prompt..."
                 />
                 <p className="mt-1 text-xs text-[var(--text)]/40">
-                  {systemPrompt.length} characters • Markers appear as pills and show descriptions on hover
+                  {systemPrompt.length} characters • Markers appear as pills and show descriptions
+                  on hover
                 </p>
 
                 {/* Marker Palette */}
@@ -1933,7 +1979,7 @@ function EditAgentModal({
 // Add Custom Model Modal Component
 function AddCustomModelModal({
   onClose,
-  onSuccess
+  onSuccess,
 }: {
   onClose: () => void;
   onSuccess: () => void;
@@ -1953,7 +1999,7 @@ function AddCustomModelModal({
         model_id: modelId,
         model_name: modelName,
         pricing_input: pricingInput ? parseFloat(pricingInput) : undefined,
-        pricing_output: pricingOutput ? parseFloat(pricingOutput) : undefined
+        pricing_output: pricingOutput ? parseFloat(pricingOutput) : undefined,
       });
       onSuccess();
     } catch (error: unknown) {
@@ -1983,9 +2029,7 @@ function AddCustomModelModal({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Model ID
-            </label>
+            <label className="block text-sm font-medium text-[var(--text)] mb-2">Model ID</label>
             <input
               type="text"
               value={modelId}
@@ -1994,9 +2038,7 @@ function AddCustomModelModal({
               placeholder="openrouter/model-name"
               required
             />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
-              Find model IDs at openrouter.ai
-            </p>
+            <p className="mt-1 text-xs text-[var(--text)]/40">Find model IDs at openrouter.ai</p>
           </div>
 
           <div>
@@ -2075,7 +2117,9 @@ function AddCustomModelModal({
 // Subscriptions Tab Component
 function SubscriptionsTab() {
   const [loading, setLoading] = useState(true);
-  const [premiumSubscription, setPremiumSubscription] = useState<Record<string, unknown> | null>(null);
+  const [premiumSubscription, setPremiumSubscription] = useState<Record<string, unknown> | null>(
+    null
+  );
   const [agentSubscriptions, setAgentSubscriptions] = useState<Array<Record<string, unknown>>>([]);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
@@ -2122,7 +2166,11 @@ function SubscriptionsTab() {
       return;
     }
 
-    if (!confirm(`Are you sure you want to cancel this subscription? You'll continue to have access until the end of your billing period.`)) {
+    if (
+      !confirm(
+        `Are you sure you want to cancel this subscription? You'll continue to have access until the end of your billing period.`
+      )
+    ) {
       return;
     }
 
@@ -2156,7 +2204,11 @@ function SubscriptionsTab() {
       return;
     }
 
-    if (!confirm(`Are you sure you want to renew this subscription? It will continue automatically after the current period.`)) {
+    if (
+      !confirm(
+        `Are you sure you want to renew this subscription? It will continue automatically after the current period.`
+      )
+    ) {
       return;
     }
 
@@ -2205,7 +2257,7 @@ function SubscriptionsTab() {
             className="rounded-xl p-6 border"
             style={{
               backgroundColor: 'var(--surface)',
-              borderColor: 'rgba(255, 107, 0, 0.2)'
+              borderColor: 'rgba(255, 107, 0, 0.2)',
             }}
           >
             <div className="flex items-start justify-between">
@@ -2218,16 +2270,32 @@ function SubscriptionsTab() {
                 </div>
 
                 {/* Subscription dates */}
-                <div className="mb-3 text-sm space-y-1" style={{ color: 'var(--text)', opacity: 0.7 }}>
+                <div
+                  className="mb-3 text-sm space-y-1"
+                  style={{ color: 'var(--text)', opacity: 0.7 }}
+                >
                   {premiumSubscription.current_period_start && (
-                    <div>Started: {new Date(premiumSubscription.current_period_start).toLocaleDateString()}</div>
+                    <div>
+                      Started:{' '}
+                      {new Date(premiumSubscription.current_period_start).toLocaleDateString()}
+                    </div>
                   )}
-                  {premiumSubscription.cancel_at_period_end && premiumSubscription.current_period_end ? (
+                  {premiumSubscription.cancel_at_period_end &&
+                  premiumSubscription.current_period_end ? (
                     <div className="text-[var(--primary)]">
-                      Cancels on: {new Date(premiumSubscription.current_period_end).toLocaleDateString()} ({Math.ceil((new Date(premiumSubscription.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days remaining)
+                      Cancels on:{' '}
+                      {new Date(premiumSubscription.current_period_end).toLocaleDateString()} (
+                      {Math.ceil(
+                        (new Date(premiumSubscription.current_period_end).getTime() - Date.now()) /
+                          (1000 * 60 * 60 * 24)
+                      )}{' '}
+                      days remaining)
                     </div>
                   ) : premiumSubscription.current_period_end ? (
-                    <div>Renews: {new Date(premiumSubscription.current_period_end).toLocaleDateString()}</div>
+                    <div>
+                      Renews:{' '}
+                      {new Date(premiumSubscription.current_period_end).toLocaleDateString()}
+                    </div>
                   ) : null}
                 </div>
 
@@ -2249,7 +2317,9 @@ function SubscriptionsTab() {
 
               {!premiumSubscription.cancel_at_period_end ? (
                 <button
-                  onClick={() => handleCancelSubscription(premiumSubscription.subscription_id, 'premium')}
+                  onClick={() =>
+                    handleCancelSubscription(premiumSubscription.subscription_id, 'premium')
+                  }
                   disabled={cancelingId === premiumSubscription.subscription_id}
                   className="px-4 py-2 text-sm font-medium text-[var(--status-error)] hover:bg-[var(--status-error)]/10 rounded-lg transition disabled:opacity-50"
                 >
@@ -2257,7 +2327,9 @@ function SubscriptionsTab() {
                 </button>
               ) : (
                 <button
-                  onClick={() => handleRenewSubscription(premiumSubscription.subscription_id, 'premium')}
+                  onClick={() =>
+                    handleRenewSubscription(premiumSubscription.subscription_id, 'premium')
+                  }
                   disabled={cancelingId === premiumSubscription.subscription_id}
                   className="px-4 py-2 text-sm font-medium text-[var(--status-success)] hover:bg-[var(--status-success)]/10 rounded-lg transition disabled:opacity-50"
                 >
@@ -2271,17 +2343,17 @@ function SubscriptionsTab() {
             className="rounded-xl p-6 border text-center"
             style={{
               backgroundColor: 'var(--surface)',
-              borderColor: 'rgba(255, 255, 255, 0.1)'
+              borderColor: 'rgba(255, 255, 255, 0.1)',
             }}
           >
             <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
               You're on the free plan
             </p>
             <button
-              onClick={() => window.location.href = '/billing/plans'}
+              onClick={() => (window.location.href = '/settings/billing')}
               className="px-6 py-2 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary)] text-white rounded-lg transition font-medium text-sm"
             >
-              Upgrade to Premium - $5/month
+              Upgrade Plan
             </button>
           </div>
         )}
@@ -2301,15 +2373,20 @@ function SubscriptionsTab() {
             className="rounded-xl p-8 border text-center"
             style={{
               backgroundColor: 'var(--surface)',
-              borderColor: 'rgba(255, 255, 255, 0.1)'
+              borderColor: 'rgba(255, 255, 255, 0.1)',
             }}
           >
-            <Package size={48} weight="fill" style={{ color: 'var(--text)', opacity: 0.3 }} className="mx-auto mb-3" />
+            <Package
+              size={48}
+              weight="fill"
+              style={{ color: 'var(--text)', opacity: 0.3 }}
+              className="mx-auto mb-3"
+            />
             <p className="text-sm" style={{ color: 'var(--text)', opacity: 0.7 }}>
               No purchased agents yet
             </p>
             <button
-              onClick={() => window.location.href = '/marketplace'}
+              onClick={() => (window.location.href = '/marketplace')}
               className="mt-4 px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition font-medium text-sm"
             >
               Browse Marketplace
@@ -2318,7 +2395,9 @@ function SubscriptionsTab() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {agentSubscriptions.map((sub) => {
-              const isSubscription = (sub.purchase_type === 'monthly' || sub.purchase_type === 'subscription') && sub.subscription_id;
+              const isSubscription =
+                (sub.purchase_type === 'monthly' || sub.purchase_type === 'subscription') &&
+                sub.subscription_id;
               const isOneTime = sub.purchase_type === 'onetime' || sub.purchase_type === 'one_time';
 
               return (
@@ -2327,7 +2406,7 @@ function SubscriptionsTab() {
                   className="rounded-xl p-4 border"
                   style={{
                     backgroundColor: 'var(--surface)',
-                    borderColor: 'rgba(255, 255, 255, 0.1)'
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
                   }}
                 >
                   <div className="flex items-start justify-between mb-3">
@@ -2340,8 +2419,7 @@ function SubscriptionsTab() {
                         <p className="text-xs" style={{ color: 'var(--text)', opacity: 0.6 }}>
                           {isSubscription
                             ? `$${(sub.price / 100).toFixed(2)}/month`
-                            : `$${(sub.price / 100).toFixed(2)} (One-time)`
-                          }
+                            : `$${(sub.price / 100).toFixed(2)} (One-time)`}
                         </p>
                       </div>
                     </div>
@@ -2376,8 +2454,12 @@ function SubscriptionsTab() {
                     {/* Show cancellation info for monthly subscriptions */}
                     {isSubscription && sub.cancel_at_period_end && sub.current_period_end && (
                       <div className="text-[var(--primary)] font-medium">
-                        Cancels: {new Date(sub.current_period_end).toLocaleDateString()}
-                        ({Math.ceil((new Date(sub.current_period_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} days left)
+                        Cancels: {new Date(sub.current_period_end).toLocaleDateString()}(
+                        {Math.ceil(
+                          (new Date(sub.current_period_end).getTime() - Date.now()) /
+                            (1000 * 60 * 60 * 24)
+                        )}{' '}
+                        days left)
                       </div>
                     )}
                     {/* Show renewal date for active monthly subscriptions */}
@@ -2395,161 +2477,6 @@ function SubscriptionsTab() {
             })}
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// Credits Tab Component
-function CreditsTab() {
-  const [loading, setLoading] = useState(true);
-  const [credits, setCredits] = useState<Record<string, unknown> | null>(null);
-  const [purchasing, setPurchasing] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadCredits();
-  }, []);
-
-  const loadCredits = async () => {
-    setLoading(true);
-    try {
-      const balance = await billingApi.getCreditsBalance();
-      setCredits(balance);
-    } catch (error) {
-      console.error('Failed to load credits:', error);
-      toast.error('Failed to load credits balance');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePurchaseCredits = async (packageType: 'small' | 'medium' | 'large') => {
-    setPurchasing(packageType);
-    try {
-      const response = await billingApi.purchaseCredits(packageType);
-      if (response.url) {
-        window.location.href = response.url;
-      }
-    } catch (error: unknown) {
-      console.error('Failed to initiate credit purchase:', error);
-      const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to start checkout');
-      setPurchasing(null);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <LoadingSpinner />
-      </div>
-    );
-  }
-
-  const packages = [
-    {
-      id: 'small' as const,
-      amount: 5,
-      credits: 500,
-      popular: false
-    },
-    {
-      id: 'medium' as const,
-      amount: 15,
-      credits: 1500,
-      popular: true
-    },
-    {
-      id: 'large' as const,
-      amount: 25,
-      credits: 2500,
-      popular: false
-    }
-  ];
-
-  return (
-    <div className="space-y-6">
-      {/* Current Balance */}
-      <div>
-        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
-          <div className="flex items-center gap-2">
-            <Coins size={20} weight="fill" className="text-[var(--status-warning)]" />
-            Credits Balance
-          </div>
-        </h2>
-
-        <div
-          className="rounded-xl p-6 border"
-          style={{
-            backgroundColor: 'var(--surface)',
-            borderColor: 'rgba(255, 107, 0, 0.2)'
-          }}
-        >
-          <div className="text-center">
-            <div className="text-4xl font-bold mb-2" style={{ color: 'var(--primary)' }}>
-              {credits?.balance_cents ? (credits.balance_cents / 100).toFixed(2) : '0.00'}
-            </div>
-            <p className="text-sm" style={{ color: 'var(--text)', opacity: 0.7 }}>
-              Available Credits (${credits?.balance_usd?.toFixed(2) || '0.00'} USD)
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Purchase Options */}
-      <div>
-        <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text)' }}>
-          Top Up Credits
-        </h2>
-        <p className="text-sm mb-6" style={{ color: 'var(--text)', opacity: 0.7 }}>
-          Credits are used to purchase API-based agents from the marketplace
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {packages.map((pkg) => (
-            <div
-              key={pkg.id}
-              className={`rounded-xl p-6 border relative ${pkg.popular ? 'ring-2' : ''}`}
-              style={{
-                backgroundColor: 'var(--surface)',
-                borderColor: pkg.popular ? 'var(--primary)' : 'rgba(255, 255, 255, 0.1)',
-                ringColor: pkg.popular ? 'var(--primary)' : undefined
-              }}
-            >
-              {pkg.popular && (
-                <div
-                  className="absolute -top-3 left-1/2 transform -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
-                  style={{
-                    backgroundColor: 'var(--primary)',
-                    color: 'white'
-                  }}
-                >
-                  Most Popular
-                </div>
-              )}
-
-              <div className="text-center">
-                <div className="text-3xl font-bold mb-2" style={{ color: 'var(--text)' }}>
-                  ${pkg.amount}
-                </div>
-                <p className="text-sm mb-4" style={{ color: 'var(--text)', opacity: 0.7 }}>
-                  {pkg.credits} credits
-                </p>
-                <button
-                  onClick={() => handlePurchaseCredits(pkg.id)}
-                  disabled={purchasing !== null}
-                  className={`w-full px-6 py-3 rounded-lg font-medium text-sm transition ${
-                    pkg.popular
-                      ? 'bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] hover:from-[var(--primary-hover)] hover:to-[var(--primary)] text-white'
-                      : 'bg-white/5 hover:bg-white/10 text-white'
-                  } disabled:opacity-50`}
-                >
-                  {purchasing === pkg.id ? 'Processing...' : 'Purchase'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

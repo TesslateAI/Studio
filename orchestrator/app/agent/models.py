@@ -11,18 +11,20 @@ Supported:
 - Future: Ollama, HuggingFace, etc.
 """
 
-from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncGenerator
-from uuid import UUID
 import logging
-import asyncio
+from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
+from typing import Any
+from uuid import UUID
+
 from openai import AsyncOpenAI
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Optional: Anthropic import (only needed if using Claude)
 try:
     from anthropic import AsyncAnthropic
+
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
@@ -31,17 +33,130 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-async def get_llm_client(
-    user_id: UUID,
-    model_name: str,
-    db: AsyncSession
-) -> AsyncOpenAI:
+# =============================================================================
+# Built-in Provider Configurations
+# =============================================================================
+# Add new providers here to make them available for BYOK
+# Each provider needs: name, base_url, api_type, and optionally default_headers
+
+BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
+    "openrouter": {
+        "name": "OpenRouter",
+        "description": "Access to 200+ AI models through a unified API",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_type": "openai",
+        "default_headers": {"HTTP-Referer": "https://tesslate.com", "X-Title": "Tesslate Studio"},
+        "website": "https://openrouter.ai",
+        "requires_key": True,
+    },
+    "openai": {
+        "name": "OpenAI",
+        "description": "GPT-4, GPT-4o, GPT-3.5, and other OpenAI models",
+        "base_url": "https://api.openai.com/v1",
+        "api_type": "openai",
+        "default_headers": {},
+        "website": "https://platform.openai.com",
+        "requires_key": True,
+    },
+    "anthropic": {
+        "name": "Anthropic",
+        "description": "Claude 3.5, Claude 3, and other Anthropic models",
+        "base_url": "https://api.anthropic.com/v1",
+        "api_type": "anthropic",
+        "default_headers": {},
+        "website": "https://console.anthropic.com",
+        "requires_key": True,
+    },
+    "groq": {
+        "name": "Groq",
+        "description": "Ultra-fast inference with Llama, Mixtral, and more",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_type": "openai",
+        "default_headers": {},
+        "website": "https://console.groq.com",
+        "requires_key": True,
+    },
+    "together": {
+        "name": "Together AI",
+        "description": "Open-source models with fast inference",
+        "base_url": "https://api.together.xyz/v1",
+        "api_type": "openai",
+        "default_headers": {},
+        "website": "https://api.together.xyz",
+        "requires_key": True,
+    },
+    "deepseek": {
+        "name": "DeepSeek",
+        "description": "DeepSeek-V3 and other DeepSeek models",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_type": "openai",
+        "default_headers": {},
+        "website": "https://platform.deepseek.com",
+        "requires_key": True,
+    },
+    "fireworks": {
+        "name": "Fireworks AI",
+        "description": "Fast inference for open-source models",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "api_type": "openai",
+        "default_headers": {},
+        "website": "https://fireworks.ai",
+        "requires_key": True,
+    },
+}
+
+
+def get_builtin_provider_config(provider_slug: str) -> dict[str, Any] | None:
+    """Get configuration for a built-in provider."""
+    return BUILTIN_PROVIDERS.get(provider_slug)
+
+
+async def get_user_api_key(user_id: UUID, provider_slug: str, db: AsyncSession) -> str:
+    """
+    Get user's API key for a specific provider.
+
+    Args:
+        user_id: The user ID
+        provider_slug: Provider identifier (e.g., "openrouter", "groq")
+        db: Database session
+
+    Returns:
+        Decrypted API key string
+
+    Raises:
+        ValueError: If no API key configured for the provider
+    """
+    from ..models import UserAPIKey
+    from ..routers.secrets import decode_key
+
+    result = await db.execute(
+        select(UserAPIKey).where(
+            UserAPIKey.user_id == user_id,
+            UserAPIKey.provider == provider_slug,
+            UserAPIKey.is_active.is_(True),
+        )
+    )
+    api_key_record = result.scalar_one_or_none()
+
+    if not api_key_record:
+        provider_name = BUILTIN_PROVIDERS.get(provider_slug, {}).get("name", provider_slug)
+        raise ValueError(
+            f"{provider_name} model selected but no API key configured. "
+            f"Please add your {provider_name} API key in Library → API Keys."
+        )
+
+    return decode_key(api_key_record.encrypted_value)
+
+
+async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> AsyncOpenAI:
     """
     Get configured LLM client for a user and model.
 
-    This is the centralized routing function that handles:
-    - OpenRouter models: Routes to OpenRouter API with user's stored key
-    - Other models: Routes to LiteLLM proxy with user's LiteLLM key
+    Routing logic based on model prefix:
+    - "provider/model-name" → User's API key for that provider
+    - No prefix → LiteLLM proxy (system models)
+
+    Supported provider prefixes: openrouter, openai, anthropic, groq, together, deepseek, fireworks
 
     Args:
         user_id: The user ID
@@ -52,11 +167,10 @@ async def get_llm_client(
         Configured AsyncOpenAI client ready to use
 
     Raises:
-        ValueError: If user not found or OpenRouter key not configured
+        ValueError: If user not found, provider not found, or API key not configured
     """
-    from ..models import User, UserAPIKey
     from ..config import get_settings
-    from ..routers.secrets import decode_key
+    from ..models import User, UserProvider
 
     settings = get_settings()
 
@@ -66,47 +180,56 @@ async def get_llm_client(
     if not user:
         raise ValueError(f"User {user_id} not found")
 
-    # Check if this is an OpenRouter model
-    if model_name.startswith("openrouter/"):
-        logger.info(f"OpenRouter model detected: {model_name}, fetching user's API key")
+    # Check if model has a provider prefix (e.g., "openrouter/model-name")
+    if "/" in model_name:
+        provider_slug = model_name.split("/")[0]
 
-        # Get user's OpenRouter API key
-        result = await db.execute(
-            select(UserAPIKey).where(
-                UserAPIKey.user_id == user_id,
-                UserAPIKey.provider == "openrouter",
-                UserAPIKey.is_active == True
+        # Try built-in provider first
+        provider_config = get_builtin_provider_config(provider_slug)
+
+        # If not built-in, check user's custom providers
+        if not provider_config:
+            result = await db.execute(
+                select(UserProvider).where(
+                    UserProvider.user_id == user_id,
+                    UserProvider.slug == provider_slug,
+                    UserProvider.is_active.is_(True),
+                )
             )
-        )
-        api_key_record = result.scalar_one_or_none()
+            custom_provider = result.scalar_one_or_none()
 
-        if not api_key_record:
-            raise ValueError(
-                "OpenRouter model selected but no OpenRouter API key configured. "
-                "Please add your OpenRouter API key in Settings."
-            )
+            if custom_provider:
+                provider_config = {
+                    "name": custom_provider.name,
+                    "base_url": custom_provider.base_url,
+                    "api_type": custom_provider.api_type,
+                    "default_headers": custom_provider.default_headers or {},
+                }
+            else:
+                raise ValueError(
+                    f"Unknown provider '{provider_slug}'. "
+                    f"Available providers: {', '.join(BUILTIN_PROVIDERS.keys())}"
+                )
 
-        # Decode the stored key
-        openrouter_key = decode_key(api_key_record.encrypted_value)
+        logger.info(f"Using {provider_config['name']} API for model: {model_name}")
 
-        logger.info(f"Using OpenRouter API with user's key for model: {model_name}")
+        # Get user's API key for this provider
+        api_key = await get_user_api_key(user_id, provider_slug, db)
 
-        # Return client configured for OpenRouter
+        # Return client configured for the provider
         return AsyncOpenAI(
-            api_key=openrouter_key,
-            base_url="https://openrouter.ai/api/v1"
+            api_key=api_key,
+            base_url=provider_config["base_url"],
+            default_headers=provider_config.get("default_headers", {}),
         )
     else:
-        # Use LiteLLM proxy for system models
+        # Use LiteLLM proxy for system models (no provider prefix)
         logger.info(f"Using LiteLLM proxy for model: {model_name}")
 
         if not user.litellm_api_key:
             raise ValueError("User does not have a LiteLLM API key. Please contact support.")
 
-        return AsyncOpenAI(
-            api_key=user.litellm_api_key,
-            base_url=settings.litellm_api_base
-        )
+        return AsyncOpenAI(api_key=user.litellm_api_key, base_url=settings.litellm_api_base)
 
 
 class ModelAdapter(ABC):
@@ -117,7 +240,7 @@ class ModelAdapter(ABC):
     """
 
     @abstractmethod
-    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
+    async def chat(self, messages: list[dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
         """
         Send messages to the model and stream text response chunks.
 
@@ -147,7 +270,7 @@ class OpenAIAdapter(ModelAdapter):
         model_name: str,
         client: AsyncOpenAI,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None
+        max_tokens: int | None = None,
     ):
         """
         Initialize OpenAI adapter with a pre-configured client.
@@ -166,7 +289,7 @@ class OpenAIAdapter(ModelAdapter):
 
         logger.info(f"OpenAIAdapter initialized - model: {model_name}")
 
-    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
+    async def chat(self, messages: list[dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
         """
         Send messages to OpenAI API and stream response chunks.
 
@@ -177,16 +300,18 @@ class OpenAIAdapter(ModelAdapter):
         Yields:
             Text chunks as they're generated by the model
         """
-        temperature = kwargs.get("temperature", self.temperature)
+        _ = kwargs.get("temperature", self.temperature)  # Reserved for future use
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
 
         # Strip openrouter/ prefix if present (OpenRouter API expects just the model ID)
-        model_id = self.model_name.removeprefix("openrouter/") if self.is_openrouter else self.model_name
+        model_id = (
+            self.model_name.removeprefix("openrouter/") if self.is_openrouter else self.model_name
+        )
 
         request_params = {
             "model": model_id,
             "messages": messages,
-            "stream": True  # Enable streaming
+            "stream": True,  # Enable streaming
         }
 
         if max_tokens:
@@ -197,11 +322,13 @@ class OpenAIAdapter(ModelAdapter):
             # Add extra_headers for OpenRouter rankings and referrals
             request_params["extra_headers"] = {
                 "HTTP-Referer": "https://tesslate.com",  # Your app URL
-                "X-Title": "Tesslate Studio"  # Your app name
+                "X-Title": "Tesslate Studio",  # Your app name
             }
 
         try:
-            logger.debug(f"Sending streaming request to {self.model_name} with {len(messages)} messages")
+            logger.debug(
+                f"Sending streaming request to {self.model_name} with {len(messages)} messages"
+            )
 
             # Create streaming completion
             stream = await self.client.chat.completions.create(**request_params)
@@ -229,11 +356,7 @@ class AnthropicAdapter(ModelAdapter):
     """
 
     def __init__(
-        self,
-        model_name: str,
-        api_key: str,
-        temperature: float = 0.7,
-        max_tokens: int = 4096
+        self, model_name: str, api_key: str, temperature: float = 0.7, max_tokens: int = 4096
     ):
         """
         Initialize Anthropic adapter.
@@ -256,7 +379,7 @@ class AnthropicAdapter(ModelAdapter):
 
         logger.info(f"AnthropicAdapter initialized - model: {model_name}")
 
-    async def chat(self, messages: List[Dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
+    async def chat(self, messages: list[dict[str, str]], **kwargs) -> AsyncGenerator[str, None]:
         """
         Send messages to Anthropic API and stream response chunks.
 
@@ -269,7 +392,7 @@ class AnthropicAdapter(ModelAdapter):
         Yields:
             Text chunks as they're generated by the model
         """
-        temperature = kwargs.get("temperature", self.temperature)
+        _ = kwargs.get("temperature", self.temperature)  # Reserved for future use
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
 
         # Anthropic requires system message to be separate
@@ -280,20 +403,19 @@ class AnthropicAdapter(ModelAdapter):
             if msg["role"] == "system":
                 system_message = msg["content"]
             else:
-                conversation_messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+                conversation_messages.append({"role": msg["role"], "content": msg["content"]})
 
         try:
-            logger.debug(f"Sending streaming request to {self.model_name} with {len(conversation_messages)} messages")
+            logger.debug(
+                f"Sending streaming request to {self.model_name} with {len(conversation_messages)} messages"
+            )
 
             request_params = {
                 "model": self.model_name,
                 "messages": conversation_messages,
-                "temperature": temperature,
+                "temperature": self.temperature,
                 "max_tokens": max_tokens,
-                "stream": True  # Enable streaming
+                "stream": True,  # Enable streaming
             }
 
             if system_message:
@@ -315,11 +437,7 @@ class AnthropicAdapter(ModelAdapter):
 
 
 async def create_model_adapter(
-    model_name: str,
-    user_id: UUID,
-    db: AsyncSession,
-    provider: Optional[str] = None,
-    **kwargs
+    model_name: str, user_id: UUID, db: AsyncSession, provider: str | None = None, **kwargs
 ) -> ModelAdapter:
     """
     Factory function to create the appropriate model adapter.
@@ -353,10 +471,7 @@ async def create_model_adapter(
     if not provider:
         if "claude" in model_lower or "anthropic" in model_lower:
             # Only use native Anthropic adapter for non-OpenRouter Claude models
-            if not model_name.startswith("openrouter/"):
-                provider = "anthropic"
-            else:
-                provider = "openai"  # OpenRouter uses OpenAI-compatible API
+            provider = "anthropic" if not model_name.startswith("openrouter/") else "openai"
         else:
             # Default to OpenAI-compatible
             provider = "openai"
@@ -364,18 +479,14 @@ async def create_model_adapter(
     if provider == "anthropic":
         # Native Anthropic API (not implemented for async client fetching yet)
         # For now, this would require direct API key - not commonly used
-        raise NotImplementedError("Native Anthropic adapter not yet updated for centralized routing")
+        raise NotImplementedError(
+            "Native Anthropic adapter not yet updated for centralized routing"
+        )
     elif provider == "openai":
         # Get configured client using centralized routing
         client = await get_llm_client(user_id, model_name, db)
 
         # Create adapter with the configured client
-        return OpenAIAdapter(
-            model_name=model_name,
-            client=client,
-            **kwargs
-        )
+        return OpenAIAdapter(model_name=model_name, client=client, **kwargs)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
-
-

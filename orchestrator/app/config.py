@@ -1,5 +1,7 @@
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     # Security - MUST be set via environment
@@ -90,7 +92,9 @@ class Settings(BaseSettings):
     # GitHub OAuth Configuration (for login)
     github_client_id: str = ""
     github_client_secret: str = ""
-    github_oauth_redirect_uri: str = ""  # Frontend callback URL - should be configured via environment
+    github_oauth_redirect_uri: str = (
+        ""  # Frontend callback URL - should be configured via environment
+    )
 
     # Google OAuth Configuration (for login)
     google_client_id: str = ""
@@ -160,28 +164,104 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_connect_client_id: str = ""  # For creator payouts (Stripe Connect)
 
-    # Subscription Pricing (in cents)
-    premium_subscription_price: int = 500  # $5/month
-    stripe_premium_price_id: str = ""  # Stripe Price ID for premium subscription
+    # ==========================================================================
+    # Subscription Tier Configuration
+    # ==========================================================================
+    # Tiers: free, basic, pro, ultra
+    # Stripe Price IDs (set these in environment)
+    stripe_basic_price_id: str = ""  # $8/month
+    stripe_pro_price_id: str = ""  # $20/month
+    stripe_ultra_price_id: str = ""  # $100/month
 
-    # Credit Packages (in cents)
-    credit_package_small: int = 500  # $5
-    credit_package_medium: int = 1000  # $10
-    credit_package_large: int = 5000  # $50
+    # Tier Pricing (in cents)
+    tier_price_free: int = 0
+    tier_price_basic: int = 800  # $8/month
+    tier_price_pro: int = 2000  # $20/month
+    tier_price_ultra: int = 10000  # $100/month
+
+    # Monthly Bundled Credits per Tier (1 credit = $0.01)
+    tier_bundled_credits_free: int = 1000  # $10 worth
+    tier_bundled_credits_basic: int = 1000  # $10 worth
+    tier_bundled_credits_pro: int = 2500  # $25 worth
+    tier_bundled_credits_ultra: int = 12000  # $120 worth
+
+    # Project Limits per Tier
+    tier_max_projects_free: int = 3
+    tier_max_projects_basic: int = 5
+    tier_max_projects_pro: int = 10
+    tier_max_projects_ultra: int = 999  # Unlimited
+
+    # Deploy Limits per Tier
+    tier_max_deploys_free: int = 1
+    tier_max_deploys_basic: int = 2
+    tier_max_deploys_pro: int = 5
+    tier_max_deploys_ultra: int = 20
+
+    # BYOK (Bring Your Own Key) - Only available for Pro and Ultra tiers
+    byok_enabled_tiers: str = "pro,ultra"  # Comma-separated list
+
+    @property
+    def byok_tiers_list(self) -> list:
+        """Get list of tiers that support BYOK."""
+        return [t.strip() for t in self.byok_enabled_tiers.split(",") if t.strip()]
+
+    # ==========================================================================
+    # Credit Packages (for purchasing additional credits)
+    # ==========================================================================
+    # Credit packages - 1 credit = $0.01, price in cents
+    credit_package_small: int = 500  # $5 for 500 credits
+    credit_package_medium: int = 1000  # $10 for 1000 credits
+
+    # Low balance warning threshold (percentage of monthly allowance)
+    credits_low_balance_threshold: float = 0.20  # 20%
 
     # Deploy Pricing (in cents)
     additional_deploy_price: int = 1000  # $10 per additional deploy slot
 
-    # Subscription Tier Limits
-    # Free tier
-    free_max_projects: int = 3
-    free_max_deploys: int = 1
-    free_initial_credits: int = 0  # Free users get 0 credits initially
+    # Helper methods for tier configuration
+    def get_tier_bundled_credits(self, tier: str) -> int:
+        """Get monthly bundled credits for a tier."""
+        return {
+            "free": self.tier_bundled_credits_free,
+            "basic": self.tier_bundled_credits_basic,
+            "pro": self.tier_bundled_credits_pro,
+            "ultra": self.tier_bundled_credits_ultra,
+        }.get(tier, self.tier_bundled_credits_free)
 
-    # Premium tier
-    premium_max_projects: int = 20
-    premium_max_deploys: int = 5
-    premium_initial_credits: int = 0  # Premium users still need to buy credits
+    def get_tier_max_projects(self, tier: str) -> int:
+        """Get max projects for a tier."""
+        return {
+            "free": self.tier_max_projects_free,
+            "basic": self.tier_max_projects_basic,
+            "pro": self.tier_max_projects_pro,
+            "ultra": self.tier_max_projects_ultra,
+        }.get(tier, self.tier_max_projects_free)
+
+    def get_tier_max_deploys(self, tier: str) -> int:
+        """Get max deploys for a tier."""
+        return {
+            "free": self.tier_max_deploys_free,
+            "basic": self.tier_max_deploys_basic,
+            "pro": self.tier_max_deploys_pro,
+            "ultra": self.tier_max_deploys_ultra,
+        }.get(tier, self.tier_max_deploys_free)
+
+    def get_tier_price(self, tier: str) -> int:
+        """Get monthly price in cents for a tier."""
+        return {
+            "free": self.tier_price_free,
+            "basic": self.tier_price_basic,
+            "pro": self.tier_price_pro,
+            "ultra": self.tier_price_ultra,
+        }.get(tier, 0)
+
+    def get_stripe_price_id(self, tier: str) -> str:
+        """Get Stripe Price ID for a tier."""
+        return {
+            "basic": self.stripe_basic_price_id,
+            "pro": self.stripe_pro_price_id,
+            "ultra": self.stripe_ultra_price_id,
+        }.get(tier, "")
 
     # Revenue sharing (percentages)
     creator_revenue_share: float = 0.90  # 90% to creator
@@ -207,7 +287,9 @@ class Settings(BaseSettings):
     k8s_max_snapshots_per_project: int = 5  # Max snapshots per project (Timeline UI)
 
     # Snapshot timeouts
-    k8s_snapshot_ready_timeout_seconds: int = 90  # Max time to wait for snapshot to become ready (EBS takes ~67s)
+    k8s_snapshot_ready_timeout_seconds: int = (
+        90  # Max time to wait for snapshot to become ready (EBS takes ~67s)
+    )
     k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
 
     # ==========================================================================
@@ -236,12 +318,16 @@ class Settings(BaseSettings):
 
     # Dev server image for Kubernetes deployments
     # Should include full registry path for private registries
-    k8s_devserver_image: str = "registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest"
+    k8s_devserver_image: str = (
+        "registry.digitalocean.com/tesslate-container-registry-nyc3/tesslate-devserver:latest"
+    )
 
     # Kubernetes Registry & Secrets Configuration
     k8s_registry_url: str = "registry.digitalocean.com/tesslate-container-registry-nyc3"
     k8s_image_pull_secret: str = "tesslate-container-registry-nyc3"  # Empty string for local dev
-    k8s_image_pull_policy: str = "IfNotPresent"  # Never for local dev (minikube), Always/IfNotPresent for production
+    k8s_image_pull_policy: str = (
+        "IfNotPresent"  # Never for local dev (minikube), Always/IfNotPresent for production
+    )
     k8s_wildcard_tls_secret: str = "tesslate-wildcard-tls"  # Empty string for local dev (no TLS)
 
     @property
@@ -257,9 +343,15 @@ class Settings(BaseSettings):
     # Container Cleanup Configuration
     # ==========================================================================
     # Two-tier cleanup system for idle dev containers
-    container_cleanup_interval_minutes: int = 2  # How often to run cleanup (default: every 2 minutes)
-    container_cleanup_tier1_idle_minutes: int = 15  # Tier 1: Pause containers idle for X minutes (default: 15)
-    container_cleanup_tier2_paused_hours: int = 24  # Tier 2: Remove containers paused for X hours (default: 24)
+    container_cleanup_interval_minutes: int = (
+        2  # How often to run cleanup (default: every 2 minutes)
+    )
+    container_cleanup_tier1_idle_minutes: int = (
+        15  # Tier 1: Pause containers idle for X minutes (default: 15)
+    )
+    container_cleanup_tier2_paused_hours: int = (
+        24  # Tier 2: Remove containers paused for X hours (default: 24)
+    )
 
     class Config:
         # For Docker Compose: environment variables are passed directly
@@ -269,6 +361,7 @@ class Settings(BaseSettings):
         extra = "ignore"  # Ignore extra fields from .env file
         case_sensitive = False  # Allow lowercase env vars to match uppercase field names
 
-@lru_cache()
+
+@lru_cache
 def get_settings():
     return Settings()

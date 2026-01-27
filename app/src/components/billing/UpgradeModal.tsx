@@ -1,64 +1,59 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { X, Check, Sparkles, Star, Crown } from 'lucide-react';
 import { billingApi } from '../../lib/api';
-import type { BillingConfig } from '../../types/billing';
+import toast from 'react-hot-toast';
+import type { SubscriptionTier } from '../../types/billing';
+import {
+  SUBSCRIPTION_TIER_LABELS,
+  SUBSCRIPTION_TIER_PRICES,
+  SUBSCRIPTION_TIER_CREDITS,
+  SUBSCRIPTION_TIER_PROJECTS,
+  SUBSCRIPTION_TIER_DEPLOYS,
+} from '../../types/billing';
 
 interface UpgradeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  reason?: 'projects' | 'deploys' | 'features' | 'general';
+  currentTier?: SubscriptionTier;
+  reason?: 'projects' | 'deploys' | 'features' | 'credits' | 'byok' | 'general';
   title?: string;
   message?: string;
+  suggestedTier?: SubscriptionTier;
 }
 
 const UpgradeModal: React.FC<UpgradeModalProps> = ({
   isOpen,
   onClose,
+  currentTier = 'free',
   reason = 'general',
   title,
   message,
+  suggestedTier,
 }) => {
-  const [config, setConfig] = useState<BillingConfig | null>(null);
+  const [selectedTier, setSelectedTier] = useState<SubscriptionTier>(suggestedTier || 'pro');
   const [upgrading, setUpgrading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadConfig();
-    }
-  }, [isOpen]);
-
-  const loadConfig = async () => {
-    try {
-      const response = await billingApi.getConfig();
-      setConfig(response.data);
-    } catch (err) {
-      console.error('Failed to load billing config:', err);
-    }
-  };
+  if (!isOpen) return null;
 
   const handleUpgrade = async () => {
+    if (selectedTier === 'free' || selectedTier === currentTier) return;
+
     try {
       setUpgrading(true);
-      setError(null);
+      const response = await billingApi.subscribe(selectedTier);
 
-      const response = await billingApi.subscribe();
-
-      // Redirect to Stripe Checkout
-      if (response.data.url) {
-        window.location.href = response.data.url;
+      if (response.url) {
+        window.location.href = response.url;
       } else {
         throw new Error('No checkout URL received');
       }
-    } catch (err: unknown) {
+    } catch (err) {
       console.error('Failed to start subscription:', err);
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to start subscription');
+      toast.error('Failed to start subscription');
       setUpgrading(false);
     }
   };
-
-  if (!isOpen) return null;
 
   // Reason-specific content
   const getContent = () => {
@@ -66,46 +61,32 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({
       case 'projects':
         return {
           defaultTitle: 'Project Limit Reached',
-          defaultMessage: `You've reached the maximum number of projects for the free tier (${config?.free_limits.max_projects || 1} project). Upgrade to Premium to create up to ${config?.premium_limits.max_projects || 5} projects.`,
-          benefits: [
-            `Create up to ${config?.premium_limits.max_projects || 5} projects`,
-            'Deploy Mode (24/7 running containers)',
-            'Use your own API keys',
-            'Priority support',
-          ],
+          defaultMessage: `You've reached your project limit. Upgrade to create more projects.`,
         };
       case 'deploys':
         return {
           defaultTitle: 'Deploy Limit Reached',
-          defaultMessage: `You've reached the maximum number of deployments for the free tier (${config?.free_limits.max_deploys || 1} deploy). Upgrade to Premium to deploy up to ${config?.premium_limits.max_deploys || 5} projects.`,
-          benefits: [
-            `Deploy up to ${config?.premium_limits.max_deploys || 5} projects`,
-            'Keep containers running 24/7',
-            'Purchase additional deploy slots',
-            'Advanced monitoring',
-          ],
+          defaultMessage: `You've reached your deploy limit. Upgrade to deploy more projects.`,
+        };
+      case 'credits':
+        return {
+          defaultTitle: 'More Credits Needed',
+          defaultMessage: 'Upgrade your plan for more monthly credits.',
+        };
+      case 'byok':
+        return {
+          defaultTitle: 'BYOK Requires Pro or Ultra',
+          defaultMessage: 'Bring Your Own Key (BYOK) is available on Pro and Ultra plans.',
         };
       case 'features':
         return {
           defaultTitle: 'Premium Feature',
-          defaultMessage: 'This feature is only available for Premium subscribers. Upgrade to unlock all premium features.',
-          benefits: [
-            'Deploy Mode enabled',
-            'Use your own API keys',
-            'More projects and deploys',
-            'Priority support',
-          ],
+          defaultMessage: 'This feature requires a higher tier subscription.',
         };
       default:
         return {
-          defaultTitle: 'Upgrade to Premium',
-          defaultMessage: 'Unlock more projects, deploys, and premium features.',
-          benefits: [
-            `${config?.premium_limits.max_projects || 5} projects`,
-            `${config?.premium_limits.max_deploys || 5} deploys`,
-            'Deploy Mode (24/7 running)',
-            'Use your own API keys',
-          ],
+          defaultTitle: 'Upgrade Your Plan',
+          defaultMessage: 'Unlock more projects, credits, and premium features.',
         };
     }
   };
@@ -114,128 +95,148 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({
   const displayTitle = title || content.defaultTitle;
   const displayMessage = message || content.defaultMessage;
 
+  // Available tiers to upgrade to (exclude current and free)
+  const upgradeTiers: SubscriptionTier[] = ['basic', 'pro', 'ultra'].filter(
+    (t) => t !== currentTier
+  ) as SubscriptionTier[];
+
+  const tierIcons: Record<SubscriptionTier, React.ReactNode> = {
+    free: null,
+    basic: <Star className="w-5 h-5" />,
+    pro: <Sparkles className="w-5 h-5" />,
+    ultra: <Crown className="w-5 h-5" />,
+  };
+
+  const tierColors: Record<SubscriptionTier, string> = {
+    free: '',
+    basic: 'border-blue-500/50 bg-blue-500/10',
+    pro: 'border-yellow-500/50 bg-yellow-500/10',
+    ultra: 'border-purple-500/50 bg-purple-500/10',
+  };
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-        {/* Background overlay */}
-        <div
-          className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
-          onClick={onClose}
-        ></div>
-
-        {/* Modal panel */}
-        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-          {/* Icon */}
-          <div className="bg-gradient-to-r from-blue-500 to-purple-600 px-6 pt-6 pb-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="flex-shrink-0 h-12 w-12 rounded-full bg-white bg-opacity-20 flex items-center justify-center">
-                  <svg
-                    className="h-6 w-6 text-white"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                </div>
-                <h3 className="text-2xl font-bold text-white">{displayTitle}</h3>
-              </div>
-              <button
-                onClick={onClose}
-                className="text-white hover:text-gray-200 transition"
-              >
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="bg-[var(--surface)] border border-white/10 rounded-2xl max-w-lg w-full overflow-hidden">
+        {/* Header */}
+        <div className="p-6 border-b border-white/10">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-[var(--text)]">{displayTitle}</h2>
+              <p className="text-sm text-[var(--text)]/60 mt-1">{displayMessage}</p>
             </div>
+            <button
+              onClick={onClose}
+              className="p-2 text-[var(--text)]/40 hover:text-[var(--text)]/60 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
+        </div>
 
-          {/* Body */}
-          <div className="px-6 py-6">
-            <p className="text-gray-700 mb-6">{displayMessage}</p>
+        {/* Tier Selection */}
+        <div className="p-6">
+          <div className="space-y-3 mb-6">
+            {upgradeTiers.map((tier) => {
+              const isSelected = selectedTier === tier;
+              const isRecommended = tier === 'pro';
 
-            {error && (
-              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
-                {error}
-              </div>
-            )}
+              return (
+                <button
+                  key={tier}
+                  onClick={() => setSelectedTier(tier)}
+                  className={`relative w-full p-4 rounded-xl border-2 transition-all text-left ${
+                    isSelected
+                      ? tierColors[tier]
+                      : 'border-white/10 bg-white/5 hover:border-white/20'
+                  }`}
+                >
+                  {isRecommended && (
+                    <div className="absolute -top-2 right-4 bg-[var(--primary)] text-white text-xs font-bold px-2 py-0.5 rounded">
+                      RECOMMENDED
+                    </div>
+                  )}
 
-            {/* Benefits */}
-            <div className="mb-6">
-              <h4 className="font-semibold text-gray-900 mb-3">Premium includes:</h4>
-              <ul className="space-y-2">
-                {content.benefits.map((benefit, idx) => (
-                  <li key={idx} className="flex items-start">
-                    <svg
-                      className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="text-gray-700">{benefit}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Pricing */}
-            {config && (
-              <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-4 mb-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm text-gray-600">Premium</div>
-                    <div className="text-3xl font-bold text-gray-900">
-                      ${(config.premium_price / 100).toFixed(0)}
-                      <span className="text-base font-normal text-gray-600">/month</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                          isSelected
+                            ? 'border-[var(--primary)] bg-[var(--primary)]'
+                            : 'border-white/30'
+                        }`}
+                      >
+                        {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {tierIcons[tier]}
+                        <span className="font-semibold text-[var(--text)]">
+                          {SUBSCRIPTION_TIER_LABELS[tier]}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xl font-bold text-[var(--text)]">
+                        ${SUBSCRIPTION_TIER_PRICES[tier]}
+                      </span>
+                      <span className="text-[var(--text)]/50">/mo</span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-xs text-gray-600">Cancel anytime</div>
-                    <div className="text-xs text-gray-600">No hidden fees</div>
+
+                  {/* Tier benefits */}
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    <div className="flex items-center gap-1 text-[var(--text)]/60">
+                      <Check className="w-3 h-3 text-green-400" />
+                      {SUBSCRIPTION_TIER_CREDITS[tier].toLocaleString()} credits/mo
+                    </div>
+                    <div className="flex items-center gap-1 text-[var(--text)]/60">
+                      <Check className="w-3 h-3 text-green-400" />
+                      {tier === 'ultra' ? 'Unlimited' : SUBSCRIPTION_TIER_PROJECTS[tier]} projects
+                    </div>
+                    <div className="flex items-center gap-1 text-[var(--text)]/60">
+                      <Check className="w-3 h-3 text-green-400" />
+                      {SUBSCRIPTION_TIER_DEPLOYS[tier]} deploys
+                    </div>
+                    {(tier === 'pro' || tier === 'ultra') && (
+                      <div className="flex items-center gap-1 text-[var(--text)]/60">
+                        <Check className="w-3 h-3 text-green-400" />
+                        BYOK enabled
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="flex space-x-3">
-              <button
-                onClick={handleUpgrade}
-                disabled={upgrading}
-                className="flex-1 py-3 px-6 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {upgrading ? (
-                  <span className="flex items-center justify-center">
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Processing...
-                  </span>
-                ) : (
-                  'Upgrade to Premium'
-                )}
-              </button>
-
-              <Link
-                to="/billing/plans"
-                onClick={onClose}
-                className="py-3 px-6 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition text-center"
-              >
-                View Plans
-              </Link>
-            </div>
-
-            <p className="text-xs text-center text-gray-500 mt-4">
-              You'll be redirected to Stripe to complete your subscription securely
-            </p>
+                </button>
+              );
+            })}
           </div>
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <button
+              onClick={handleUpgrade}
+              disabled={upgrading || selectedTier === currentTier}
+              className="flex-1 py-3 px-6 bg-[var(--primary)] text-white font-semibold rounded-xl hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {upgrading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Processing...
+                </span>
+              ) : (
+                `Upgrade to ${SUBSCRIPTION_TIER_LABELS[selectedTier]}`
+              )}
+            </button>
+
+            <Link
+              to="/settings/billing"
+              onClick={onClose}
+              className="py-3 px-6 bg-white/5 border border-white/10 text-[var(--text)] font-medium rounded-xl hover:bg-white/10 transition-colors text-center"
+            >
+              View All Plans
+            </Link>
+          </div>
+
+          <p className="text-xs text-center text-[var(--text)]/40 mt-4">
+            Secure checkout powered by Stripe. Cancel anytime.
+          </p>
         </div>
       </div>
     </div>

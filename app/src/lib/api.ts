@@ -38,7 +38,9 @@ fetchCsrfToken();
  * Helper to build auth headers for fetch() calls
  * Supports both JWT Bearer tokens and cookie-based OAuth authentication
  */
-export const getAuthHeaders = (additionalHeaders?: Record<string, string>): Record<string, string> => {
+export const getAuthHeaders = (
+  additionalHeaders?: Record<string, string>
+): Record<string, string> => {
   const token = localStorage.getItem('token');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -96,8 +98,7 @@ api.interceptors.response.use(
     }
 
     // If error is 403 and mentions CSRF, refetch token and retry
-    if (error.response?.status === 403 &&
-        error.response?.data?.detail?.includes('CSRF')) {
+    if (error.response?.status === 403 && error.response?.data?.detail?.includes('CSRF')) {
       await fetchCsrfToken();
       // Retry the request once with new CSRF token
       if (error.config && !error.config._retry) {
@@ -193,20 +194,14 @@ export const tasksApi = {
         try {
           // Check timeout
           if (Date.now() - startTime > timeout) {
-            reject(
-              new Error(
-                `Task polling timeout after ${timeout}ms for task ${taskId}`
-              )
-            );
+            reject(new Error(`Task polling timeout after ${timeout}ms for task ${taskId}`));
             return;
           }
 
           // Check max retries
           if (retryCount >= maxRetries) {
             reject(
-              new Error(
-                `Task polling exceeded max retries (${maxRetries}) for task ${taskId}`
-              )
+              new Error(`Task polling exceeded max retries (${maxRetries}) for task ${taskId}`)
             );
             return;
           }
@@ -255,7 +250,7 @@ export const projectsApi = {
     } = {
       name,
       description,
-      source_type: sourceType || 'template'
+      source_type: sourceType || 'template',
     };
 
     if (sourceType === 'github') {
@@ -311,13 +306,13 @@ export const projectsApi = {
   saveFile: async (slug: string, filePath: string, content: string) => {
     const response = await api.post(`/api/projects/${slug}/files/save`, {
       file_path: filePath,
-      content: content
+      content: content,
     });
     return response.data;
   },
   deleteFile: async (slug: string, filePath: string) => {
     const response = await api.delete(`/api/projects/${slug}/files`, {
-      data: { file_path: filePath }
+      data: { file_path: filePath },
     });
     return response.data;
   },
@@ -366,7 +361,7 @@ export const projectsApi = {
     return {
       ...completedTask.result,
       message: response.data.message,
-      task_id
+      task_id,
     };
   },
   stopContainer: async (slug: string, containerId: string) => {
@@ -377,12 +372,18 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}/containers/status`);
     return response.data;
   },
-  checkContainerHealth: async (slug: string, containerId: string): Promise<{ healthy: boolean; status_code?: number; url?: string; error?: string }> => {
+  checkContainerHealth: async (
+    slug: string,
+    containerId: string
+  ): Promise<{ healthy: boolean; status_code?: number; url?: string; error?: string }> => {
     try {
       const response = await api.get(`/api/projects/${slug}/containers/${containerId}/health`);
       return response.data;
     } catch (error) {
-      return { healthy: false, error: error instanceof Error ? error.message : 'Health check failed' };
+      return {
+        healthy: false,
+        error: error instanceof Error ? error.message : 'Health check failed',
+      };
     }
   },
 };
@@ -469,10 +470,13 @@ export const chatApi = {
       reader.releaseLock();
     }
   },
-  sendApprovalResponse: async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop'): Promise<void> => {
+  sendApprovalResponse: async (
+    approvalId: string,
+    response: 'allow_once' | 'allow_all' | 'stop'
+  ): Promise<void> => {
     await api.post('/api/chat/agent/approval', {
       approval_id: approvalId,
-      response: response
+      response: response,
     });
   },
 };
@@ -533,19 +537,25 @@ export const marketplaceApi = {
   // Get related agents (recommendations based on co-installs)
   getRelatedAgents: async (slug: string, limit: number = 6) => {
     const response = await api.get(`/api/marketplace/agents/${slug}/related`, {
-      params: { limit }
+      params: { limit },
     });
     return response.data.related_agents || [];
   },
 
   // Fork an open source agent
-  forkAgent: async (agentId: string, customizations?: {
-    name?: string;
-    description?: string;
-    system_prompt?: string;
-    model?: string;
-  }) => {
-    const response = await api.post(`/api/marketplace/agents/${agentId}/fork`, customizations || {});
+  forkAgent: async (
+    agentId: string,
+    customizations?: {
+      name?: string;
+      description?: string;
+      system_prompt?: string;
+      model?: string;
+    }
+  ) => {
+    const response = await api.post(
+      `/api/marketplace/agents/${agentId}/fork`,
+      customizations || {}
+    );
     return response.data;
   },
 
@@ -563,15 +573,18 @@ export const marketplaceApi = {
   },
 
   // Update a custom/forked agent
-  updateAgent: async (agentId: string, data: {
-    name?: string;
-    description?: string;
-    system_prompt?: string;
-    model?: string;
-    tools?: string[];
-    tool_configs?: Record<string, { description?: string; examples?: string[] }>;
-    avatar_url?: string | null;
-  }) => {
+  updateAgent: async (
+    agentId: string,
+    data: {
+      name?: string;
+      description?: string;
+      system_prompt?: string;
+      model?: string;
+      tools?: string[];
+      tool_configs?: Record<string, { description?: string; examples?: string[] }>;
+      avatar_url?: string | null;
+    }
+  ) => {
     const response = await api.patch(`/api/marketplace/agents/${agentId}`, data);
     return response.data;
   },
@@ -592,7 +605,7 @@ export const marketplaceApi = {
   verifyPurchase: async (sessionId: string, agentSlug?: string) => {
     const response = await api.post('/api/marketplace/verify-purchase', {
       session_id: sessionId,
-      agent_slug: agentSlug
+      agent_slug: agentSlug,
     });
     return response.data;
   },
@@ -715,7 +728,6 @@ export const marketplaceApi = {
     const response = await api.delete(`/api/marketplace/agents/${agentId}/review`);
     return response.data;
   },
-
 };
 
 // Creator/Author profile API
@@ -786,11 +798,14 @@ export const secretsApi = {
   },
 
   // Update API key
-  updateApiKey: async (keyId: number, data: {
-    api_key?: string;
-    key_name?: string;
-    provider_metadata?: Record<string, unknown>;
-  }) => {
+  updateApiKey: async (
+    keyId: number,
+    data: {
+      api_key?: string;
+      key_name?: string;
+      provider_metadata?: Record<string, unknown>;
+    }
+  ) => {
     const response = await api.put(`/api/secrets/api-keys/${keyId}`, data);
     return response.data;
   },
@@ -810,6 +825,46 @@ export const secretsApi = {
   // List supported providers
   getProviders: async () => {
     const response = await api.get('/api/secrets/providers');
+    return response.data;
+  },
+
+  // === Custom Provider Methods ===
+
+  // List user's custom providers
+  listCustomProviders: async () => {
+    const response = await api.get('/api/secrets/providers/custom');
+    return response.data;
+  },
+
+  // Create a custom provider
+  createCustomProvider: async (data: {
+    name: string;
+    slug: string;
+    base_url: string;
+    api_type?: string;
+    default_headers?: Record<string, string>;
+  }) => {
+    const response = await api.post('/api/secrets/providers/custom', data);
+    return response.data;
+  },
+
+  // Update a custom provider
+  updateCustomProvider: async (
+    providerId: string,
+    data: {
+      name?: string;
+      base_url?: string;
+      api_type?: string;
+      default_headers?: Record<string, string>;
+    }
+  ) => {
+    const response = await api.put(`/api/secrets/providers/custom/${providerId}`, data);
+    return response.data;
+  },
+
+  // Delete a custom provider
+  deleteCustomProvider: async (providerId: string) => {
+    const response = await api.delete(`/api/secrets/providers/custom/${providerId}`);
     return response.data;
   },
 };
@@ -993,7 +1048,7 @@ export const diagramApi = {
   // Generate architecture diagram for a project
   generateDiagram: async (slug: string, diagramType: 'mermaid' | 'c4_plantuml' = 'mermaid') => {
     const response = await api.post(`/api/projects/${slug}/generate-architecture-diagram`, null, {
-      params: { diagram_type: diagramType }
+      params: { diagram_type: diagramType },
     });
     return response.data;
   },
@@ -1119,8 +1174,14 @@ export const billingApi = {
     return response.data;
   },
 
-  subscribe: async () => {
-    const response = await api.post('/api/billing/subscribe');
+  subscribe: async (tier: 'basic' | 'pro' | 'ultra' = 'pro') => {
+    const response = await api.post('/api/billing/subscribe', { tier });
+    return response.data;
+  },
+
+  // Get credit status for low balance warning
+  getCreditStatus: async () => {
+    const response = await api.get('/api/billing/credits/status');
     return response.data;
   },
 
@@ -1147,7 +1208,7 @@ export const billingApi = {
     return response.data;
   },
 
-  purchaseCredits: async (packageType: 'small' | 'medium' | 'large') => {
+  purchaseCredits: async (packageType: 'small' | 'medium') => {
     const response = await api.post('/api/billing/credits/purchase', {
       package: packageType,
     });
@@ -1176,7 +1237,12 @@ export const billingApi = {
     return response.data;
   },
 
-  getUsageLogs: async (limit: number = 100, offset: number = 0, startDate?: string, endDate?: string) => {
+  getUsageLogs: async (
+    limit: number = 100,
+    offset: number = 0,
+    startDate?: string,
+    endDate?: string
+  ) => {
     const response = await api.get('/api/billing/usage/logs', {
       params: { limit, offset, start_date: startDate, end_date: endDate },
     });
@@ -1261,10 +1327,13 @@ export const deploymentCredentialsApi = {
   },
 
   // Update credential
-  update: async (credentialId: string, data: {
-    access_token?: string;
-    metadata?: Record<string, unknown>;
-  }) => {
+  update: async (
+    credentialId: string,
+    data: {
+      access_token?: string;
+      metadata?: Record<string, unknown>;
+    }
+  ) => {
     const response = await api.put(`/api/deployment-credentials/${credentialId}`, data);
     return response.data;
   },
@@ -1325,25 +1394,31 @@ export const deploymentCredentialsApi = {
 
 export const deploymentsApi = {
   // Trigger a new deployment
-  deploy: async (projectSlug: string, data: {
-    provider: string;
-    deployment_mode?: 'source' | 'pre-built';
-    custom_domain?: string;
-    env_vars?: Record<string, string>;
-    build_command?: string;
-    framework?: string;
-  }) => {
+  deploy: async (
+    projectSlug: string,
+    data: {
+      provider: string;
+      deployment_mode?: 'source' | 'pre-built';
+      custom_domain?: string;
+      env_vars?: Record<string, string>;
+      build_command?: string;
+      framework?: string;
+    }
+  ) => {
     const response = await api.post(`/api/deployments/${projectSlug}/deploy`, data);
     return response.data;
   },
 
   // List project deployments
-  listProjectDeployments: async (projectSlug: string, params?: {
-    provider?: string;
-    status?: string;
-    limit?: number;
-    offset?: number;
-  }) => {
+  listProjectDeployments: async (
+    projectSlug: string,
+    params?: {
+      provider?: string;
+      status?: string;
+      limit?: number;
+      offset?: number;
+    }
+  ) => {
     const response = await api.get(`/api/deployments/${projectSlug}/deployments`, {
       params,
     });
@@ -1375,7 +1450,11 @@ export const deploymentsApi = {
   },
 
   // Stream deployment progress (SSE)
-  streamProgress: (deploymentId: string, onMessage: (data: Record<string, unknown>) => void, onError?: (error: Event) => void) => {
+  streamProgress: (
+    deploymentId: string,
+    onMessage: (data: Record<string, unknown>) => void,
+    onError?: (error: Event) => void
+  ) => {
     const eventSource = new EventSource(
       `${API_URL}/api/deployments/deployments/${deploymentId}/stream`,
       { withCredentials: true }
@@ -1421,11 +1500,7 @@ export const feedbackApi = {
   },
 
   // Create new feedback post
-  create: async (data: {
-    type: 'bug' | 'suggestion';
-    title: string;
-    description: string;
-  }) => {
+  create: async (data: { type: 'bug' | 'suggestion'; title: string; description: string }) => {
     const response = await api.post('/api/feedback', data);
     return response.data;
   },

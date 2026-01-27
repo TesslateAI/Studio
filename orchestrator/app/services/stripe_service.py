@@ -3,23 +3,22 @@ Stripe payment processing service for marketplace, subscriptions, and billing.
 """
 
 import logging
-from typing import Optional, Dict, Any
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import (
-    User,
-    MarketplaceAgent,
-    UserPurchasedAgent,
-    CreditPurchase,
-    MarketplaceTransaction,
-    UsageLog
-)
 from ..config import get_settings
+from ..models import (
+    CreditPurchase,
+    MarketplaceAgent,
+    MarketplaceTransaction,
+    UsageLog,
+    User,
+    UserPurchasedAgent,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -39,6 +38,7 @@ class StripeService:
         if self.stripe_key:
             try:
                 import stripe
+
                 stripe.api_key = self.stripe_key
                 self.stripe = stripe
                 logger.info("Stripe initialized successfully")
@@ -54,11 +54,8 @@ class StripeService:
     # ========================================================================
 
     async def create_customer(
-        self,
-        email: str,
-        name: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, email: str, name: str, metadata: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
         """
         Create a Stripe customer.
 
@@ -75,22 +72,14 @@ class StripeService:
             return None
 
         try:
-            customer = self.stripe.Customer.create(
-                email=email,
-                name=name,
-                metadata=metadata or {}
-            )
+            customer = self.stripe.Customer.create(email=email, name=name, metadata=metadata or {})
             logger.info(f"Created Stripe customer: {customer.id} for {email}")
             return customer
         except Exception as e:
             logger.error(f"Failed to create Stripe customer: {e}")
             raise
 
-    async def get_or_create_customer(
-        self,
-        user: User,
-        db: AsyncSession
-    ) -> Optional[str]:
+    async def get_or_create_customer(self, user: User, db: AsyncSession) -> str | None:
         """
         Get existing Stripe customer ID or create a new one.
 
@@ -105,9 +94,7 @@ class StripeService:
             return user.stripe_customer_id
 
         customer = await self.create_customer(
-            email=user.email,
-            name=user.name,
-            metadata={"user_id": str(user.id)}
+            email=user.email, name=user.name, metadata={"user_id": str(user.id)}
         )
 
         if customer:
@@ -122,20 +109,17 @@ class StripeService:
     # ========================================================================
 
     async def create_subscription_checkout(
-        self,
-        user: User,
-        success_url: str,
-        cancel_url: str,
-        db: AsyncSession
-    ) -> Optional[Dict[str, Any]]:
+        self, user: User, success_url: str, cancel_url: str, db: AsyncSession, tier: str = "pro"
+    ) -> dict[str, Any] | None:
         """
-        Create a checkout session for premium subscription.
+        Create a checkout session for a subscription tier.
 
         Args:
             user: User subscribing
             success_url: Success redirect URL
             cancel_url: Cancel redirect URL
             db: Database session
+            tier: Subscription tier (basic, pro, ultra)
 
         Returns:
             Checkout session with URL
@@ -151,35 +135,30 @@ class StripeService:
             if not customer_id:
                 raise ValueError("Failed to create Stripe customer")
 
+            # Get Stripe price ID for tier
+            price_id = settings.get_stripe_price_id(tier)
+            if not price_id:
+                raise ValueError(f"No Stripe price ID configured for tier: {tier}")
+
             # Create checkout session
             session = self.stripe.checkout.Session.create(
                 customer=customer_id,
                 payment_method_types=["card"],
-                line_items=[{
-                    "price": settings.stripe_premium_price_id,
-                    "quantity": 1
-                }],
+                line_items=[{"price": price_id, "quantity": 1}],
                 mode="subscription",
                 success_url=success_url,
                 cancel_url=cancel_url,
-                metadata={
-                    "user_id": str(user.id),
-                    "type": "premium_subscription"
-                }
+                metadata={"user_id": str(user.id), "type": "subscription", "tier": tier},
             )
 
-            logger.info(f"Created subscription checkout for user {user.id}")
+            logger.info(f"Created {tier} subscription checkout for user {user.id}")
             return session
 
         except Exception as e:
             logger.error(f"Failed to create subscription checkout: {e}")
             raise
 
-    async def cancel_subscription(
-        self,
-        subscription_id: str,
-        at_period_end: bool = False
-    ) -> bool:
+    async def cancel_subscription(self, subscription_id: str, at_period_end: bool = False) -> bool:
         """
         Cancel a Stripe subscription.
 
@@ -196,10 +175,7 @@ class StripeService:
 
         try:
             if at_period_end:
-                self.stripe.Subscription.modify(
-                    subscription_id,
-                    cancel_at_period_end=True
-                )
+                self.stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
             else:
                 self.stripe.Subscription.delete(subscription_id)
 
@@ -209,10 +185,7 @@ class StripeService:
             logger.error(f"Failed to cancel subscription: {e}")
             return False
 
-    async def renew_subscription(
-        self,
-        subscription_id: str
-    ) -> bool:
+    async def renew_subscription(self, subscription_id: str) -> bool:
         """
         Renew a cancelled subscription by removing the cancellation.
 
@@ -228,10 +201,7 @@ class StripeService:
 
         try:
             # Reactivate by setting cancel_at_period_end to False
-            self.stripe.Subscription.modify(
-                subscription_id,
-                cancel_at_period_end=False
-            )
+            self.stripe.Subscription.modify(subscription_id, cancel_at_period_end=False)
             logger.info(f"Renewed subscription: {subscription_id}")
             return True
         except Exception as e:
@@ -243,13 +213,8 @@ class StripeService:
     # ========================================================================
 
     async def create_credit_purchase_checkout(
-        self,
-        user: User,
-        amount_cents: int,
-        success_url: str,
-        cancel_url: str,
-        db: AsyncSession
-    ) -> Optional[Dict[str, Any]]:
+        self, user: User, amount_cents: int, success_url: str, cancel_url: str, db: AsyncSession
+    ) -> dict[str, Any] | None:
         """
         Create a checkout session for purchasing credits.
 
@@ -278,28 +243,32 @@ class StripeService:
             session = self.stripe.checkout.Session.create(
                 customer=customer_id,
                 payment_method_types=["card"],
-                line_items=[{
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {
-                            "name": f"${amount_cents / 100:.2f} Credits",
-                            "description": f"Purchase ${amount_cents / 100:.2f} in credits for AI usage"
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "product_data": {
+                                "name": f"${amount_cents / 100:.2f} Credits",
+                                "description": f"Purchase ${amount_cents / 100:.2f} in credits for AI usage",
+                            },
+                            "unit_amount": amount_cents,
                         },
-                        "unit_amount": amount_cents
-                    },
-                    "quantity": 1
-                }],
+                        "quantity": 1,
+                    }
+                ],
                 mode="payment",
                 success_url=success_url,
                 cancel_url=cancel_url,
                 metadata={
                     "user_id": str(user.id),
                     "type": "credit_purchase",
-                    "amount_cents": str(amount_cents)
-                }
+                    "amount_cents": str(amount_cents),
+                },
             )
 
-            logger.info(f"Created credit purchase checkout for user {user.id}: ${amount_cents / 100}")
+            logger.info(
+                f"Created credit purchase checkout for user {user.id}: ${amount_cents / 100}"
+            )
             return session
 
         except Exception as e:
@@ -316,8 +285,8 @@ class StripeService:
         agent: MarketplaceAgent,
         success_url: str,
         cancel_url: str,
-        db: AsyncSession
-    ) -> Optional[Dict[str, Any]]:
+        db: AsyncSession,
+    ) -> dict[str, Any] | None:
         """
         Create a checkout session for purchasing a marketplace agent.
 
@@ -347,39 +316,40 @@ class StripeService:
                 # Monthly subscription
                 mode = "subscription"
                 if agent.stripe_price_id:
-                    line_items = [{
-                        "price": agent.stripe_price_id,
-                        "quantity": 1
-                    }]
+                    line_items = [{"price": agent.stripe_price_id, "quantity": 1}]
                 else:
-                    line_items = [{
+                    line_items = [
+                        {
+                            "price_data": {
+                                "currency": "usd",
+                                "product_data": {
+                                    "name": agent.name,
+                                    "description": agent.description,
+                                    "metadata": {"agent_id": str(agent.id)},
+                                },
+                                "unit_amount": agent.price,
+                                "recurring": {"interval": "month"},
+                            },
+                            "quantity": 1,
+                        }
+                    ]
+            elif agent.pricing_type == "one_time":
+                # One-time payment
+                mode = "payment"
+                line_items = [
+                    {
                         "price_data": {
                             "currency": "usd",
                             "product_data": {
                                 "name": agent.name,
                                 "description": agent.description,
-                                "metadata": {"agent_id": str(agent.id)}
+                                "metadata": {"agent_id": str(agent.id)},
                             },
                             "unit_amount": agent.price,
-                            "recurring": {"interval": "month"}
                         },
-                        "quantity": 1
-                    }]
-            elif agent.pricing_type == "one_time":
-                # One-time payment
-                mode = "payment"
-                line_items = [{
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {
-                            "name": agent.name,
-                            "description": agent.description,
-                            "metadata": {"agent_id": str(agent.id)}
-                        },
-                        "unit_amount": agent.price
-                    },
-                    "quantity": 1
-                }]
+                        "quantity": 1,
+                    }
+                ]
             else:
                 raise ValueError(f"Invalid pricing type: {agent.pricing_type}")
 
@@ -395,8 +365,8 @@ class StripeService:
                     "user_id": str(user.id),
                     "agent_id": str(agent.id),
                     "type": "agent_purchase",
-                    "pricing_type": agent.pricing_type
-                }
+                    "pricing_type": agent.pricing_type,
+                },
             )
 
             logger.info(f"Created agent purchase checkout for user {user.id}, agent {agent.id}")
@@ -411,12 +381,8 @@ class StripeService:
     # ========================================================================
 
     async def create_deploy_purchase_checkout(
-        self,
-        user: User,
-        success_url: str,
-        cancel_url: str,
-        db: AsyncSession
-    ) -> Optional[Dict[str, Any]]:
+        self, user: User, success_url: str, cancel_url: str, db: AsyncSession
+    ) -> dict[str, Any] | None:
         """
         Create a checkout session for purchasing an additional deploy slot.
 
@@ -446,24 +412,23 @@ class StripeService:
             session = self.stripe.checkout.Session.create(
                 customer=customer_id,
                 payment_method_types=["card"],
-                line_items=[{
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {
-                            "name": "Additional Deploy Slot",
-                            "description": "Purchase an additional deploy slot for continuous deployment"
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "product_data": {
+                                "name": "Additional Deploy Slot",
+                                "description": "Purchase an additional deploy slot for continuous deployment",
+                            },
+                            "unit_amount": price,
                         },
-                        "unit_amount": price
-                    },
-                    "quantity": 1
-                }],
+                        "quantity": 1,
+                    }
+                ],
                 mode="payment",
                 success_url=success_url,
                 cancel_url=cancel_url,
-                metadata={
-                    "user_id": str(user.id),
-                    "type": "deploy_purchase"
-                }
+                metadata={"user_id": str(user.id), "type": "deploy_purchase"},
             )
 
             logger.info(f"Created deploy purchase checkout for user {user.id}")
@@ -478,11 +443,8 @@ class StripeService:
     # ========================================================================
 
     async def create_usage_invoice(
-        self,
-        user: User,
-        usage_logs: list[UsageLog],
-        db: AsyncSession
-    ) -> Optional[str]:
+        self, user: User, usage_logs: list[UsageLog], db: AsyncSession
+    ) -> str | None:
         """
         Create a Stripe invoice for monthly API usage.
 
@@ -523,7 +485,7 @@ class StripeService:
                 # Mark usage logs as paid
                 for log in usage_logs:
                     log.billed_status = "paid"
-                    log.billed_at = datetime.now(timezone.utc)
+                    log.billed_at = datetime.now(UTC)
                 await db.commit()
                 return None
             elif user.credits_balance > 0:
@@ -533,11 +495,11 @@ class StripeService:
                 await db.commit()
 
             # Create invoice for remaining amount
-            invoice_item = self.stripe.InvoiceItem.create(
+            self.stripe.InvoiceItem.create(
                 customer=customer_id,
                 amount=remaining_cost,
                 currency="usd",
-                description=f"AI Usage - {datetime.now().strftime('%B %Y')}"
+                description=f"AI Usage - {datetime.now().strftime('%B %Y')}",
             )
 
             invoice = self.stripe.Invoice.create(
@@ -547,8 +509,8 @@ class StripeService:
                     "user_id": str(user.id),
                     "type": "usage_invoice",
                     "period_start": usage_logs[0].created_at.isoformat(),
-                    "period_end": usage_logs[-1].created_at.isoformat()
-                }
+                    "period_end": usage_logs[-1].created_at.isoformat(),
+                },
             )
 
             # Finalize and pay the invoice
@@ -559,12 +521,14 @@ class StripeService:
             for log in usage_logs:
                 log.invoice_id = invoice.id
                 log.billed_status = "invoiced"
-                log.billed_at = datetime.now(timezone.utc)
+                log.billed_at = datetime.now(UTC)
 
             user.total_spend += remaining_cost
             await db.commit()
 
-            logger.info(f"Created usage invoice {invoice.id} for user {user.id}: ${remaining_cost / 100:.2f}")
+            logger.info(
+                f"Created usage invoice {invoice.id} for user {user.id}: ${remaining_cost / 100:.2f}"
+            )
             return invoice.id
 
         except Exception as e:
@@ -576,12 +540,8 @@ class StripeService:
     # ========================================================================
 
     async def create_connect_account_link(
-        self,
-        user: User,
-        refresh_url: str,
-        return_url: str,
-        db: AsyncSession
-    ) -> Optional[str]:
+        self, user: User, refresh_url: str, return_url: str, db: AsyncSession
+    ) -> str | None:
         """
         Create a Stripe Connect account link for creator onboarding.
 
@@ -602,9 +562,7 @@ class StripeService:
             # Create or get existing account
             if not user.creator_stripe_account_id:
                 account = self.stripe.Account.create(
-                    type="express",
-                    email=user.email,
-                    metadata={"user_id": str(user.id)}
+                    type="express", email=user.email, metadata={"user_id": str(user.id)}
                 )
                 user.creator_stripe_account_id = account.id
                 await db.commit()
@@ -616,7 +574,7 @@ class StripeService:
                 account=account["id"],
                 refresh_url=refresh_url,
                 return_url=return_url,
-                type="account_onboarding"
+                type="account_onboarding",
             )
 
             logger.info(f"Created Connect account link for user {user.id}")
@@ -626,11 +584,7 @@ class StripeService:
             logger.error(f"Failed to create Connect account link: {e}")
             raise
 
-    async def create_payout(
-        self,
-        transaction: MarketplaceTransaction,
-        db: AsyncSession
-    ) -> bool:
+    async def create_payout(self, transaction: MarketplaceTransaction, db: AsyncSession) -> bool:
         """
         Create a payout to agent creator via Stripe Connect.
 
@@ -647,9 +601,7 @@ class StripeService:
 
         try:
             # Get creator's Connect account
-            creator_result = await db.execute(
-                select(User).where(User.id == transaction.creator_id)
-            )
+            creator_result = await db.execute(select(User).where(User.id == transaction.creator_id))
             creator = creator_result.scalar_one_or_none()
 
             if not creator or not creator.creator_stripe_account_id:
@@ -664,13 +616,13 @@ class StripeService:
                 metadata={
                     "transaction_id": str(transaction.id),
                     "agent_id": str(transaction.agent_id),
-                    "user_id": str(transaction.user_id)
-                }
+                    "user_id": str(transaction.user_id),
+                },
             )
 
             # Update transaction
             transaction.payout_status = "paid"
-            transaction.payout_date = datetime.now(timezone.utc)
+            transaction.payout_date = datetime.now(UTC)
             transaction.stripe_payout_id = transfer.id
             await db.commit()
 
@@ -686,11 +638,8 @@ class StripeService:
     # ========================================================================
 
     async def handle_webhook(
-        self,
-        payload: bytes,
-        sig_header: str,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        self, payload: bytes, sig_header: str, db: AsyncSession
+    ) -> dict[str, Any]:
         """
         Handle Stripe webhook events.
 
@@ -708,9 +657,7 @@ class StripeService:
 
         try:
             # Verify webhook signature
-            event = self.stripe.Webhook.construct_event(
-                payload, sig_header, self.webhook_secret
-            )
+            event = self.stripe.Webhook.construct_event(payload, sig_header, self.webhook_secret)
 
             # Handle different event types
             event_type = event["type"]
@@ -739,13 +686,13 @@ class StripeService:
             logger.error(f"Webhook processing failed: {e}")
             return {"success": False, "message": str(e)}
 
-    async def _handle_checkout_completed(self, session: Dict[str, Any], db: AsyncSession):
+    async def _handle_checkout_completed(self, session: dict[str, Any], db: AsyncSession):
         """Handle successful checkout completion."""
         metadata = session.get("metadata", {})
         checkout_type = metadata.get("type")
 
-        if checkout_type == "premium_subscription":
-            await self._handle_premium_subscription_checkout(session, db)
+        if checkout_type == "subscription" or checkout_type == "premium_subscription":
+            await self._handle_subscription_checkout(session, db)
         elif checkout_type == "credit_purchase":
             await self._handle_credit_purchase_checkout(session, db)
         elif checkout_type == "agent_purchase":
@@ -755,23 +702,42 @@ class StripeService:
         else:
             logger.warning(f"Unknown checkout type: {checkout_type}")
 
-    async def _handle_premium_subscription_checkout(self, session: Dict[str, Any], db: AsyncSession):
-        """Handle premium subscription checkout completion."""
+    async def _handle_subscription_checkout(self, session: dict[str, Any], db: AsyncSession):
+        """Handle subscription checkout completion for any tier."""
+        from datetime import timedelta
+
         user_id = UUID(session["metadata"]["user_id"])
         subscription_id = session.get("subscription")
+        tier = session["metadata"].get("tier", "pro")  # Default to pro for legacy
 
-        # Update user to premium tier
-        user_result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
+        # Validate tier
+        valid_tiers = ["basic", "pro", "ultra"]
+        if tier not in valid_tiers:
+            logger.warning(f"Invalid tier in webhook: {tier}, defaulting to pro")
+            tier = "pro"
+
+        # Update user to new tier
+        user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one()
-        user.subscription_tier = "pro"
+
+        # Set the subscription tier
+        user.subscription_tier = tier
         user.stripe_subscription_id = subscription_id
+
+        # Set bundled credits for the tier
+        bundled_credits = settings.get_tier_bundled_credits(tier)
+        user.bundled_credits = bundled_credits
+
+        # Set credits reset date to 30 days from now
+        user.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
+
         await db.commit()
 
-        logger.info(f"User {user_id} upgraded to premium")
+        logger.info(
+            f"User {user_id} upgraded to {tier} tier with {bundled_credits} bundled credits"
+        )
 
-    async def _handle_credit_purchase_checkout(self, session: Dict[str, Any], db: AsyncSession):
+    async def _handle_credit_purchase_checkout(self, session: dict[str, Any], db: AsyncSession):
         """Handle credit purchase checkout completion."""
         user_id = UUID(session["metadata"]["user_id"])
         amount_cents = int(session["metadata"]["amount_cents"])
@@ -789,26 +755,26 @@ class StripeService:
         purchase = CreditPurchase(
             user_id=user_id,
             amount_cents=amount_cents,
-            credits_amount=amount_cents,  # 1:1 ratio
+            credits_amount=amount_cents,  # 1:1 ratio (1 credit = $0.01)
             stripe_payment_intent=payment_intent,
             stripe_checkout_session=session["id"],
             status="completed",
-            completed_at=datetime.now(timezone.utc)
+            completed_at=datetime.now(UTC),
         )
         db.add(purchase)
 
-        # Update user credits balance
-        user_result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
+        # Update user credits - purchased credits never expire
+        user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one()
-        user.credits_balance += amount_cents
+
+        # Add to purchased_credits (permanent, never expire)
+        user.purchased_credits = (user.purchased_credits or 0) + amount_cents
         user.total_spend += amount_cents
 
         await db.commit()
-        logger.info(f"User {user_id} purchased ${amount_cents / 100} in credits")
+        logger.info(f"User {user_id} purchased {amount_cents} credits (${amount_cents / 100})")
 
-    async def _handle_agent_purchase_checkout(self, session: Dict[str, Any], db: AsyncSession):
+    async def _handle_agent_purchase_checkout(self, session: dict[str, Any], db: AsyncSession):
         """Handle agent purchase checkout completion."""
         user_id = UUID(session["metadata"]["user_id"])
         agent_id = UUID(session["metadata"]["agent_id"])
@@ -819,8 +785,7 @@ class StripeService:
         # Check if already processed
         existing = await db.execute(
             select(UserPurchasedAgent).where(
-                UserPurchasedAgent.user_id == user_id,
-                UserPurchasedAgent.agent_id == agent_id
+                UserPurchasedAgent.user_id == user_id, UserPurchasedAgent.agent_id == agent_id
             )
         )
         if existing.scalar_one_or_none():
@@ -834,7 +799,7 @@ class StripeService:
             purchase_type="subscription" if pricing_type == "monthly" else "purchased",
             stripe_payment_intent=payment_intent,
             stripe_subscription_id=subscription_id,
-            is_active=True
+            is_active=True,
         )
         db.add(purchase)
 
@@ -859,14 +824,12 @@ class StripeService:
             amount_creator=amount_creator,
             amount_platform=amount_platform,
             stripe_payment_intent=payment_intent,
-            stripe_subscription_id=subscription_id
+            stripe_subscription_id=subscription_id,
         )
         db.add(transaction)
 
         # Update user total spend
-        user_result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
+        user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one()
         user.total_spend += amount_total
 
@@ -877,14 +840,12 @@ class StripeService:
         if agent.created_by_user_id:
             await self.create_payout(transaction, db)
 
-    async def _handle_deploy_purchase_checkout(self, session: Dict[str, Any], db: AsyncSession):
+    async def _handle_deploy_purchase_checkout(self, session: dict[str, Any], db: AsyncSession):
         """Handle deploy slot purchase checkout completion."""
         user_id = UUID(session["metadata"]["user_id"])
 
         # Update user deployed projects count limit
-        user_result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
+        user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one()
 
         # This doesn't increase current count, just allows one more deploy
@@ -895,19 +856,19 @@ class StripeService:
         await db.commit()
         logger.info(f"User {user_id} purchased additional deploy slot")
 
-    async def _handle_subscription_created(self, subscription: Dict[str, Any], db: AsyncSession):
+    async def _handle_subscription_created(self, subscription: dict[str, Any], db: AsyncSession):
         """Handle new subscription creation."""
         logger.info(f"Subscription created: {subscription['id']}")
 
-    async def _handle_subscription_updated(self, subscription: Dict[str, Any], db: AsyncSession):
+    async def _handle_subscription_updated(self, subscription: dict[str, Any], db: AsyncSession):
         """Handle subscription update."""
         logger.info(f"Subscription updated: {subscription['id']}")
 
-    async def _handle_subscription_deleted(self, subscription: Dict[str, Any], db: AsyncSession):
+    async def _handle_subscription_deleted(self, subscription: dict[str, Any], db: AsyncSession):
         """Handle subscription cancellation."""
         subscription_id = subscription["id"]
 
-        # Check if it's a premium subscription
+        # Check if it's a platform subscription (basic, pro, ultra)
         user_result = await db.execute(
             select(User).where(User.stripe_subscription_id == subscription_id)
         )
@@ -915,10 +876,17 @@ class StripeService:
 
         if user:
             # Downgrade to free tier
+            old_tier = user.subscription_tier
             user.subscription_tier = "free"
             user.stripe_subscription_id = None
+
+            # Reset bundled credits to free tier amount
+            user.bundled_credits = settings.get_tier_bundled_credits("free")
+
+            # Note: purchased_credits are NOT affected - they never expire
+
             await db.commit()
-            logger.info(f"User {user.id} downgraded to free tier")
+            logger.info(f"User {user.id} downgraded from {old_tier} to free tier")
             return
 
         # Check if it's an agent subscription
@@ -931,11 +899,11 @@ class StripeService:
 
         if purchase:
             purchase.is_active = False
-            purchase.expires_at = datetime.now(timezone.utc)
+            purchase.expires_at = datetime.now(UTC)
             await db.commit()
             logger.info(f"Agent subscription cancelled: {subscription_id}")
 
-    async def _handle_invoice_payment_succeeded(self, invoice: Dict[str, Any], db: AsyncSession):
+    async def _handle_invoice_payment_succeeded(self, invoice: dict[str, Any], db: AsyncSession):
         """Handle successful invoice payment."""
         logger.info(f"Invoice payment succeeded: {invoice['id']}")
 
@@ -945,8 +913,7 @@ class StripeService:
             user_id = UUID(metadata["user_id"])
             usage_result = await db.execute(
                 select(UsageLog).where(
-                    UsageLog.user_id == user_id,
-                    UsageLog.invoice_id == invoice["id"]
+                    UsageLog.user_id == user_id, UsageLog.invoice_id == invoice["id"]
                 )
             )
             usage_logs = usage_result.scalars().all()
@@ -957,12 +924,14 @@ class StripeService:
             await db.commit()
             logger.info(f"Marked {len(usage_logs)} usage logs as paid")
 
-    async def _handle_invoice_payment_failed(self, invoice: Dict[str, Any], db: AsyncSession):
+    async def _handle_invoice_payment_failed(self, invoice: dict[str, Any], db: AsyncSession):
         """Handle failed invoice payment."""
         logger.error(f"Invoice payment failed: {invoice['id']}")
         # TODO: Notify user, possibly suspend service
 
-    async def _handle_payment_intent_succeeded(self, payment_intent: Dict[str, Any], db: AsyncSession):
+    async def _handle_payment_intent_succeeded(
+        self, payment_intent: dict[str, Any], db: AsyncSession
+    ):
         """Handle successful one-time payment."""
         logger.info(f"Payment intent succeeded: {payment_intent['id']}")
 

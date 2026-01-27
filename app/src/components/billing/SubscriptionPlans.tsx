@@ -1,342 +1,335 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Check, X, Sparkles, Zap, Crown, Star } from 'lucide-react';
 import { billingApi } from '../../lib/api';
-import type {
-  BillingConfig,
-  SubscriptionResponse,
+import toast from 'react-hot-toast';
+import type { SubscriptionTier } from '../../types/billing';
+import {
+  SUBSCRIPTION_TIER_LABELS,
+  SUBSCRIPTION_TIER_PRICES,
+  SUBSCRIPTION_TIER_CREDITS,
+  SUBSCRIPTION_TIER_PROJECTS,
+  SUBSCRIPTION_TIER_DEPLOYS,
 } from '../../types/billing';
 
-interface PricingFeature {
+interface TierFeature {
   name: string;
   free: boolean | string;
-  premium: boolean | string;
+  basic: boolean | string;
+  pro: boolean | string;
+  ultra: boolean | string;
 }
 
 const SubscriptionPlans: React.FC = () => {
-  const [config, setConfig] = useState<BillingConfig | null>(null);
-  const [subscription, setSubscription] = useState<SubscriptionResponse | null>(null);
+  const navigate = useNavigate();
+  const [currentTier, setCurrentTier] = useState<SubscriptionTier>('free');
   const [loading, setLoading] = useState(true);
-  const [subscribing, setSubscribing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [subscribing, setSubscribing] = useState<SubscriptionTier | null>(null);
 
   useEffect(() => {
-    loadData();
+    loadSubscription();
   }, []);
 
-  const loadData = async () => {
+  const loadSubscription = async () => {
     try {
       setLoading(true);
-      setError(null);
-
-      const [configRes, subRes] = await Promise.all([
-        billingApi.getConfig(),
-        billingApi.getSubscription(),
-      ]);
-
-      setConfig(configRes);
-      setSubscription(subRes);
-    } catch (err: unknown) {
-      console.error('Failed to load billing data:', err);
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to load billing information');
+      const subscription = await billingApi.getSubscription();
+      setCurrentTier(subscription.tier as SubscriptionTier);
+    } catch (err) {
+      console.error('Failed to load subscription:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUpgrade = async () => {
-    if (!subscription || subscription.tier === 'pro') return;
+  const handleSelectTier = async (tier: SubscriptionTier) => {
+    if (tier === currentTier || tier === 'free') return;
 
     try {
-      setSubscribing(true);
-      setError(null);
-
-      const response = await billingApi.subscribe();
-
-      // Redirect to Stripe Checkout
+      setSubscribing(tier);
+      const response = await billingApi.subscribe(tier);
       if (response.url) {
         window.location.href = response.url;
-      } else {
-        throw new Error('No checkout URL received');
       }
-    } catch (err: unknown) {
+    } catch (err) {
       console.error('Failed to start subscription:', err);
-      const error = err as { response?: { data?: { detail?: string } } };
-      setError(error.response?.data?.detail || 'Failed to start subscription');
-      setSubscribing(false);
+      toast.error('Failed to start subscription');
+      setSubscribing(null);
     }
   };
 
   const handleManageSubscription = async () => {
     try {
       const response = await billingApi.getCustomerPortal();
-
-      // Redirect to Stripe Customer Portal
       if (response.url) {
         window.location.href = response.url;
       }
-    } catch (err: unknown) {
+    } catch (err) {
       console.error('Failed to open customer portal:', err);
-      const error = err as { response?: { data?: { detail?: string }; status?: number } };
-      const errorDetail = error.response?.data?.detail || 'Failed to open customer portal';
-
-      // If portal not configured, redirect to library subscriptions tab
-      if (error.response?.status === 503 || errorDetail.includes('not configured')) {
-        if (confirm(errorDetail + '\n\nWould you like to go to Library > Subscriptions to manage your subscription?')) {
-          window.location.href = '/library?tab=subscriptions';
-        }
-      } else {
-        setError(errorDetail);
-      }
+      toast.error('Failed to open billing portal');
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading pricing information...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!config || !subscription) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <p className="text-red-600">Failed to load billing information</p>
-          {error && <p className="text-sm text-gray-600 mt-2">{error}</p>}
-          <button
-            onClick={loadData}
-            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const features: PricingFeature[] = [
+  const features: TierFeature[] = [
+    {
+      name: 'Monthly Credits',
+      free: `${SUBSCRIPTION_TIER_CREDITS.free.toLocaleString()}`,
+      basic: `${SUBSCRIPTION_TIER_CREDITS.basic.toLocaleString()}`,
+      pro: `${SUBSCRIPTION_TIER_CREDITS.pro.toLocaleString()}`,
+      ultra: `${SUBSCRIPTION_TIER_CREDITS.ultra.toLocaleString()}`,
+    },
     {
       name: 'Active Projects',
-      free: `${config.free_limits.max_projects} project`,
-      premium: `${config.premium_limits.max_projects} projects`,
+      free: `${SUBSCRIPTION_TIER_PROJECTS.free}`,
+      basic: `${SUBSCRIPTION_TIER_PROJECTS.basic}`,
+      pro: `${SUBSCRIPTION_TIER_PROJECTS.pro}`,
+      ultra: 'Unlimited',
     },
     {
-      name: 'Deployed Projects',
-      free: `${config.free_limits.max_deploys} deploy`,
-      premium: `${config.premium_limits.max_deploys} deploys`,
+      name: 'Deploy Slots',
+      free: `${SUBSCRIPTION_TIER_DEPLOYS.free}`,
+      basic: `${SUBSCRIPTION_TIER_DEPLOYS.basic}`,
+      pro: `${SUBSCRIPTION_TIER_DEPLOYS.pro}`,
+      ultra: `${SUBSCRIPTION_TIER_DEPLOYS.ultra}`,
     },
     {
-      name: 'Deploy Mode (24/7 Running)',
+      name: 'Bring Your Own Key (BYOK)',
       free: false,
-      premium: true,
+      basic: false,
+      pro: true,
+      ultra: true,
     },
     {
-      name: 'Use Your Own API Keys',
+      name: 'Priority Support',
       free: false,
-      premium: true,
+      basic: false,
+      pro: true,
+      ultra: true,
     },
     {
       name: 'Marketplace Access',
       free: true,
-      premium: true,
+      basic: true,
+      pro: true,
+      ultra: true,
     },
     {
       name: 'Agent Creation',
       free: true,
-      premium: true,
-    },
-    {
-      name: 'Creator Revenue (90/10 Split)',
-      free: true,
-      premium: true,
+      basic: true,
+      pro: true,
+      ultra: true,
     },
     {
       name: 'Credit Purchases',
       free: true,
-      premium: true,
-    },
-    {
-      name: 'Additional Deploy Slots',
-      free: `$${(config.deploy_price / 100).toFixed(2)} each`,
-      premium: `$${(config.deploy_price / 100).toFixed(2)} each`,
+      basic: true,
+      pro: true,
+      ultra: true,
     },
   ];
 
-  const isCurrentlyPremium = subscription.tier === 'pro';
+  const tierIcons: Record<SubscriptionTier, React.ReactNode> = {
+    free: <Zap className="w-6 h-6" />,
+    basic: <Star className="w-6 h-6" />,
+    pro: <Sparkles className="w-6 h-6" />,
+    ultra: <Crown className="w-6 h-6" />,
+  };
+
+  const tierColors: Record<SubscriptionTier, string> = {
+    free: 'border-white/10',
+    basic: 'border-blue-500/50',
+    pro: 'border-yellow-500/50',
+    ultra: 'border-purple-500/50',
+  };
+
+  const tierBadgeColors: Record<SubscriptionTier, string> = {
+    free: 'bg-white/10 text-[var(--text)]/60',
+    basic: 'bg-blue-500/20 text-blue-400',
+    pro: 'bg-yellow-500/20 text-yellow-400',
+    ultra: 'bg-purple-500/20 text-purple-400',
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--primary)]"></div>
+      </div>
+    );
+  }
+
+  const tiers: SubscriptionTier[] = ['free', 'basic', 'pro', 'ultra'];
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="py-8 px-4">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            Choose Your Plan
-          </h1>
-          <p className="text-xl text-gray-600">
+          <h1 className="text-3xl font-bold text-[var(--text)] mb-4">Choose Your Plan</h1>
+          <p className="text-lg text-[var(--text)]/60">
             Start free, upgrade when you need more power
           </p>
-          {isCurrentlyPremium && (
-            <div className="mt-4 inline-block bg-green-100 text-green-800 px-4 py-2 rounded-full">
-              You're currently on Premium
-            </div>
-          )}
         </div>
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-lg">
-            {error}
-          </div>
-        )}
 
         {/* Pricing Cards */}
-        <div className="grid md:grid-cols-2 gap-8 mb-12">
-          {/* Free Plan */}
-          <div className="bg-white rounded-lg shadow-lg p-8 border-2 border-gray-200">
-            <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Free</h2>
-              <div className="text-4xl font-bold text-gray-900 mb-2">$0</div>
-              <div className="text-gray-600">Forever free</div>
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          {tiers.map((tier) => {
+            const isCurrentTier = tier === currentTier;
+            const isPopular = tier === 'pro';
 
-            <ul className="space-y-4 mb-8">
-              {features.map((feature, idx) => (
-                <li key={idx} className="flex items-start">
-                  <span className="flex-shrink-0 mr-3">
-                    {feature.free === true ? (
-                      <svg className="h-5 w-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    ) : feature.free === false ? (
-                      <svg className="h-5 w-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    ) : (
-                      <svg className="h-5 w-5 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    )}
-                  </span>
-                  <div>
-                    <span className="text-gray-900">{feature.name}</span>
-                    {typeof feature.free === 'string' && (
-                      <span className="block text-sm text-gray-500">{feature.free}</span>
-                    )}
+            return (
+              <div
+                key={tier}
+                className={`relative bg-[var(--surface)] rounded-2xl border-2 ${tierColors[tier]} p-6 ${
+                  isPopular ? 'ring-2 ring-[var(--primary)]' : ''
+                }`}
+              >
+                {isPopular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[var(--primary)] text-white text-xs font-bold px-3 py-1 rounded-full">
+                    POPULAR
                   </div>
-                </li>
-              ))}
-            </ul>
+                )}
 
-            {!isCurrentlyPremium ? (
-              <button
-                disabled
-                className="w-full py-3 px-6 rounded-lg bg-gray-100 text-gray-500 font-semibold cursor-not-allowed"
-              >
-                Current Plan
-              </button>
-            ) : (
-              <button
-                disabled
-                className="w-full py-3 px-6 rounded-lg bg-gray-200 text-gray-600 font-semibold cursor-not-allowed opacity-50"
-              >
-                Downgrade (Contact Support)
-              </button>
-            )}
-          </div>
+                {/* Tier Header */}
+                <div className="text-center mb-6">
+                  <div className={`inline-flex p-3 rounded-xl ${tierBadgeColors[tier]} mb-3`}>
+                    {tierIcons[tier]}
+                  </div>
+                  <h2 className="text-xl font-bold text-[var(--text)]">
+                    {SUBSCRIPTION_TIER_LABELS[tier]}
+                  </h2>
+                  <div className="mt-2">
+                    <span className="text-3xl font-bold text-[var(--text)]">
+                      ${SUBSCRIPTION_TIER_PRICES[tier]}
+                    </span>
+                    {tier !== 'free' && <span className="text-[var(--text)]/50">/mo</span>}
+                  </div>
+                  <div className="text-sm text-[var(--text)]/50 mt-1">
+                    {SUBSCRIPTION_TIER_CREDITS[tier].toLocaleString()} credits/month
+                  </div>
+                </div>
 
-          {/* Premium Plan */}
-          <div className="bg-white rounded-lg shadow-lg p-8 border-2 border-blue-500 relative">
-            <div className="absolute top-0 right-0 bg-blue-500 text-white px-4 py-1 rounded-bl-lg rounded-tr-lg text-sm font-semibold">
-              POPULAR
-            </div>
+                {/* Features */}
+                <ul className="space-y-3 mb-6">
+                  {features.map((feature, idx) => {
+                    const value = feature[tier];
+                    const hasFeature = value === true || typeof value === 'string';
 
-            <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Premium</h2>
-              <div className="text-4xl font-bold text-gray-900 mb-2">
-                ${(config.premium_price / 100).toFixed(0)}
+                    return (
+                      <li key={idx} className="flex items-start gap-2">
+                        {hasFeature ? (
+                          <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <X className="w-4 h-4 text-[var(--text)]/30 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div>
+                          <span
+                            className={`text-sm ${hasFeature ? 'text-[var(--text)]' : 'text-[var(--text)]/40'}`}
+                          >
+                            {feature.name}
+                          </span>
+                          {typeof value === 'string' && (
+                            <span className="text-sm text-[var(--primary)] ml-1">({value})</span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {/* Action Button */}
+                {isCurrentTier ? (
+                  tier === 'free' ? (
+                    <button
+                      disabled
+                      className="w-full py-3 px-4 bg-white/5 text-[var(--text)]/50 font-medium rounded-xl cursor-not-allowed"
+                    >
+                      Current Plan
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleManageSubscription}
+                      className="w-full py-3 px-4 bg-white/5 border border-white/10 text-[var(--text)] font-medium rounded-xl hover:bg-white/10 transition-colors"
+                    >
+                      Manage Subscription
+                    </button>
+                  )
+                ) : tier === 'free' ? (
+                  <button
+                    disabled
+                    className="w-full py-3 px-4 bg-white/5 text-[var(--text)]/50 font-medium rounded-xl cursor-not-allowed"
+                  >
+                    {currentTier !== 'free' ? 'Contact Support to Downgrade' : 'Current Plan'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSelectTier(tier)}
+                    disabled={subscribing !== null}
+                    className={`w-full py-3 px-4 font-medium rounded-xl transition-colors disabled:opacity-50 ${
+                      isPopular
+                        ? 'bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]'
+                        : 'bg-white/5 border border-white/10 text-[var(--text)] hover:bg-white/10'
+                    }`}
+                  >
+                    {subscribing === tier
+                      ? 'Processing...'
+                      : `Upgrade to ${SUBSCRIPTION_TIER_LABELS[tier]}`}
+                  </button>
+                )}
               </div>
-              <div className="text-gray-600">Per month</div>
+            );
+          })}
+        </div>
+
+        {/* FAQ Section */}
+        <div className="bg-[var(--surface)] rounded-2xl border border-white/10 p-8">
+          <h3 className="text-xl font-bold text-[var(--text)] mb-6">Frequently Asked Questions</h3>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="font-semibold text-[var(--text)] mb-2">Can I cancel anytime?</h4>
+              <p className="text-sm text-[var(--text)]/60">
+                Yes! You can cancel your subscription at any time. Your access will continue until
+                the end of your billing period.
+              </p>
             </div>
 
-            <ul className="space-y-4 mb-8">
-              {features.map((feature, idx) => (
-                <li key={idx} className="flex items-start">
-                  <span className="flex-shrink-0 mr-3">
-                    {feature.premium === true || typeof feature.premium === 'string' ? (
-                      <svg className="h-5 w-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    ) : (
-                      <svg className="h-5 w-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    )}
-                  </span>
-                  <div>
-                    <span className="text-gray-900 font-medium">{feature.name}</span>
-                    {typeof feature.premium === 'string' && (
-                      <span className="block text-sm text-gray-500">{feature.premium}</span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <div>
+              <h4 className="font-semibold text-[var(--text)] mb-2">What are credits?</h4>
+              <p className="text-sm text-[var(--text)]/60">
+                Credits are used for AI usage. Each plan includes monthly credits that reset. You
+                can also purchase additional credits that never expire.
+              </p>
+            </div>
 
-            {isCurrentlyPremium ? (
-              <button
-                onClick={handleManageSubscription}
-                className="w-full py-3 px-6 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 transition"
-              >
-                Manage Subscription
-              </button>
-            ) : (
-              <button
-                onClick={handleUpgrade}
-                disabled={subscribing}
-                className="w-full py-3 px-6 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {subscribing ? 'Processing...' : 'Upgrade to Premium'}
-              </button>
-            )}
+            <div>
+              <h4 className="font-semibold text-[var(--text)] mb-2">What is BYOK?</h4>
+              <p className="text-sm text-[var(--text)]/60">
+                Bring Your Own Key (BYOK) lets Pro and Ultra users use their own API keys from
+                providers like OpenRouter, Anthropic, and OpenAI.
+              </p>
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-[var(--text)] mb-2">
+                How do I upgrade or downgrade?
+              </h4>
+              <p className="text-sm text-[var(--text)]/60">
+                You can upgrade anytime from this page. To downgrade, manage your subscription
+                through the billing portal or contact support.
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Additional Information */}
-        <div className="bg-white rounded-lg shadow p-8">
-          <h3 className="text-xl font-bold text-gray-900 mb-4">Frequently Asked Questions</h3>
-
-          <div className="space-y-6">
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-2">Can I cancel anytime?</h4>
-              <p className="text-gray-600">
-                Yes! You can cancel your premium subscription at any time. Your access will continue until the end of your billing period.
-              </p>
-            </div>
-
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-2">What are credits?</h4>
-              <p className="text-gray-600">
-                Credits are prepaid funds you can use for AI usage costs. You can purchase credits in $5, $10, or $50 packages. Credits are deducted before charging your card for monthly usage.
-              </p>
-            </div>
-
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-2">How does Deploy Mode work?</h4>
-              <p className="text-gray-600">
-                Deploy Mode keeps your containerized applications running 24/7. Premium users get {config.premium_limits.max_deploys} deploy slots. Additional slots are ${(config.deploy_price / 100).toFixed(2)} each.
-              </p>
-            </div>
-
-            <div>
-              <h4 className="font-semibold text-gray-900 mb-2">How do creator earnings work?</h4>
-              <p className="text-gray-600">
-                When you publish agents to the marketplace, you earn 90% of the revenue from purchases and usage. The platform takes 10%. You can connect your Stripe account to receive payouts.
-              </p>
-            </div>
-          </div>
+        {/* Back to Settings */}
+        <div className="text-center mt-8">
+          <button
+            onClick={() => navigate('/settings/billing')}
+            className="text-sm text-[var(--text)]/50 hover:text-[var(--text)] transition-colors"
+          >
+            ← Back to Billing Settings
+          </button>
         </div>
       </div>
     </div>

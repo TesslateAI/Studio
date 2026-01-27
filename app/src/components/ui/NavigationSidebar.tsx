@@ -15,7 +15,7 @@ import {
   ChevronRight,
   FileText,
   MessageCircle,
-  ArrowUp
+  ArrowUp,
 } from 'lucide-react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
 import { billingApi } from '../../lib/api';
@@ -33,7 +33,7 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
     return saved !== null ? JSON.parse(saved) : true;
   });
   const [isPremium, setIsPremium] = useState(false);
-  const [loadingSubscription, setLoadingSubscription] = useState(true);
+  const [, setLoadingSubscription] = useState(true);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
@@ -97,7 +97,7 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
         type: 'spring',
         stiffness: 700,
         damping: 28,
-        mass: 0.4
+        mass: 0.4,
       }}
       className="hidden md:flex flex-col h-screen bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)] overflow-x-hidden"
     >
@@ -119,7 +119,9 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
             fill="currentColor"
           />
         </svg>
-        {isExpanded && <span className="text-lg font-bold text-[var(--sidebar-text)]">Tesslate</span>}
+        {isExpanded && (
+          <span className="text-lg font-bold text-[var(--sidebar-text)]">Tesslate</span>
+        )}
       </div>
 
       <motion.div
@@ -132,40 +134,64 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
         <Tooltip content="Projects" shortcut={`${modKey} D`} side="right" delay={200}>
           <button
             onClick={() => navigate('/dashboard')}
-            className={isExpanded ? navButtonClass(activePage === 'dashboard') : navButtonClassCollapsed(activePage === 'dashboard')}
+            className={
+              isExpanded
+                ? navButtonClass(activePage === 'dashboard')
+                : navButtonClassCollapsed(activePage === 'dashboard')
+            }
           >
             <FolderOpen size={18} className={iconClass(activePage === 'dashboard')} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Projects</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Projects</span>
+            )}
           </button>
         </Tooltip>
 
         <Tooltip content="Marketplace" shortcut={`${modKey} M`} side="right" delay={200}>
           <button
             onClick={() => navigate('/marketplace')}
-            className={isExpanded ? navButtonClass(activePage === 'marketplace') : navButtonClassCollapsed(activePage === 'marketplace')}
+            className={
+              isExpanded
+                ? navButtonClass(activePage === 'marketplace')
+                : navButtonClassCollapsed(activePage === 'marketplace')
+            }
           >
             <Store size={18} className={iconClass(activePage === 'marketplace')} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Marketplace</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Marketplace</span>
+            )}
           </button>
         </Tooltip>
 
         <Tooltip content="Library" shortcut={`${modKey} L`} side="right" delay={200}>
           <button
             onClick={() => navigate('/library')}
-            className={isExpanded ? navButtonClass(activePage === 'library') : navButtonClassCollapsed(activePage === 'library')}
+            className={
+              isExpanded
+                ? navButtonClass(activePage === 'library')
+                : navButtonClassCollapsed(activePage === 'library')
+            }
           >
             <BookOpen size={18} className={iconClass(activePage === 'library')} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Library</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Library</span>
+            )}
           </button>
         </Tooltip>
 
         <Tooltip content="Feedback" side="right" delay={200}>
           <button
             onClick={() => navigate('/feedback')}
-            className={isExpanded ? navButtonClass(activePage === 'feedback') : navButtonClassCollapsed(activePage === 'feedback')}
+            className={
+              isExpanded
+                ? navButtonClass(activePage === 'feedback')
+                : navButtonClassCollapsed(activePage === 'feedback')
+            }
           >
             <MessageCircle size={18} className={iconClass(activePage === 'feedback')} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Feedback</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Feedback</span>
+            )}
           </button>
         </Tooltip>
 
@@ -175,7 +201,9 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
             className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
           >
             <Package size={18} className={inactiveIconClass} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Components</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Components</span>
+            )}
           </button>
         </Tooltip>
 
@@ -187,7 +215,9 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
             className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
           >
             <FileText size={18} className={inactiveIconClass} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Documentation</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Documentation</span>
+            )}
           </a>
         </Tooltip>
 
@@ -199,7 +229,9 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
             className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
           >
             <Settings size={18} className={inactiveIconClass} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Settings</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Settings</span>
+            )}
           </button>
         </Tooltip>
 
@@ -209,7 +241,9 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
             className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
           >
             <LogOut size={18} className={inactiveIconClass} />
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Logout</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Logout</span>
+            )}
           </button>
         </Tooltip>
 
@@ -233,7 +267,7 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
               ?
             </button>
             <button
-              onClick={() => navigate('/billing/plans')}
+              onClick={() => navigate('/settings/billing')}
               className="flex-1 h-8 rounded-full bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] text-[var(--sidebar-text)]/70 hover:text-[var(--sidebar-text)] text-sm font-medium transition-colors flex items-center justify-center gap-1.5"
             >
               <ArrowUp size={14} strokeWidth={2} />
@@ -265,7 +299,9 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
             ) : (
               <ChevronRight size={18} className={inactiveIconClass} />
             )}
-            {isExpanded && <span className="text-sm font-medium text-[var(--sidebar-text)]">Collapse</span>}
+            {isExpanded && (
+              <span className="text-sm font-medium text-[var(--sidebar-text)]">Collapse</span>
+            )}
           </button>
         </Tooltip>
       </motion.div>
@@ -279,7 +315,10 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
       />
 
       {/* Keyboard Shortcuts Modal */}
-      <KeyboardShortcutsModal open={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
+      <KeyboardShortcutsModal
+        open={showShortcutsModal}
+        onClose={() => setShowShortcutsModal(false)}
+      />
     </motion.div>
   );
 }

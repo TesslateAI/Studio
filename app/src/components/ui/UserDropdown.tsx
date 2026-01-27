@@ -1,13 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  User,
-  CaretDown,
-  Coins,
-  CreditCard,
-  Gear,
-  SignOut
-} from '@phosphor-icons/react';
+import { User, CaretDown, Coins, CreditCard, Gear, SignOut } from '@phosphor-icons/react';
 
 interface UserDropdownProps {
   userName: string;
@@ -42,10 +35,7 @@ export function UserDropdown({ userName, userCredits, userTier }: UserDropdownPr
       {showDropdown && (
         <>
           {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setShowDropdown(false)}
-          />
+          <div className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} />
 
           {/* Menu */}
           <div className="absolute right-0 mt-2 w-56 bg-[var(--surface)] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden">
@@ -61,7 +51,9 @@ export function UserDropdown({ userName, userCredits, userTier }: UserDropdownPr
                 <Coins size={18} className="text-[var(--primary)]" weight="fill" />
                 <div className="flex-1">
                   <div className="text-sm font-medium text-[var(--text)]">Credits</div>
-                  <div className="text-xs text-[var(--text)]/60">{userCredits.toLocaleString()} available</div>
+                  <div className="text-xs text-[var(--text)]/60">
+                    {userCredits.toLocaleString()} available
+                  </div>
                 </div>
               </button>
 
@@ -71,7 +63,7 @@ export function UserDropdown({ userName, userCredits, userTier }: UserDropdownPr
               <button
                 onClick={() => {
                   setShowDropdown(false);
-                  navigate('/billing/plans');
+                  navigate('/settings/billing');
                 }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
               >

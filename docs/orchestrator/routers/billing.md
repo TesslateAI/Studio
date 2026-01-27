@@ -1,141 +1,203 @@
 # Billing Router
 
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/billing.py` (702 lines)
+**File**: `orchestrator/app/routers/billing.py`
 
 The billing router handles subscription management, credit purchases, usage tracking, and Stripe integration for Tesslate Studio.
 
 ## Overview
 
-Tesslate Studio uses a hybrid monetization model:
-- **Subscription Tiers**: Free and Pro tiers with different limits
-- **Credits**: Pay-as-you-go for AI agent usage and marketplace purchases
-- **Usage Tracking**: Monitor API calls, tokens, and costs
+Tesslate Studio uses a **4-tier subscription model** with a **dual credit system**:
+
+### Subscription Tiers
+
+| Tier | Price | Projects | Deploys | Monthly Credits | BYOK |
+|------|-------|----------|---------|-----------------|------|
+| **Free** | $0/mo | 3 | 1 | 1,000 | No |
+| **Basic** | $8/mo | 5 | 2 | 1,000 | No |
+| **Pro** | $20/mo | 10 | 5 | 2,500 | Yes |
+| **Ultra** | $100/mo | Unlimited | 20 | 12,000 | Yes |
+
+### Credit System
+
+Credits are the currency for AI usage. **1 credit = $0.01 USD**.
+
+- **Bundled Credits**: Monthly allowance that comes with your subscription. Resets on your billing date.
+- **Purchased Credits**: Buy additional credits that **never expire**. Used after bundled credits are depleted.
+
+**Credit Consumption Order**:
+1. Bundled credits are consumed first
+2. Purchased credits are consumed after bundled credits are exhausted
+3. Total credits = bundled_credits + purchased_credits
 
 ## Base Path
 
 All endpoints are mounted at `/api/billing`
 
-## Subscription Management
+---
 
-### Get Subscription
+## Subscription Endpoints
+
+### Get Subscription Status
 
 ```
 GET /api/billing/subscription
 ```
 
-Returns current subscription status and limits.
+Returns current subscription status, limits, and credit balance.
 
 **Response**:
 ```json
 {
-  "tier": "free|pro",
+  "tier": "pro",
   "is_active": true,
   "subscription_id": "sub_xxx",
   "stripe_customer_id": "cus_xxx",
-  "max_projects": 5,
-  "max_deploys": 3,
-  "current_period_start": "2025-01-09T00:00:00Z",
-  "current_period_end": "2025-02-09T00:00:00Z",
+  "max_projects": 10,
+  "max_deploys": 5,
+  "current_period_start": "2026-01-01T00:00:00Z",
+  "current_period_end": "2026-02-01T00:00:00Z",
   "cancel_at_period_end": false,
-  "cancel_at": null
+  "cancel_at": null,
+  "bundled_credits": 2500,
+  "purchased_credits": 500,
+  "total_credits": 3000,
+  "monthly_allowance": 2500,
+  "credits_reset_date": "2026-02-01T00:00:00Z",
+  "byok_enabled": true
 }
 ```
 
-**Tier Limits**:
-
-| Feature | Free | Pro |
-|---------|------|-----|
-| Projects | 3 | 20 |
-| Concurrent Deploys | 1 | 5 |
-| AI Agent Calls | 50/day | Unlimited |
-| Storage | 500MB | 10GB |
-| Custom Domains | No | Yes |
-
-### Create Checkout Session
+### Create Subscription Checkout
 
 ```
-POST /api/billing/subscription/checkout
+POST /api/billing/subscribe
 ```
 
-Creates a Stripe Checkout session for Pro subscription purchase.
+Creates a Stripe Checkout session for a subscription tier upgrade.
 
 **Request Body**:
 ```json
 {
-  "price_id": "price_xxx",  // Stripe price ID
-  "success_url": "https://app.tesslate.com/success",
-  "cancel_url": "https://app.tesslate.com/cancel"
+  "tier": "pro"
 }
 ```
+
+Valid tiers: `basic`, `pro`, `ultra`
 
 **Response**:
 ```json
 {
   "session_id": "cs_test_xxx",
-  "url": "https://checkout.stripe.com/pay/cs_test_xxx"
+  "url": "https://checkout.stripe.com/c/pay/cs_test_xxx"
 }
 ```
 
 **Flow**:
-1. Frontend calls this endpoint
-2. Backend creates Stripe Checkout session
-3. Frontend redirects user to Stripe checkout
-4. User completes payment
-5. Stripe redirects to `success_url`
-6. Webhook updates user's subscription
+1. Frontend calls this endpoint with desired tier
+2. Backend validates tier and creates Stripe Checkout session
+3. Frontend redirects user to Stripe checkout URL
+4. User completes payment on Stripe
+5. Stripe sends `checkout.session.completed` webhook
+6. Backend updates user's tier and grants bundled credits
+7. User is redirected to `/settings/billing?success=true`
 
 ### Cancel Subscription
 
 ```
-POST /api/billing/subscription/cancel
+POST /api/billing/cancel
 ```
 
-Cancels the Pro subscription at the end of the current billing period.
+Cancels the subscription at the end of the current billing period.
+
+**Query Parameters**:
+- `at_period_end`: boolean (default: true) - If true, access continues until period end
 
 **Response**:
 ```json
 {
-  "message": "Subscription will cancel at period end",
-  "cancel_at": "2025-02-09T00:00:00Z"
+  "success": true,
+  "message": "Subscription will cancel at end of period"
 }
 ```
 
-User retains Pro features until period end.
-
-### Reactivate Subscription
+### Renew Subscription
 
 ```
-POST /api/billing/subscription/reactivate
+POST /api/billing/renew
 ```
 
-Reactivates a canceled subscription (before it expires).
+Reactivates a cancelled subscription (before it expires).
 
 **Response**:
 ```json
 {
-  "message": "Subscription reactivated"
+  "success": true,
+  "message": "Subscription has been renewed and will continue after the current period"
 }
 ```
 
-## Credit Management
-
-### Get Credit Balance
+### Get Customer Portal
 
 ```
-GET /api/billing/credits/balance
+GET /api/billing/portal
 ```
 
-Returns current credit balance.
+Returns a Stripe Customer Portal URL for managing payment methods and invoices.
 
 **Response**:
 ```json
 {
-  "balance_cents": 10000,
-  "balance_usd": 100.00
+  "url": "https://billing.stripe.com/session/xxx"
 }
 ```
 
-Credits are stored in cents to avoid floating-point errors.
+---
+
+## Credits Endpoints
+
+### Get Credits Balance
+
+```
+GET /api/billing/credits
+```
+
+Returns detailed credit balance information.
+
+**Response**:
+```json
+{
+  "bundled_credits": 1500,
+  "purchased_credits": 500,
+  "total_credits": 2000,
+  "monthly_allowance": 2500,
+  "credits_reset_date": "2026-02-01T00:00:00Z",
+  "tier": "pro"
+}
+```
+
+### Get Credit Status (Low Balance Warning)
+
+```
+GET /api/billing/credits/status
+```
+
+Returns credit status for low balance warnings.
+
+**Response**:
+```json
+{
+  "total_credits": 200,
+  "is_low": true,
+  "is_empty": false,
+  "threshold": 500,
+  "tier": "pro",
+  "monthly_allowance": 2500
+}
+```
+
+**Thresholds**:
+- `is_low`: True when total credits ≤ 20% of monthly allowance
+- `is_empty`: True when total credits = 0
 
 ### Purchase Credits
 
@@ -143,63 +205,74 @@ Credits are stored in cents to avoid floating-point errors.
 POST /api/billing/credits/purchase
 ```
 
-Creates a Stripe Checkout session for credit purchase.
+Creates a Stripe Checkout session for purchasing additional credits.
 
 **Request Body**:
 ```json
 {
-  "package": "small|medium|large",
-  "success_url": "https://...",
-  "cancel_url": "https://..."
+  "package": "small"
 }
 ```
 
 **Credit Packages**:
-- **Small**: $10 = 1,000 credits
-- **Medium**: $50 = 5,500 credits (10% bonus)
-- **Large**: $100 = 12,000 credits (20% bonus)
 
-**Response**: Checkout session URL
-
-### Get Credit Transactions
-
-```
-GET /api/billing/credits/transactions
-```
-
-Returns history of credit purchases and usage.
+| Package | Credits | Price |
+|---------|---------|-------|
+| `small` | 500 | $5 |
+| `medium` | 1000 | $10 |
 
 **Response**:
 ```json
 {
-  "transactions": [
-    {
-      "id": "uuid",
-      "type": "purchase|usage|refund",
-      "amount_cents": 1000,
-      "amount_usd": 10.00,
-      "status": "completed",
-      "description": "Credit package purchase",
-      "created_at": "2025-01-09T10:00:00Z"
-    }
-  ],
-  "total": 45
+  "session_id": "cs_test_xxx",
+  "url": "https://checkout.stripe.com/c/pay/cs_test_xxx"
 }
 ```
 
-## Usage Tracking
+### Get Credit Purchase History
+
+```
+GET /api/billing/credits/history
+```
+
+Returns history of credit purchases.
+
+**Query Parameters**:
+- `limit`: number (default: 50)
+- `offset`: number (default: 0)
+
+**Response**:
+```json
+{
+  "purchases": [
+    {
+      "id": "uuid",
+      "amount_cents": 500,
+      "amount_usd": 5.00,
+      "credits_amount": 500,
+      "status": "completed",
+      "created_at": "2026-01-15T10:00:00Z",
+      "completed_at": "2026-01-15T10:01:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## Usage Endpoints
 
 ### Get Usage Summary
 
 ```
-GET /api/billing/usage/summary
+GET /api/billing/usage
 ```
 
-Returns AI agent usage statistics for the current billing period.
+Returns AI usage statistics for a date range.
 
 **Query Parameters**:
-- `start_date`: Start of period (ISO format)
-- `end_date`: End of period (ISO format)
+- `start_date`: ISO date string (default: start of current month)
+- `end_date`: ISO date string (default: now)
 
 **Response**:
 ```json
@@ -215,42 +288,52 @@ Returns AI agent usage statistics for the current billing period.
       "tokens_input": 140000,
       "tokens_output": 45000,
       "cost_cents": 2300
-    },
-    "gpt-4-turbo": {
-      "requests": 45,
-      "tokens_input": 10000,
-      "tokens_output": 5000,
-      "cost_cents": 200
     }
   },
   "by_agent": {
     "default-agent": {
       "requests": 250,
       "cost_cents": 2000
-    },
-    "react-specialist": {
-      "requests": 75,
-      "cost_cents": 500
     }
   },
-  "period_start": "2025-01-01T00:00:00Z",
-  "period_end": "2025-01-31T23:59:59Z"
+  "period_start": "2026-01-01T00:00:00Z",
+  "period_end": "2026-01-31T23:59:59Z"
 }
 ```
 
-### Get Usage Details
+### Sync Usage from LiteLLM
 
 ```
-GET /api/billing/usage/details
+POST /api/billing/usage/sync
+```
+
+Manually triggers usage sync from LiteLLM.
+
+**Query Parameters**:
+- `start_date`: ISO date string (default: 24 hours ago)
+
+**Response**:
+```json
+{
+  "success": true,
+  "logs_synced": 45,
+  "message": "Synced 45 usage entries"
+}
+```
+
+### Get Usage Logs
+
+```
+GET /api/billing/usage/logs
 ```
 
 Returns detailed usage logs with pagination.
 
 **Query Parameters**:
-- `skip`: Pagination offset (default: 0)
-- `limit`: Results per page (default: 50, max: 100)
-- `model`: Filter by model
-- `agent_id`: Filter by agent
+- `limit`: number (default: 100)
+- `offset`: number (default: 0)
+- `start_date`: ISO date string
+- `end_date`: ISO date string
 
 **Response**:
 ```json
@@ -258,260 +341,321 @@ Returns detailed usage logs with pagination.
   "logs": [
     {
       "id": "uuid",
-      "timestamp": "2025-01-09T10:15:30Z",
       "model": "claude-sonnet-4-5-20250929",
-      "agent_id": "uuid",
-      "project_id": "uuid",
       "tokens_input": 1500,
       "tokens_output": 800,
-      "cost_cents": 12,
-      "request_type": "chat"
+      "cost_total_cents": 12,
+      "cost_total_usd": 0.12,
+      "agent_id": "uuid",
+      "project_id": "uuid",
+      "billed_status": "paid",
+      "created_at": "2026-01-15T10:15:30Z"
     }
-  ],
-  "total": 325,
-  "skip": 0,
-  "limit": 50
+  ]
 }
 ```
 
-## Stripe Webhooks
+---
 
-### Webhook Handler
+## Transaction History
 
-```
-POST /api/billing/webhooks/stripe
-```
-
-Handles Stripe webhook events for payment processing.
-
-**Webhook Events**:
-
-1. **checkout.session.completed**: Payment successful
-   - Updates user's subscription tier
-   - Adds credits to user's balance
-   - Creates transaction record
-
-2. **customer.subscription.updated**: Subscription changed
-   - Updates subscription status in database
-   - Handles upgrades/downgrades
-
-3. **customer.subscription.deleted**: Subscription canceled
-   - Downgrades user to free tier
-   - Preserves existing projects (within free limits)
-
-4. **invoice.payment_failed**: Payment failed
-   - Sends notification to user
-   - Marks subscription for cancellation
-
-5. **invoice.payment_succeeded**: Recurring payment successful
-   - Extends subscription period
-   - Updates billing history
-
-**Webhook Security**:
-
-Stripe signature verification:
-```python
-import stripe
-
-try:
-    event = stripe.Webhook.construct_event(
-        payload=request.body,
-        sig_header=request.headers['Stripe-Signature'],
-        secret=settings.stripe_webhook_secret
-    )
-except stripe.error.SignatureVerificationError:
-    raise HTTPException(status_code=400, detail="Invalid signature")
-```
-
-## Credit Deduction
-
-Credits are deducted automatically for:
-
-1. **AI Agent Calls**: Based on tokens used
-   - Input tokens: $3 per 1M tokens
-   - Output tokens: $15 per 1M tokens
-
-2. **Marketplace Purchases**: Based on item price
-   - Agent purchase: Fixed credit amount
-   - Base purchase: Fixed credit amount
-
-3. **Premium Features**: Coming soon
-   - Custom domains
-   - Advanced analytics
-   - Priority support
-
-**Deduction Example**:
-```python
-from ..services.usage_service import usage_service
-
-# Track agent call
-cost_cents = usage_service.calculate_cost(
-    model="claude-sonnet-4-5-20250929",
-    tokens_input=1500,
-    tokens_output=800
-)
-
-# Deduct from balance
-await usage_service.deduct_credits(
-    user_id=user.id,
-    amount_cents=cost_cents,
-    description="Agent chat - Project XYZ"
-)
-
-# Check if user has sufficient balance
-if user.credit_balance_cents < cost_cents:
-    raise HTTPException(
-        status_code=402,
-        detail="Insufficient credits"
-    )
-```
-
-## Billing Cycle
-
-**Free Tier**:
-- No billing cycle
-- Usage resets daily (50 agent calls/day)
-- No credit card required
-
-**Pro Tier**:
-- Monthly billing cycle
-- Charged on subscription date each month
-- Unlimited agent calls (pay per token)
-- Auto-renews unless canceled
-
-## Example Workflows
-
-### Upgrading to Pro
-
-1. **User clicks "Upgrade to Pro"**:
-   ```
-   POST /api/billing/subscription/checkout
-   {
-     "price_id": "price_pro_monthly",
-     "success_url": "https://app.tesslate.com/success"
-   }
-   ```
-
-2. **Backend creates Checkout session**
-
-3. **User redirected to Stripe**
-
-4. **User completes payment**
-
-5. **Stripe sends webhook**:
-   `checkout.session.completed`
-
-6. **Backend processes webhook**:
-   - Finds user by `customer_id`
-   - Updates `subscription_tier` to "pro"
-   - Updates `stripe_subscription_id`
-   - Sends confirmation email
-
-7. **User redirected to success page**
-
-8. **User now has Pro features**
-
-### Purchasing Credits
-
-1. **User selects credit package**:
-   ```
-   POST /api/billing/credits/purchase
-   {"package": "medium"}
-   ```
-
-2. **Checkout session created** ($50 for 5,500 credits)
-
-3. **User completes payment**
-
-4. **Webhook received**: `checkout.session.completed`
-
-5. **Backend adds credits**:
-   ```python
-   user.credit_balance_cents += 550000  # 5,500 credits = $55 = 5500 cents
-   ```
-
-6. **Transaction recorded**:
-   ```python
-   transaction = CreditPurchase(
-       user_id=user.id,
-       amount_cents=5000,
-       credits_purchased=550000,
-       stripe_payment_intent_id=payment_intent_id
-   )
-   ```
-
-### Using Credits for Agent Call
-
-1. **User sends agent message**:
-   ```
-   POST /api/chat/agent
-   {"message": "Create a login page"}
-   ```
-
-2. **Agent executes**:
-   - Input: 1,500 tokens
-   - Output: 800 tokens
-
-3. **Cost calculated**:
-   ```python
-   cost = (1500 / 1000000) * 3.00 + (800 / 1000000) * 15.00
-       = 0.0045 + 0.012
-       = 0.0165 USD
-       = 1.65 cents
-   ```
-
-4. **Credits deducted**:
-   ```python
-   user.credit_balance_cents -= 2  # Rounded to nearest cent
-   ```
-
-5. **Usage logged**:
-   ```python
-   log = UsageLog(
-       user_id=user.id,
-       model="claude-sonnet-4-5-20250929",
-       tokens_input=1500,
-       tokens_output=800,
-       cost_cents=2
-   )
-   ```
-
-## Pricing Calculator
-
-Users can estimate costs before using features:
+### Get All Transactions
 
 ```
-GET /api/billing/pricing/estimate
+GET /api/billing/transactions
 ```
+
+Returns combined transaction history (credits, subscriptions, agent purchases).
 
 **Query Parameters**:
-- `feature`: "agent_call|marketplace_agent|marketplace_base"
-- `model`: AI model ID
-- `tokens_input`: Estimated input tokens
-- `tokens_output`: Estimated output tokens
+- `limit`: number (default: 50)
+- `offset`: number (default: 0)
 
 **Response**:
 ```json
 {
-  "feature": "agent_call",
-  "model": "claude-sonnet-4-5-20250929",
-  "tokens_input": 2000,
-  "tokens_output": 1000,
-  "estimated_cost_cents": 21,
-  "estimated_cost_usd": 0.21
+  "transactions": [
+    {
+      "id": "uuid",
+      "type": "credit_purchase",
+      "amount_cents": 500,
+      "amount_usd": 5.00,
+      "status": "completed",
+      "created_at": "2026-01-15T10:00:00Z"
+    },
+    {
+      "id": "uuid",
+      "type": "agent_purchase",
+      "amount_cents": 999,
+      "amount_usd": 9.99,
+      "status": "completed",
+      "agent_id": "uuid",
+      "created_at": "2026-01-14T15:30:00Z"
+    }
+  ]
 }
 ```
 
-## Security
+---
 
-1. **Webhook Verification**: Stripe signatures validated
-2. **Idempotency**: Webhook events processed once (using Stripe event ID)
-3. **Balance Checks**: Prevent negative balances
-4. **Transaction Logging**: All credit changes audited
-5. **PCI Compliance**: No credit card data stored (handled by Stripe)
+## Creator Endpoints
+
+### Get Creator Earnings
+
+```
+GET /api/billing/earnings
+```
+
+Returns earnings from marketplace agents (for creators).
+
+**Query Parameters**:
+- `start_date`: ISO date string (default: start of current month)
+- `end_date`: ISO date string (default: now)
+
+**Response**:
+```json
+{
+  "total_earnings_cents": 4500,
+  "total_earnings_usd": 45.00,
+  "transactions": [...],
+  "period_start": "2026-01-01T00:00:00Z",
+  "period_end": "2026-01-31T23:59:59Z"
+}
+```
+
+### Connect Stripe Account
+
+```
+POST /api/billing/connect
+```
+
+Creates a Stripe Connect onboarding link for receiving payouts.
+
+**Response**:
+```json
+{
+  "url": "https://connect.stripe.com/setup/xxx"
+}
+```
+
+---
+
+## Configuration Endpoint
+
+### Get Billing Config
+
+```
+GET /api/billing/config
+```
+
+Returns public billing configuration for the frontend. **No authentication required**.
+
+**Response**:
+```json
+{
+  "stripe_publishable_key": "pk_test_xxx",
+  "credit_packages": {
+    "small": {
+      "credits": 500,
+      "price_cents": 500
+    },
+    "medium": {
+      "credits": 1000,
+      "price_cents": 1000
+    }
+  },
+  "deploy_price": 1000,
+  "tiers": {
+    "free": {
+      "price_cents": 0,
+      "max_projects": 3,
+      "max_deploys": 1,
+      "bundled_credits": 1000,
+      "byok_enabled": false
+    },
+    "basic": {
+      "price_cents": 800,
+      "max_projects": 5,
+      "max_deploys": 2,
+      "bundled_credits": 1000,
+      "byok_enabled": false
+    },
+    "pro": {
+      "price_cents": 2000,
+      "max_projects": 10,
+      "max_deploys": 5,
+      "bundled_credits": 2500,
+      "byok_enabled": true
+    },
+    "ultra": {
+      "price_cents": 10000,
+      "max_projects": 999,
+      "max_deploys": 20,
+      "bundled_credits": 12000,
+      "byok_enabled": true
+    }
+  },
+  "low_balance_threshold": 0.20
+}
+```
+
+---
+
+## Stripe Webhook Handling
+
+Webhooks are handled at `POST /api/webhooks/stripe`
+
+### Handled Events
+
+| Event | Action |
+|-------|--------|
+| `checkout.session.completed` | Process subscription, credit, or agent purchase |
+| `customer.subscription.created` | Log new subscription |
+| `customer.subscription.updated` | Update subscription status |
+| `customer.subscription.deleted` | Downgrade user to free tier |
+| `invoice.payment_succeeded` | Mark usage as paid |
+| `invoice.payment_failed` | Log failure, notify user |
+| `payment_intent.succeeded` | Log one-time payment |
+
+### Subscription Checkout Handling
+
+When a subscription checkout completes:
+
+1. Extract `user_id` and `tier` from session metadata
+2. Update user's `subscription_tier` to the new tier
+3. Set `bundled_credits` based on tier:
+   - Free: 1,000
+   - Basic: 1,000
+   - Pro: 2,500
+   - Ultra: 12,000
+4. Set `credits_reset_date` to 30 days from now
+5. Store `stripe_subscription_id` for future management
+
+### Credit Purchase Handling
+
+When a credit purchase completes:
+
+1. Check for idempotency (payment_intent already processed)
+2. Create `CreditPurchase` record
+3. Add credits to `purchased_credits` (NOT bundled_credits)
+4. Purchased credits never expire
+
+---
+
+## Environment Variables
+
+### Required for Stripe
+
+```bash
+# Stripe API Keys
+STRIPE_SECRET_KEY=sk_test_xxx
+STRIPE_PUBLISHABLE_KEY=pk_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+
+# Stripe Price IDs (create in Stripe Dashboard)
+STRIPE_BASIC_PRICE_ID=price_xxx
+STRIPE_PRO_PRICE_ID=price_xxx
+STRIPE_ULTRA_PRICE_ID=price_xxx
+```
+
+### Tier Configuration
+
+```bash
+# Tier Pricing (cents)
+TIER_PRICE_FREE=0
+TIER_PRICE_BASIC=800
+TIER_PRICE_PRO=2000
+TIER_PRICE_ULTRA=10000
+
+# Bundled Credits per Tier
+TIER_BUNDLED_CREDITS_FREE=1000
+TIER_BUNDLED_CREDITS_BASIC=1000
+TIER_BUNDLED_CREDITS_PRO=2500
+TIER_BUNDLED_CREDITS_ULTRA=12000
+
+# Project Limits
+TIER_MAX_PROJECTS_FREE=3
+TIER_MAX_PROJECTS_BASIC=5
+TIER_MAX_PROJECTS_PRO=10
+TIER_MAX_PROJECTS_ULTRA=999
+
+# Deploy Limits
+TIER_MAX_DEPLOYS_FREE=1
+TIER_MAX_DEPLOYS_BASIC=2
+TIER_MAX_DEPLOYS_PRO=5
+TIER_MAX_DEPLOYS_ULTRA=20
+
+# BYOK Tiers
+BYOK_ENABLED_TIERS=pro,ultra
+```
+
+### Credit Packages
+
+```bash
+# Credit package prices (cents) - 1:1 ratio with credits
+CREDIT_PACKAGE_SMALL=500    # $5 = 500 credits
+CREDIT_PACKAGE_MEDIUM=1000  # $10 = 1000 credits
+
+# Low balance threshold (percentage of monthly allowance)
+CREDITS_LOW_BALANCE_THRESHOLD=0.20
+```
+
+---
+
+## Database Models
+
+### User Credit Fields
+
+```python
+class User(Base):
+    # Credit system
+    bundled_credits: int = 1000      # Monthly allowance, resets on billing date
+    purchased_credits: int = 0        # Never expire
+    credits_reset_date: datetime      # When bundled credits reset
+
+    # Subscription
+    subscription_tier: str = "free"   # free, basic, pro, ultra
+    stripe_customer_id: str
+    stripe_subscription_id: str
+
+    @property
+    def total_credits(self) -> int:
+        return (self.bundled_credits or 0) + (self.purchased_credits or 0)
+```
+
+### Credit Purchase Record
+
+```python
+class CreditPurchase(Base):
+    id: UUID
+    user_id: UUID
+    amount_cents: int              # Amount paid
+    credits_amount: int            # Credits received (1:1 ratio)
+    stripe_payment_intent: str
+    stripe_checkout_session: str
+    status: str                    # pending, completed, failed
+    created_at: datetime
+    completed_at: datetime
+```
+
+---
+
+## Security Considerations
+
+1. **Webhook Signature Verification**: All Stripe webhooks are verified using the webhook secret
+2. **Idempotency**: Payment intents are checked to prevent duplicate processing
+3. **Balance Checks**: Server-side validation before any credit-consuming operation
+4. **User Isolation**: Users can only access their own billing data
+5. **No Credit Card Storage**: All payment info handled by Stripe
+
+---
 
 ## Related Files
 
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/stripe_service.py` - Stripe integration
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/services/usage_service.py` - Usage tracking and cost calculation
-- `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/models.py` - CreditPurchase, UsageLog models
+- `orchestrator/app/services/stripe_service.py` - Stripe integration service
+- `orchestrator/app/services/usage_service.py` - Usage tracking and cost calculation
+- `orchestrator/app/routers/webhooks.py` - Webhook endpoint
+- `orchestrator/app/models.py` - CreditPurchase, UsageLog models
+- `orchestrator/app/models_auth.py` - User model with credit fields
+- `orchestrator/app/config.py` - Billing configuration
+- `orchestrator/alembic/versions/0005_billing_credits_system.py` - Credits migration

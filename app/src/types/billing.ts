@@ -6,30 +6,40 @@
 // Configuration Types
 // ============================================================================
 
+export interface TierConfig {
+  price_cents: number;
+  max_projects: number;
+  max_deploys: number;
+  bundled_credits: number;
+  byok_enabled: boolean;
+}
+
+export interface CreditPackageConfig {
+  credits: number;
+  price_cents: number;
+}
+
 export interface BillingConfig {
   stripe_publishable_key: string;
   credit_packages: {
-    small: number;
-    medium: number;
-    large: number;
+    small: CreditPackageConfig;
+    medium: CreditPackageConfig;
   };
-  premium_price: number;
   deploy_price: number;
-  free_limits: {
-    max_projects: number;
-    max_deploys: number;
+  tiers: {
+    free: TierConfig;
+    basic: TierConfig;
+    pro: TierConfig;
+    ultra: TierConfig;
   };
-  premium_limits: {
-    max_projects: number;
-    max_deploys: number;
-  };
+  low_balance_threshold: number;
 }
 
 // ============================================================================
 // Subscription Types
 // ============================================================================
 
-export type SubscriptionTier = 'free' | 'pro';
+export type SubscriptionTier = 'free' | 'basic' | 'pro' | 'ultra';
 
 export interface SubscriptionResponse {
   tier: SubscriptionTier;
@@ -38,6 +48,16 @@ export interface SubscriptionResponse {
   stripe_customer_id?: string;
   max_projects: number;
   max_deploys: number;
+  current_period_start?: string;
+  current_period_end?: string;
+  cancel_at_period_end?: boolean;
+  cancel_at?: string;
+  bundled_credits: number;
+  purchased_credits: number;
+  total_credits: number;
+  monthly_allowance: number;
+  credits_reset_date?: string;
+  byok_enabled: boolean;
 }
 
 export interface CheckoutSessionResponse {
@@ -49,17 +69,28 @@ export interface CheckoutSessionResponse {
 // Credits Types
 // ============================================================================
 
-export type CreditPackage = 'small' | 'medium' | 'large';
+export type CreditPackage = 'small' | 'medium';
 
 export interface CreditBalanceResponse {
-  balance_cents: number;
-  balance_usd: number;
+  bundled_credits: number;
+  purchased_credits: number;
+  total_credits: number;
+  monthly_allowance: number;
+  credits_reset_date?: string;
+  tier: SubscriptionTier;
+}
+
+export interface CreditStatusResponse {
+  total_credits: number;
+  is_low: boolean;
+  is_empty: boolean;
+  threshold: number;
+  tier: SubscriptionTier;
+  monthly_allowance: number;
 }
 
 export interface CreditPurchase {
   id: string;
-  amount_cents: number;
-  amount_usd: number;
   credits_amount: number;
   status: string;
   created_at: string;
@@ -195,7 +226,7 @@ export interface StripeConnectResponse {
 }
 
 // ============================================================================
-// Helper Types
+// Helper Types & Constants
 // ============================================================================
 
 export interface BillingError {
@@ -204,12 +235,41 @@ export interface BillingError {
 }
 
 export const CREDIT_PACKAGE_LABELS: Record<CreditPackage, string> = {
-  small: '$5 Credits',
-  medium: '$10 Credits',
-  large: '$50 Credits',
+  small: '500 Credits ($5)',
+  medium: '1000 Credits ($10)',
 };
 
 export const SUBSCRIPTION_TIER_LABELS: Record<SubscriptionTier, string> = {
   free: 'Free',
-  pro: 'Premium',
+  basic: 'Basic',
+  pro: 'Pro',
+  ultra: 'Ultra',
+};
+
+export const SUBSCRIPTION_TIER_PRICES: Record<SubscriptionTier, number> = {
+  free: 0,
+  basic: 8,
+  pro: 20,
+  ultra: 100,
+};
+
+export const SUBSCRIPTION_TIER_CREDITS: Record<SubscriptionTier, number> = {
+  free: 1000,
+  basic: 1000,
+  pro: 2500,
+  ultra: 12000,
+};
+
+export const SUBSCRIPTION_TIER_PROJECTS: Record<SubscriptionTier, number> = {
+  free: 3,
+  basic: 5,
+  pro: 10,
+  ultra: 999,
+};
+
+export const SUBSCRIPTION_TIER_DEPLOYS: Record<SubscriptionTier, number> = {
+  free: 1,
+  basic: 2,
+  pro: 5,
+  ultra: 20,
 };
