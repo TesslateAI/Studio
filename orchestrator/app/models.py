@@ -21,6 +21,7 @@ from sqlalchemy.sql import func
 from .database import Base
 
 # Import fastapi-users compatible auth models
+from .models_auth import User  # noqa: F401 - Re-export for backwards compatibility
 
 # Import kanban models so they're included in Base.metadata
 
