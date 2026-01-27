@@ -861,10 +861,7 @@ async def create_project(
         current_projects_count = current_projects_result.scalar()
 
         # Determine max projects based on tier
-        if current_user.subscription_tier == "pro":
-            max_projects = settings.premium_max_projects
-        else:
-            max_projects = settings.free_max_projects
+        max_projects = settings.get_tier_max_projects(current_user.subscription_tier or "free")
 
         # Enforce limit
         if current_projects_count >= max_projects:
@@ -2794,10 +2791,7 @@ async def deploy_project(
     deployed_count = deployed_count_result.scalar()
 
     # Determine max deploys based on tier
-    if current_user.subscription_tier == "pro":
-        max_deploys = settings.premium_max_deploys
-    else:
-        max_deploys = settings.free_max_deploys
+    max_deploys = settings.get_tier_max_deploys(current_user.subscription_tier or "free")
 
     # Check if limit exceeded
     if deployed_count >= max_deploys:
@@ -2883,13 +2877,10 @@ async def get_deployment_limits(
     )
     deployed_count = deployed_count_result.scalar()
 
-    # Determine limits
-    if current_user.subscription_tier == "pro":
-        base_max_deploys = settings.premium_max_deploys
-        base_max_projects = settings.premium_max_projects
-    else:
-        base_max_deploys = settings.free_max_deploys
-        base_max_projects = settings.free_max_projects
+    # Determine limits based on tier
+    tier = current_user.subscription_tier or "free"
+    base_max_deploys = settings.get_tier_max_deploys(tier)
+    base_max_projects = settings.get_tier_max_projects(tier)
 
     # Calculate additional slots from purchases
     additional_slots = current_user.total_spend // settings.additional_deploy_price
