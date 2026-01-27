@@ -11,13 +11,13 @@ Usage:
 Or inside Docker container:
     docker exec tesslate-orchestrator python /app/create_superuser.py
 """
+
 import asyncio
 import sys
 from getpass import getpass
 
 from nanoid import generate
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
 from app.models_auth import User
@@ -67,9 +67,7 @@ async def create_superuser():
     async with AsyncSessionLocal() as session:
         try:
             # Check if email already exists
-            result = await session.execute(
-                select(User).where(User.email == email)
-            )
+            result = await session.execute(select(User).where(User.email == email))
             existing_user = result.scalar_one_or_none()
 
             if existing_user:
@@ -77,9 +75,7 @@ async def create_superuser():
                 sys.exit(1)
 
             # Check if username already exists
-            result = await session.execute(
-                select(User).where(User.username == username)
-            )
+            result = await session.execute(select(User).where(User.username == username))
             existing_user = result.scalar_one_or_none()
 
             if existing_user:
@@ -110,7 +106,8 @@ async def create_superuser():
                 is_verified=True,
                 subscription_tier="free",
                 total_spend=0,
-                credits_balance=0,
+                bundled_credits=1000,
+                purchased_credits=0,
             )
 
             session.add(superuser)
@@ -135,6 +132,7 @@ async def create_superuser():
         except Exception as e:
             print(f"❌ Error creating superuser: {e}")
             import traceback
+
             traceback.print_exc()
             sys.exit(1)
 
@@ -142,9 +140,7 @@ async def create_superuser():
 async def list_superusers():
     """List all existing superusers."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(User).where(User.is_superuser == True)
-        )
+        result = await session.execute(select(User).where(User.is_superuser.is_(True)))
         superusers = result.scalars().all()
 
         if not superusers:

@@ -474,11 +474,21 @@ class StripeService:
                 logger.info(f"No charges for user {user.id} this month")
                 return None
 
-            # Deduct from credits balance first
+            # Deduct from credits: bundled first, then purchased
             remaining_cost = total_cost
-            if user.credits_balance >= total_cost:
-                # Fully covered by credits
-                user.credits_balance -= total_cost
+            total_available = user.total_credits  # bundled + purchased
+
+            if total_available >= total_cost:
+                # Fully covered by credits - deduct bundled first, then purchased
+                to_deduct = total_cost
+                if user.bundled_credits >= to_deduct:
+                    user.bundled_credits -= to_deduct
+                else:
+                    # Use all bundled, then purchased
+                    to_deduct -= user.bundled_credits
+                    user.bundled_credits = 0
+                    user.purchased_credits -= to_deduct
+
                 await db.commit()
                 logger.info(f"Usage paid from credits for user {user.id}: ${total_cost / 100:.2f}")
 
@@ -488,10 +498,11 @@ class StripeService:
                     log.billed_at = datetime.now(UTC)
                 await db.commit()
                 return None
-            elif user.credits_balance > 0:
-                # Partially covered by credits
-                remaining_cost = total_cost - user.credits_balance
-                user.credits_balance = 0
+            elif total_available > 0:
+                # Partially covered by credits - use all available
+                remaining_cost = total_cost - total_available
+                user.bundled_credits = 0
+                user.purchased_credits = 0
                 await db.commit()
 
             # Create invoice for remaining amount

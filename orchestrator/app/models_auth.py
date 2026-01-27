@@ -89,6 +89,9 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     theme_preset: Mapped[str | None] = mapped_column(
         String, nullable=True, default="default-dark"
     )  # UI theme preset
+    chat_position: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, default="center"
+    )  # Chat panel position: left, center, right
 
     # Public profile fields
     avatar_url: Mapped[str | None] = mapped_column(
