@@ -57,6 +57,7 @@ export default function Feedback() {
 
   useEffect(() => {
     loadFeedback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, sortBy]);
 
   // Fetch user data for dropdown
@@ -65,7 +66,7 @@ export default function Feedback() {
       try {
         const user = await authApi.getCurrentUser();
         setUserName(user.name || user.username || 'there');
-        setUserCredits(user.credits_balance || 0);
+        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
         setUserTier(user.subscription_tier || 'free');
       } catch (e) {
         console.error('Failed to fetch user data:', e);
@@ -96,11 +97,13 @@ export default function Feedback() {
       const result = await feedbackApi.toggleUpvote(feedbackId);
 
       // Update local state
-      setFeedback(prev => prev.map(item =>
-        item.id === feedbackId
-          ? { ...item, has_upvoted: result.upvoted, upvote_count: result.upvote_count }
-          : item
-      ));
+      setFeedback((prev) =>
+        prev.map((item) =>
+          item.id === feedbackId
+            ? { ...item, has_upvoted: result.upvoted, upvote_count: result.upvote_count }
+            : item
+        )
+      );
     } catch {
       toast.error('Failed to update upvote');
     }
@@ -130,47 +133,52 @@ export default function Feedback() {
       {
         icon: <Folder className="w-5 h-5" weight="fill" />,
         title: 'Projects',
-        onClick: () => navigate('/dashboard')
+        onClick: () => navigate('/dashboard'),
       },
       {
         icon: <Storefront className="w-5 h-5" weight="fill" />,
         title: 'Marketplace',
-        onClick: () => navigate('/marketplace')
+        onClick: () => navigate('/marketplace'),
       },
       {
         icon: <Books className="w-5 h-5" weight="fill" />,
         title: 'Library',
-        onClick: () => navigate('/library')
+        onClick: () => navigate('/library'),
       },
       {
         icon: <ChatCircleDots className="w-5 h-5" weight="fill" />,
         title: 'Feedback',
         onClick: () => {},
-        active: true
+        active: true,
       },
       {
         icon: <Package className="w-5 h-5" weight="fill" />,
         title: 'Components',
-        onClick: () => toast('Components library coming soon!')
-      }
+        onClick: () => toast('Components library coming soon!'),
+      },
     ],
     right: [
       {
-        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        icon:
+          theme === 'dark' ? (
+            <Sun className="w-5 h-5" weight="fill" />
+          ) : (
+            <Moon className="w-5 h-5" weight="fill" />
+          ),
         title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
-        onClick: toggleTheme
+        onClick: toggleTheme,
       },
       {
         icon: <Gear className="w-5 h-5" weight="fill" />,
         title: 'Settings',
-        onClick: () => navigate('/settings')
+        onClick: () => navigate('/settings'),
       },
       {
         icon: <SignOut className="w-5 h-5" weight="fill" />,
         title: 'Logout',
-        onClick: logout
-      }
-    ]
+        onClick: logout,
+      },
+    ],
   };
 
   if (loading) {
@@ -184,193 +192,202 @@ export default function Feedback() {
   return (
     <>
       <MobileMenu leftItems={mobileMenuItems.left} rightItems={mobileMenuItems.right} />
-        {/* Top Bar */}
-        <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
-          <div className="flex items-center gap-4 md:gap-6">
-            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Feedback</h1>
+      {/* Top Bar */}
+      <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
+        <div className="flex items-center gap-4 md:gap-6">
+          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Feedback</h1>
 
-            {/* Filter Tabs - Desktop */}
-            <div className="hidden md:flex items-center gap-1">
-              {[
-                { key: 'all' as FeedbackType, label: 'All', icon: ChatCircleDots },
-                { key: 'bug' as FeedbackType, label: 'Bugs', icon: Bug },
-                { key: 'suggestion' as FeedbackType, label: 'Suggestions', icon: Lightbulb }
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setFilter(tab.key)}
-                  className={`
+          {/* Filter Tabs - Desktop */}
+          <div className="hidden md:flex items-center gap-1">
+            {[
+              { key: 'all' as FeedbackType, label: 'All', icon: ChatCircleDots },
+              { key: 'bug' as FeedbackType, label: 'Bugs', icon: Bug },
+              { key: 'suggestion' as FeedbackType, label: 'Suggestions', icon: Lightbulb },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setFilter(tab.key)}
+                className={`
                     flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all
-                    ${filter === tab.key
-                      ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                      : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                    ${
+                      filter === tab.key
+                        ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
+                        : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
                     }
                   `}
-                >
-                  <tab.icon size={14} weight="fill" />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Sort Dropdown - Desktop */}
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'upvotes' | 'date' | 'comments')}
-              className="hidden md:block text-xs bg-[var(--surface)] border border-white/10 text-[var(--text)] px-2 py-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-            >
-              <option value="upvotes">Most Upvoted</option>
-              <option value="date">Most Recent</option>
-              <option value="comments">Most Discussed</option>
-            </select>
+              >
+                <tab.icon size={14} weight="fill" />
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* New Feedback Button */}
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-            >
-              <Plus size={16} weight="bold" />
-              <span className="hidden md:inline">New Feedback</span>
-            </button>
-
-            {/* User Dropdown */}
-            <UserDropdown
-              userName={userName}
-              userCredits={userCredits}
-              userTier={userTier}
-            />
-          </div>
+          {/* Sort Dropdown - Desktop */}
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as 'upvotes' | 'date' | 'comments')}
+            className="hidden md:block text-xs bg-[var(--surface)] border border-white/10 text-[var(--text)] px-2 py-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+          >
+            <option value="upvotes">Most Upvoted</option>
+            <option value="date">Most Recent</option>
+            <option value="comments">Most Discussed</option>
+          </select>
         </div>
 
-        {/* Filter Tabs - Mobile */}
-        <div className="md:hidden bg-[var(--surface)] border-b border-white/10 px-4 py-2 flex items-center gap-2 overflow-x-auto">
-          {[
-            { key: 'all' as FeedbackType, label: 'All', icon: ChatCircleDots },
-            { key: 'bug' as FeedbackType, label: 'Bugs', icon: Bug },
-            { key: 'suggestion' as FeedbackType, label: 'Suggestions', icon: Lightbulb }
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setFilter(tab.key)}
-              className={`
+        <div className="flex items-center gap-3">
+          {/* New Feedback Button */}
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+          >
+            <Plus size={16} weight="bold" />
+            <span className="hidden md:inline">New Feedback</span>
+          </button>
+
+          {/* User Dropdown */}
+          <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
+        </div>
+      </div>
+
+      {/* Filter Tabs - Mobile */}
+      <div className="md:hidden bg-[var(--surface)] border-b border-white/10 px-4 py-2 flex items-center gap-2 overflow-x-auto">
+        {[
+          { key: 'all' as FeedbackType, label: 'All', icon: ChatCircleDots },
+          { key: 'bug' as FeedbackType, label: 'Bugs', icon: Bug },
+          { key: 'suggestion' as FeedbackType, label: 'Suggestions', icon: Lightbulb },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setFilter(tab.key)}
+            className={`
                 flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all whitespace-nowrap
-                ${filter === tab.key
-                  ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
-                  : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
+                ${
+                  filter === tab.key
+                    ? 'bg-[var(--primary)]/10 text-[var(--primary)]'
+                    : 'text-[var(--text)]/60 hover:text-[var(--text)] hover:bg-white/5'
                 }
               `}
-            >
-              <tab.icon size={14} weight="fill" />
-              {tab.label}
-            </button>
-          ))}
-        </div>
+          >
+            <tab.icon size={14} weight="fill" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-auto bg-[var(--bg)]">
-          <div className="p-4 md:p-6">
-            {/* Feedback Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {feedback.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setSelectedFeedback(item)}
-                  className={`
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-auto bg-[var(--bg)]">
+        <div className="p-4 md:p-6">
+          {/* Feedback Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {feedback.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setSelectedFeedback(item)}
+                className={`
                     group bg-[var(--surface)] rounded-2xl p-5 border-2 transition-all duration-300
                     hover:transform hover:-translate-y-1 text-left
-                    ${item.type === 'bug'
-                      ? 'border-red-500/30 hover:border-red-500/60 hover:shadow-lg hover:shadow-red-500/10'
-                      : 'border-teal-500/30 hover:border-teal-500/60 hover:shadow-lg hover:shadow-teal-500/10'
+                    ${
+                      item.type === 'bug'
+                        ? 'border-red-500/30 hover:border-red-500/60 hover:shadow-lg hover:shadow-red-500/10'
+                        : 'border-teal-500/30 hover:border-teal-500/60 hover:shadow-lg hover:shadow-teal-500/10'
                     }
                   `}
-                >
-                  {/* Type Badge */}
-                  <div className="flex items-center gap-2 mb-3">
-                    <span
-                      className={`
+              >
+                {/* Type Badge */}
+                <div className="flex items-center gap-2 mb-3">
+                  <span
+                    className={`
                         inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
-                        ${item.type === 'bug'
-                          ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                          : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
+                        ${
+                          item.type === 'bug'
+                            ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                            : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
                         }
                       `}
-                    >
-                      {item.type === 'bug' ? (
-                        <><Bug size={12} weight="fill" /> Bug</>
-                      ) : (
-                        <><Lightbulb size={12} weight="fill" /> Suggestion</>
-                      )}
-                    </span>
-
-                    {/* Status Badge */}
-                    {item.status !== 'open' && (
-                      <span className="px-2 py-0.5 bg-white/10 text-[var(--text)]/60 text-xs rounded-md">
-                        {item.status}
-                      </span>
+                  >
+                    {item.type === 'bug' ? (
+                      <>
+                        <Bug size={12} weight="fill" /> Bug
+                      </>
+                    ) : (
+                      <>
+                        <Lightbulb size={12} weight="fill" /> Suggestion
+                      </>
                     )}
-                  </div>
+                  </span>
 
-                  {/* Title */}
-                  <h3 className="font-heading text-base font-bold text-[var(--text)] mb-2 line-clamp-2 group-hover:text-[var(--primary)] transition-colors">
-                    {item.title}
-                  </h3>
+                  {/* Status Badge */}
+                  {item.status !== 'open' && (
+                    <span className="px-2 py-0.5 bg-white/10 text-[var(--text)]/60 text-xs rounded-md">
+                      {item.status}
+                    </span>
+                  )}
+                </div>
 
-                  {/* Description Preview */}
-                  <p className="text-sm text-[var(--text)]/60 mb-4 line-clamp-2">
-                    {item.description}
-                  </p>
+                {/* Title */}
+                <h3 className="font-heading text-base font-bold text-[var(--text)] mb-2 line-clamp-2 group-hover:text-[var(--primary)] transition-colors">
+                  {item.title}
+                </h3>
 
-                  {/* Footer */}
-                  <div className="flex items-center justify-between pt-3 border-t border-white/10">
-                    {/* Upvote Button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleUpvote(item.id);
-                      }}
-                      className={`
+                {/* Description Preview */}
+                <p className="text-sm text-[var(--text)]/60 mb-4 line-clamp-2">
+                  {item.description}
+                </p>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between pt-3 border-t border-white/10">
+                  {/* Upvote Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleUpvote(item.id);
+                    }}
+                    className={`
                         flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all
-                        ${item.has_upvoted
-                          ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
-                          : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                        ${
+                          item.has_upvoted
+                            ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
+                            : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
                         }
                       `}
-                    >
-                      <Heart size={14} weight={item.has_upvoted ? 'fill' : 'regular'} />
-                      {item.upvote_count}
-                    </button>
+                  >
+                    <Heart size={14} weight={item.has_upvoted ? 'fill' : 'regular'} />
+                    {item.upvote_count}
+                  </button>
 
-                    {/* Comments Count */}
-                    <div className="flex items-center gap-3 text-xs text-[var(--text)]/40">
-                      <span className="flex items-center gap-1">
-                        <ChatCircleDots size={14} />
-                        {item.comment_count}
-                      </span>
-                      <span>{formatDate(item.created_at)}</span>
-                    </div>
+                  {/* Comments Count */}
+                  <div className="flex items-center gap-3 text-xs text-[var(--text)]/40">
+                    <span className="flex items-center gap-1">
+                      <ChatCircleDots size={14} />
+                      {item.comment_count}
+                    </span>
+                    <span>{formatDate(item.created_at)}</span>
                   </div>
-                </button>
-              ))}
-            </div>
-
-            {/* Empty State */}
-            {feedback.length === 0 && (
-              <div className="text-center py-16">
-                <ChatCircleDots size={64} className="mx-auto text-[var(--text)]/20 mb-4" weight="thin" />
-                <p className="text-[var(--text)]/40 text-sm mb-4">No feedback found</p>
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  className="inline-flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all"
-                >
-                  <Plus size={16} weight="bold" />
-                  Create First Feedback
-                </button>
-              </div>
-            )}
+                </div>
+              </button>
+            ))}
           </div>
+
+          {/* Empty State */}
+          {feedback.length === 0 && (
+            <div className="text-center py-16">
+              <ChatCircleDots
+                size={64}
+                className="mx-auto text-[var(--text)]/20 mb-4"
+                weight="thin"
+              />
+              <p className="text-[var(--text)]/40 text-sm mb-4">No feedback found</p>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+              >
+                <Plus size={16} weight="bold" />
+                Create First Feedback
+              </button>
+            </div>
+          )}
         </div>
+      </div>
 
       {/* Create Feedback Modal */}
       <CreateFeedbackModal

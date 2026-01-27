@@ -2,11 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projectsApi, authApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
-import {
-  MobileMenu,
-  ProjectCard,
-  UserDropdown
-} from '../components/ui';
+import { MobileMenu, ProjectCard, UserDropdown } from '../components/ui';
 import type { Status, EnvironmentStatus } from '../components/ui';
 import { ConfirmDialog, CreateProjectModal, RepoImportModal } from '../components/modals';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
@@ -21,7 +17,7 @@ import {
   FilePlus,
   Books,
   SignOut,
-  GitBranch
+  GitBranch,
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -57,7 +53,7 @@ export default function Dashboard() {
       try {
         const user = await authApi.getCurrentUser();
         setUserName(user.name || user.username || 'there');
-        setUserCredits(user.credits_balance || 0);
+        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
         setUserTier(user.subscription_tier || 'free');
       } catch (e) {
         console.error('Failed to fetch user data:', e);
@@ -89,7 +85,7 @@ export default function Dashboard() {
       const projectsWithMeta = data.map((p: Project) => ({
         ...p,
         status: (p.status || 'build') as Status,
-        agents: p.agents || []
+        agents: p.agents || [],
       }));
       setProjects(projectsWithMeta);
     } catch {
@@ -111,7 +107,7 @@ export default function Dashboard() {
       const response = await projectsApi.create(
         projectName,
         '',
-        'base',  // Always use 'base' source type
+        'base', // Always use 'base' source type
         undefined,
         'main',
         baseId
@@ -160,7 +156,7 @@ export default function Dashboard() {
   };
 
   const deleteProject = (id: string) => {
-    const project = projects.find(p => p.id === id);
+    const project = projects.find((p) => p.id === id);
     if (project) {
       setProjectToDelete(project);
       setShowDeleteDialog(true);
@@ -173,11 +169,11 @@ export default function Dashboard() {
     const projectId = projectToDelete.id;
     const projectSlug = projectToDelete.slug;
     setShowDeleteDialog(false);
-    setDeletingProjectIds(prev => new Set(prev).add(projectId));
+    setDeletingProjectIds((prev) => new Set(prev).add(projectId));
     const deletingToast = toast.loading('Deleting project...');
 
     try {
-      const response = await projectsApi.delete(projectSlug);  // Use slug for API call
+      const response = await projectsApi.delete(projectSlug); // Use slug for API call
       // Response now includes { task_id, status_endpoint }
       const taskId = response.task_id;
 
@@ -192,9 +188,9 @@ export default function Dashboard() {
           toast.success('Project deleted successfully', { id: deletingToast });
 
           // Remove project from state
-          setProjects(prev => prev.filter(p => p.id !== projectId));
+          setProjects((prev) => prev.filter((p) => p.id !== projectId));
 
-          setDeletingProjectIds(prev => {
+          setDeletingProjectIds((prev) => {
             const updated = new Set(prev);
             updated.delete(projectId);
             return updated;
@@ -204,7 +200,7 @@ export default function Dashboard() {
           console.error('Project deletion task failed:', taskError);
           toast.error('Project deletion failed', { id: deletingToast });
 
-          setDeletingProjectIds(prev => {
+          setDeletingProjectIds((prev) => {
             const updated = new Set(prev);
             updated.delete(projectId);
             return updated;
@@ -217,7 +213,7 @@ export default function Dashboard() {
         // No task ID returned - reload to verify state
         toast.success('Project deleted', { id: deletingToast });
         await loadProjects();
-        setDeletingProjectIds(prev => {
+        setDeletingProjectIds((prev) => {
           const updated = new Set(prev);
           updated.delete(projectId);
           return updated;
@@ -226,7 +222,7 @@ export default function Dashboard() {
     } catch {
       toast.error('Failed to delete project', { id: deletingToast });
       // Remove from deleting state on error
-      setDeletingProjectIds(prev => {
+      setDeletingProjectIds((prev) => {
         const updated = new Set(prev);
         updated.delete(projectId);
         return updated;
@@ -239,9 +235,7 @@ export default function Dashboard() {
   const updateProjectStatus = async (id: string, status: Status) => {
     try {
       // Update local state immediately for better UX
-      setProjects(prev => prev.map(p =>
-        p.id === id ? { ...p, status } : p
-      ));
+      setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
       toast.success(`Project moved to ${status}`);
       // TODO: Add API call to persist status
     } catch {
@@ -280,9 +274,12 @@ export default function Dashboard() {
     try {
       // Handle ISO 8601 format with or without timezone
       // If the date string doesn't have timezone info, assume UTC
-      const dateStr = dateString.includes('Z') || dateString.includes('+') || dateString.includes('T') && dateString.match(/[+-]\d{2}:\d{2}$/)
-        ? dateString
-        : dateString.replace(' ', 'T') + 'Z';
+      const dateStr =
+        dateString.includes('Z') ||
+        dateString.includes('+') ||
+        (dateString.includes('T') && dateString.match(/[+-]\d{2}:\d{2}$/))
+          ? dateString
+          : dateString.replace(' ', 'T') + 'Z';
 
       const date = new Date(dateStr);
 
@@ -317,41 +314,46 @@ export default function Dashboard() {
         icon: <Folder className="w-5 h-5" weight="fill" />,
         title: 'Projects',
         onClick: () => {},
-        active: true
+        active: true,
       },
       {
         icon: <Storefront className="w-5 h-5" weight="fill" />,
         title: 'Marketplace',
-        onClick: () => navigate('/marketplace')
+        onClick: () => navigate('/marketplace'),
       },
       {
         icon: <Books className="w-5 h-5" weight="fill" />,
         title: 'Library',
-        onClick: () => navigate('/library')
+        onClick: () => navigate('/library'),
       },
       {
         icon: <Package className="w-5 h-5" weight="fill" />,
         title: 'Components',
-        onClick: () => toast('Components library coming soon!')
-      }
+        onClick: () => toast('Components library coming soon!'),
+      },
     ],
     right: [
       {
-        icon: theme === 'dark' ? <Sun className="w-5 h-5" weight="fill" /> : <Moon className="w-5 h-5" weight="fill" />,
+        icon:
+          theme === 'dark' ? (
+            <Sun className="w-5 h-5" weight="fill" />
+          ) : (
+            <Moon className="w-5 h-5" weight="fill" />
+          ),
         title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
-        onClick: toggleTheme
+        onClick: toggleTheme,
       },
       {
         icon: <Gear className="w-5 h-5" weight="fill" />,
         title: 'Settings',
-        onClick: () => navigate('/settings')
+        onClick: () => navigate('/settings'),
       },
       {
         icon: <SignOut className="w-5 h-5" weight="fill" />,
         title: 'Logout',
-        onClick: logout
-      }
-    ]
+        onClick: logout,
+      },
+    ],
   };
 
   if (loading) {
@@ -369,46 +371,55 @@ export default function Dashboard() {
 
       {/* Top Bar */}
       <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
-          <div className="flex items-center gap-4 md:gap-6">
-            <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
-          </div>
-
-          {/* Right side - User Profile */}
-          <div className="flex items-center gap-3">
-            {/* User Dropdown */}
-            <UserDropdown
-              userName={userName}
-              userCredits={userCredits}
-              userTier={userTier}
-            />
-
-            {/* Mobile hamburger menu */}
-            <button
-              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-              className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
-            >
-              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-          </div>
+        <div className="flex items-center gap-4 md:gap-6">
+          <h1 className="font-heading text-sm font-semibold text-[var(--text)]">Projects</h1>
         </div>
 
-        {/* Tab Filters - Mobile */}
+        {/* Right side - User Profile */}
+        <div className="flex items-center gap-3">
+          {/* User Dropdown */}
+          <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-auto bg-[var(--bg)]">
-          <div className="p-4 md:p-6">
-            {/* Projects Grid */}
-            <div className={filteredProjects.length === 0
-              ? "flex flex-wrap justify-center gap-4"
-              : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-            }>
-              {/* Create New Project Card */}
-              <button
-                onClick={() => setShowCreateDialog(true)}
-                disabled={isCreating}
-                className={`
+          {/* Mobile hamburger menu */}
+          <button
+            onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
+            className="md:hidden p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors"
+          >
+            <svg
+              className="w-6 h-6 text-[var(--text)]"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Filters - Mobile */}
+
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-auto bg-[var(--bg)]">
+        <div className="p-4 md:p-6">
+          {/* Projects Grid */}
+          <div
+            className={
+              filteredProjects.length === 0
+                ? 'flex flex-wrap justify-center gap-4'
+                : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+            }
+          >
+            {/* Create New Project Card */}
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              disabled={isCreating}
+              className={`
                   group bg-white/[0.01] rounded-2xl p-6
                   border-2 border-dashed border-[rgba(var(--primary-rgb),0.3)]
                   hover:border-[rgba(var(--primary-rgb),0.6)]
@@ -418,25 +429,23 @@ export default function Dashboard() {
                   ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
                   ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
-              >
-                <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
-                  <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
-                </div>
-                <div className="text-center">
-                  <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
-                    Create New Project
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    Start building something amazing
-                  </p>
-                </div>
-              </button>
+            >
+              <div className="w-16 h-16 bg-[rgba(var(--primary-rgb),0.2)] rounded-2xl flex items-center justify-center group-hover:bg-[rgba(var(--primary-rgb),0.3)] transition-colors">
+                <FilePlus className="w-8 h-8 text-[var(--primary)]" weight="fill" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
+                  Create New Project
+                </h3>
+                <p className="text-sm text-gray-500">Start building something amazing</p>
+              </div>
+            </button>
 
-              {/* Import from Repository Card */}
-              <button
-                onClick={() => setShowImportDialog(true)}
-                disabled={isCreating}
-                className={`
+            {/* Import from Repository Card */}
+            <button
+              onClick={() => setShowImportDialog(true)}
+              disabled={isCreating}
+              className={`
                   group bg-white/[0.01] rounded-2xl p-6
                   border-2 border-dashed border-emerald-500/30
                   hover:border-emerald-500/60
@@ -446,53 +455,52 @@ export default function Dashboard() {
                   ${filteredProjects.length === 0 ? 'w-full max-w-sm min-h-[280px]' : 'min-h-[240px]'}
                   ${isCreating ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
-              >
-                <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
-                  <GitBranch className="w-8 h-8 text-emerald-500" weight="fill" />
-                </div>
-                <div className="text-center">
-                  <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
-                    Import from Repository
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    GitHub, GitLab, or Bitbucket
-                  </p>
-                </div>
-              </button>
-
-              {/* Project Cards */}
-              {filteredProjects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={{
-                    id: project.id,
-                    name: project.name,
-                    description: project.description || 'No description',
-                    status: project.status || 'build',
-                    agents: project.agents || [],
-                    lastUpdated: formatDate(project.updated_at),
-                    isLive: project.status === 'launch',
-                    slug: project.slug,
-                    environmentStatus: project.environment_status
-                  }}
-                  onOpen={() => navigate(`/project/${project.slug}/builder`)}
-                  onDelete={() => deleteProject(project.id)}
-                  onStatusChange={(status) => updateProjectStatus(project.id, status)}
-                  onFork={() => handleForkProject(project.id)}
-                  isDeleting={deletingProjectIds.has(project.id)}
-                />
-              ))}
-            </div>
-
-            {/* Empty State */}
-            {filteredProjects.length === 0 && (
-              <div className="text-center py-16">
-                <p className="text-[var(--text)]/40 text-sm">No projects found. Create one to get started!</p>
+            >
+              <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
+                <GitBranch className="w-8 h-8 text-emerald-500" weight="fill" />
               </div>
-            )}
-          </div>
-        </div>
+              <div className="text-center">
+                <h3 className="font-heading text-lg font-bold text-[var(--text)] mb-2">
+                  Import from Repository
+                </h3>
+                <p className="text-sm text-gray-500">GitHub, GitLab, or Bitbucket</p>
+              </div>
+            </button>
 
+            {/* Project Cards */}
+            {filteredProjects.map((project) => (
+              <ProjectCard
+                key={project.id}
+                project={{
+                  id: project.id,
+                  name: project.name,
+                  description: project.description || 'No description',
+                  status: project.status || 'build',
+                  agents: project.agents || [],
+                  lastUpdated: formatDate(project.updated_at),
+                  isLive: project.status === 'launch',
+                  slug: project.slug,
+                  environmentStatus: project.environment_status,
+                }}
+                onOpen={() => navigate(`/project/${project.slug}/builder`)}
+                onDelete={() => deleteProject(project.id)}
+                onStatusChange={(status) => updateProjectStatus(project.id, status)}
+                onFork={() => handleForkProject(project.id)}
+                isDeleting={deletingProjectIds.has(project.id)}
+              />
+            ))}
+          </div>
+
+          {/* Empty State */}
+          {filteredProjects.length === 0 && (
+            <div className="text-center py-16">
+              <p className="text-[var(--text)]/40 text-sm">
+                No projects found. Create one to get started!
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
@@ -529,7 +537,7 @@ export default function Dashboard() {
             const response = await projectsApi.create(
               projectName,
               '',
-              provider,  // 'github', 'gitlab', or 'bitbucket'
+              provider, // 'github', 'gitlab', or 'bitbucket'
               repoUrl,
               branch,
               undefined
@@ -549,7 +557,6 @@ export default function Dashboard() {
           }
         }}
       />
-
     </>
   );
 }

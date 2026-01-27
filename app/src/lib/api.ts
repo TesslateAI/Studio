@@ -889,15 +889,27 @@ export interface UserProfileUpdate {
   website_url?: string;
 }
 
+export type ChatPosition = 'left' | 'center' | 'right';
+
+export interface UserPreferences {
+  diagram_model?: string | null;
+  theme_preset?: string | null;
+  chat_position?: ChatPosition | null;
+}
+
 export const usersApi = {
   // Get user preferences
-  getPreferences: async () => {
+  getPreferences: async (): Promise<UserPreferences> => {
     const response = await api.get('/api/users/preferences');
     return response.data;
   },
 
   // Update user preferences
-  updatePreferences: async (data: { diagram_model?: string; theme_preset?: string }) => {
+  updatePreferences: async (data: {
+    diagram_model?: string;
+    theme_preset?: string;
+    chat_position?: ChatPosition;
+  }) => {
     const response = await api.patch('/api/users/preferences', data);
     return response.data;
   },

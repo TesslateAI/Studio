@@ -95,12 +95,7 @@ export class AuthenticationError extends Error {
             400
           );
         }
-        return new AuthenticationError(
-          'UNKNOWN',
-          detail || 'Invalid request',
-          false,
-          400
-        );
+        return new AuthenticationError('UNKNOWN', detail || 'Invalid request', false, 400);
 
       case 401:
         // Check if token expired vs invalid
@@ -112,20 +107,10 @@ export class AuthenticationError extends Error {
             401
           );
         }
-        return new AuthenticationError(
-          'UNAUTHORIZED',
-          'Not authenticated',
-          false,
-          401
-        );
+        return new AuthenticationError('UNAUTHORIZED', 'Not authenticated', false, 401);
 
       case 403:
-        return new AuthenticationError(
-          'FORBIDDEN',
-          'Access denied',
-          false,
-          403
-        );
+        return new AuthenticationError('FORBIDDEN', 'Access denied', false, 403);
 
       case 500:
       case 502:
@@ -159,7 +144,8 @@ export interface AuthUser {
   name?: string;
   avatar_url?: string;
   subscription_tier?: string;
-  credits_balance?: number;
+  bundled_credits?: number;
+  purchased_credits?: number;
   is_superuser?: boolean;
   slug?: string;
 }

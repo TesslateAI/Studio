@@ -246,7 +246,7 @@ export default function Library() {
       try {
         const user = await authApi.getCurrentUser();
         setUserName(user.name || user.username || 'there');
-        setUserCredits(user.credits_balance || 0);
+        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
         setUserTier(user.subscription_tier || 'free');
       } catch (e) {
         console.error('Failed to fetch user data:', e);

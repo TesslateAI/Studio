@@ -23,7 +23,7 @@ import {
   FlowArrow,
   List,
   Article,
-  Terminal
+  Terminal,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -44,7 +44,7 @@ import {
   SettingsPanel,
   AssetsPanel,
   KanbanPanel,
-  TerminalPanel
+  TerminalPanel,
 } from '../components/panels';
 import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
@@ -122,7 +122,7 @@ export default function Project() {
       onError: (error) => {
         setNeedsContainerStart(false);
         toast.error(`Container failed: ${error}`, { id: 'container-start' });
-      }
+      },
     }
   );
 
@@ -131,77 +131,129 @@ export default function Project() {
   // ============================================================================
 
   // View switching shortcuts (Cmd/Ctrl + 1-5)
-  useHotkeys('mod+1', (e) => {
-    e.preventDefault();
-    setActiveView('preview');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+1',
+    (e) => {
+      e.preventDefault();
+      setActiveView('preview');
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+2', (e) => {
-    e.preventDefault();
-    setActiveView('code');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+2',
+    (e) => {
+      e.preventDefault();
+      setActiveView('code');
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+3', (e) => {
-    e.preventDefault();
-    setActiveView('kanban');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+3',
+    (e) => {
+      e.preventDefault();
+      setActiveView('kanban');
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+4', (e) => {
-    e.preventDefault();
-    setActiveView('assets');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+4',
+    (e) => {
+      e.preventDefault();
+      setActiveView('assets');
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+5', (e) => {
-    e.preventDefault();
-    setActiveView('terminal');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+5',
+    (e) => {
+      e.preventDefault();
+      setActiveView('terminal');
+    },
+    { enableOnFormTags: false }
+  );
 
   // Refresh preview (Cmd/Ctrl + R)
-  useHotkeys('mod+r', (e) => {
-    e.preventDefault();
-    if (activeView === 'preview') {
-      refreshPreview();
-    }
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+r',
+    (e) => {
+      e.preventDefault();
+      if (activeView === 'preview') {
+        refreshPreview();
+      }
+    },
+    { enableOnFormTags: false }
+  );
 
   // Sidebar toggle (Cmd/Ctrl + [ and ])
-  useHotkeys('mod+[', (e) => {
-    e.preventDefault();
-    setIsLeftSidebarExpanded(false);
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+[',
+    (e) => {
+      e.preventDefault();
+      setIsLeftSidebarExpanded(false);
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+]', (e) => {
-    e.preventDefault();
-    setIsLeftSidebarExpanded(true);
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+]',
+    (e) => {
+      e.preventDefault();
+      setIsLeftSidebarExpanded(true);
+    },
+    { enableOnFormTags: false }
+  );
 
   // Panel shortcuts (Cmd/Ctrl + Shift + G/N/S/A)
-  useHotkeys('mod+shift+g', (e) => {
-    e.preventDefault();
-    togglePanel('github');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+shift+g',
+    (e) => {
+      e.preventDefault();
+      togglePanel('github');
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+shift+n', (e) => {
-    e.preventDefault();
-    togglePanel('notes');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+shift+n',
+    (e) => {
+      e.preventDefault();
+      togglePanel('notes');
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+shift+s', (e) => {
-    e.preventDefault();
-    togglePanel('settings');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+shift+s',
+    (e) => {
+      e.preventDefault();
+      togglePanel('settings');
+    },
+    { enableOnFormTags: false }
+  );
 
-  useHotkeys('mod+shift+a', (e) => {
-    e.preventDefault();
-    togglePanel('architecture');
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'mod+shift+a',
+    (e) => {
+      e.preventDefault();
+      togglePanel('architecture');
+    },
+    { enableOnFormTags: false }
+  );
 
   // Escape to close active panel
-  useHotkeys('escape', () => {
-    if (activePanel) {
-      setActivePanel(null);
-    }
-  }, { enableOnFormTags: false });
+  useHotkeys(
+    'escape',
+    () => {
+      if (activePanel) {
+        setActivePanel(null);
+      }
+    },
+    { enableOnFormTags: false }
+  );
 
   useEffect(() => {
     if (slug) {
@@ -210,6 +262,7 @@ export default function Project() {
       loadSettings();
       loadAgents(); // Load user's enabled agents from library
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // Fetch user data for dropdown
@@ -218,7 +271,7 @@ export default function Project() {
       try {
         const user = await authApi.getCurrentUser();
         setUserName(user.name || user.username || 'there');
-        setUserCredits(user.credits_balance || 0);
+        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
         setUserTier(user.subscription_tier || 'free');
       } catch (e) {
         console.error('Failed to fetch user data:', e);
@@ -232,6 +285,7 @@ export default function Project() {
     if (slug) {
       loadContainer();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [containerId, slug]);
 
   // Reload files when container changes (to apply filtering)
@@ -239,6 +293,7 @@ export default function Project() {
     if (container) {
       loadFiles();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [container]);
 
   useEffect(() => {
@@ -322,6 +377,7 @@ export default function Project() {
     return () => {
       unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // Smart polling to catch file changes from agents using bash/exec commands
@@ -369,14 +425,16 @@ export default function Project() {
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [slug, container]);  // Re-create interval when container changes to use fresh loadFiles
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, container]); // Re-create interval when container changes to use fresh loadFiles
 
   // Refresh files when switching to code view
   useEffect(() => {
     if (activeView === 'code' && slug) {
       loadFiles();
     }
-  }, [activeView, slug, container]);  // Include container to use correct filter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, slug, container]); // Include container to use correct filter
 
   const loadProject = async () => {
     if (!slug) return;
@@ -408,11 +466,13 @@ export default function Project() {
       if (containerId && container && container.directory) {
         const containerDir = container.directory as string;
         const filteredFiles = filesData
-          .filter((file: Record<string, unknown>) => (file.file_path as string).startsWith(containerDir + '/'))
+          .filter((file: Record<string, unknown>) =>
+            (file.file_path as string).startsWith(containerDir + '/')
+          )
           .map((file: Record<string, unknown>) => ({
             ...file,
             // Strip container directory prefix for display (e.g., "next-js-15/app/page.tsx" -> "app/page.tsx")
-            file_path: (file.file_path as string).slice(containerDir.length + 1)
+            file_path: (file.file_path as string).slice(containerDir.length + 1),
           }));
 
         // In K8s mode, files are already container-scoped (no prefix)
@@ -449,12 +509,19 @@ export default function Project() {
         // Check if container is already running before starting
         try {
           const status = await projectsApi.getContainersStatus(slug);
-          const containerDir = foundContainer.directory || foundContainer.name?.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+          const containerDir =
+            foundContainer.directory ||
+            foundContainer.name?.toLowerCase().replace(/[^a-z0-9-]/g, '-');
           const containerStatus = status?.containers?.[containerDir];
 
           // Check for hibernation - only explicit hibernated status, not just stopped
-          if (containerStatus?.status === 'hibernated' || status?.environment_status === 'hibernated') {
-            toast('This project has been hibernated. Redirecting to projects...', { duration: 3000 });
+          if (
+            containerStatus?.status === 'hibernated' ||
+            status?.environment_status === 'hibernated'
+          ) {
+            toast('This project has been hibernated. Redirecting to projects...', {
+              duration: 3000,
+            });
             navigate('/dashboard');
             return;
           }
@@ -487,7 +554,9 @@ export default function Project() {
     try {
       // Load agents from user's library (enabled agents only)
       const libraryData = await marketplaceApi.getMyAgents();
-      const enabledAgents = libraryData.agents.filter((agent: Record<string, unknown>) => agent.is_enabled);
+      const enabledAgents = libraryData.agents.filter(
+        (agent: Record<string, unknown>) => agent.is_enabled
+      );
 
       // Convert backend agents to UI format
       const uiAgents = enabledAgents.map((agent: Record<string, unknown>) => ({
@@ -495,7 +564,7 @@ export default function Project() {
         name: agent.name as string,
         icon: (agent.icon as string) || '🤖',
         backendId: agent.id as string,
-        mode: agent.mode as string
+        mode: agent.mode as string,
       }));
 
       setAgents(uiAgents);
@@ -505,56 +574,57 @@ export default function Project() {
     }
   };
 
-  const handleFileUpdate = useCallback(async (filePath: string, content: string) => {
-    if (!slug) return;
+  const handleFileUpdate = useCallback(
+    async (filePath: string, content: string) => {
+      if (!slug) return;
 
-    // For container-scoped views, prepend container directory when saving
-    // (we stripped it for display, now add it back for the API)
-    const saveFilePath = (containerId && container?.directory)
-      ? `${container.directory}/${filePath}`
-      : filePath;
+      // For container-scoped views, prepend container directory when saving
+      // (we stripped it for display, now add it back for the API)
+      const saveFilePath =
+        containerId && container?.directory ? `${container.directory}/${filePath}` : filePath;
 
-    // Track if this is a new file or an update
-    let isNewFile = false;
-    setFiles(prev => {
-      const existing = prev.find(f => f.file_path === filePath);
-      isNewFile = !existing;
-      if (existing) {
-        return prev.map(f =>
-          f.file_path === filePath ? { ...f, content } : f
-        );
-      }
-      return [...prev, { file_path: filePath, content }];
-    });
-
-    try {
-      await projectsApi.saveFile(slug, saveFilePath, content);
-
-      // Emit file event to refresh the code editor file tree
-      fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
-    } catch (error) {
-      console.error('Failed to save file:', error);
-      toast.error(`Failed to save ${filePath}`);
-    }
-
-    if (filePath.match(/\.(jsx?|tsx?|css|html)$/i)) {
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-      }
-
-      refreshTimeoutRef.current = setTimeout(() => {
-        const iframe = iframeRef.current;
-        if (iframe) {
-          try {
-            const currentSrc = iframe.src;
-            iframe.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 'hmr_fallback=' + Date.now();
-          } catch (error) {
-            console.log('Preview refresh error:', error);
-          }
+      // Track if this is a new file or an update
+      let isNewFile = false;
+      setFiles((prev) => {
+        const existing = prev.find((f) => f.file_path === filePath);
+        isNewFile = !existing;
+        if (existing) {
+          return prev.map((f) => (f.file_path === filePath ? { ...f, content } : f));
         }
-      }, 5000);
-    }
-  }, [slug, containerId, container]);
+        return [...prev, { file_path: filePath, content }];
+      });
+
+      try {
+        await projectsApi.saveFile(slug, saveFilePath, content);
+
+        // Emit file event to refresh the code editor file tree
+        fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
+      } catch (error) {
+        console.error('Failed to save file:', error);
+        toast.error(`Failed to save ${filePath}`);
+      }
+
+      if (filePath.match(/\.(jsx?|tsx?|css|html)$/i)) {
+        if (refreshTimeoutRef.current) {
+          clearTimeout(refreshTimeoutRef.current);
+        }
+
+        refreshTimeoutRef.current = setTimeout(() => {
+          const iframe = iframeRef.current;
+          if (iframe) {
+            try {
+              const currentSrc = iframe.src;
+              iframe.src =
+                currentSrc + (currentSrc.includes('?') ? '&' : '?') + 'hmr_fallback=' + Date.now();
+            } catch (error) {
+              console.log('Preview refresh error:', error);
+            }
+          }
+        }, 5000);
+      }
+    },
+    [slug, containerId, container]
+  );
 
   const loadDevServerUrl = async () => {
     if (!slug) return;
@@ -577,7 +647,8 @@ export default function Project() {
         setDevServerUrl(response.url);
         // Only add auth_token for Kubernetes deployment (NGINX Ingress auth)
         if (token && deploymentMode === 'kubernetes') {
-          const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
+          const urlWithAuth =
+            response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
         } else {
           setDevServerUrlWithAuth(response.url);
@@ -589,7 +660,8 @@ export default function Project() {
         setDevServerUrl(response.url);
         // Only add auth_token for Kubernetes deployment (NGINX Ingress auth)
         if (token && deploymentMode === 'kubernetes') {
-          const urlWithAuth = response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
+          const urlWithAuth =
+            response.url + (response.url.includes('?') ? '&' : '?') + 'auth_token=' + token;
           setDevServerUrlWithAuth(urlWithAuth);
         } else {
           setDevServerUrlWithAuth(response.url);
@@ -599,7 +671,10 @@ export default function Project() {
       toast.dismiss('dev-server');
       const err = error as { response?: { data?: { detail?: { message?: string } | string } } };
       const detail = err.response?.data?.detail;
-      const errorMessage = (typeof detail === 'object' && detail?.message) || (typeof detail === 'string' ? detail : null) || 'Failed to start dev server';
+      const errorMessage =
+        (typeof detail === 'object' && detail?.message) ||
+        (typeof detail === 'string' ? detail : null) ||
+        'Failed to start dev server';
       toast.error(errorMessage, { id: 'dev-server' });
       setTimeout(() => loadDevServerUrl(), 5000);
     }
@@ -657,89 +732,89 @@ export default function Project() {
       icon: <Monitor size={18} />,
       title: 'Preview',
       onClick: () => setActiveView('preview'),
-      active: activeView === 'preview'
+      active: activeView === 'preview',
     },
     {
       icon: <Code size={18} />,
       title: 'Code',
       onClick: () => setActiveView('code'),
-      active: activeView === 'code'
+      active: activeView === 'code',
     },
     {
       icon: <Kanban size={18} />,
       title: 'Kanban Board',
       onClick: () => setActiveView('kanban'),
-      active: activeView === 'kanban'
+      active: activeView === 'kanban',
     },
     {
       icon: <Image size={18} />,
       title: 'Assets',
       onClick: () => setActiveView('assets'),
-      active: activeView === 'assets'
+      active: activeView === 'assets',
     },
     {
       icon: <Terminal size={18} />,
       title: 'Terminal',
       onClick: () => setActiveView('terminal'),
-      active: activeView === 'terminal'
+      active: activeView === 'terminal',
     },
     {
       icon: <Folder size={18} />,
       title: 'Files',
-      onClick: () => toast('File tree feature coming soon!', { icon: '📁' })
+      onClick: () => toast('File tree feature coming soon!', { icon: '📁' }),
     },
     {
       icon: <Cube size={18} />,
       title: 'Components',
-      onClick: () => toast('Components library coming soon!', { icon: '🧩' })
+      onClick: () => toast('Components library coming soon!', { icon: '🧩' }),
     },
     {
       icon: <FlowArrow size={18} />,
       title: 'Architecture',
       onClick: () => togglePanel('architecture'),
-      active: activePanel === 'architecture'
-    }
+      active: activePanel === 'architecture',
+    },
   ];
 
   const rightSidebarItems = [
     {
       icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
       title: 'Toggle Theme',
-      onClick: toggleTheme
+      onClick: toggleTheme,
     },
     {
       icon: <BookOpen size={18} />,
       title: 'Notes',
       onClick: () => togglePanel('notes'),
-      active: activePanel === 'notes'
+      active: activePanel === 'notes',
     },
     {
       icon: <GitBranch size={18} />,
       title: 'GitHub Sync',
       onClick: () => togglePanel('github'),
-      active: activePanel === 'github'
+      active: activePanel === 'github',
     },
     {
       icon: <Storefront size={18} />,
       title: 'Agents',
-      onClick: () => navigate('/marketplace')
+      onClick: () => navigate('/marketplace'),
     },
     {
       icon: <Article size={18} />,
       title: 'Documentation',
-      onClick: () => window.open('https://docs.tesslate.com', '_blank')
+      onClick: () => window.open('https://docs.tesslate.com', '_blank'),
     },
     {
       icon: <Gear size={18} />,
       title: 'Settings',
       onClick: () => togglePanel('settings'),
-      active: activePanel === 'settings'
+      active: activePanel === 'settings',
     },
     {
       icon: <ShareNetwork size={18} />,
       title: 'Share',
-      onClick: () => toast('Share feature coming soon!', { icon: '🔗' })
-    }
+      onClick: () => toast('Share feature coming soon!', { icon: '🔗' }),
+    },
   ];
 
   return (
@@ -755,19 +830,30 @@ export default function Project() {
         initial={false}
         animate={{ width: isLeftSidebarExpanded ? 192 : 48 }}
         transition={{
-          type: "spring",
+          type: 'spring',
           stiffness: 700,
           damping: 28,
-          mass: 0.4
+          mass: 0.4,
         }}
         className="hidden md:flex flex-col bg-[var(--surface)] border-r border-[var(--sidebar-border)] overflow-x-hidden"
       >
         {/* Tesslate Logo */}
-        <div className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}>
+        <div
+          className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}
+        >
           <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
-            <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-            <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-            <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+            <path
+              d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"
+              fill="currentColor"
+            />
+            <path
+              d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"
+              fill="currentColor"
+            />
+            <path
+              d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"
+              fill="currentColor"
+            />
           </svg>
           {isLeftSidebarExpanded && (
             <span className="text-lg font-bold text-[var(--text)]">Tesslate</span>
@@ -775,58 +861,42 @@ export default function Project() {
         </div>
 
         <div className="py-3 gap-1 flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
-
-        {/* Back Button */}
-        {isLeftSidebarExpanded ? (
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
-          >
-            <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
-            <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
-          </button>
-        ) : (
-          <Tooltip content="Back to Projects" side="right" delay={200}>
+          {/* Back Button */}
+          {isLeftSidebarExpanded ? (
             <button
               onClick={() => navigate('/dashboard')}
-              className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
+              className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
             >
-              <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
-            </button>
-          </Tooltip>
-        )}
-
-        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
-
-        {/* Main View Toggles */}
-        {leftSidebarItems.map((item, index) => (
-          isLeftSidebarExpanded ? (
-            <button
-              key={index}
-              onClick={item.onClick}
-              className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                item.active
-                  ? 'bg-[var(--sidebar-active)]'
-                  : 'hover:bg-[var(--sidebar-hover)]'
-              }`}
-            >
-              {React.cloneElement(item.icon, {
-                className: `transition-colors ${
-                  item.active
-                    ? 'text-[var(--text)]'
-                    : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                }`
-              })}
-              <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
+              <ArrowLeft
+                size={18}
+                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+              />
+              <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
             </button>
           ) : (
-            <Tooltip key={index} content={item.title} side="right" delay={200}>
+            <Tooltip content="Back to Projects" side="right" delay={200}>
               <button
+                onClick={() => navigate('/dashboard')}
+                className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
+              >
+                <ArrowLeft
+                  size={18}
+                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+                />
+              </button>
+            </Tooltip>
+          )}
+
+          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+
+          {/* Main View Toggles */}
+          {leftSidebarItems.map((item, index) =>
+            isLeftSidebarExpanded ? (
+              <button
+                key={index}
                 onClick={item.onClick}
-                className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                  item.active
-                    ? 'bg-[var(--sidebar-active)]'
-                    : 'hover:bg-[var(--sidebar-hover)]'
+                className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
+                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
                 {React.cloneElement(item.icon, {
@@ -834,44 +904,40 @@ export default function Project() {
                     item.active
                       ? 'text-[var(--text)]'
                       : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`
+                  }`,
                 })}
+                <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
               </button>
-            </Tooltip>
-          )
-        ))}
+            ) : (
+              <Tooltip key={index} content={item.title} side="right" delay={200}>
+                <button
+                  onClick={item.onClick}
+                  className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
+                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                  }`}
+                >
+                  {React.cloneElement(item.icon, {
+                    className: `transition-colors ${
+                      item.active
+                        ? 'text-[var(--text)]'
+                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                    }`,
+                  })}
+                </button>
+              </Tooltip>
+            )
+          )}
 
-        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
 
-        {/* Settings & Tools */}
-        {rightSidebarItems.map((item, index) => (
-          isLeftSidebarExpanded ? (
-            <button
-              key={index}
-              onClick={item.onClick}
-              className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                item.active
-                  ? 'bg-[var(--sidebar-active)]'
-                  : 'hover:bg-[var(--sidebar-hover)]'
-              }`}
-            >
-              {React.cloneElement(item.icon, {
-                className: `transition-colors ${
-                  item.active
-                    ? 'text-[var(--text)]'
-                    : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                }`
-              })}
-              <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
-            </button>
-          ) : (
-            <Tooltip key={index} content={item.title} side="right" delay={200}>
+          {/* Settings & Tools */}
+          {rightSidebarItems.map((item, index) =>
+            isLeftSidebarExpanded ? (
               <button
+                key={index}
                 onClick={item.onClick}
-                className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                  item.active
-                    ? 'bg-[var(--sidebar-active)]'
-                    : 'hover:bg-[var(--sidebar-hover)]'
+                className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
+                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
                 {React.cloneElement(item.icon, {
@@ -879,37 +945,62 @@ export default function Project() {
                     item.active
                       ? 'text-[var(--text)]'
                       : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`
+                  }`,
                 })}
+                <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
+              </button>
+            ) : (
+              <Tooltip key={index} content={item.title} side="right" delay={200}>
+                <button
+                  onClick={item.onClick}
+                  className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
+                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                  }`}
+                >
+                  {React.cloneElement(item.icon, {
+                    className: `transition-colors ${
+                      item.active
+                        ? 'text-[var(--text)]'
+                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                    }`,
+                  })}
+                </button>
+              </Tooltip>
+            )
+          )}
+
+          {/* Spacer to push collapse button to bottom */}
+          <div className="flex-1" />
+
+          <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
+
+          {/* Collapse/Expand Toggle */}
+          {isLeftSidebarExpanded ? (
+            <button
+              onClick={() => setIsLeftSidebarExpanded(false)}
+              className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
+            >
+              <List
+                size={18}
+                weight="bold"
+                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+              />
+              <span className="text-sm font-medium text-[var(--text)]">Collapse</span>
+            </button>
+          ) : (
+            <Tooltip content="Expand" side="right" delay={200}>
+              <button
+                onClick={() => setIsLeftSidebarExpanded(true)}
+                className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
+              >
+                <List
+                  size={18}
+                  weight="bold"
+                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+                />
               </button>
             </Tooltip>
-          )
-        ))}
-
-        {/* Spacer to push collapse button to bottom */}
-        <div className="flex-1" />
-
-        <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
-
-        {/* Collapse/Expand Toggle */}
-        {isLeftSidebarExpanded ? (
-          <button
-            onClick={() => setIsLeftSidebarExpanded(false)}
-            className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
-          >
-            <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
-            <span className="text-sm font-medium text-[var(--text)]">Collapse</span>
-          </button>
-        ) : (
-          <Tooltip content="Expand" side="right" delay={200}>
-            <button
-              onClick={() => setIsLeftSidebarExpanded(true)}
-              className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
-            >
-              <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
-            </button>
-          </Tooltip>
-        )}
+          )}
         </div>
       </motion.div>
 
@@ -922,7 +1013,7 @@ export default function Project() {
               items={[
                 { label: 'Projects', href: '/dashboard' },
                 { label: project.name, href: `/project/${slug}` },
-                { label: 'Builder' }
+                { label: 'Builder' },
               ]}
             />
 
@@ -930,11 +1021,11 @@ export default function Project() {
             {containers.length > 0 && (
               <div className="hidden md:flex items-center border-l border-white/10 pl-4">
                 <ContainerSelector
-                  containers={containers.map(c => ({
+                  containers={containers.map((c) => ({
                     id: c.id as string,
                     name: c.name as string,
                     status: c.status as string,
-                    base: c.base as { slug: string; name: string } | undefined
+                    base: c.base as { slug: string; name: string } | undefined,
                   }))}
                   currentContainerId={containerId || (container?.id as string)}
                   onChange={(id) => navigate(`/project/${slug}/builder?container=${id}`)}
@@ -952,7 +1043,9 @@ export default function Project() {
             >
               <FlowArrow size={18} className="text-[var(--text)]" />
               <span className="text-sm font-medium text-[var(--text)]">Architecture</span>
-              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">Beta</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+                Beta
+              </span>
             </button>
 
             {/* Deploy Button with Dropdown */}
@@ -973,11 +1066,7 @@ export default function Project() {
             </div>
 
             {/* User Dropdown */}
-            <UserDropdown
-              userName={userName}
-              userCredits={userCredits}
-              userTier={userTier}
-            />
+            <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
 
             {/* Mobile hamburger menu */}
             <button
@@ -985,8 +1074,18 @@ export default function Project() {
               className="md:hidden p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors"
               aria-label="Open menu"
             >
-              <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <svg
+                className="w-6 h-6 text-[var(--text)]"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
               </svg>
             </button>
           </div>
@@ -1047,7 +1146,9 @@ export default function Project() {
                     <div className="hidden md:block flex-1">
                       <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
                         <span className="text-yellow-500 mr-2">🔒</span>
-                        <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
+                        <span className="text-[var(--text)]/80 truncate">
+                          {currentPreviewUrl || devServerUrl}
+                        </span>
                       </div>
                     </div>
                     <button
@@ -1078,12 +1179,10 @@ export default function Project() {
           </div>
 
           {/* Code View */}
-          <div className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}>
-            <CodeEditor
-              projectId={project?.id}
-              files={files}
-              onFileUpdate={handleFileUpdate}
-            />
+          <div
+            className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
+          >
+            <CodeEditor projectId={project?.id} files={files} onFileUpdate={handleFileUpdate} />
           </div>
 
           {/* Kanban View */}
@@ -1102,6 +1201,25 @@ export default function Project() {
           </div>
         </div>
       </div>
+
+      {/* RIGHT DOCKED CHAT - When chat position is 'right' */}
+      {chatPosition === 'right' && agents.length > 0 && (
+        <div className="hidden md:flex flex-col w-[400px] bg-[var(--bg-dark)] border-l border-[var(--surface)]">
+          <ChatContainer
+            projectId={project?.id}
+            containerId={containerId || undefined}
+            viewContext="builder"
+            agents={agents}
+            currentAgent={agents[0]}
+            onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+            onFileUpdate={handleFileUpdate}
+            projectFiles={files}
+            projectName={project?.name}
+            sidebarExpanded={isLeftSidebarExpanded}
+            isDocked={true}
+          />
+        </div>
+      )}
 
       {/* Floating Panels */}
       <FloatingPanel
@@ -1142,8 +1260,8 @@ export default function Project() {
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
 
-      {/* Chat Interface or Empty State */}
-      {agents.length > 0 ? (
+      {/* CENTER FLOATING CHAT - Only when chat position is 'center' */}
+      {chatPosition === 'center' && agents.length > 0 && (
         <ChatContainer
           projectId={project?.id}
           containerId={containerId || undefined}
@@ -1156,7 +1274,10 @@ export default function Project() {
           projectName={project?.name}
           sidebarExpanded={isLeftSidebarExpanded}
         />
-      ) : (
+      )}
+
+      {/* No Agents Empty State */}
+      {agents.length === 0 && (
         <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">
           <div className="bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-2xl shadow-2xl p-8 max-w-md pointer-events-auto">
             <div className="text-center">

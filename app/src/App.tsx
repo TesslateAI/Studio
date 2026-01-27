@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ThemeProvider, useTheme } from './theme';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ChatPositionProvider } from './contexts/ChatPositionContext';
 import { CommandProvider } from './contexts/CommandContext';
 import { DashboardLayout } from './components/DashboardLayout';
 import Landing from './pages/Landing';
@@ -336,17 +337,19 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <CommandProvider>
-          <style>{`
-            @keyframes spin {
-              0% { transform: rotate(0deg); }
-              100% { transform: rotate(360deg); }
-            }
-          `}</style>
-          <BrowserRouter>
-            <AppContent />
-          </BrowserRouter>
-        </CommandProvider>
+        <ChatPositionProvider>
+          <CommandProvider>
+            <style>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}</style>
+            <BrowserRouter>
+              <AppContent />
+            </BrowserRouter>
+          </CommandProvider>
+        </ChatPositionProvider>
       </AuthProvider>
     </ThemeProvider>
   );

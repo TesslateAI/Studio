@@ -14,10 +14,10 @@ import { type AgentMessageData, type DBMessage } from '../../types/agent';
 interface Agent {
   id: string;
   name: string;
-  icon: string;  // Emoji string from backend
-  avatar_url?: string;  // Uploaded logo URL
+  icon: string; // Emoji string from backend
+  avatar_url?: string; // Uploaded logo URL
   active?: boolean;
-  backendId?: number;  // Link to backend agent ID
+  backendId?: number; // Link to backend agent ID
   mode?: 'stream' | 'agent';
 }
 
@@ -56,8 +56,8 @@ interface ProjectFile {
 
 interface ChatContainerProps {
   projectId: number;
-  containerId?: string;  // Container ID for container-scoped agents
-  viewContext?: 'graph' | 'builder' | 'terminal' | 'kanban';  // UI view context for scoped tools
+  containerId?: string; // Container ID for container-scoped agents
+  viewContext?: 'graph' | 'builder' | 'terminal' | 'kanban'; // UI view context for scoped tools
   agents: Agent[];
   currentAgent: Agent;
   onSelectAgent: (agent: Agent) => void;
@@ -66,6 +66,7 @@ interface ChatContainerProps {
   projectName?: string;
   className?: string;
   sidebarExpanded?: boolean;
+  isDocked?: boolean; // When true, renders as docked panel instead of floating
 }
 
 export function ChatContainer({
@@ -80,6 +81,7 @@ export function ChatContainer({
   projectName = 'project',
   className = '',
   sidebarExpanded = true,
+  isDocked = false,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -94,6 +96,10 @@ export function ChatContainer({
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
+
+  // When docked, always show as expanded
+  const effectiveIsExpanded = isDocked || isExpanded;
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -122,7 +128,7 @@ export function ChatContainer({
               expandedMessages.push({
                 id: `msg-${idx}`,
                 type: messageType,
-                content: msg.content
+                content: msg.content,
               });
             }
             return;
@@ -130,9 +136,10 @@ export function ChatContainer({
 
           // For agent messages, split iterations into separate messages
           // Find agent icon from initialAgents if available
-          const agentData = initialAgents.length > 0
-            ? initialAgents.find(a => a.name === msg.message_metadata?.agent_type)
-            : null;
+          const agentData =
+            initialAgents.length > 0
+              ? initialAgents.find((a) => a.name === msg.message_metadata?.agent_type)
+              : null;
           const agentIcon = agentData?.icon || '🤖'; // Fallback icon if agents not loaded yet
           const agentType = msg.message_metadata.agent_type;
           const finalResponse = msg.content && msg.content.trim() ? msg.content : '';
@@ -141,7 +148,9 @@ export function ChatContainer({
           if (msg.message_metadata.steps && msg.message_metadata.steps.length > 0) {
             msg.message_metadata.steps.forEach((step, stepIdx) => {
               // Only add steps that have tool calls or thoughts (match AgentMessage filtering)
-              const hasContent = (step.tool_calls && step.tool_calls.length > 0) || (step.thought && step.thought.trim());
+              const hasContent =
+                (step.tool_calls && step.tool_calls.length > 0) ||
+                (step.thought && step.thought.trim());
               if (!hasContent) return;
 
               expandedMessages.push({
@@ -152,10 +161,10 @@ export function ChatContainer({
                   steps: [step],
                   iterations: step.iteration || stepIdx + 1,
                   tool_calls_made: step.tool_calls?.length || 0,
-                  completion_reason: 'step_complete'
+                  completion_reason: 'step_complete',
                 },
                 agentIcon,
-                agentType
+                agentType,
               });
             });
 
@@ -169,10 +178,10 @@ export function ChatContainer({
                   steps: [],
                   iterations: 0,
                   tool_calls_made: 0,
-                  completion_reason: 'complete'
+                  completion_reason: 'complete',
                 },
                 agentIcon,
-                agentType
+                agentType,
               });
             }
           } else if (finalResponse) {
@@ -185,10 +194,10 @@ export function ChatContainer({
                 steps: [],
                 iterations: 0,
                 tool_calls_made: 0,
-                completion_reason: 'complete'
+                completion_reason: 'complete',
               },
               agentIcon,
-              agentType
+              agentType,
             });
           }
         });
@@ -211,7 +220,7 @@ export function ChatContainer({
       setAgents(initialAgents);
 
       // Set first agent as default if current agent not in list
-      if (!initialAgents.find(a => a.id === currentAgent.id)) {
+      if (!initialAgents.find((a) => a.id === currentAgent.id)) {
         const defaultAgent = initialAgents[0];
         setCurrentAgent(defaultAgent);
         onSelectAgent(defaultAgent);
@@ -290,27 +299,32 @@ export function ChatContainer({
           console.log('[WS] Message:', data.type);
 
           if (data.type === 'stream') {
-            setCurrentStream(prev => prev + data.content);
+            setCurrentStream((prev) => prev + data.content);
 
             // Extract file names from code blocks
             const codeBlockPattern = /```\w+\s*\n\/\/\s*File:\s*([^\n]+)/g;
             let match;
             while ((match = codeBlockPattern.exec(data.content)) !== null) {
               const fileName = match[1].trim();
-              setStreamingFiles(prev => new Map(prev).set(fileName, { fileName, isStreaming: true }));
+              setStreamingFiles((prev) =>
+                new Map(prev).set(fileName, { fileName, isStreaming: true })
+              );
             }
           } else if (data.type === 'complete') {
             // Handle complete event from both StreamAgent and IterativeAgent
             const finalResponse = data.data?.final_response || data.content || currentStream;
 
-            setMessages(prev => [...prev, {
-              id: `msg-${Date.now()}`,
-              type: 'ai',
-              content: finalResponse
-            }]);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `msg-${Date.now()}`,
+                type: 'ai',
+                content: finalResponse,
+              },
+            ]);
             setCurrentStream('');
             setIsStreaming(false);
-            setStreamingFiles(prev => {
+            setStreamingFiles((prev) => {
               const newMap = new Map(prev);
               newMap.forEach((file, key) => {
                 newMap.set(key, { ...file, isStreaming: false });
@@ -322,7 +336,7 @@ export function ChatContainer({
             toast.success(`Created ${data.file_path}`, { duration: 2000 });
 
             const fileName = data.file_path.replace(/^src\//, '');
-            setStreamingFiles(prev => {
+            setStreamingFiles((prev) => {
               const newMap = new Map(prev);
               if (newMap.has(fileName)) {
                 newMap.set(fileName, { fileName, isStreaming: false });
@@ -333,7 +347,7 @@ export function ChatContainer({
             toast.error(data.content);
             setIsStreaming(false);
             setCurrentStream('');
-            setStreamingFiles(prev => {
+            setStreamingFiles((prev) => {
               const newMap = new Map(prev);
               newMap.forEach((file, key) => {
                 newMap.set(key, { ...file, isStreaming: false });
@@ -351,7 +365,7 @@ export function ChatContainer({
               toolParameters: data.data.tool_parameters,
               toolDescription: data.data.tool_description,
             };
-            setMessages(prev => [...prev, approvalMessage]);
+            setMessages((prev) => [...prev, approvalMessage]);
           } else if (data.type === 'status_update') {
             // Handle hibernation status updates
             // Backend sends: { type: 'status_update', payload: { environment_status, message, action } }
@@ -395,7 +409,9 @@ export function ChatContainer({
             const delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), 30000);
             reconnectAttempts++;
 
-            console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+            console.log(
+              `[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`
+            );
 
             reconnectTimer = setTimeout(() => {
               connectWebSocket();
@@ -458,7 +474,7 @@ export function ChatContainer({
   // Smart auto-scroll: only scroll if user hasn't manually scrolled up
   useEffect(() => {
     const container = messagesContainerRef.current;
-    if (!isExpanded || !container || !messagesEndRef.current) return;
+    if (!effectiveIsExpanded || !container || !messagesEndRef.current) return;
 
     const { scrollTop, scrollHeight, clientHeight } = container;
     const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
@@ -474,13 +490,21 @@ export function ChatContainer({
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
       isUserScrollingRef.current = false; // Reset after scrolling
     }
-  }, [messages, currentStream, isExpanded]);
+  }, [messages, currentStream, effectiveIsExpanded]);
 
   // Collapse chat when clicking outside (including clicks on iframe/preview) - desktop only
+  // Skip this behavior when docked since docked chat should always stay open
   useEffect(() => {
+    // Don't add collapse behavior when docked
+    if (isDocked) return;
+
     const handleClickOutside = (event: MouseEvent) => {
       // Only auto-close on desktop (md breakpoint is 768px)
-      if (window.innerWidth >= 768 && containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (
+        window.innerWidth >= 768 &&
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
         setIsExpanded(false);
       }
     };
@@ -504,7 +528,7 @@ export function ChatContainer({
         window.removeEventListener('blur', handleWindowBlur);
       };
     }
-  }, [isExpanded]);
+  }, [isExpanded, isDocked]);
 
   const handleInputFocus = () => {
     setIsExpanded(true);
@@ -521,20 +545,22 @@ export function ChatContainer({
     const userMessage: Message = {
       id: `msg-${Date.now()}`,
       type: 'user',
-      content: message
+      content: message,
     };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
     setStreamingFiles(new Map());
 
-    wsRef.current.send(JSON.stringify({
-      message,
-      project_id: projectId,
-      container_id: containerId,  // Container ID for scoped file access
-      agent_id: currentAgent.backendId,  // Include agent_id
-      edit_mode: editMode,  // Include edit mode
-      view_context: viewContext  // UI view context for scoped tools
-    }));
+    wsRef.current.send(
+      JSON.stringify({
+        message,
+        project_id: projectId,
+        container_id: containerId, // Container ID for scoped file access
+        agent_id: currentAgent.backendId, // Include agent_id
+        edit_mode: editMode, // Include edit mode
+        view_context: viewContext, // UI view context for scoped tools
+      })
+    );
   };
 
   const [abortController, setAbortController] = useState<AbortController | null>(null);
@@ -586,16 +612,15 @@ export function ChatContainer({
     };
   }, [agentExecuting, stopAgentExecution]);
 
-
   const sendAgentMessage = async (message: string) => {
     if (!message.trim() || agentExecuting) return;
 
     const userMessage: Message = {
       id: `msg-${Date.now()}`,
       type: 'user',
-      content: message
+      content: message,
     };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setAgentExecuting(true);
 
     // Create abort controller
@@ -618,29 +643,32 @@ export function ChatContainer({
       agentAvatarUrl: currentAgent.avatar_url,
       agentType: currentAgent.name,
     };
-    setMessages(prev => [...prev, thinkingMessage]);
+    setMessages((prev) => [...prev, thinkingMessage]);
 
     try {
       await chatApi.sendAgentMessageStreaming(
         {
           project_id: projectId.toString(),
-          container_id: containerId,  // Container ID for scoped file access
+          container_id: containerId, // Container ID for scoped file access
           message,
           agent_id: currentAgent.backendId?.toString(),
           max_iterations: 20,
           edit_mode: editMode,
-          view_context: viewContext,  // UI view context for scoped tools
+          view_context: viewContext, // UI view context for scoped tools
         },
         (event) => {
           if (event.type === 'agent_step') {
             // Transform tool_results array to match HTTP format
             const transformedStep = {
               ...event.data,
-              tool_calls: event.data.tool_calls?.map((tc: { name: string; parameters: unknown }, index: number) => ({
-                name: tc.name,
-                parameters: tc.parameters,
-                result: event.data.tool_results?.[index] || {}
-              })) || []
+              tool_calls:
+                event.data.tool_calls?.map(
+                  (tc: { name: string; parameters: unknown }, index: number) => ({
+                    name: tc.name,
+                    parameters: tc.parameters,
+                    result: event.data.tool_results?.[index] || {},
+                  })
+                ) || [],
             };
             delete transformedStep.tool_results;
 
@@ -661,19 +689,23 @@ export function ChatContainer({
             };
 
             // Remove thinking message, add step message, and re-add thinking message in one update
-            setMessages(prev => {
-              const withoutThinking = prev.filter(msg => msg.id !== thinkingMessageId);
-              return [...withoutThinking, stepMessage, { ...thinkingMessage, id: thinkingMessageId }];
+            setMessages((prev) => {
+              const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
+              return [
+                ...withoutThinking,
+                stepMessage,
+                { ...thinkingMessage, id: thinkingMessageId },
+              ];
             });
           } else if (event.type === 'complete') {
             // Remove thinking message
-            setMessages(prev => prev.filter(msg => msg.id !== thinkingMessageId));
+            setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
 
             // Add final response as part of AgentMessage (not a separate message)
             const finalContent = event.data.final_response;
             if (finalContent && finalContent.trim()) {
               // Update the last agent message to include the final response
-              setMessages(prev => {
+              setMessages((prev) => {
                 const lastMsg = prev[prev.length - 1];
                 if (lastMsg && lastMsg.agentData) {
                   return [
@@ -681,30 +713,36 @@ export function ChatContainer({
                     {
                       ...lastMsg,
                       content: finalContent,
-                    }
+                    },
                   ];
                 }
                 // Fallback: if no agent message exists, create one
-                return [...prev, {
-                  id: `msg-${Date.now()}-result`,
-                  type: 'ai',
-                  content: finalContent,
-                  agentData: {
-                    steps: [],
-                    iterations: 0,
-                    tool_calls_made: 0,
-                    completion_reason: 'complete',
+                return [
+                  ...prev,
+                  {
+                    id: `msg-${Date.now()}-result`,
+                    type: 'ai',
+                    content: finalContent,
+                    agentData: {
+                      steps: [],
+                      iterations: 0,
+                      tool_calls_made: 0,
+                      completion_reason: 'complete',
+                    },
+                    agentIcon: currentAgent.icon,
+                    agentAvatarUrl: currentAgent.avatar_url,
+                    agentType: currentAgent.name,
                   },
-                  agentIcon: currentAgent.icon,
-                  agentAvatarUrl: currentAgent.avatar_url,
-                  agentType: currentAgent.name,
-                }];
+                ];
               });
             }
 
             toast.success('Task completed successfully');
           } else if (event.type === 'error') {
-            const errorMsg = (event as { content?: string; data?: { message?: string } }).content || event.data?.message || 'Agent execution failed';
+            const errorMsg =
+              (event as { content?: string; data?: { message?: string } }).content ||
+              event.data?.message ||
+              'Agent execution failed';
             throw new Error(errorMsg);
           } else if (event.type === 'approval_required') {
             // Handle approval request - add approval message to chat
@@ -717,7 +755,7 @@ export function ChatContainer({
               toolParameters: event.data.tool_parameters,
               toolDescription: event.data.tool_description,
             };
-            setMessages(prev => [...prev, approvalMessage]);
+            setMessages((prev) => [...prev, approvalMessage]);
           }
         },
         controller.signal
@@ -727,13 +765,16 @@ export function ChatContainer({
         console.log('[AGENT] Execution aborted by user');
 
         // Remove thinking message and add stopped message
-        setMessages(prev => {
-          const withoutThinking = prev.filter(msg => msg.id !== thinkingMessageId);
-          return [...withoutThinking, {
-            id: `msg-${Date.now()}-stopped`,
-            type: 'ai',
-            content: '_[Execution stopped by user]_',
-          }];
+        setMessages((prev) => {
+          const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
+          return [
+            ...withoutThinking,
+            {
+              id: `msg-${Date.now()}-stopped`,
+              type: 'ai',
+              content: '_[Execution stopped by user]_',
+            },
+          ];
         });
 
         return;
@@ -742,13 +783,17 @@ export function ChatContainer({
       console.error('[AGENT] Streaming execution error:', error);
 
       // Remove thinking message and add error message
-      setMessages(prev => {
-        const withoutThinking = prev.filter(msg => msg.id !== thinkingMessageId);
-        return [...withoutThinking, {
-          id: `msg-${Date.now()}-error`,
-          type: 'ai',
-          content: "I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.",
-        }];
+      setMessages((prev) => {
+        const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
+        return [
+          ...withoutThinking,
+          {
+            id: `msg-${Date.now()}-error`,
+            type: 'ai',
+            content:
+              'I apologize, but I encountered an error while working on your request. The task could not be completed. Please try again or contact support if the issue persists.',
+          },
+        ];
       });
 
       const errorDetail = error instanceof Error ? error.message : 'Failed to execute agent';
@@ -782,17 +827,23 @@ export function ChatContainer({
     }
   };
 
-  const handleApprovalResponse = async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop', toolName: string) => {
+  const handleApprovalResponse = async (
+    approvalId: string,
+    response: 'allow_once' | 'allow_all' | 'stop',
+    toolName: string
+  ) => {
     // Define write tools that should switch mode
     const WRITE_TOOLS = new Set(['write_file', 'patch_file', 'multi_edit']);
 
     // Send approval response via WebSocket (for stream mode)
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'approval_response',
-        approval_id: approvalId,
-        response: response
-      }));
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'approval_response',
+          approval_id: approvalId,
+          response: response,
+        })
+      );
     } else if (agentExecuting) {
       // Send approval response via HTTP API (for SSE agent mode)
       try {
@@ -806,9 +857,9 @@ export function ChatContainer({
     }
 
     // Remove approval message from chat
-    setMessages(prev => prev.filter(msg =>
-      !(msg.type === 'approval_request' && msg.approvalId === approvalId)
-    ));
+    setMessages((prev) =>
+      prev.filter((msg) => !(msg.type === 'approval_request' && msg.approvalId === approvalId))
+    );
 
     // Handle mode switching for write tools
     if (response === 'allow_all' && WRITE_TOOLS.has(toolName)) {
@@ -833,12 +884,18 @@ export function ChatContainer({
     let processedContent = content;
 
     if (isCurrentlyStreaming) {
-      processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*?```/g, (match, fileName) => {
-        return `[FILE: ${fileName.trim()}]`;
-      });
-      processedContent = processedContent.replace(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*$/g, (match, fileName) => {
-        return `[FILE: ${fileName.trim()}]`;
-      });
+      processedContent = processedContent.replace(
+        /```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*?```/g,
+        (match, fileName) => {
+          return `[FILE: ${fileName.trim()}]`;
+        }
+      );
+      processedContent = processedContent.replace(
+        /```\w+\s*\n\/\/\s*File:\s*([^\n]+)[\s\S]*$/g,
+        (match, fileName) => {
+          return `[FILE: ${fileName.trim()}]`;
+        }
+      );
     } else {
       processedContent = processedContent.replace(/```[\s\S]*?```/g, (match) => {
         const fileMatch = match.match(/```\w+\s*\n\/\/\s*File:\s*([^\n]+)/);
@@ -857,7 +914,8 @@ export function ChatContainer({
       } else {
         const fileName = part;
         const fileInfo = streamingFiles.get(fileName);
-        const isFileStreaming = isCurrentlyStreaming && (!fileInfo || fileInfo.isStreaming !== false);
+        const isFileStreaming =
+          isCurrentlyStreaming && (!fileInfo || fileInfo.isStreaming !== false);
 
         return (
           <div key={index} className="my-2">
@@ -881,11 +939,12 @@ export function ChatContainer({
 
   return (
     <>
-      {/* Mobile: Floating chat button - only show when collapsed */}
-      <div className="md:hidden fixed bottom-20 right-4 z-30 group">
-        <button
-          onClick={() => setIsExpanded(true)}
-          className={`
+      {/* Mobile: Floating chat button - only show when collapsed and not docked */}
+      {!isDocked && (
+        <div className="md:hidden fixed bottom-20 right-4 z-30 group">
+          <button
+            onClick={() => setIsExpanded(true)}
+            className={`
             w-12 h-12 md:w-16 md:h-16 rounded-full
             bg-[var(--primary)] hover:bg-[var(--primary-hover)] active:bg-[var(--primary-hover)]
             shadow-lg hover:shadow-xl
@@ -894,16 +953,24 @@ export function ChatContainer({
             hover:scale-110
             ${isExpanded ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'}
           `}
-          aria-label="Open chat"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="16" viewBox="0 0 161.9 126.66" className="text-white md:w-6 md:h-6" fill="currentColor">
-            <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"/>
-            <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"/>
-            <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"/>
-          </svg>
+            aria-label="Open chat"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="16"
+              viewBox="0 0 161.9 126.66"
+              className="text-white md:w-6 md:h-6"
+              fill="currentColor"
+            >
+              <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" />
+              <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" />
+              <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" />
+            </svg>
 
-          {/* Hover tooltip */}
-          <div className="
+            {/* Hover tooltip */}
+            <div
+              className="
             absolute bottom-full mb-2 right-0
             bg-gray-900 text-white text-sm
             px-3 py-2 rounded-lg
@@ -911,266 +978,310 @@ export function ChatContainer({
             opacity-0 group-hover:opacity-100
             transition-opacity duration-200
             pointer-events-none
-          ">
-            Open chat
-          </div>
-        </button>
-      </div>
+          "
+            >
+              Open chat
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* Chat container - 60-30-10: 60% bg-dark (dominant), 30% surface/borders (secondary), 10% orange accents */}
+      {/* When docked: fills parent, no fixed positioning, no glow effects */}
+      {/* When floating: fixed position, centered, with glow effects */}
       <div
         ref={containerRef}
         className={`
           chat-container
-          fixed
-          z-40
           flex flex-col
           bg-[var(--bg-dark)]
-          backdrop-blur-xl saturate-180
-          border-2 border-[var(--surface)]
-          shadow-2xl
-          transition-all duration-400 ease-[var(--ease)]
-          rounded-3xl
-          max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-b-none max-md:w-full
-          md:bottom-6 md:-translate-x-1/2
-          ${isExpanded
-            ? 'md:w-[min(800px,calc(100vw-48px))] md:max-h-[calc(100vh-48px)] max-md:max-h-[90vh] max-md:translate-y-0'
-            : 'md:w-[min(600px,calc(100vw-48px))] max-md:translate-y-full max-md:opacity-0 max-md:pointer-events-none'
+          ${
+            isDocked
+              ? 'w-full h-full'
+              : `
+              fixed
+              z-40
+              backdrop-blur-xl saturate-180
+              border-2 border-[var(--surface)]
+              shadow-2xl
+              transition-all duration-400 ease-[var(--ease)]
+              rounded-3xl
+              max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-b-none max-md:w-full
+              md:bottom-6 md:-translate-x-1/2
+              ${
+                isExpanded
+                  ? 'md:w-[min(800px,calc(100vw-48px))] md:max-h-[calc(100vh-48px)] max-md:max-h-[90vh] max-md:translate-y-0'
+                  : 'md:w-[min(600px,calc(100vw-48px))] max-md:translate-y-full max-md:opacity-0 max-md:pointer-events-none'
+              }
+              ${!isExpanded && isHovered ? 'md:w-[min(650px,calc(100vw-48px))]' : ''}
+            `
           }
-          ${!isExpanded && isHovered ? 'md:w-[min(650px,calc(100vw-48px))]' : ''}
           ${className}
         `}
-        style={isDesktop ? {
-          left: sidebarExpanded ? 'calc(96px + 50vw)' : 'calc(24px + 50vw)',
-          transition: 'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.4s var(--ease), max-height 0.4s var(--ease)'
-        } : {
-          transition: 'width 0.4s var(--ease), max-height 0.4s var(--ease), transform 0.4s var(--ease)'
-        }}
-        onMouseEnter={() => !isExpanded && setIsHovered(true)}
-        onMouseLeave={() => !isExpanded && setIsHovered(false)}
+        style={
+          !isDocked && isDesktop
+            ? {
+                left: sidebarExpanded ? 'calc(96px + 50vw)' : 'calc(24px + 50vw)',
+                transition:
+                  'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.4s var(--ease), max-height 0.4s var(--ease)',
+              }
+            : !isDocked
+              ? {
+                  transition:
+                    'width 0.4s var(--ease), max-height 0.4s var(--ease), transform 0.4s var(--ease)',
+                }
+              : undefined
+        }
+        onMouseEnter={() => !isDocked && !isExpanded && setIsHovered(true)}
+        onMouseLeave={() => !isDocked && !isExpanded && setIsHovered(false)}
       >
-      {/* Glow effects */}
-      <div
-        className={`
-          chat-glow glow-top
-          absolute -top-0.5 -right-0.5
-          w-3/5 h-3/5
-          bg-[radial-gradient(circle_at_top_right,hsl(var(--hue1)_80%_60%_/_0.3)_0%,transparent_70%)]
-          blur-xl
-          pointer-events-none
-          rounded-inherit
-          transition-opacity duration-400
-          ${isExpanded || isHovered ? 'opacity-100' : 'opacity-0'}
-        `}
-        style={{ zIndex: -1 }}
-      />
-      <div
-        className={`
-          chat-glow glow-bottom
-          absolute -bottom-0.5 -left-0.5
-          w-3/5 h-3/5
-          bg-[radial-gradient(circle_at_bottom_left,hsl(var(--hue2)_80%_60%_/_0.3)_0%,transparent_70%)]
-          blur-xl
-          pointer-events-none
-          rounded-inherit
-          transition-opacity duration-400
-          ${isExpanded || isHovered ? 'opacity-100' : 'opacity-0'}
-        `}
-        style={{ zIndex: -1 }}
-      />
+        {/* Glow effects - only shown when floating (not docked) */}
+        {!isDocked && (
+          <>
+            <div
+              className={`
+              chat-glow glow-top
+              absolute -top-0.5 -right-0.5
+              w-3/5 h-3/5
+              bg-[radial-gradient(circle_at_top_right,hsl(var(--hue1)_80%_60%_/_0.3)_0%,transparent_70%)]
+              blur-xl
+              pointer-events-none
+              rounded-inherit
+              transition-opacity duration-400
+              ${isExpanded || isHovered ? 'opacity-100' : 'opacity-0'}
+            `}
+              style={{ zIndex: -1 }}
+            />
+            <div
+              className={`
+              chat-glow glow-bottom
+              absolute -bottom-0.5 -left-0.5
+              w-3/5 h-3/5
+              bg-[radial-gradient(circle_at_bottom_left,hsl(var(--hue2)_80%_60%_/_0.3)_0%,transparent_70%)]
+              blur-xl
+              pointer-events-none
+              rounded-inherit
+              transition-opacity duration-400
+              ${isExpanded || isHovered ? 'opacity-100' : 'opacity-0'}
+            `}
+              style={{ zIndex: -1 }}
+            />
+          </>
+        )}
 
-      {/* Mobile header with close button - 30% secondary surface */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b-2 border-[var(--surface)] bg-[var(--surface)]/30">
-        <h3 className="text-sm font-semibold text-[var(--text)]">Chat</h3>
-        <button
-          onClick={() => setIsExpanded(false)}
-          className="p-2 hover:bg-[var(--primary)]/10 rounded-lg transition-colors -mr-2"
-          aria-label="Close chat"
-        >
-          <X size={20} className="text-[var(--text)]/60 hover:text-[var(--primary)]" />
-        </button>
-      </div>
+        {/* Mobile header with close button - only shown when floating (not docked) */}
+        {!isDocked && (
+          <div className="md:hidden flex items-center justify-between px-4 py-3 border-b-2 border-[var(--surface)] bg-[var(--surface)]/30">
+            <h3 className="text-sm font-semibold text-[var(--text)]">Chat</h3>
+            <button
+              onClick={() => setIsExpanded(false)}
+              className="p-2 hover:bg-[var(--primary)]/10 rounded-lg transition-colors -mr-2"
+              aria-label="Close chat"
+            >
+              <X size={20} className="text-[var(--text)]/60 hover:text-[var(--primary)]" />
+            </button>
+          </div>
+        )}
 
-      {/* Chat messages - only shown when expanded */}
-      <div
-        ref={messagesContainerRef}
-        className={`
+        {/* Chat messages - always visible when docked, otherwise only when expanded */}
+        <div
+          ref={messagesContainerRef}
+          className={`
           chat-messages
           flex-1 overflow-y-auto px-3
           transition-all duration-300
-          ${isExpanded ? 'pointer-events-auto' : 'pointer-events-none'}
-          ${isExpanded
-            ? 'opacity-100 max-h-[calc(100vh-400px)] py-3'
-            : 'opacity-0 max-h-0 py-0'
+          ${effectiveIsExpanded ? 'pointer-events-auto' : 'pointer-events-none'}
+          ${
+            effectiveIsExpanded
+              ? `opacity-100 py-3 ${isDocked ? '' : 'max-h-[calc(100vh-400px)]'}`
+              : 'opacity-0 max-h-0 py-0'
           }
         `}
-      >
-        {isLoadingHistory && (
-          <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
-            <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
-              <Loader2 className="animate-spin text-[var(--primary)]" size={32} />
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm max-w-xs mx-auto leading-relaxed">
-                Loading chat history...
-              </p>
-            </div>
-          </div>
-        )}
-
-        {!isLoadingHistory && messages.length === 0 && !isStreaming && (
-          <div className="text-center text-[var(--text)]/60 mt-8 space-y-6 max-w-md mx-auto px-4">
-            <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
-              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="25" viewBox="0 0 161.9 126.66" className="text-[var(--primary)]">
-                <g>
-                  <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor" strokeWidth="0"/>
-                  <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor" strokeWidth="0"/>
-                  <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor" strokeWidth="0"/>
-                </g>
-              </svg>
-            </div>
-            <div className="space-y-2">
-              <p className="text-lg font-semibold text-[var(--text)]">Let's start building</p>
-              <p className="text-sm leading-relaxed">
-                Describe what you'd like to create and I'll help you build it step by step
-              </p>
-            </div>
-
-            {/* Discovery Cards - 30% secondary background with 10% accent borders */}
-            <div className="space-y-3 text-left">
-              <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--border-color)]">
-                <div className="flex items-center gap-2 mb-2">
-                  <PencilSimple size={16} weight="bold" className="text-[var(--text)]/80" />
-                  <span className="font-semibold text-sm text-[var(--text)]">Customize Your Agent</span>
-                </div>
-                <p className="text-xs text-[var(--text)]/70 mb-3">
-                  Edit system prompts, behaviors, and settings to tailor {currentAgent.name} to your needs.
-                </p>
-                <button
-                  onClick={() => {
-                    navigate('/library', { state: { selectedAgentId: currentAgent.backendId } });
-                  }}
-                  className="w-full py-2 bg-[var(--text)]/5 hover:bg-[var(--text)]/10 border-2 border-[var(--border-color)] hover:border-[var(--text)]/20 rounded-lg text-[var(--text)] text-xs font-semibold transition-all"
-                >
-                  Open in Library
-                </button>
+        >
+          {isLoadingHistory && (
+            <div className="text-center text-[var(--text)]/60 mt-8 space-y-4">
+              <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
+                <Loader2 className="animate-spin text-[var(--primary)]" size={32} />
               </div>
-
-              <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--primary)]/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <Storefront size={16} weight="fill" className="text-[var(--primary)]" />
-                  <span className="font-semibold text-sm text-[var(--text)]">Discover More Agents</span>
-                </div>
-                <p className="text-xs text-[var(--text)]/70 mb-3">
-                  Browse specialized agents for React, Vue, Python, DevOps, and more!
-                </p>
-                <button
-                  onClick={() => {
-                    navigate('/marketplace');
-                  }}
-                  className="w-full py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 rounded-lg text-[var(--primary)] text-xs font-semibold transition-all border-2 border-[var(--primary)]/40 hover:border-[var(--primary)]/60"
-                >
-                  Browse Marketplace
-                </button>
+              <div className="space-y-2">
+                <p className="text-sm max-w-xs mx-auto leading-relaxed">Loading chat history...</p>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {messages.map((message) => {
-          // Check if this is a new message that should animate
-          const isNewMessage = !animatedMessagesRef.current.has(message.id);
-          if (isNewMessage && !isLoadingHistory) {
-            animatedMessagesRef.current.add(message.id);
-          }
-          const shouldAnimate = isNewMessage && !isLoadingHistory;
+          {!isLoadingHistory && messages.length === 0 && !isStreaming && (
+            <div className="text-center text-[var(--text)]/60 mt-8 space-y-6 max-w-md mx-auto px-4">
+              <div className="w-16 h-16 bg-[var(--surface)] rounded-2xl flex items-center justify-center mx-auto border-2 border-[var(--primary)]/20">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="32"
+                  height="25"
+                  viewBox="0 0 161.9 126.66"
+                  className="text-[var(--primary)]"
+                >
+                  <g>
+                    <path
+                      d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"
+                      fill="currentColor"
+                      strokeWidth="0"
+                    />
+                    <path
+                      d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"
+                      fill="currentColor"
+                      strokeWidth="0"
+                    />
+                    <path
+                      d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"
+                      fill="currentColor"
+                      strokeWidth="0"
+                    />
+                  </g>
+                </svg>
+              </div>
+              <div className="space-y-2">
+                <p className="text-lg font-semibold text-[var(--text)]">Let's start building</p>
+                <p className="text-sm leading-relaxed">
+                  Describe what you'd like to create and I'll help you build it step by step
+                </p>
+              </div>
 
-          // Render approval request message
-          if (message.type === 'approval_request' && message.approvalId) {
+              {/* Discovery Cards - 30% secondary background with 10% accent borders */}
+              <div className="space-y-3 text-left">
+                <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--border-color)]">
+                  <div className="flex items-center gap-2 mb-2">
+                    <PencilSimple size={16} weight="bold" className="text-[var(--text)]/80" />
+                    <span className="font-semibold text-sm text-[var(--text)]">
+                      Customize Your Agent
+                    </span>
+                  </div>
+                  <p className="text-xs text-[var(--text)]/70 mb-3">
+                    Edit system prompts, behaviors, and settings to tailor {currentAgent.name} to
+                    your needs.
+                  </p>
+                  <button
+                    onClick={() => {
+                      navigate('/library', { state: { selectedAgentId: currentAgent.backendId } });
+                    }}
+                    className="w-full py-2 bg-[var(--text)]/5 hover:bg-[var(--text)]/10 border-2 border-[var(--border-color)] hover:border-[var(--text)]/20 rounded-lg text-[var(--text)] text-xs font-semibold transition-all"
+                  >
+                    Open in Library
+                  </button>
+                </div>
+
+                <div className="bg-[var(--surface)] rounded-lg p-3 border-2 border-[var(--primary)]/30">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Storefront size={16} weight="fill" className="text-[var(--primary)]" />
+                    <span className="font-semibold text-sm text-[var(--text)]">
+                      Discover More Agents
+                    </span>
+                  </div>
+                  <p className="text-xs text-[var(--text)]/70 mb-3">
+                    Browse specialized agents for React, Vue, Python, DevOps, and more!
+                  </p>
+                  <button
+                    onClick={() => {
+                      navigate('/marketplace');
+                    }}
+                    className="w-full py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 rounded-lg text-[var(--primary)] text-xs font-semibold transition-all border-2 border-[var(--primary)]/40 hover:border-[var(--primary)]/60"
+                  >
+                    Browse Marketplace
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {messages.map((message) => {
+            // Check if this is a new message that should animate
+            const isNewMessage = !animatedMessagesRef.current.has(message.id);
+            if (isNewMessage && !isLoadingHistory) {
+              animatedMessagesRef.current.add(message.id);
+            }
+            const shouldAnimate = isNewMessage && !isLoadingHistory;
+
+            // Render approval request message
+            if (message.type === 'approval_request' && message.approvalId) {
+              return (
+                <div
+                  key={message.id}
+                  className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
+                >
+                  <ApprovalRequestCard
+                    approvalId={message.approvalId}
+                    toolName={message.toolName || 'unknown'}
+                    toolParameters={message.toolParameters}
+                    toolDescription={message.toolDescription || 'No description provided'}
+                    onRespond={handleApprovalResponse}
+                  />
+                </div>
+              );
+            }
+
+            // Render agent message with special component
+            if (message.type === 'ai' && message.agentData) {
+              return (
+                <div
+                  key={message.id}
+                  className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
+                >
+                  <AgentMessage
+                    agentData={message.agentData}
+                    finalResponse={message.content}
+                    agentIcon={message.agentIcon}
+                    agentAvatarUrl={message.agentAvatarUrl}
+                  />
+                </div>
+              );
+            }
+
+            // Render regular messages
             return (
               <div
                 key={message.id}
-                className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
+                className={shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}
               >
-                <ApprovalRequestCard
-                  approvalId={message.approvalId}
-                  toolName={message.toolName || 'unknown'}
-                  toolParameters={message.toolParameters}
-                  toolDescription={message.toolDescription || 'No description provided'}
-                  onRespond={handleApprovalResponse}
-                />
-              </div>
-            );
-          }
-
-          // Render agent message with special component
-          if (message.type === 'ai' && message.agentData) {
-            return (
-              <div
-                key={message.id}
-                className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
-              >
-                <AgentMessage
-                  agentData={message.agentData}
-                  finalResponse={message.content}
+                <ChatMessage
+                  type={message.type as 'user' | 'ai'}
+                  content={message.content || ''}
                   agentIcon={message.agentIcon}
                   agentAvatarUrl={message.agentAvatarUrl}
+                  toolCalls={message.toolCalls}
+                  actions={message.actions}
                 />
               </div>
             );
-          }
+          })}
 
-          // Render regular messages
-          return (
-            <div
-              key={message.id}
-              className={shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}
-            >
-              <ChatMessage
-                type={message.type as 'user' | 'ai'}
-                content={message.content || ''}
-                agentIcon={message.agentIcon}
-                agentAvatarUrl={message.agentAvatarUrl}
-                toolCalls={message.toolCalls}
-                actions={message.actions}
-              />
+          {/* Streaming message */}
+          {isStreaming && currentStream && (
+            <div className="mb-4 animate-[slideIn_0.3s_ease-out]">
+              <ChatMessage type="ai" content={renderMessageContent(currentStream, true)} />
             </div>
-          );
-        })}
+          )}
 
-        {/* Streaming message */}
-        {isStreaming && currentStream && (
-          <div className="mb-4 animate-[slideIn_0.3s_ease-out]">
-            <ChatMessage
-              type="ai"
-              content={renderMessageContent(currentStream, true)}
-            />
-          </div>
-        )}
+          <div ref={messagesEndRef} />
+        </div>
 
-        <div ref={messagesEndRef} />
+        {/* Chat input */}
+        <div onFocus={handleInputFocus} className="pointer-events-auto">
+          <ChatInput
+            agents={agents}
+            currentAgent={currentAgent}
+            onSelectAgent={handleAgentSelect}
+            onSendMessage={handleSendMessage}
+            projectFiles={projectFiles}
+            projectName={projectName}
+            disabled={isStreaming || agentExecuting}
+            isExecuting={agentExecuting}
+            onStop={stopAgentExecution}
+            onClearHistory={handleClearHistory}
+            isExpanded={effectiveIsExpanded}
+            editMode={editMode}
+            onModeChange={setEditMode}
+            onPlanMode={() => setEditMode('plan')}
+          />
+        </div>
       </div>
-
-      {/* Chat input */}
-      <div onFocus={handleInputFocus} className="pointer-events-auto">
-        <ChatInput
-          agents={agents}
-          currentAgent={currentAgent}
-          onSelectAgent={handleAgentSelect}
-          onSendMessage={handleSendMessage}
-          projectFiles={projectFiles}
-          projectName={projectName}
-          disabled={isStreaming || agentExecuting}
-          isExecuting={agentExecuting}
-          onStop={stopAgentExecution}
-          onClearHistory={handleClearHistory}
-          isExpanded={isExpanded}
-          editMode={editMode}
-          onModeChange={setEditMode}
-          onPlanMode={() => setEditMode('plan')}
-        />
-      </div>
-    </div>
     </>
   );
 }
