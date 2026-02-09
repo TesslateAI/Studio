@@ -2,40 +2,42 @@
 
 Docker Compose configuration for local development.
 
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/docker-compose.yml`
+**File**: `docker compose.yml` (project root)
+
+> **First-time setup?** See [Docker Setup from Scratch](../../guides/docker-setup.md) for the complete walkthrough.
 
 ## Overview
 
 Docker Compose provides a simple way to run Tesslate Studio locally for development. It includes:
 - Traefik reverse proxy (routing *.localhost)
 - PostgreSQL database
-- Backend orchestrator
-- Frontend React app
-- Regional router (multi-region support)
+- Backend orchestrator (FastAPI)
+- Frontend React app (Vite dev server)
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Host Machine (Docker Desktop)                          │
-│                                                          │
-│  ┌──────────────┐                                       │
-│  │ Traefik      │ :80, :443, :8080                     │
-│  │ (Routing)    │                                       │
-│  └──────┬───────┘                                       │
-│         │                                                │
-│    ┌────┴─────┬──────────────┬──────────────┐          │
-│    │          │              │              │          │
-│    ↓          ↓              ↓              ↓          │
-│  ┌─────┐  ┌────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ App │  │Backend │  │Regional  │  │User Projects │  │
-│  │     │  │        │  │Router    │  │(Dynamic)     │  │
-│  └─────┘  └───┬────┘  └──────────┘  └──────────────┘  │
-│               │                                          │
-│               ↓                                          │
-│          ┌─────────┐                                    │
-│          │Postgres │                                    │
-│          └─────────┘                                    │
+│ Host Machine (Docker Desktop)                           │
+│                                                         │
+│  ┌──────────────┐                                      │
+│  │   Traefik     │ :80, :443, :8080                    │
+│  │   (Routing)   │                                     │
+│  └──────┬───────┘                                      │
+│         │                                               │
+│    ┌────┴──────┬──────────────┐                        │
+│    │           │              │                         │
+│    ↓           ↓              ↓                         │
+│  ┌──────┐  ┌────────────┐  ┌──────────────┐           │
+│  │ App  │  │Orchestrator│  │User Projects │           │
+│  │:5173 │  │   :8000    │  │(Dynamic)     │           │
+│  └──────┘  └─────┬──────┘  └──────────────┘           │
+│                   │                                     │
+│                   ↓                                     │
+│            ┌──────────┐                                │
+│            │PostgreSQL│                                │
+│            │  :5432   │                                │
+│            └──────────┘                                │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -157,25 +159,44 @@ CHOKIDAR_USEPOLLING: true  # For file watcher
 
 ## Usage
 
+### From-Scratch Setup
+
+```bash
+# 1. Copy environment file and configure required values
+cp .env.example .env
+# Edit .env: set SECRET_KEY, LITELLM_API_BASE, LITELLM_MASTER_KEY
+
+# 2. Build images and start all services
+docker compose up --build -d
+
+# 3. Verify everything is running
+docker compose ps
+```
+
+See [Docker Setup from Scratch](../../guides/docker-setup.md) for the full walkthrough.
+
 ### Start Services
 
 ```bash
 # Start all services in background
-docker-compose up -d
+docker compose up -d
+
+# Start with rebuild (after dependency changes)
+docker compose up -d --build
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # View specific service logs
-docker-compose logs -f orchestrator
+docker compose logs -f orchestrator
 ```
 
 ### Access Services
 
-- **Frontend**: http://localhost
-- **Backend API**: http://localhost/api
-- **Backend Direct**: http://localhost:8000 (port exposed)
-- **Traefik Dashboard**: http://localhost/traefik
+- **Frontend**: http://localhost (via Traefik) or http://localhost:5173 (direct)
+- **Backend API**: http://localhost/api (via Traefik) or http://localhost:8000 (direct)
+- **API Docs**: http://localhost:8000/docs (Swagger UI)
+- **Traefik Dashboard**: http://localhost:8080
 - **PostgreSQL**: localhost:5432 (for pgAdmin, DBeaver)
 
 ### User Projects
@@ -196,33 +217,33 @@ Traefik auto-discovers containers with label `com.tesslate.project=true`
 
 ```bash
 # Stop containers, keep volumes
-docker-compose down
+docker compose down
 
 # Stop containers, remove volumes
-docker-compose down -v
+docker compose down -v
 ```
 
 ### Rebuild After Code Changes
 
 ```bash
 # Rebuild specific service
-docker-compose up -d --build orchestrator
+docker compose up -d --build orchestrator
 
 # Rebuild all
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ### Reset Database
 
 ```bash
 # Stop services
-docker-compose down
+docker compose down
 
 # Remove database volume
 docker volume rm tesslate-postgres-dev-data
 
 # Restart
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Development Workflow
@@ -233,9 +254,9 @@ docker-compose up -d
 2. Uvicorn auto-reloads (watch for "Reloading..." in logs)
 3. If dependencies changed:
 ```bash
-docker-compose exec orchestrator pip install -e .
+docker compose exec orchestrator pip install -e .
 # OR rebuild:
-docker-compose up -d --build orchestrator
+docker compose up -d --build orchestrator
 ```
 
 ### Frontend Changes
@@ -244,22 +265,22 @@ docker-compose up -d --build orchestrator
 2. Vite HMR updates browser automatically
 3. If dependencies changed:
 ```bash
-docker-compose exec app npm install
+docker compose exec app npm install
 # OR rebuild:
-docker-compose up -d --build app
+docker compose up -d --build app
 ```
 
 ### Database Migrations
 
 ```bash
 # Generate migration
-docker-compose exec orchestrator alembic revision --autogenerate -m "description"
+docker compose exec orchestrator alembic revision --autogenerate -m "description"
 
 # Apply migrations
-docker-compose exec orchestrator alembic upgrade head
+docker compose exec orchestrator alembic upgrade head
 
 # Rollback
-docker-compose exec orchestrator alembic downgrade -1
+docker compose exec orchestrator alembic downgrade -1
 ```
 
 ### Debugging
@@ -267,34 +288,34 @@ docker-compose exec orchestrator alembic downgrade -1
 **Backend**:
 ```bash
 # Attach to logs
-docker-compose logs -f orchestrator
+docker compose logs -f orchestrator
 
 # Enter container shell
-docker-compose exec orchestrator bash
+docker compose exec orchestrator bash
 
 # Run Python REPL
-docker-compose exec orchestrator python
+docker compose exec orchestrator python
 ```
 
 **Frontend**:
 ```bash
 # Attach to logs
-docker-compose logs -f app
+docker compose logs -f app
 
 # Enter container
-docker-compose exec app sh
+docker compose exec app sh
 
 # Run npm commands
-docker-compose exec app npm run build
+docker compose exec app npm run build
 ```
 
 **Database**:
 ```bash
 # Enter psql shell
-docker-compose exec postgres psql -U tesslate_user -d tesslate_dev
+docker compose exec postgres psql -U tesslate_user -d tesslate_dev
 
 # Run SQL file
-docker-compose exec -T postgres psql -U tesslate_user -d tesslate_dev < script.sql
+docker compose exec -T postgres psql -U tesslate_user -d tesslate_dev < script.sql
 ```
 
 ## Traefik Configuration
@@ -322,7 +343,7 @@ Access Traefik dashboard at http://localhost/traefik
 - Monitor HTTP traffic
 - Debug routing issues
 
-**Authentication**: Basic auth (configured in docker-compose.yml)
+**Authentication**: Basic auth (configured in docker compose.yml)
 
 ## Environment Variables
 
@@ -379,7 +400,7 @@ APP_PORT=8080  # Use port 8080 instead of 80
 
 **Check logs**:
 ```bash
-docker-compose logs orchestrator
+docker compose logs orchestrator
 ```
 
 **Common issues**:
@@ -403,19 +424,19 @@ docker-compose logs orchestrator
 
 **Check postgres**:
 ```bash
-docker-compose ps postgres
-docker-compose logs postgres
+docker compose ps postgres
+docker compose logs postgres
 ```
 
 **Verify connection**:
 ```bash
-docker-compose exec postgres pg_isready -U tesslate_user
+docker compose exec postgres pg_isready -U tesslate_user
 ```
 
 ### User Project Container Not Accessible
 
 **Check Traefik routes**:
-- Dashboard: http://localhost/traefik → Routers
+- Dashboard: http://localhost:8080 → Routers
 - Look for `{container}.localhost` route
 
 **Verify labels**:
@@ -442,8 +463,24 @@ docker inspect {container_name} | grep -A 10 Labels
 | **Scaling** | Manual | Automatic |
 | **Use Case** | Local development | Production |
 
+## Clean Slate Reset
+
+Remove everything and start from scratch:
+
+```bash
+# 1. Stop and remove containers + volumes
+docker compose down --volumes --remove-orphans
+
+# 2. Remove all tesslate images
+docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep -i tesslate | awk '{print $2}' | sort -u | xargs docker rmi -f
+
+# 3. Rebuild from scratch
+docker compose up --build -d
+```
+
 ## Related Documentation
 
-- [CLAUDE.md](CLAUDE.md): Docker agent context
+- [Docker Setup from Scratch](../../guides/docker-setup.md): Complete first-time setup guide
+- [CLAUDE.md](CLAUDE.md): Docker agent context (quick reference)
 - [dockerfiles.md](dockerfiles.md): Dockerfile documentation
 - [docker-compose.md](docker-compose.md): Compose file details

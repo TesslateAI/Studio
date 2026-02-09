@@ -6,6 +6,7 @@ interface EditModeStatusProps {
   mode: EditMode;
   onModeChange: (mode: EditMode) => void;
   className?: string;
+  compact?: boolean; // When true, only show icon without text label
 }
 
 const modeConfig = {
@@ -35,7 +36,12 @@ const modeConfig = {
   },
 } as const;
 
-export function EditModeStatus({ mode, onModeChange, className = '' }: EditModeStatusProps) {
+export function EditModeStatus({
+  mode,
+  onModeChange,
+  className = '',
+  compact = false,
+}: EditModeStatusProps) {
   const config = modeConfig[mode];
   const Icon = config.icon;
 
@@ -51,15 +57,16 @@ export function EditModeStatus({ mode, onModeChange, className = '' }: EditModeS
       <button
         onClick={cycleMode}
         className={`
-          flex items-center gap-2 px-3 py-1.5 rounded-full
+          flex items-center gap-2 rounded-full
           border transition-all duration-200
           ${config.bgColor} ${config.borderColor} ${config.hoverBg}
           text-sm font-medium
+          ${compact ? 'p-1.5' : 'px-3 py-1.5'}
         `}
-        title="Click to cycle edit mode"
+        title={compact ? config.label : 'Click to cycle edit mode'}
       >
         <Icon className={`w-4 h-4 ${config.color}`} />
-        <span className={config.color}>{config.label}</span>
+        {!compact && <span className={config.color}>{config.label}</span>}
       </button>
     </div>
   );

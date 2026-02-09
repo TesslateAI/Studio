@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SearchAddon } from '@xterm/addon-search';
-import { Plus, X, Wifi, WifiOff } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { createTerminalWebSocket } from '../../lib/api';
 import { useTheme } from '../../theme/ThemeContext';
@@ -35,7 +35,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
   // Create a new terminal tab
   const createTab = (isMain: boolean = false) => {
     const tabId = isMain ? 'main' : `shell-${Date.now()}`;
-    const tabTitle = isMain ? '⚡ Main' : `Shell ${nextTabNumber.current++}`;
+    const tabTitle = isMain ? 'Main' : `Shell ${nextTabNumber.current++}`;
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -52,7 +52,8 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
         foreground: theme === 'dark' ? '#e5e7eb' : '#1f2937',
         cursor: theme === 'dark' ? '#f97316' : '#ea580c',
         cursorAccent: theme === 'dark' ? '#000000' : '#ffffff',
-        selectionBackground: theme === 'dark' ? 'rgba(249, 115, 22, 0.25)' : 'rgba(234, 88, 12, 0.25)',
+        selectionBackground:
+          theme === 'dark' ? 'rgba(249, 115, 22, 0.25)' : 'rgba(234, 88, 12, 0.25)',
         selectionForeground: theme === 'dark' ? '#ffffff' : '#000000',
         // Modern color palette
         black: '#1f2937',
@@ -103,7 +104,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       connectionStatus: 'connecting',
     };
 
-    setTabs(prev => [...prev, newTab]);
+    setTabs((prev) => [...prev, newTab]);
     setActiveTabId(tabId);
 
     return newTab;
@@ -118,8 +119,8 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     // Cleanup function that runs BEFORE effect and on unmount
     // This ensures old tabs are fully cleaned up before creating new ones
     const cleanupTabs = () => {
-      setTabs(currentTabs => {
-        currentTabs.forEach(tab => {
+      setTabs((currentTabs) => {
+        currentTabs.forEach((tab) => {
           if (tab.reconnectTimer) {
             clearTimeout(tab.reconnectTimer);
             tab.reconnectTimer = null;
@@ -150,7 +151,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
   useEffect(() => {
     if (!terminalContainerRef.current || !activeTabId) return;
 
-    const activeTab = tabs.find(tab => tab.id === activeTabId);
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
     if (!activeTab) return;
 
     // Hide all terminal divs
@@ -159,7 +160,9 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     });
 
     // Find or create terminal div for this tab
-    let terminalDiv = terminalContainerRef.current.querySelector(`[data-terminal-id="${activeTab.id}"]`) as HTMLDivElement;
+    let terminalDiv = terminalContainerRef.current.querySelector(
+      `[data-terminal-id="${activeTab.id}"]`
+    ) as HTMLDivElement;
 
     if (!terminalDiv) {
       // Create new div for this terminal
@@ -190,18 +193,23 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       }
     }, 0);
 
-    // Handle resize
+    // Handle resize - debounced to avoid spam during panel resize
+    let resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      try {
-        activeTab.fitAddon.fit();
-      } catch {
-        // Ignore resize errors
-      }
+      if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
+      resizeTimeoutId = setTimeout(() => {
+        try {
+          activeTab.fitAddon.fit();
+        } catch {
+          // Ignore resize errors
+        }
+      }, 50); // 50ms debounce
     });
 
     resizeObserver.observe(terminalDiv);
 
     return () => {
+      if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
       resizeObserver.disconnect();
     };
   }, [activeTabId, tabs]);
@@ -237,7 +245,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
         // Reset reconnect attempts on successful connection
         tab.reconnectAttempts = 0;
         tab.connectionStatus = 'connected';
-        setTabs(prev => [...prev]); // Trigger re-render for status indicator
+        setTabs((prev) => [...prev]); // Trigger re-render for status indicator
 
         // Connection established - backend will send scrollback history automatically
         // No need to write connection message, let the shell output speak for itself
@@ -245,11 +253,13 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
         // Send initial terminal size for proper rendering
         const dims = tab.fitAddon.proposeDimensions();
         if (dims) {
-          ws.send(JSON.stringify({
-            type: 'resize',
-            cols: dims.cols,
-            rows: dims.rows
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'resize',
+              cols: dims.cols,
+              rows: dims.rows,
+            })
+          );
         }
       };
 
@@ -262,13 +272,13 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
             // The backend sends only new data, not the full buffer
             tab.terminal.write(data.data);
           } else if (data.type === 'attached') {
-            tab.terminal.writeln(`\x1b[36m⟳ Attached to pane: ${data.pane_id}\x1b[0m\r\n`);
+            tab.terminal.writeln(`\x1b[36m[+] Attached to pane: ${data.pane_id}\x1b[0m\r\n`);
           } else if (data.type === 'window_created') {
-            tab.terminal.writeln(`\x1b[32m✓ Created new shell: ${data.window_name}\x1b[0m\r\n`);
+            tab.terminal.writeln(`\x1b[32m[OK] Created new shell: ${data.window_name}\x1b[0m\r\n`);
           } else if (data.type === 'error') {
-            tab.terminal.writeln(`\r\n\x1b[31m✗ Error: ${data.message}\x1b[0m\r\n`);
+            tab.terminal.writeln(`\r\n\x1b[31m[ERROR] ${data.message}\x1b[0m\r\n`);
           } else if (data.type === 'status') {
-            tab.terminal.writeln(`\x1b[36m⟳ ${data.message}\x1b[0m`);
+            tab.terminal.writeln(`\x1b[36m[~] ${data.message}\x1b[0m`);
           }
         } catch (e) {
           console.error('Failed to parse message:', e);
@@ -279,14 +289,14 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
 
       ws.onerror = () => {
         tab.connectionStatus = 'error';
-        setTabs(prev => [...prev]); // Trigger re-render for status indicator
-        tab.terminal.writeln('\r\n\x1b[31m✗ Connection error\x1b[0m\r\n');
+        setTabs((prev) => [...prev]); // Trigger re-render for status indicator
+        tab.terminal.writeln('\r\n\x1b[31m[ERROR] Connection error\x1b[0m\r\n');
       };
 
       ws.onclose = () => {
         tab.ws = null;
         tab.connectionStatus = 'disconnected';
-        setTabs(prev => [...prev]); // Trigger re-render for status indicator
+        setTabs((prev) => [...prev]); // Trigger re-render for status indicator
 
         // Attempt to reconnect with fixed delay
         const maxAttempts = 10;
@@ -296,47 +306,54 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
           tab.reconnectAttempts++;
 
           tab.terminal.writeln('');
-          tab.terminal.writeln(`\x1b[33m⚠ Connection lost. Reconnecting in ${delay / 1000}s... (${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`);
+          tab.terminal.writeln(
+            `\x1b[33m[WARN] Connection lost. Reconnecting in ${delay / 1000}s... (${tab.reconnectAttempts}/${maxAttempts})\x1b[0m`
+          );
 
           tab.connectionStatus = 'connecting';
-          setTabs(prev => [...prev]); // Update status
+          setTabs((prev) => [...prev]); // Update status
 
           tab.reconnectTimer = setTimeout(() => {
             connectTerminal(tab, true);
           }, delay);
         } else {
           tab.connectionStatus = 'error';
-          setTabs(prev => [...prev]); // Update status
+          setTabs((prev) => [...prev]); // Update status
 
           tab.terminal.writeln('');
-          tab.terminal.writeln('\x1b[31m✗ Unable to reconnect. Please refresh the page.\x1b[0m');
+          tab.terminal.writeln(
+            '\x1b[31m[ERROR] Unable to reconnect. Please refresh the page.\x1b[0m'
+          );
         }
       };
 
       // Handle user input
       tab.terminal.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'input',
-            data: data
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'input',
+              data: data,
+            })
+          );
         }
       });
 
       // Handle terminal resize
       tab.terminal.onResize((dimensions) => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'resize',
-            cols: dimensions.cols,
-            rows: dimensions.rows
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'resize',
+              cols: dimensions.cols,
+              rows: dimensions.rows,
+            })
+          );
         }
       });
-
     } catch (err) {
       console.error('Failed to connect WebSocket:', err);
-      tab.terminal.writeln('\x1b[31m✗ Failed to establish connection\x1b[0m');
+      tab.terminal.writeln('\x1b[31m[ERROR] Failed to establish connection\x1b[0m');
 
       // Retry connection
       if (tab.reconnectAttempts < 10) {
@@ -350,7 +367,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
 
   // Close a tab
   const closeTab = (tabId: string) => {
-    const tab = tabs.find(t => t.id === tabId);
+    const tab = tabs.find((t) => t.id === tabId);
     if (!tab) return;
 
     // Don't allow closing the main tab
@@ -370,7 +387,7 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
     tab.terminal.dispose();
 
     // Remove from tabs array
-    const newTabs = tabs.filter(t => t.id !== tabId);
+    const newTabs = tabs.filter((t) => t.id !== tabId);
     setTabs(newTabs);
 
     // Switch to main tab if closing active tab
@@ -384,16 +401,16 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       {/* Tab Bar - Improved with better mobile support */}
       <div className="flex items-center gap-1 px-2 py-2 bg-[var(--bg-dark)] border-b border-[var(--sidebar-border)] overflow-x-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
         <div className="flex items-center gap-1 min-w-0">
-          {tabs.map(tab => {
-            const getStatusIcon = () => {
+          {tabs.map((tab) => {
+            const getStatusIndicator = () => {
               switch (tab.connectionStatus) {
                 case 'connected':
-                  return <Wifi size={12} className="text-green-500" />;
+                  return <span className="w-2 h-2 rounded-full bg-green-500" />;
                 case 'connecting':
-                  return <Wifi size={12} className="text-yellow-500 animate-pulse" />;
+                  return <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />;
                 case 'disconnected':
                 case 'error':
-                  return <WifiOff size={12} className="text-red-500" />;
+                  return <span className="w-2 h-2 rounded-full bg-red-500" />;
               }
             };
 
@@ -403,15 +420,18 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
                 className={`
                   group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer
                   transition-all duration-200 min-w-fit
-                  ${activeTabId === tab.id
-                    ? 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 text-orange-500 shadow-md border border-orange-500/30'
-                    : 'bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)] border border-transparent'
+                  ${
+                    activeTabId === tab.id
+                      ? 'bg-gradient-to-r from-orange-500/20 to-orange-600/20 text-orange-500 shadow-md border border-orange-500/30'
+                      : 'bg-[var(--surface)] text-[var(--text)]/60 hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)] border border-transparent'
                   }
                 `}
                 onClick={() => setActiveTabId(tab.id)}
               >
-                {getStatusIcon()}
-                <span className={`text-sm font-medium whitespace-nowrap ${activeTabId === tab.id ? 'font-semibold' : ''}`}>
+                {getStatusIndicator()}
+                <span
+                  className={`text-sm font-medium whitespace-nowrap ${activeTabId === tab.id ? 'font-semibold' : ''}`}
+                >
                   {tab.title}
                 </span>
                 {!tab.isMain && (
@@ -454,10 +474,18 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
       {/* Info Footer - More compact on mobile */}
       <div className="px-4 py-2.5 bg-gradient-to-r from-[#1a1a1a] to-[#151515] border-t border-white/[0.08]">
         <p className="text-xs text-gray-500 hidden sm:block">
-          💡 Type <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">dev-server</code> to control your app (logs, stop, restart). Dev server runs in background.
+          Tip: Type{' '}
+          <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">
+            dev-server
+          </code>{' '}
+          to control your app (logs, stop, restart). Dev server runs in background.
         </p>
         <p className="text-xs text-gray-500 sm:hidden">
-          💡 Type <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">dev-server</code> for commands
+          Tip: Type{' '}
+          <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">
+            dev-server
+          </code>{' '}
+          for commands
         </p>
       </div>
     </div>

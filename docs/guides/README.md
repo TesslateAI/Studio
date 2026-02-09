@@ -6,7 +6,8 @@ Practical how-to guides for developing, deploying, and extending Tesslate Studio
 
 | Guide | Description | When to Use |
 |-------|-------------|-------------|
-| [Local Development](local-development.md) | Set up local development with Docker Compose | First-time setup, new developers |
+| [Docker Setup](docker-setup.md) | Set up Tesslate Studio from scratch with Docker Compose | **Start here** — first-time setup, new developers |
+| [Local Development](local-development.md) | Run backend/frontend natively (without Docker) | Faster iteration, debugging |
 | [Minikube Setup](minikube-setup.md) | Deploy to local Kubernetes cluster | Testing K8s features locally |
 | [AWS Deployment](aws-deployment.md) | Deploy to AWS EKS production | Production deployment |
 
@@ -51,9 +52,11 @@ Practical how-to guides for developing, deploying, and extending Tesslate Studio
 ### Common Commands
 
 ```powershell
-# Local Development (Docker)
-docker-compose up -d
-docker-compose logs -f
+# Local Development (Docker) — from-scratch setup
+cp .env.example .env          # then edit .env with your keys
+docker compose up --build -d  # build images and start
+docker compose ps             # verify all services are healthy
+docker compose logs -f        # watch logs
 
 # Minikube
 minikube start -p tesslate --driver=docker

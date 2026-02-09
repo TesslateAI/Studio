@@ -10,7 +10,7 @@ Detailed documentation of docker-compose.yml services.
 - Reverse proxy routing *.localhost
 - Ports: 80 (HTTP), 443 (HTTPS), 8080 (Dashboard)
 - Auto-discovers containers with label `com.tesslate.traefik=main`
-- Dashboard: http://localhost/traefik
+- Dashboard: http://localhost:8080
 
 ### postgres
 - PostgreSQL 15 Alpine

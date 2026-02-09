@@ -1,6 +1,8 @@
 # Local Development Setup
 
-This guide covers setting up Tesslate Studio for local development using Docker Compose.
+This guide covers running Tesslate Studio services natively on your machine (without Docker for the app/backend). This is useful for faster iteration and debugging with breakpoints.
+
+> **Looking for Docker setup?** See [Docker Setup from Scratch](docker-setup.md) — the easiest way to get started.
 
 ## Prerequisites
 
@@ -8,8 +10,8 @@ This guide covers setting up Tesslate Studio for local development using Docker 
 
 | Software | Version | Purpose |
 |----------|---------|---------|
-| Docker Desktop | Latest | Container runtime |
-| Node.js | 18+ | Frontend development |
+| Docker Desktop | Latest | Container runtime (for PostgreSQL + user project containers) |
+| Node.js | 20+ | Frontend development |
 | Python | 3.11+ | Backend development |
 | Git | Latest | Version control |
 
@@ -57,99 +59,82 @@ npm install
 
 ## Environment Variables
 
-### Backend Environment (.env)
+### Root Environment (.env)
 
-Create `orchestrator/.env` with the following variables:
+Copy the example config from the project root:
 
 ```bash
-# Database
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/tesslate
-
-# Security
-SECRET_KEY=your-secret-key-here-change-in-production
-
-# Application
-APP_DOMAIN=studio.localhost
-DEPLOYMENT_MODE=docker
-
-# AI Configuration
-LITELLM_API_KEY=your-openai-or-anthropic-key
-LITELLM_DEFAULT_MODEL=gpt-4
-
-# OAuth (optional for local dev)
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-
-# Stripe (optional for local dev)
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
+cp .env.example .env
 ```
 
-### Frontend Environment (.env)
+Edit `.env` with required values:
 
-Create `app/.env` with:
+```bash
+# REQUIRED
+SECRET_KEY=your-secret-key-here-change-this
+DEPLOYMENT_MODE=docker
+
+# Database (points to Docker postgres container)
+POSTGRES_DB=tesslate_dev
+POSTGRES_USER=tesslate_user
+POSTGRES_PASSWORD=dev_password_change_me
+
+# AI Configuration (required for agent features)
+LITELLM_API_BASE=https://your-litellm-url.com/v1
+LITELLM_MASTER_KEY=your-litellm-master-key
+LITELLM_DEFAULT_MODELS=gpt-4o-mini
+
+# Domain
+APP_PROTOCOL=http
+APP_DOMAIN=localhost
+```
+
+### Frontend Environment (app/.env)
+
+For native frontend development (not through Docker/Traefik), point directly to the backend:
 
 ```bash
 VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000
 ```
 
-## Docker Compose Setup
+## Native Development Setup
 
-### 1. Start Services
+### Start PostgreSQL via Docker
 
-From the project root:
+You still need PostgreSQL running in Docker:
 
 ```bash
-docker-compose up -d
+docker compose up -d postgres
 ```
 
-This starts:
-- PostgreSQL database (port 5432)
-- Traefik reverse proxy (port 80, 443)
-- Backend API (port 8000)
-- Frontend (port 3000)
-
-### 2. Verify Services
+Verify it's healthy:
 
 ```bash
-# Check all containers are running
-docker-compose ps
-
-# View logs
-docker-compose logs -f
-
-# View specific service logs
-docker-compose logs -f backend
-docker-compose logs -f frontend
+docker compose ps postgres
 ```
 
-### 3. Initialize Database
-
-The database tables are created automatically on first startup. To run migrations:
+### Run Database Migrations
 
 ```bash
 cd orchestrator
 alembic upgrade head
 ```
 
-## Running Without Docker
+## Running Services Natively
 
-For faster development iteration, run services directly:
+Run each service in a separate terminal:
 
-### Terminal 1: Database
+### Terminal 1: PostgreSQL (Docker)
 
 ```bash
-docker-compose up -d postgres
+docker compose up -d postgres
 ```
 
 ### Terminal 2: Backend
 
 ```bash
 cd orchestrator
-source .venv/bin/activate  # or Windows equivalent
+source .venv/bin/activate  # or Windows: .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -164,18 +149,18 @@ npm run dev
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| Frontend | http://localhost:3000 | Main application |
+| Frontend | http://localhost:5173 | Vite dev server |
 | Backend API | http://localhost:8000 | REST API |
 | API Docs | http://localhost:8000/docs | Swagger UI |
-| Traefik Dashboard | http://localhost:8080 | Reverse proxy admin |
+| PostgreSQL | localhost:5432 | Database (pgAdmin/DBeaver) |
 
 ## Development Workflow
 
 ### Making Backend Changes
 
 1. Edit files in `orchestrator/app/`
-2. If using `--reload`, changes apply automatically
-3. Check logs for errors: `docker-compose logs -f backend`
+2. Uvicorn auto-reloads (watch for "Reloading..." in terminal)
+3. Check terminal output for errors
 
 ### Making Frontend Changes
 
@@ -204,34 +189,23 @@ npm test
 ### Reset Database
 
 ```bash
-# Stop containers
-docker-compose down
+# Stop postgres
+docker compose down
 
 # Remove database volume
-docker volume rm tesslate-studio_postgres-data
+docker volume rm tesslate-postgres-dev-data
 
-# Restart
-docker-compose up -d
+# Restart postgres
+docker compose up -d postgres
+
+# Re-run migrations
+cd orchestrator && alembic upgrade head
 ```
 
-### Rebuild Images
+### Access Database Shell
 
 ```bash
-# Rebuild all images
-docker-compose build --no-cache
-
-# Rebuild specific service
-docker-compose build --no-cache backend
-```
-
-### View Container Shell
-
-```bash
-# Access backend container
-docker-compose exec backend bash
-
-# Access database
-docker-compose exec postgres psql -U postgres -d tesslate
+docker compose exec postgres psql -U tesslate_user -d tesslate_dev
 ```
 
 ## Directory Structure
@@ -259,12 +233,13 @@ tesslate-studio/
 │   ├── public/              # Static assets
 │   └── Dockerfile.prod      # Frontend container
 │
-├── docker-compose.yml        # Local development setup
+├── docker compose.yml        # Local development setup
 └── k8s/                     # Kubernetes manifests
 ```
 
 ## Next Steps
 
+- [Docker Setup from Scratch](docker-setup.md) - Full Docker Compose setup (easier, recommended for most developers)
 - [Minikube Setup](minikube-setup.md) - Test Kubernetes features locally
 - [Adding Routers](adding-routers.md) - Create new API endpoints
 - [Adding Agent Tools](adding-agent-tools.md) - Extend agent capabilities

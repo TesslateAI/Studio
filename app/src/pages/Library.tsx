@@ -513,7 +513,7 @@ export default function Library() {
       {editingAgent && (
         <EditAgentModal
           agent={editingAgent}
-          availableModels={models.map((m) => m.id)}
+          availableModels={[...new Set(models.map((m) => m.id))]}
           onClose={() => setEditingAgent(null)}
           onSave={async (updatedData) => {
             try {
@@ -703,7 +703,7 @@ function AgentsTab({
           <AgentCard
             key={agent.id}
             agent={agent}
-            availableModels={models.map((m) => m.id)}
+            availableModels={[...new Set(models.map((m) => m.id))]}
             modelsLoading={modelsLoading}
             onToggleEnable={() => onToggleEnable(agent)}
             onEdit={() => onEdit(agent)}

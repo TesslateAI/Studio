@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, FileCode, X } from 'lucide-react';
 import { PencilSimple, Storefront } from '@phosphor-icons/react';
@@ -95,7 +95,13 @@ export function ChatContainer({
   const [currentStream, setCurrentStream] = useState('');
   const [streamingFiles, setStreamingFiles] = useState<Map<string, StreamingFile>>(new Map());
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
+  // Use matchMedia for initial value to avoid forced reflow from reading window.innerWidth
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(min-width: 768px)').matches;
+    }
+    return true; // Default to desktop
+  });
 
   // When docked, always show as expanded
   const effectiveIsExpanded = isDocked || isExpanded;
@@ -444,14 +450,22 @@ export function ChatContainer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // Track desktop/mobile state
+  // Track desktop/mobile state using matchMedia - no reflows, no debounce needed
   useEffect(() => {
-    const handleResize = () => {
-      setIsDesktop(window.innerWidth >= 768);
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+
+    const mediaQuery = window.matchMedia('(min-width: 768px)');
+
+    // Update state when media query changes
+    const handleChange = (e: MediaQueryListEvent) => {
+      setIsDesktop(e.matches);
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    // Modern browsers use addEventListener
+    mediaQuery.addEventListener('change', handleChange);
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
   }, []);
 
   // Track user scroll behavior
@@ -499,9 +513,9 @@ export function ChatContainer({
     if (isDocked) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      // Only auto-close on desktop (md breakpoint is 768px)
+      // Only auto-close on desktop - use cached isDesktop state to avoid forced reflow
       if (
-        window.innerWidth >= 768 &&
+        isDesktop &&
         containerRef.current &&
         !containerRef.current.contains(event.target as Node)
       ) {
@@ -511,7 +525,8 @@ export function ChatContainer({
 
     const handleWindowBlur = () => {
       // Close chat when clicking on iframe (preview window) - desktop only
-      if (window.innerWidth >= 768) {
+      // Use cached isDesktop state to avoid forced reflow from reading window.innerWidth
+      if (isDesktop) {
         setTimeout(() => {
           if (document.activeElement?.tagName === 'IFRAME' && isExpanded) {
             setIsExpanded(false);
@@ -528,7 +543,7 @@ export function ChatContainer({
         window.removeEventListener('blur', handleWindowBlur);
       };
     }
-  }, [isExpanded, isDocked]);
+  }, [isExpanded, isDocked, isDesktop]);
 
   const handleInputFocus = () => {
     setIsExpanded(true);
@@ -937,6 +952,21 @@ export function ChatContainer({
     });
   };
 
+  // Memoize the style object to avoid recreating it on every render
+  const containerStyle = useMemo(() => {
+    if (isDocked) return undefined;
+    if (isDesktop) {
+      return {
+        left: sidebarExpanded ? 'calc(96px + 50vw)' : 'calc(24px + 50vw)',
+        transition:
+          'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.4s var(--ease), max-height 0.4s var(--ease)',
+      };
+    }
+    return {
+      transition: 'width 0.4s var(--ease), max-height 0.4s var(--ease), transform 0.4s var(--ease)',
+    };
+  }, [isDocked, isDesktop, sidebarExpanded]);
+
   return (
     <>
       {/* Mobile: Floating chat button - only show when collapsed and not docked */}
@@ -1018,20 +1048,7 @@ export function ChatContainer({
           }
           ${className}
         `}
-        style={
-          !isDocked && isDesktop
-            ? {
-                left: sidebarExpanded ? 'calc(96px + 50vw)' : 'calc(24px + 50vw)',
-                transition:
-                  'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.4s var(--ease), max-height 0.4s var(--ease)',
-              }
-            : !isDocked
-              ? {
-                  transition:
-                    'width 0.4s var(--ease), max-height 0.4s var(--ease), transform 0.4s var(--ease)',
-                }
-              : undefined
-        }
+        style={containerStyle}
         onMouseEnter={() => !isDocked && !isExpanded && setIsHovered(true)}
         onMouseLeave={() => !isDocked && !isExpanded && setIsHovered(false)}
       >
@@ -1279,6 +1296,7 @@ export function ChatContainer({
             editMode={editMode}
             onModeChange={setEditMode}
             onPlanMode={() => setEditMode('plan')}
+            isDocked={isDocked}
           />
         </div>
       </div>

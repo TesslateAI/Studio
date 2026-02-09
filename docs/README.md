@@ -136,9 +136,10 @@ tesslate-studio/
 
 ### For New Developers
 
-1. **Understand the architecture**: Start with [Architecture Overview](architecture/README.md)
-2. **Set up local development**: Follow [Local Development Guide](guides/local-development.md)
+1. **Set up Docker from scratch**: Follow [Docker Setup Guide](guides/docker-setup.md) — fastest way to get running
+2. **Understand the architecture**: Read [Architecture Overview](architecture/README.md)
 3. **Explore the codebase**: Use CLAUDE.md files for context
+4. **Native development** (optional): See [Local Development Guide](guides/local-development.md) for running without Docker
 
 ### For Backend Development
 

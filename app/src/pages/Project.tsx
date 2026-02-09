@@ -53,9 +53,11 @@ import { ContainerSelector } from '../components/ContainerSelector';
 import { projectsApi, marketplaceApi, authApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
+import { useChatPosition } from '../contexts/ChatPositionContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 
 type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
@@ -75,6 +77,7 @@ export default function Project() {
   const containerId = searchParams.get('container');
 
   const { theme, toggleTheme } = useTheme();
+  const { chatPosition } = useChatPosition();
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
   const [container, setContainer] = useState<Record<string, unknown> | null>(null);
@@ -92,6 +95,9 @@ export default function Project() {
   });
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
+
+  // Chat panel width for Discord button positioning (stored in localStorage by react-resizable-panels)
+  const [chatPanelWidth, _setChatPanelWidth] = useState(400);
 
   // User state for dropdown
   const [userName, setUserName] = useState<string>('');
@@ -1091,135 +1097,348 @@ export default function Project() {
           </div>
         </div>
 
-        {/* Main View Container */}
-        <div className="flex-1 overflow-hidden bg-[var(--bg)]">
-          {/* Preview View */}
-          <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
-            {/* Show loading overlay during container startup */}
-            {containerStartup.isLoading || containerStartup.status === 'error' ? (
-              <ContainerLoadingOverlay
-                phase={containerStartup.phase}
-                progress={containerStartup.progress}
-                message={containerStartup.message}
-                logs={containerStartup.logs}
-                error={containerStartup.error || undefined}
-                onRetry={containerStartup.retry}
-              />
-            ) : devServerUrl ? (
-              previewMode === 'browser-tabs' ? (
-                <BrowserPreview
-                  devServerUrl={devServerUrl}
-                  devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
-                  currentPreviewUrl={currentPreviewUrl}
-                  onNavigateBack={navigateBack}
-                  onNavigateForward={navigateForward}
-                  onRefresh={refreshPreview}
-                  onUrlChange={setCurrentPreviewUrl}
-                  containerStatus={containerStartup.status}
-                  startupPhase={containerStartup.phase}
-                  startupProgress={containerStartup.progress}
-                  startupMessage={containerStartup.message}
-                  startupLogs={containerStartup.logs}
-                  startupError={containerStartup.error || undefined}
-                  onRetryStart={containerStartup.retry}
-                />
-              ) : (
-                <>
-                  {/* Browser-style chrome */}
-                  <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={navigateBack}
-                        className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                        title="Go back"
-                      >
-                        <CaretLeft size={18} weight="bold" />
-                      </button>
-                      <button
-                        onClick={navigateForward}
-                        className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
-                        title="Go forward"
-                      >
-                        <CaretRight size={18} weight="bold" />
-                      </button>
-                    </div>
-                    <div className="hidden md:block flex-1">
-                      <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
-                        <span className="text-yellow-500 mr-2">🔒</span>
-                        <span className="text-[var(--text)]/80 truncate">
-                          {currentPreviewUrl || devServerUrl}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={refreshPreview}
-                      className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
-                      title="Refresh"
+        {/* Main View Container - uses react-resizable-panels only when chat is docked */}
+        <div className="flex-1 flex overflow-hidden bg-[var(--bg)]">
+          {/* Desktop layout - conditionally use PanelGroup only when chat is docked */}
+          <div className="hidden md:flex w-full h-full">
+            {/* DOCKED CHAT LAYOUT: Use PanelGroup for resizable panels */}
+            {(chatPosition === 'left' || chatPosition === 'right') && agents.length > 0 ? (
+              <PanelGroup orientation="horizontal">
+                {/* LEFT DOCKED CHAT */}
+                {chatPosition === 'left' && (
+                  <>
+                    <Panel
+                      id="chat-left"
+                      defaultSize="30"
+                      minSize="20"
+                      maxSize="50"
+                      className="bg-[var(--bg-dark)] overflow-hidden"
                     >
-                      <ArrowsClockwise size={16} />
-                    </button>
+                      <ChatContainer
+                        projectId={project?.id}
+                        containerId={containerId || undefined}
+                        viewContext="builder"
+                        agents={agents}
+                        currentAgent={agents[0]}
+                        onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+                        onFileUpdate={handleFileUpdate}
+                        projectFiles={files}
+                        projectName={project?.name}
+                        sidebarExpanded={isLeftSidebarExpanded}
+                        isDocked={true}
+                      />
+                    </Panel>
+                    <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
+                  </>
+                )}
+
+                {/* MAIN CONTENT PANEL (inside PanelGroup) */}
+                <Panel id="content" minSize="30" className="overflow-hidden">
+                  {/* Preview View */}
+                  <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
+                    {containerStartup.isLoading || containerStartup.status === 'error' ? (
+                      <ContainerLoadingOverlay
+                        phase={containerStartup.phase}
+                        progress={containerStartup.progress}
+                        message={containerStartup.message}
+                        logs={containerStartup.logs}
+                        error={containerStartup.error || undefined}
+                        onRetry={containerStartup.retry}
+                      />
+                    ) : devServerUrl ? (
+                      previewMode === 'browser-tabs' ? (
+                        <BrowserPreview
+                          devServerUrl={devServerUrl}
+                          devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
+                          currentPreviewUrl={currentPreviewUrl}
+                          onNavigateBack={navigateBack}
+                          onNavigateForward={navigateForward}
+                          onRefresh={refreshPreview}
+                          onUrlChange={setCurrentPreviewUrl}
+                          containerStatus={containerStartup.status}
+                          startupPhase={containerStartup.phase}
+                          startupProgress={containerStartup.progress}
+                          startupMessage={containerStartup.message}
+                          startupLogs={containerStartup.logs}
+                          startupError={containerStartup.error || undefined}
+                          onRetryStart={containerStartup.retry}
+                        />
+                      ) : (
+                        <>
+                          <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={navigateBack}
+                                className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                title="Go back"
+                              >
+                                <CaretLeft size={18} weight="bold" />
+                              </button>
+                              <button
+                                onClick={navigateForward}
+                                className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                                title="Go forward"
+                              >
+                                <CaretRight size={18} weight="bold" />
+                              </button>
+                            </div>
+                            <div className="hidden md:block flex-1">
+                              <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
+                                <span className="text-yellow-500 mr-2">🔒</span>
+                                <span className="text-[var(--text)]/80 truncate">
+                                  {currentPreviewUrl || devServerUrl}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={refreshPreview}
+                              className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
+                              title="Refresh"
+                            >
+                              <ArrowsClockwise size={16} />
+                            </button>
+                          </div>
+                          <div className="w-full h-[calc(100%-50px)] bg-white">
+                            <iframe
+                              ref={iframeRef}
+                              id="preview-iframe"
+                              src={devServerUrlWithAuth || devServerUrl}
+                              className="w-full h-full"
+                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                            />
+                          </div>
+                        </>
+                      )
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-[var(--text)]/60">
+                        <LoadingSpinner message="Loading project..." size={60} />
+                      </div>
+                    )}
                   </div>
-                  {/* Preview iframe */}
-                  <div className="w-full h-[calc(100%-50px)] bg-white">
-                    <iframe
-                      ref={iframeRef}
-                      id="preview-iframe"
-                      src={devServerUrlWithAuth || devServerUrl}
-                      className="w-full h-full"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+
+                  {/* Code View */}
+                  <div
+                    className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
+                  >
+                    <CodeEditor
+                      projectId={project?.id}
+                      files={files}
+                      onFileUpdate={handleFileUpdate}
                     />
                   </div>
-                </>
-              )
+
+                  {/* Kanban View */}
+                  <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                    <KanbanPanel projectId={project?.id} />
+                  </div>
+
+                  {/* Assets View */}
+                  <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
+                    <AssetsPanel projectSlug={slug!} />
+                  </div>
+
+                  {/* Terminal View */}
+                  <div
+                    className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}
+                  >
+                    <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+                  </div>
+                </Panel>
+
+                {/* RIGHT DOCKED CHAT */}
+                {chatPosition === 'right' && (
+                  <>
+                    <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
+                    <Panel
+                      id="chat-right"
+                      defaultSize="30"
+                      minSize="20"
+                      maxSize="50"
+                      className="bg-[var(--bg-dark)] overflow-hidden"
+                    >
+                      <ChatContainer
+                        projectId={project?.id}
+                        containerId={containerId || undefined}
+                        viewContext="builder"
+                        agents={agents}
+                        currentAgent={agents[0]}
+                        onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+                        onFileUpdate={handleFileUpdate}
+                        projectFiles={files}
+                        projectName={project?.name}
+                        sidebarExpanded={isLeftSidebarExpanded}
+                        isDocked={true}
+                      />
+                    </Panel>
+                  </>
+                )}
+              </PanelGroup>
             ) : (
-              <div className="h-full flex items-center justify-center text-[var(--text)]/60">
-                <LoadingSpinner message="Loading project..." size={60} />
+              /* CENTER MODE: No PanelGroup wrapper - direct content for better performance */
+              <div className="w-full h-full overflow-hidden">
+                {/* Preview View */}
+                <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
+                  {containerStartup.isLoading || containerStartup.status === 'error' ? (
+                    <ContainerLoadingOverlay
+                      phase={containerStartup.phase}
+                      progress={containerStartup.progress}
+                      message={containerStartup.message}
+                      logs={containerStartup.logs}
+                      error={containerStartup.error || undefined}
+                      onRetry={containerStartup.retry}
+                    />
+                  ) : devServerUrl ? (
+                    previewMode === 'browser-tabs' ? (
+                      <BrowserPreview
+                        devServerUrl={devServerUrl}
+                        devServerUrlWithAuth={devServerUrlWithAuth || devServerUrl}
+                        currentPreviewUrl={currentPreviewUrl}
+                        onNavigateBack={navigateBack}
+                        onNavigateForward={navigateForward}
+                        onRefresh={refreshPreview}
+                        onUrlChange={setCurrentPreviewUrl}
+                        containerStatus={containerStartup.status}
+                        startupPhase={containerStartup.phase}
+                        startupProgress={containerStartup.progress}
+                        startupMessage={containerStartup.message}
+                        startupLogs={containerStartup.logs}
+                        startupError={containerStartup.error || undefined}
+                        onRetryStart={containerStartup.retry}
+                      />
+                    ) : (
+                      <>
+                        <div className="bg-[var(--surface)] border-b border-[var(--sidebar-border)] p-2 md:p-3 flex items-center gap-2 md:gap-3">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={navigateBack}
+                              className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                              title="Go back"
+                            >
+                              <CaretLeft size={18} weight="bold" />
+                            </button>
+                            <button
+                              onClick={navigateForward}
+                              className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)]"
+                              title="Go forward"
+                            >
+                              <CaretRight size={18} weight="bold" />
+                            </button>
+                          </div>
+                          <div className="hidden md:block flex-1">
+                            <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
+                              <span className="text-yellow-500 mr-2">🔒</span>
+                              <span className="text-[var(--text)]/80 truncate">
+                                {currentPreviewUrl || devServerUrl}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={refreshPreview}
+                            className="p-1.5 md:p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors text-[var(--text)]/60 hover:text-[var(--text)] ml-auto"
+                            title="Refresh"
+                          >
+                            <ArrowsClockwise size={16} />
+                          </button>
+                        </div>
+                        <div className="w-full h-[calc(100%-50px)] bg-white">
+                          <iframe
+                            ref={iframeRef}
+                            id="preview-iframe"
+                            src={devServerUrlWithAuth || devServerUrl}
+                            className="w-full h-full"
+                            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                          />
+                        </div>
+                      </>
+                    )
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[var(--text)]/60">
+                      <LoadingSpinner message="Loading project..." size={60} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Code View */}
+                <div
+                  className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
+                >
+                  <CodeEditor
+                    projectId={project?.id}
+                    files={files}
+                    onFileUpdate={handleFileUpdate}
+                  />
+                </div>
+
+                {/* Kanban View */}
+                <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                  <KanbanPanel projectId={project?.id} />
+                </div>
+
+                {/* Assets View */}
+                <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
+                  <AssetsPanel projectSlug={slug!} />
+                </div>
+
+                {/* Terminal View */}
+                <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
+                  <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+                </div>
               </div>
             )}
           </div>
 
-          {/* Code View */}
-          <div
-            className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
-          >
-            <CodeEditor projectId={project?.id} files={files} onFileUpdate={handleFileUpdate} />
-          </div>
+          {/* Mobile layout - simple full width content */}
+          <div className="md:hidden w-full h-full overflow-hidden">
+            {/* Preview View */}
+            <div className={`w-full h-full ${activeView === 'preview' ? 'block' : 'hidden'}`}>
+              {containerStartup.isLoading || containerStartup.status === 'error' ? (
+                <ContainerLoadingOverlay
+                  phase={containerStartup.phase}
+                  progress={containerStartup.progress}
+                  message={containerStartup.message}
+                  logs={containerStartup.logs}
+                  error={containerStartup.error || undefined}
+                  onRetry={containerStartup.retry}
+                />
+              ) : devServerUrl ? (
+                <div className="w-full h-full bg-white">
+                  <iframe
+                    src={devServerUrlWithAuth || devServerUrl}
+                    className="w-full h-full"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                  />
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-[var(--text)]/60">
+                  <LoadingSpinner message="Loading project..." size={60} />
+                </div>
+              )}
+            </div>
 
-          {/* Kanban View */}
-          <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-            <KanbanPanel projectId={project?.id} />
-          </div>
+            {/* Code View */}
+            <div
+              className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
+            >
+              <CodeEditor projectId={project?.id} files={files} onFileUpdate={handleFileUpdate} />
+            </div>
 
-          {/* Assets View */}
-          <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
-            <AssetsPanel projectSlug={slug!} />
-          </div>
+            {/* Kanban View */}
+            <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+              <KanbanPanel projectId={project?.id} />
+            </div>
 
-          {/* Terminal View */}
-          <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
-            <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+            {/* Assets View */}
+            <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
+              <AssetsPanel projectSlug={slug!} />
+            </div>
+
+            {/* Terminal View */}
+            <div className={`w-full h-full ${activeView === 'terminal' ? 'block' : 'hidden'}`}>
+              <TerminalPanel projectId={slug!} containerId={containerId || undefined} />
+            </div>
           </div>
         </div>
       </div>
-
-      {/* RIGHT DOCKED CHAT - When chat position is 'right' */}
-      {chatPosition === 'right' && agents.length > 0 && (
-        <div className="hidden md:flex flex-col w-[400px] bg-[var(--bg-dark)] border-l border-[var(--surface)]">
-          <ChatContainer
-            projectId={project?.id}
-            containerId={containerId || undefined}
-            viewContext="builder"
-            agents={agents}
-            currentAgent={agents[0]}
-            onSelectAgent={(agent) => console.log('Selected agent:', agent)}
-            onFileUpdate={handleFileUpdate}
-            projectFiles={files}
-            projectName={project?.name}
-            sidebarExpanded={isLeftSidebarExpanded}
-            isDocked={true}
-          />
-        </div>
-      )}
 
       {/* Floating Panels */}
       <FloatingPanel
@@ -1260,20 +1479,23 @@ export default function Project() {
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
 
-      {/* CENTER FLOATING CHAT - Only when chat position is 'center' */}
-      {chatPosition === 'center' && agents.length > 0 && (
-        <ChatContainer
-          projectId={project?.id}
-          containerId={containerId || undefined}
-          viewContext="builder"
-          agents={agents}
-          currentAgent={agents[0]}
-          onSelectAgent={(agent) => console.log('Selected agent:', agent)}
-          onFileUpdate={handleFileUpdate}
-          projectFiles={files}
-          projectName={project?.name}
-          sidebarExpanded={isLeftSidebarExpanded}
-        />
+      {/* FLOATING CHAT - Always on mobile, or when chat position is 'center' on desktop */}
+      {/* Mobile always uses floating mode; desktop only shows floating when center position */}
+      {agents.length > 0 && (
+        <div className={chatPosition !== 'center' ? 'md:hidden' : ''}>
+          <ChatContainer
+            projectId={project?.id}
+            containerId={containerId || undefined}
+            viewContext="builder"
+            agents={agents}
+            currentAgent={agents[0]}
+            onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+            onFileUpdate={handleFileUpdate}
+            projectFiles={files}
+            projectName={project?.name}
+            sidebarExpanded={isLeftSidebarExpanded}
+          />
+        </div>
       )}
 
       {/* No Agents Empty State */}
@@ -1311,8 +1533,8 @@ export default function Project() {
         </div>
       )}
 
-      {/* Discord Support */}
-      <DiscordSupport />
+      {/* Discord Support - position adjusts when chat is right-docked */}
+      <DiscordSupport chatPosition={chatPosition} chatPanelWidth={chatPanelWidth} />
 
       {/* Deployment Modal */}
       {showDeployModal && (

@@ -1,5 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Plus, CaretLeft, CaretRight, ArrowsClockwise } from '@phosphor-icons/react';
+import {
+  X,
+  Plus,
+  CaretLeft,
+  CaretRight,
+  ArrowsClockwise,
+  DeviceMobile,
+  Monitor,
+} from '@phosphor-icons/react';
 import { ContainerLoadingOverlay } from './ContainerLoadingOverlay';
 import type { ContainerStartupStatus } from '../hooks/useContainerStartup';
 
@@ -44,10 +52,15 @@ export function BrowserPreview({
   onRetryStart,
 }: BrowserPreviewProps) {
   // Determine if we should show the loading overlay
-  const showLoadingOverlay = containerStatus === 'starting' || containerStatus === 'health_checking' || containerStatus === 'error';
-  const [tabs, setTabs] = useState<Tab[]>([
-    { id: '1', title: 'Home', url: devServerUrl }
-  ]);
+  const showLoadingOverlay =
+    containerStatus === 'starting' ||
+    containerStatus === 'health_checking' ||
+    containerStatus === 'error';
+
+  // Viewport mode for mobile preview
+  const [viewportMode, setViewportMode] = useState<'desktop' | 'mobile'>('desktop');
+
+  const [tabs, setTabs] = useState<Tab[]>([{ id: '1', title: 'Home', url: devServerUrl }]);
   const [activeTabId, setActiveTabId] = useState('1');
   const iframeRefs = useRef<{ [key: string]: HTMLIFrameElement | null }>({});
 
@@ -55,7 +68,7 @@ export function BrowserPreview({
     const newTab: Tab = {
       id: Date.now().toString(),
       title: 'New Tab',
-      url: devServerUrl
+      url: devServerUrl,
     };
     setTabs([...tabs, newTab]);
     setActiveTabId(newTab.id);
@@ -65,21 +78,19 @@ export function BrowserPreview({
     e.stopPropagation();
     if (tabs.length === 1) return; // Don't close last tab
 
-    const newTabs = tabs.filter(t => t.id !== tabId);
+    const newTabs = tabs.filter((t) => t.id !== tabId);
     setTabs(newTabs);
 
     if (activeTabId === tabId) {
       // Switch to adjacent tab
-      const closedIndex = tabs.findIndex(t => t.id === tabId);
+      const closedIndex = tabs.findIndex((t) => t.id === tabId);
       const newActiveTab = newTabs[Math.min(closedIndex, newTabs.length - 1)];
       setActiveTabId(newActiveTab.id);
     }
   };
 
   const updateTabTitle = (tabId: string, title: string) => {
-    setTabs(tabs.map(t =>
-      t.id === tabId ? { ...t, title } : t
-    ));
+    setTabs(tabs.map((t) => (t.id === tabId ? { ...t, title } : t)));
   };
 
   // Listen for iframe URL changes
@@ -110,14 +121,15 @@ export function BrowserPreview({
       {/* Tab Bar */}
       <div className="bg-[var(--surface)] border-b border-white/10 flex items-center px-2">
         <div className="flex items-center gap-1 flex-1 overflow-x-auto">
-          {tabs.map(tab => (
+          {tabs.map((tab) => (
             <div
               key={tab.id}
               className={`
                 group flex items-center gap-2 px-4 py-2 min-w-[150px] max-w-[200px] rounded-t-lg transition-colors cursor-pointer
-                ${activeTabId === tab.id
-                  ? 'bg-[var(--text)]/5 border-b-2 border-orange-500'
-                  : 'hover:bg-[var(--text)]/5'
+                ${
+                  activeTabId === tab.id
+                    ? 'bg-[var(--text)]/5 border-b-2 border-orange-500'
+                    : 'hover:bg-[var(--text)]/5'
                 }
               `}
             >
@@ -169,7 +181,9 @@ export function BrowserPreview({
         <div className="hidden md:block flex-1">
           <div className="bg-[var(--text)]/5 rounded-lg px-4 py-2 text-sm text-[var(--text)]/60 font-mono flex items-center border border-[var(--border-color)] overflow-hidden">
             <span className="text-yellow-500 mr-2">🔒</span>
-            <span className="text-[var(--text)]/80 truncate">{currentPreviewUrl || devServerUrl}</span>
+            <span className="text-[var(--text)]/80 truncate">
+              {currentPreviewUrl || devServerUrl}
+            </span>
           </div>
         </div>
         <button
@@ -179,10 +193,23 @@ export function BrowserPreview({
         >
           <ArrowsClockwise size={16} />
         </button>
+        <button
+          onClick={() => setViewportMode(viewportMode === 'desktop' ? 'mobile' : 'desktop')}
+          className={`p-1.5 md:p-2 hover:bg-white/10 active:bg-white/20 rounded-lg transition-colors ${
+            viewportMode === 'mobile'
+              ? 'text-orange-500'
+              : 'text-[var(--text)]/60 hover:text-[var(--text)]'
+          }`}
+          title={viewportMode === 'desktop' ? 'Switch to mobile view' : 'Switch to desktop view'}
+        >
+          {viewportMode === 'desktop' ? <DeviceMobile size={16} /> : <Monitor size={16} />}
+        </button>
       </div>
 
       {/* Preview area - either loading overlay or iframes */}
-      <div className="flex-1 bg-white relative">
+      <div
+        className={`flex-1 relative overflow-auto ${viewportMode === 'mobile' ? 'bg-gray-100 flex items-center justify-center' : 'bg-white'}`}
+      >
         {showLoadingOverlay ? (
           <ContainerLoadingOverlay
             phase={startupPhase}
@@ -193,16 +220,26 @@ export function BrowserPreview({
             onRetry={onRetryStart}
           />
         ) : (
-          tabs.map(tab => (
-            <iframe
-              key={tab.id}
-              ref={(el) => { iframeRefs.current[tab.id] = el; }}
-              id={`preview-iframe-${tab.id}`}
-              src={tab.id === activeTabId ? devServerUrlWithAuth : tab.url}
-              className={`w-full h-full ${tab.id === activeTabId ? 'block' : 'hidden'}`}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-            />
-          ))
+          <div
+            className={
+              viewportMode === 'mobile'
+                ? 'w-[375px] h-[667px] border border-gray-300 rounded-lg shadow-lg overflow-hidden flex-shrink-0 bg-white'
+                : 'w-full h-full'
+            }
+          >
+            {tabs.map((tab) => (
+              <iframe
+                key={tab.id}
+                ref={(el) => {
+                  iframeRefs.current[tab.id] = el;
+                }}
+                id={`preview-iframe-${tab.id}`}
+                src={tab.id === activeTabId ? devServerUrlWithAuth : tab.url}
+                className={`w-full h-full ${tab.id === activeTabId ? 'block' : 'hidden'}`}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>

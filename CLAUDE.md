@@ -261,6 +261,7 @@ Each `CLAUDE.md` file contains:
 
 | Task | Start Here |
 |------|------------|
+| Docker setup from scratch | `docs/guides/docker-setup.md` |
 | Understanding system architecture | `docs/architecture/CLAUDE.md` |
 | Backend API development | `docs/orchestrator/routers/CLAUDE.md` |
 | AI agent development | `docs/orchestrator/agent/CLAUDE.md` |
@@ -281,6 +282,23 @@ Each `CLAUDE.md` file contains:
 - `DEPLOYMENT_MODE=docker` in config
 - Traefik routes `*.localhost` to containers
 - Project files on local filesystem
+
+**For complete Docker setup from scratch, see: [docs/guides/docker-setup.md](docs/guides/docker-setup.md)**
+
+#### Docker Quick Start
+```bash
+cp .env.example .env           # configure SECRET_KEY, LITELLM_API_BASE, LITELLM_MASTER_KEY
+docker compose up --build -d   # build images and start all services
+docker compose ps              # verify all 4 services are healthy
+# Access: http://localhost (frontend), http://localhost:8000/docs (API docs)
+```
+
+#### Docker Clean Slate Reset
+```bash
+docker compose down --volumes --remove-orphans
+docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep -i tesslate | awk '{print $2}' | sort -u | xargs docker rmi -f
+docker compose up --build -d
+```
 
 ### Kubernetes (Minikube/Production)
 - `DEPLOYMENT_MODE=kubernetes` in config

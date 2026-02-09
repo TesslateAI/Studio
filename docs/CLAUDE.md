@@ -66,8 +66,15 @@ Tesslate Studio consists of four major systems:
 ### Common Commands
 
 ```bash
-# Local Docker development
-docker-compose up
+# Docker setup from scratch
+cp .env.example .env           # configure required values
+docker compose up --build -d   # build and start all services
+docker compose ps              # verify services are healthy
+
+# Docker clean slate reset
+docker compose down --volumes --remove-orphans
+docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep -i tesslate | awk '{print $2}' | sort -u | xargs docker rmi -f
+docker compose up --build -d
 
 # Minikube deployment
 kubectl apply -k k8s/overlays/minikube
@@ -106,6 +113,7 @@ Load this root CLAUDE.md when:
 
 | Task | Go To |
 |------|-------|
+| Set up Docker from scratch | [guides/docker-setup.md](guides/docker-setup.md) |
 | Add a new API endpoint | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) |
 | Modify the AI agent | [orchestrator/agent/CLAUDE.md](orchestrator/agent/CLAUDE.md) |
 | Add a new tool for the agent | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) |

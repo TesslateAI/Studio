@@ -4,9 +4,9 @@ import { useNavigate } from 'react-router-dom';
 interface Agent {
   id: string;
   name: string;
-  icon: string;  // Emoji string from backend
+  icon: string; // Emoji string from backend
   active?: boolean;
-  backendId?: number;  // Link to backend agent ID
+  backendId?: number; // Link to backend agent ID
   mode?: 'stream' | 'agent';
 }
 
@@ -14,9 +14,16 @@ interface AgentSelectorProps {
   agents: Agent[];
   currentAgent: Agent;
   onSelectAgent: (agent: Agent) => void;
+  /** When true, only shows the agent icon without name */
+  compact?: boolean;
 }
 
-export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSelectorProps) {
+export function AgentSelector({
+  agents,
+  currentAgent,
+  onSelectAgent,
+  compact = false,
+}: AgentSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -70,7 +77,7 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className="
+        className={`
           agent-pill
           bg-[var(--text)]/10 text-[var(--text)]
           flex items-center gap-1.5
@@ -81,17 +88,19 @@ export function AgentSelector({ agents, currentAgent, onSelectAgent }: AgentSele
           active:bg-[var(--text)]/30
           relative z-[10000]
           h-8
-          md:px-3.5 md:rounded-xl
-          px-2.5 rounded-xl
+          rounded-xl
           border-2 border-[var(--border-color)]
-        "
+          ${compact ? 'px-2' : 'px-3.5'}
+        `}
         title={currentAgent.name}
       >
-        <span className="text-sm">{currentAgent.icon}</span>
-        <span className="hidden md:inline">{currentAgent.name}</span>
-        <svg className="w-3 h-3 ml-0.5 hidden md:block" fill="currentColor" viewBox="0 0 256 256">
-          <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
-        </svg>
+        <span className="text-sm flex-shrink-0">{currentAgent.icon}</span>
+        {!compact && <span className="truncate max-w-[100px]">{currentAgent.name}</span>}
+        {!compact && (
+          <svg className="w-3 h-3 ml-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
+            <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z" />
+          </svg>
+        )}
       </button>
 
       {isOpen && (
