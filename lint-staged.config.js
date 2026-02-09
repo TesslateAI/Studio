@@ -1,27 +1,27 @@
 const path = require('path');
 
-// Cross-platform command wrapper: Windows uses cmd /c, Unix uses sh -c
+// lint-staged runs commands directly (not via a shell), so `cd dir && cmd`
+// breaks because `cd` resolves to /usr/bin/cd instead of the shell builtin.
+// Wrap with `sh -c` (or `cmd /c` on Windows) to get proper shell execution.
 const isWindows = process.platform === 'win32';
-const runInDir = (dir, cmd) =>
-  isWindows ? `cmd /c "cd ${dir} && ${cmd}"` : `cd ${dir} && ${cmd}`;
+const shell = (cmd) => (isWindows ? `cmd /c "${cmd}"` : `sh -c '${cmd}'`);
 
 module.exports = {
   // Frontend files - lint and format TypeScript/React
   'app/**/*.{ts,tsx}': (filenames) => {
-    // Convert to paths relative to app/ for eslint/prettier
     const files = filenames
       .map((f) => path.relative(path.join(__dirname, 'app'), f).replace(/\\/g, '/'))
       .join(' ');
     return [
-      runInDir('app', `npx eslint --fix ${files}`),
-      runInDir('app', `npx prettier --write ${files}`),
+      shell(`cd app && npx eslint --fix ${files}`),
+      shell(`cd app && npx prettier --write ${files}`),
     ];
   },
   'app/**/*.{js,jsx,json,css,md}': (filenames) => {
     const files = filenames
       .map((f) => path.relative(path.join(__dirname, 'app'), f).replace(/\\/g, '/'))
       .join(' ');
-    return [runInDir('app', `npx prettier --write ${files}`)];
+    return [shell(`cd app && npx prettier --write ${files}`)];
   },
 
   // Backend files - lint and format Python

@@ -112,12 +112,31 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  // Login with JWT bearer token (fastapi-users endpoint)
+  // Login with email 2FA (custom endpoint — always returns temp_token + requires_2fa)
   login: async (username: string, password: string) => {
     const formData = new URLSearchParams();
     formData.append('username', username);
     formData.append('password', password);
-    const response = await api.post('/api/auth/jwt/login', formData, {
+    const response = await api.post('/api/auth/login', formData, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    return response.data;
+  },
+
+  // Verify 2FA code during login (returns JWT access_token on success)
+  verify2fa: async (tempToken: string, code: string) => {
+    const response = await api.post('/api/auth/2fa/verify', {
+      temp_token: tempToken,
+      code,
+    });
+    return response.data;
+  },
+
+  // Resend 2FA code during login
+  resend2faCode: async (tempToken: string) => {
+    const formData = new URLSearchParams();
+    formData.append('temp_token', tempToken);
+    const response = await api.post('/api/auth/2fa/resend', formData, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
     return response.data;

@@ -1,31 +1,62 @@
-from fastapi import FastAPI, Request, Depends, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+import contextlib
+import logging
+import os
+import re
+
+import sqlalchemy as sa
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import status as http_status
+from fastapi.responses import JSONResponse, RedirectResponse
+from httpx_oauth.integrations.fastapi import OAuth2AuthorizeCallback
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
-from .database import engine, Base
-from .routers import projects, chat, agent, agents, github, git, git_providers, marketplace, admin, shell, secrets, users, kanban, referrals, auth, billing, webhooks, feedback, tasks, deployments, deployment_credentials, deployment_oauth, creators, snapshots, themes
+
 from .config import get_settings
-import sqlalchemy as sa
+from .database import engine
 from .middleware.csrf import CSRFProtectionMiddleware, get_csrf_token_response
-from .users import fastapi_users, cookie_backend, bearer_backend, get_user_manager
-from .schemas_auth import UserRead, UserCreate, UserUpdate
 from .oauth import get_available_oauth_clients
-import os
-import logging
-import re
+from .routers import (
+    admin,
+    agent,
+    agents,
+    auth,
+    billing,
+    chat,
+    creators,
+    deployment_credentials,
+    deployment_oauth,
+    deployments,
+    feedback,
+    git,
+    git_providers,
+    github,
+    kanban,
+    marketplace,
+    projects,
+    referrals,
+    secrets,
+    shell,
+    snapshots,
+    tasks,
+    themes,
+    two_fa,
+    users,
+    webhooks,
+)
+from .schemas_auth import UserCreate, UserRead, UserUpdate
+from .users import bearer_backend, cookie_backend, fastapi_users, get_user_manager
 
 settings = get_settings()
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Application Builder API")
+
 
 # Dynamic CORS middleware that supports wildcard subdomain patterns
 # Allows dev environments to communicate with backend across different subdomains
@@ -39,6 +70,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
 
     The APP_DOMAIN setting controls which production domain to allow.
     """
+
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin")
 
@@ -50,16 +82,16 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         # Define allowed origin patterns (dynamically generated based on app_domain)
         # Local development patterns (always allowed)
         local_patterns = [
-            r"^http://localhost$",                                  # Local dev (port 80, no port in origin)
-            r"^http://localhost:\d+$",                              # Local dev server (any port)
-            r"^http://studio\.localhost$",                          # Local main app
-            r"^http://[\w-]+\.studio\.localhost$",                  # Local user dev environments (subdomain)
+            r"^http://localhost$",  # Local dev (port 80, no port in origin)
+            r"^http://localhost:\d+$",  # Local dev server (any port)
+            r"^http://studio\.localhost$",  # Local main app
+            r"^http://[\w-]+\.studio\.localhost$",  # Local user dev environments (subdomain)
         ]
 
         # Production patterns (generated from APP_DOMAIN)
         production_patterns = [
-            f"^https?://{escaped_domain}$",                        # Main app (http or https)
-            f"^https?://[\\w-]+\\.{escaped_domain}$",              # User dev environments (subdomain wildcard)
+            f"^https?://{escaped_domain}$",  # Main app (http or https)
+            f"^https?://[\\w-]+\\.{escaped_domain}$",  # User dev environments (subdomain wildcard)
         ]
 
         allowed_patterns = local_patterns + production_patterns
@@ -87,7 +119,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
                         "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token",
                         "Access-Control-Max-Age": "600",
-                    }
+                    },
                 )
             else:
                 # Reject preflight for disallowed origins
@@ -100,11 +132,16 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         if origin_allowed and origin:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token"
+            response.headers["Access-Control-Allow-Methods"] = (
+                "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            )
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Authorization, X-Requested-With, Accept, Origin, X-CSRF-Token"
+            )
             response.headers["Access-Control-Expose-Headers"] = "Content-Length, X-Total-Count"
 
         return response
+
 
 # Add ProxyHeadersMiddleware first to handle X-Forwarded-* headers from Traefik
 # This ensures FastAPI generates correct URLs for OAuth redirects
@@ -115,6 +152,7 @@ app.add_middleware(DynamicCORSMiddleware)
 
 # Add CSRF protection middleware (must be after CORS)
 app.add_middleware(CSRFProtectionMiddleware)
+
 
 def load_agents_config():
     """Load agent definitions from agents_config.json file."""
@@ -127,7 +165,7 @@ def load_agents_config():
 
     if config_path.exists():
         logger.info(f"Loading agent definitions from: {config_path}")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             return json.load(f)
 
     logger.error(f"agents_config.json not found at: {config_path}")
@@ -142,9 +180,10 @@ async def seed_default_agents():
     Agents require:  name, slug, description, category, system_prompt, mode,
                     agent_type, pricing_type, source_type, etc.
     """
-    from .models import MarketplaceAgent
-    from .database import AsyncSessionLocal
     from sqlalchemy import select
+
+    from .database import AsyncSessionLocal
+    from .models import MarketplaceAgent
 
     async with AsyncSessionLocal() as session:
         try:
@@ -153,11 +192,15 @@ async def seed_default_agents():
             existing_agents = result.scalars().all()
 
             if existing_agents:
-                logger.info(f"Agents already seeded ({len(existing_agents)} marketplace agents found)")
+                logger.info(
+                    f"Agents already seeded ({len(existing_agents)} marketplace agents found)"
+                )
                 return
 
             # For now, skip seeding - agents should be added via marketplace or migration
-            logger.info("No agents found. Add marketplace agents via migration scripts or admin panel.")
+            logger.info(
+                "No agents found. Add marketplace agents via migration scripts or admin panel."
+            )
             logger.info("Skipping automatic seed - using new marketplace agent system")
 
             # Future: Load from marketplace_agents_config.json
@@ -173,8 +216,9 @@ async def seed_default_agents():
 async def shell_session_cleanup_loop():
     """Background task to clean up idle shell sessions."""
     import asyncio
-    from .services.shell_session_manager import get_shell_session_manager
+
     from .database import AsyncSessionLocal
+    from .services.shell_session_manager import get_shell_session_manager
 
     logger.info("Shell session cleanup task started")
     error_count = 0
@@ -194,7 +238,10 @@ async def shell_session_cleanup_loop():
 
         except Exception as e:
             error_count += 1
-            logger.error(f"Session cleanup error ({error_count}/{max_consecutive_errors}): {e}", exc_info=True)
+            logger.error(
+                f"Session cleanup error ({error_count}/{max_consecutive_errors}): {e}",
+                exc_info=True,
+            )
 
             # If too many consecutive errors, use exponential backoff
             if error_count >= max_consecutive_errors:
@@ -205,10 +252,8 @@ async def shell_session_cleanup_loop():
         finally:
             # Ensure DB session is always closed
             if db is not None:
-                try:
+                with contextlib.suppress(Exception):
                     await db.close()
-                except:
-                    pass
 
         # Run every 5 minutes
         await asyncio.sleep(300)
@@ -222,6 +267,7 @@ async def container_cleanup_loop():
     are managed via docker-compose and don't need this cleanup task.
     """
     import asyncio
+
     logger.info("Container cleanup task disabled - legacy single-container system removed")
 
     # Keep the task alive but do nothing
@@ -234,8 +280,9 @@ async def container_cleanup_loop():
 async def stats_flush_loop():
     """Background task to flush shell session stats to database."""
     import asyncio
-    from .services.shell_session_manager import get_shell_session_manager
+
     from .database import AsyncSessionLocal
+    from .services.shell_session_manager import get_shell_session_manager
 
     logger.info("Stats flush task started - batches DB updates to prevent blocking")
 
@@ -253,10 +300,8 @@ async def stats_flush_loop():
         finally:
             # Ensure DB session is always closed
             if db is not None:
-                try:
+                with contextlib.suppress(Exception):
                     await db.close()
-                except:
-                    pass
 
         # Flush every 5 seconds to keep stats reasonably fresh
         # while avoiding blocking on every keystroke
@@ -301,14 +346,17 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     return response
 
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
     if request.url.path == "/api/users/me":
         logger.info(f"Cookie header: {request.headers.get('cookie', 'NO COOKIE')}")
     if "/api/tasks/" in request.url.path:
-        auth_header = request.headers.get('authorization', 'NO AUTH HEADER')
-        logger.info(f"[TASK_REQUEST] Authorization header: {auth_header[:50] if auth_header != 'NO AUTH HEADER' else auth_header}...")
+        auth_header = request.headers.get("authorization", "NO AUTH HEADER")
+        logger.info(
+            f"[TASK_REQUEST] Authorization header: {auth_header[:50] if auth_header != 'NO AUTH HEADER' else auth_header}..."
+        )
         logger.info(f"[TASK_REQUEST] All headers: {dict(request.headers)}")
     try:
         response = await call_next(request)
@@ -317,6 +365,7 @@ async def log_requests(request: Request, call_next):
     except Exception as e:
         logger.error(f"Request failed: {str(e)}")
         raise
+
 
 # Run database migrations
 def run_alembic_migrations():
@@ -333,10 +382,7 @@ def run_alembic_migrations():
 
     # Run alembic upgrade head as a subprocess
     result = subprocess.run(
-        ["alembic", "upgrade", "head"],
-        cwd=base_dir,
-        capture_output=True,
-        text=True
+        ["alembic", "upgrade", "head"], cwd=base_dir, capture_output=True, text=True
     )
 
     if result.returncode != 0:
@@ -344,12 +390,12 @@ def run_alembic_migrations():
 
     # Log the output
     if result.stdout:
-        for line in result.stdout.strip().split('\n'):
+        for line in result.stdout.strip().split("\n"):
             if line:
                 logger.info(f"[Alembic] {line}")
     if result.stderr:
-        for line in result.stderr.strip().split('\n'):
-            if line and 'INFO' in line:
+        for line in result.stderr.strip().split("\n"):
+            if line and "INFO" in line:
                 logger.info(f"[Alembic] {line}")
             elif line:
                 logger.warning(f"[Alembic] {line}")
@@ -374,20 +420,25 @@ async def startup():
             break
         except Exception as e:
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8 seconds
-                logger.warning(f"Database connection/migration attempt {attempt + 1} failed: {type(e).__name__}: {str(e) or 'No error message'}")
-                logger.warning(f"Full traceback:", exc_info=True)
+                wait_time = 2**attempt  # Exponential backoff: 1, 2, 4, 8 seconds
+                logger.warning(
+                    f"Database connection/migration attempt {attempt + 1} failed: {type(e).__name__}: {str(e) or 'No error message'}"
+                )
+                logger.warning("Full traceback:", exc_info=True)
                 logger.info(f"Retrying in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
             else:
-                logger.error(f"Failed to connect to database/run migrations after {max_retries} attempts: {type(e).__name__}: {str(e) or 'No error message'}")
-                logger.error(f"Full traceback:", exc_info=True)
+                logger.error(
+                    f"Failed to connect to database/run migrations after {max_retries} attempts: {type(e).__name__}: {str(e) or 'No error message'}"
+                )
+                logger.error("Full traceback:", exc_info=True)
                 raise
 
     # Create users directory for Docker mode
     # In Docker mode, user project files are stored in the users directory
     # In K8s mode, files are stored on PVC and this is not needed
     from .services.orchestration import is_docker_mode
+
     if is_docker_mode():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
@@ -403,11 +454,13 @@ async def startup():
     # Initialize base cache (Docker mode only - async - doesn't block startup)
     if is_docker_mode():
         from .services.base_cache_manager import get_base_cache_manager
+
         base_cache_manager = get_base_cache_manager()
         asyncio.create_task(base_cache_manager.initialize_cache())
         logger.info("Base cache manager initialized for Docker mode")
     else:
         logger.info("Skipping base cache manager initialization (Kubernetes mode)")
+
 
 # Mount static files for project previews (legacy - not used in K8s architecture)
 # In Kubernetes-native mode, user files are served directly from user dev pods
@@ -469,8 +522,6 @@ app.include_router(
 # These MUST be registered BEFORE the OAuth routers to take precedence
 # They force the redirect_uri to use localhost (Google doesn't accept .localhost domains)
 
-from fastapi import Query
-from fastapi.responses import JSONResponse
 
 @app.get("/api/auth/google/authorize", tags=["auth"])
 async def google_authorize(scopes: list[str] = Query(None)):
@@ -479,14 +530,12 @@ async def google_authorize(scopes: list[str] = Query(None)):
     Google OAuth doesn't accept .localhost domains, so we force it to use localhost
     regardless of what domain the user accessed the app from.
     """
+    from fastapi_users.router.oauth import generate_state_token
+
     from .oauth import OAUTH_CLIENTS
-    from fastapi_users.router.oauth import generate_state_token, STATE_TOKEN_AUDIENCE
 
     if "google" not in OAUTH_CLIENTS:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "Google OAuth is not configured"}
-        )
+        return JSONResponse(status_code=503, content={"detail": "Google OAuth is not configured"})
 
     oauth_client = OAUTH_CLIENTS["google"]
 
@@ -507,20 +556,19 @@ async def google_authorize(scopes: list[str] = Query(None)):
 
     return {"authorization_url": authorization_url}
 
+
 @app.get("/api/auth/github/authorize", tags=["auth"])
 async def github_authorize(scopes: list[str] = Query(None)):
     """
     Custom GitHub OAuth authorize endpoint that forces redirect_uri to use localhost.
     This matches the Google OAuth behavior for consistency.
     """
+    from fastapi_users.router.oauth import generate_state_token
+
     from .oauth import OAUTH_CLIENTS
-    from fastapi_users.router.oauth import generate_state_token, STATE_TOKEN_AUDIENCE
 
     if "github" not in OAUTH_CLIENTS:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "GitHub OAuth is not configured"}
-        )
+        return JSONResponse(status_code=503, content={"detail": "GitHub OAuth is not configured"})
 
     oauth_client = OAUTH_CLIENTS["github"]
 
@@ -541,19 +589,17 @@ async def github_authorize(scopes: list[str] = Query(None)):
 
     return {"authorization_url": authorization_url}
 
+
 # ============================================================================
 # Custom OAuth Callback Endpoints with Redirect
 # ============================================================================
 # We need custom callback endpoints to properly redirect to the frontend
 # after setting the authentication cookie
 
-from fastapi import HTTPException, status as http_status
-from fastapi.responses import RedirectResponse
-from httpx_oauth.integrations.fastapi import OAuth2AuthorizeCallback
-
 # Frontend callback URL where users will be redirected after authentication
 # Dynamically constructed from environment settings to support both local and production
 frontend_callback_url = f"{settings.get_app_base_url}/oauth/callback"
+
 
 def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redirect_uri: str):
     """
@@ -585,8 +631,8 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
         5. Generate session token and set cookie
         6. Redirect to frontend OAuth callback page
         """
-        from fastapi_users.router.oauth import STATE_TOKEN_AUDIENCE
         import jwt as jose_jwt
+        from fastapi_users.router.oauth import STATE_TOKEN_AUDIENCE
 
         token, state = access_token_state
 
@@ -602,18 +648,19 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
 
             # Verify state token
             from fastapi_users.jwt import decode_jwt
+
             try:
                 decode_jwt(state, settings.secret_key, [STATE_TOKEN_AUDIENCE])
             except jose_jwt.DecodeError:
                 raise HTTPException(
                     status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="INVALID_STATE_TOKEN",
-                )
+                ) from None
             except jose_jwt.ExpiredSignatureError:
                 raise HTTPException(
                     status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="STATE_TOKEN_EXPIRED",
-                )
+                ) from None
 
             # Create or get user via OAuth callback
             user = await user_manager.oauth_callback(
@@ -645,9 +692,9 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
             redirect_response = RedirectResponse(url=frontend_callback_url, status_code=303)
 
             # Copy Set-Cookie headers from login response to redirect response
-            set_cookie_headers = login_response.headers.getlist('set-cookie')
+            set_cookie_headers = login_response.headers.getlist("set-cookie")
             for cookie_header in set_cookie_headers:
-                redirect_response.headers.append('set-cookie', cookie_header)
+                redirect_response.headers.append("set-cookie", cookie_header)
 
             logger.info(f"OAuth login successful for {provider_name}: {user.email}")
             return redirect_response
@@ -662,6 +709,7 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
 
     return oauth_callback_handler
 
+
 # Register OAuth callback endpoints for each provider
 for provider_name, oauth_client in get_available_oauth_clients().items():
     # Get the correct redirect_uri for token exchange (from environment)
@@ -673,7 +721,9 @@ for provider_name, oauth_client in get_available_oauth_clients().items():
         oauth_redirect_uri = None
 
     # Create and register the callback endpoint
-    callback_handler = create_oauth_callback_endpoint(provider_name, oauth_client, oauth_redirect_uri)
+    callback_handler = create_oauth_callback_endpoint(
+        provider_name, oauth_client, oauth_redirect_uri
+    )
 
     app.add_api_route(
         f"/api/auth/{provider_name}/callback",
@@ -683,13 +733,17 @@ for provider_name, oauth_client in get_available_oauth_clients().items():
         tags=["auth"],
     )
 
-    logger.info(f"✅ Registered OAuth callback for {provider_name} (redirects to: {frontend_callback_url})")
+    logger.info(
+        f"✅ Registered OAuth callback for {provider_name} (redirects to: {frontend_callback_url})"
+    )
+
 
 # CSRF token endpoint
 @app.get("/api/auth/csrf", tags=["auth"])
 async def get_csrf_token():
     """Get CSRF token for cookie-based authentication."""
     return get_csrf_token_response()
+
 
 # ============================================================================
 # Include Other Routers
@@ -706,6 +760,7 @@ app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(git_providers.router, prefix="/api", tags=["git-providers"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(two_fa.router, prefix="/api/auth", tags=["auth"])
 app.include_router(shell.router, prefix="/api/shell", tags=["shell"])
 app.include_router(secrets.router, prefix="/api/secrets", tags=["secrets"])
 app.include_router(kanban.router, tags=["kanban"])
@@ -720,9 +775,11 @@ app.include_router(deployment_oauth.router)
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 
+
 @app.get("/")
 async def root():
     return {"message": "AI Application Builder API"}
+
 
 @app.get("/health")
 async def health_check():

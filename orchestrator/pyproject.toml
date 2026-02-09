@@ -39,6 +39,7 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=13.0.0",
     "httpx-oauth>=0.14.1",
     "itsdangerous>=2.1.2",
+    "aiosmtplib>=3.0.0",
     # Rate limiting
     "slowapi>=0.1.9",
     # Encryption

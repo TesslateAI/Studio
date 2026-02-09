@@ -858,7 +858,9 @@ class MarketplaceBase(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # User-submitted bases
-    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     visibility = Column(String, default="public", server_default="public")  # "private" or "public"
 
     # Relationships
@@ -1318,3 +1320,24 @@ class FeedbackComment(Base):
     # Relationships
     user = relationship("User", back_populates="feedback_comments")
     feedback_post = relationship("FeedbackPost", back_populates="comments")
+
+
+class EmailVerificationCode(Base):
+    """Email verification codes for 2FA."""
+
+    __tablename__ = "email_verification_codes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code_hash = Column(String, nullable=False)
+    purpose = Column(String(50), nullable=False)  # e.g., "2fa_login"
+    attempts = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=5, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

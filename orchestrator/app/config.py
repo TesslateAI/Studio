@@ -340,6 +340,24 @@ class Settings(BaseSettings):
     k8s_user_environments_namespace: str = "tesslate-user-environments"
 
     # ==========================================================================
+    # SMTP Configuration (for 2FA email codes)
+    # ==========================================================================
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_sender_email: str = ""
+
+    # ==========================================================================
+    # Two-Factor Authentication
+    # ==========================================================================
+    two_fa_code_length: int = 6
+    two_fa_code_expiry_seconds: int = 600  # 10 minutes
+    two_fa_max_attempts: int = 5
+    two_fa_temp_token_expiry_seconds: int = 600  # 10 minutes
+
+    # ==========================================================================
     # Container Cleanup Configuration
     # ==========================================================================
     # Two-tier cleanup system for idle dev containers
