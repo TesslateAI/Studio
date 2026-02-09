@@ -213,6 +213,7 @@ services:
       - ./app/package.json:/app/package.json
     environment:
       - VITE_API_URL=${VITE_API_URL:-}
+      - VITE_BACKEND_URL=http://orchestrator:8000
       - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-localhost}}
       - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY:-}
       - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-}
