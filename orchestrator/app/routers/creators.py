@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 
 from ..database import get_db
-from ..models import MarketplaceAgent
+from ..models import MarketplaceAgent, MarketplaceBase
 from ..models_auth import User
 
 router = APIRouter(prefix="/api/creators", tags=["creators"])
@@ -49,8 +49,18 @@ async def get_creator_profile(
     )
     agents = agents_result.scalars().all()
 
-    # Calculate total downloads
-    total_downloads = sum(agent.downloads or 0 for agent in agents)
+    # Get published (public) bases by this creator
+    bases_result = await db.execute(
+        select(MarketplaceBase).where(
+            MarketplaceBase.created_by_user_id == creator_uuid,
+            MarketplaceBase.visibility == "public",
+            MarketplaceBase.is_active == True,
+        ).order_by(MarketplaceBase.downloads.desc())
+    )
+    bases = bases_result.scalars().all()
+
+    # Calculate total downloads (agents + bases)
+    total_downloads = sum(agent.downloads or 0 for agent in agents) + sum(base.downloads or 0 for base in bases)
 
     # Calculate average rating
     rated_agents = [a for a in agents if a.rating and a.reviews_count]
@@ -71,7 +81,7 @@ async def get_creator_profile(
         "website_url": user.website_url,
         "joined_at": user.created_at.isoformat() if user.created_at else None,
         "stats": {
-            "extensions_count": len(agents),
+            "extensions_count": len(agents) + len(bases),
             "total_downloads": total_downloads,
             "average_rating": round(avg_rating, 1)
         },
@@ -99,7 +109,26 @@ async def get_creator_profile(
                 "is_featured": agent.is_featured
             }
             for agent in agents
-        ]
+        ],
+        "bases": [
+            {
+                "id": str(base.id),
+                "name": base.name,
+                "slug": base.slug,
+                "description": base.description,
+                "category": base.category,
+                "icon": base.icon,
+                "pricing_type": base.pricing_type,
+                "downloads": base.downloads or 0,
+                "rating": base.rating or 5.0,
+                "reviews_count": base.reviews_count or 0,
+                "features": base.features or [],
+                "tech_stack": base.tech_stack or [],
+                "tags": base.tags or [],
+                "is_featured": base.is_featured,
+            }
+            for base in bases
+        ],
     }
 
 
@@ -206,18 +235,29 @@ async def get_creator_stats(
     )
     agents = agents_result.scalars().all()
 
-    if not agents:
+    # Get all public bases by this creator
+    bases_result = await db.execute(
+        select(MarketplaceBase).where(
+            MarketplaceBase.created_by_user_id == creator_uuid,
+            MarketplaceBase.visibility == "public",
+            MarketplaceBase.is_active == True,
+        )
+    )
+    bases = bases_result.scalars().all()
+
+    if not agents and not bases:
         return {
             "extensions_count": 0,
+            "bases_count": 0,
             "total_downloads": 0,
             "total_usage": 0,
             "average_rating": 5.0,
             "total_reviews": 0
         }
 
-    total_downloads = sum(agent.downloads or 0 for agent in agents)
+    total_downloads = sum(agent.downloads or 0 for agent in agents) + sum(base.downloads or 0 for base in bases)
     total_usage = sum(agent.usage_count or 0 for agent in agents)
-    total_reviews = sum(agent.reviews_count or 0 for agent in agents)
+    total_reviews = sum(agent.reviews_count or 0 for agent in agents) + sum(base.reviews_count or 0 for base in bases)
 
     # Calculate weighted average rating
     rated_agents = [a for a in agents if a.rating and a.reviews_count]
@@ -231,6 +271,7 @@ async def get_creator_stats(
 
     return {
         "extensions_count": len(agents),
+        "bases_count": len(bases),
         "total_downloads": total_downloads,
         "total_usage": total_usage,
         "average_rating": round(avg_rating, 1),

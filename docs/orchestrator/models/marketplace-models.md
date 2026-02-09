@@ -503,6 +503,10 @@ class MarketplaceBase(Base):
     features: JSON              # ["Hot reload", "API ready", "Database setup"]
     tech_stack: JSON            # ["React", "FastAPI", "PostgreSQL"]
 
+    # User-submitted bases
+    created_by_user_id: UUID    # FK → users.id, nullable (NULL = Tesslate-seeded base)
+    visibility: str             # "private" or "public" (default "public")
+
     # Status
     is_featured: bool
     is_active: bool
@@ -517,15 +521,24 @@ class MarketplaceBase(Base):
 ```python
 purchased_by = relationship("UserPurchasedBase", back_populates="base")
 reviews = relationship("BaseReview", back_populates="base")
+created_by_user = relationship("User", foreign_keys=[created_by_user_id])
 ```
 
 ### Common Queries
 
-**Get all bases**:
+**Get all public bases** (marketplace browse):
 ```python
+from sqlalchemy import or_
+
 result = await db.execute(
     select(MarketplaceBase)
-    .where(MarketplaceBase.is_active == True)
+    .where(
+        MarketplaceBase.is_active == True,
+        or_(
+            MarketplaceBase.created_by_user_id.is_(None),  # seeded bases
+            MarketplaceBase.visibility == "public"           # public user bases
+        )
+    )
     .order_by(MarketplaceBase.downloads.desc())
 )
 bases = result.scalars().all()
@@ -539,6 +552,16 @@ result = await db.execute(
     .where(MarketplaceBase.is_active == True)
 )
 fullstack_bases = result.scalars().all()
+```
+
+**Get user's created bases**:
+```python
+result = await db.execute(
+    select(MarketplaceBase)
+    .where(MarketplaceBase.created_by_user_id == user.id)
+    .order_by(MarketplaceBase.created_at.desc())
+)
+my_bases = result.scalars().all()
 ```
 
 ---

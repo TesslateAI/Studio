@@ -3,11 +3,12 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 """
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +25,7 @@ from ..models import (
     UserPurchasedAgent,
     UserPurchasedBase,
 )
+from ..schemas import BaseSubmitRequest, BaseUpdateRequest
 from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..services.cache_service import cache
 from ..users import current_active_user, current_optional_user
@@ -1960,7 +1962,13 @@ async def get_marketplace_bases(
     - Authenticated: Shows purchase status (is_purchased) for each item
     - Unauthenticated: Shows catalog without purchase status
     """
-    query = select(MarketplaceBase).where(MarketplaceBase.is_active)
+    query = select(MarketplaceBase).where(
+        MarketplaceBase.is_active == True,
+        or_(
+            MarketplaceBase.created_by_user_id.is_(None),  # seeded bases always visible
+            MarketplaceBase.visibility == "public",  # user bases only when public
+        ),
+    )
 
     # Apply filters
     if category:
@@ -2031,6 +2039,8 @@ async def get_marketplace_bases(
                 "source_type": "open",  # All bases are open source
                 "is_forkable": False,  # Bases can't be forked
                 "usage_count": base.downloads,
+                "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
+                "visibility": base.visibility or "public",
             }
         )
 
@@ -2052,6 +2062,11 @@ async def get_base_details(
 
     if not base:
         raise HTTPException(status_code=404, detail="Base not found")
+
+    # Private bases are only visible to their creator
+    if base.visibility == "private" and base.created_by_user_id:
+        if not current_user or current_user.id != base.created_by_user_id:
+            raise HTTPException(status_code=404, detail="Base not found")
 
     # Check if user has purchased this base (only if authenticated)
     is_purchased = False
@@ -2099,6 +2114,8 @@ async def get_base_details(
         "source_type": "open",
         "is_forkable": False,
         "usage_count": base.downloads,
+        "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
+        "visibility": base.visibility or "public",
         "reviews": [
             {
                 "id": review.id,
@@ -2191,6 +2208,190 @@ async def get_user_bases(
         )
 
     return {"bases": response}
+
+
+# ============================================================================
+# User-Submitted Bases Endpoints
+# ============================================================================
+
+
+@router.post("/bases/submit")
+async def submit_base(
+    request: BaseSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Submit a new base template from a git repository URL."""
+    # Generate slug from name
+    slug_base = re.sub(r"[^a-z0-9]+", "-", request.name.lower()).strip("-")
+    slug = f"{slug_base}-{current_user.id}-{datetime.now(UTC).timestamp()}"
+
+    new_base = MarketplaceBase(
+        name=request.name,
+        slug=slug,
+        description=request.description,
+        long_description=request.long_description,
+        git_repo_url=request.git_repo_url,
+        default_branch=request.default_branch,
+        category=request.category,
+        icon=request.icon,
+        tags=request.tags,
+        features=request.features,
+        tech_stack=request.tech_stack,
+        pricing_type="free",
+        price=0,
+        created_by_user_id=current_user.id,
+        visibility=request.visibility,
+        is_active=True,
+    )
+    db.add(new_base)
+    await db.flush()
+
+    # Auto-add to creator's library
+    purchase = UserPurchasedBase(
+        user_id=current_user.id,
+        base_id=new_base.id,
+        purchase_type="free",
+        is_active=True,
+    )
+    db.add(purchase)
+    await db.commit()
+    await db.refresh(new_base)
+
+    return {
+        "id": str(new_base.id),
+        "name": new_base.name,
+        "slug": new_base.slug,
+        "visibility": new_base.visibility,
+        "success": True,
+    }
+
+
+@router.patch("/bases/{base_id}")
+async def update_base(
+    base_id: str,
+    request: BaseUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Update a user-submitted base. Only the creator can update."""
+    result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = result.scalar_one_or_none()
+
+    if not base:
+        raise HTTPException(status_code=404, detail="Base not found")
+    if base.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only edit bases you created")
+
+    update_fields = request.model_dump(exclude_unset=True)
+
+    # Regenerate slug if name changes
+    if "name" in update_fields:
+        slug_base = re.sub(r"[^a-z0-9]+", "-", update_fields["name"].lower()).strip("-")
+        base.slug = f"{slug_base}-{current_user.id}-{datetime.now(UTC).timestamp()}"
+
+    for field, value in update_fields.items():
+        setattr(base, field, value)
+
+    await db.commit()
+    await db.refresh(base)
+
+    return {
+        "id": str(base.id),
+        "name": base.name,
+        "slug": base.slug,
+        "visibility": base.visibility,
+        "success": True,
+    }
+
+
+@router.patch("/bases/{base_id}/visibility")
+async def set_base_visibility(
+    base_id: str,
+    visibility: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Toggle visibility of a user-submitted base between private and public."""
+    if visibility not in ("private", "public"):
+        raise HTTPException(status_code=400, detail="Visibility must be 'private' or 'public'")
+
+    result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = result.scalar_one_or_none()
+
+    if not base:
+        raise HTTPException(status_code=404, detail="Base not found")
+    if base.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only change visibility of bases you created")
+
+    base.visibility = visibility
+    await db.commit()
+
+    return {
+        "id": str(base.id),
+        "visibility": base.visibility,
+        "success": True,
+    }
+
+
+@router.delete("/bases/{base_id}")
+async def delete_base(
+    base_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Soft-delete a user-submitted base. Only the creator can delete."""
+    result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = result.scalar_one_or_none()
+
+    if not base:
+        raise HTTPException(status_code=404, detail="Base not found")
+    if base.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete bases you created")
+
+    base.is_active = False
+    await db.commit()
+
+    return {"id": str(base.id), "success": True}
+
+
+@router.get("/my-created-bases")
+async def get_my_created_bases(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Get all bases created/submitted by the current user."""
+    result = await db.execute(
+        select(MarketplaceBase).where(
+            MarketplaceBase.created_by_user_id == current_user.id,
+            MarketplaceBase.is_active == True,
+        ).order_by(MarketplaceBase.created_at.desc())
+    )
+    bases = result.scalars().all()
+
+    return {
+        "bases": [
+            {
+                "id": str(base.id),
+                "name": base.name,
+                "slug": base.slug,
+                "description": base.description,
+                "long_description": base.long_description,
+                "git_repo_url": base.git_repo_url,
+                "default_branch": base.default_branch,
+                "category": base.category,
+                "icon": base.icon,
+                "tags": base.tags,
+                "features": base.features,
+                "tech_stack": base.tech_stack,
+                "visibility": base.visibility or "public",
+                "downloads": base.downloads or 0,
+                "rating": base.rating or 5.0,
+                "created_at": base.created_at.isoformat() if base.created_at else None,
+            }
+            for base in bases
+        ]
+    }
 
 
 @router.get("/my-items")

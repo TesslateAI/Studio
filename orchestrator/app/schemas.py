@@ -789,6 +789,84 @@ class MarketplaceBaseResponse(BaseModel):
 
 
 # =============================================================================
+# User-Submitted Bases
+# =============================================================================
+
+class BaseSubmitRequest(BaseModel):
+    """Request schema for submitting a new base template."""
+    name: str
+    description: str
+    git_repo_url: str
+    category: str  # fullstack, frontend, backend, mobile, data, devops
+    default_branch: str = "main"
+    visibility: str = "public"  # "private" or "public"
+    long_description: Optional[str] = None
+    icon: str = "\U0001F4E6"
+    tags: Optional[List[str]] = None
+    features: Optional[List[str]] = None
+    tech_stack: Optional[List[str]] = None
+
+    @field_validator("git_repo_url")
+    @classmethod
+    def validate_git_url(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            raise ValueError("Git URL must start with https://")
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str) -> str:
+        if v not in ("private", "public"):
+            raise ValueError("Visibility must be 'private' or 'public'")
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, v: str) -> str:
+        valid = {"fullstack", "frontend", "backend", "mobile", "data", "devops"}
+        if v not in valid:
+            raise ValueError(f"Category must be one of: {', '.join(sorted(valid))}")
+        return v
+
+
+class BaseUpdateRequest(BaseModel):
+    """Request schema for updating an existing base template."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    git_repo_url: Optional[str] = None
+    category: Optional[str] = None
+    default_branch: Optional[str] = None
+    visibility: Optional[str] = None
+    long_description: Optional[str] = None
+    icon: Optional[str] = None
+    tags: Optional[List[str]] = None
+    features: Optional[List[str]] = None
+    tech_stack: Optional[List[str]] = None
+
+    @field_validator("git_repo_url")
+    @classmethod
+    def validate_git_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.startswith("https://"):
+            raise ValueError("Git URL must start with https://")
+        return v
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("private", "public"):
+            raise ValueError("Visibility must be 'private' or 'public'")
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def validate_category(cls, v: Optional[str]) -> Optional[str]:
+        valid = {"fullstack", "frontend", "backend", "mobile", "data", "devops"}
+        if v is not None and v not in valid:
+            raise ValueError(f"Category must be one of: {', '.join(sorted(valid))}")
+        return v
+
+
+# =============================================================================
 # Project Snapshots (EBS VolumeSnapshots for Timeline UI)
 # =============================================================================
 

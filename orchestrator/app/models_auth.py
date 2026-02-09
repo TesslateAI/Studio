@@ -141,6 +141,7 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     purchased_bases = relationship(
         "UserPurchasedBase", back_populates="user", cascade="all, delete-orphan"
     )
+    created_bases = relationship("MarketplaceBase", foreign_keys="MarketplaceBase.created_by_user_id")
     api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
     custom_models = relationship(
         "UserCustomModel", back_populates="user", cascade="all, delete-orphan"

@@ -117,7 +117,7 @@ When working on specific features, also load:
 For specific UI work, reference the actual component files:
 - **Chat**: `app/src/components/chat/`
 - **Panels**: `app/src/components/panels/`
-- **Modals**: `app/src/components/modals/`
+- **Modals**: `app/src/components/modals/` (includes `SubmitBaseModal` for base template submission)
 - **Billing**: `app/src/components/billing/`
 - **Marketplace**: `app/src/components/marketplace/` (includes `SkeletonCard` for loading states)
 - **Settings**: `app/src/components/settings/` (see `docs/app/components/settings.md`)

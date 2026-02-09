@@ -44,7 +44,7 @@ import {
   UserDropdown,
   type MarkerEditorHandle,
 } from '../components/ui';
-import { ConfirmDialog } from '../components/modals';
+import { ConfirmDialog, SubmitBaseModal } from '../components/modals';
 import { ToolManagement } from '../components/ToolManagement';
 import { ImageUpload } from '../components/ImageUpload';
 import { marketplaceApi, secretsApi, usersApi, billingApi, authApi } from '../lib/api';
@@ -124,7 +124,26 @@ interface Provider {
   requires_key: boolean;
 }
 
-type TabType = 'agents' | 'models' | 'api-keys' | 'subscriptions';
+type TabType = 'agents' | 'bases' | 'models' | 'api-keys' | 'subscriptions';
+
+interface LibraryBase {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  long_description?: string;
+  git_repo_url: string;
+  default_branch: string;
+  category: string;
+  icon: string;
+  visibility: 'private' | 'public';
+  tags?: string[];
+  features?: string[];
+  tech_stack?: string[];
+  downloads: number;
+  rating: number;
+  created_at: string;
+}
 
 // All available tools in the system
 const _ALL_TOOLS = [
@@ -168,9 +187,12 @@ export default function Library() {
   const tabParam = searchParams.get('tab') as TabType | null;
   const [activeTab, setActiveTab] = useState<TabType>(tabParam || 'agents');
   const [agents, setAgents] = useState<LibraryAgent[]>([]);
+  const [bases, setBases] = useState<LibraryBase[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [externalProviders, setExternalProviders] = useState<ExternalProvider[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
+  const [editingBase, setEditingBase] = useState<LibraryBase | null>(null);
 
   // User state for dropdown
   const [userName, setUserName] = useState<string>('');
@@ -263,6 +285,9 @@ export default function Library() {
         await loadLibraryAgents();
         setLoading(false);
         loadModelsInBackground();
+      } else if (activeTab === 'bases') {
+        await loadCreatedBases();
+        setLoading(false);
       } else if (activeTab === 'models') {
         await loadModels();
         setLoading(false);
@@ -283,6 +308,39 @@ export default function Library() {
     } catch (error) {
       console.error('Failed to load library:', error);
       toast.error('Failed to load library');
+    }
+  };
+
+  const loadCreatedBases = async () => {
+    try {
+      const data = await marketplaceApi.getMyCreatedBases();
+      setBases(data.bases || []);
+    } catch (error) {
+      console.error('Failed to load bases:', error);
+      toast.error('Failed to load bases');
+    }
+  };
+
+  const handleToggleBaseVisibility = async (base: LibraryBase) => {
+    const newVisibility = base.visibility === 'public' ? 'private' : 'public';
+    try {
+      await marketplaceApi.setBaseVisibility(base.id, newVisibility);
+      toast.success(`Base is now ${newVisibility}`);
+      loadCreatedBases();
+    } catch (error) {
+      console.error('Failed to toggle visibility:', error);
+      toast.error('Failed to change visibility');
+    }
+  };
+
+  const handleDeleteBase = async (base: LibraryBase) => {
+    try {
+      await marketplaceApi.deleteBase(base.id);
+      toast.success('Base deleted');
+      loadCreatedBases();
+    } catch (error) {
+      console.error('Failed to delete base:', error);
+      toast.error('Failed to delete base');
     }
   };
 
@@ -441,6 +499,17 @@ export default function Library() {
               Agents ({agents.length})
             </button>
             <button
+              onClick={() => setActiveTab('bases')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'bases'
+                  ? 'bg-[var(--primary)] text-white'
+                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+              }`}
+            >
+              <Rocket size={16} weight={activeTab === 'bases' ? 'fill' : 'regular'} />
+              Bases ({bases.length})
+            </button>
+            <button
               onClick={() => setActiveTab('models')}
               className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
                 activeTab === 'models'
@@ -490,6 +559,17 @@ export default function Library() {
               onTogglePublish={handleTogglePublish}
               onModelChange={handleModelChange}
               onReload={loadLibraryAgents}
+            />
+          )}
+
+          {activeTab === 'bases' && (
+            <BasesTab
+              bases={bases}
+              loading={loading}
+              onSubmit={() => { setEditingBase(null); setShowSubmitBaseModal(true); }}
+              onEdit={(base) => { setEditingBase(base); setShowSubmitBaseModal(true); }}
+              onToggleVisibility={handleToggleBaseVisibility}
+              onDelete={handleDeleteBase}
             />
           )}
 
@@ -559,6 +639,14 @@ export default function Library() {
           }}
         />
       )}
+
+      {/* Submit/Edit Base Modal */}
+      <SubmitBaseModal
+        isOpen={showSubmitBaseModal}
+        onClose={() => { setShowSubmitBaseModal(false); setEditingBase(null); }}
+        onSuccess={loadCreatedBases}
+        editBase={editingBase}
+      />
     </>
   );
 }
@@ -725,6 +813,176 @@ function AgentsTab({
         title="Remove Agent"
         message={`Remove "${agentToDelete?.name}" from your library? This cannot be undone.`}
         confirmText="Remove"
+        cancelText="Cancel"
+        variant="danger"
+      />
+    </>
+  );
+}
+
+// Bases Tab Component
+function BasesTab({
+  bases,
+  loading,
+  onSubmit,
+  onEdit,
+  onToggleVisibility,
+  onDelete,
+}: {
+  bases: LibraryBase[];
+  loading: boolean;
+  onSubmit: () => void;
+  onEdit: (base: LibraryBase) => void;
+  onToggleVisibility: (base: LibraryBase) => void;
+  onDelete: (base: LibraryBase) => void;
+}) {
+  const [deleteTarget, setDeleteTarget] = useState<LibraryBase | null>(null);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-sm font-semibold text-[var(--text)]">Your Base Templates</h3>
+          <p className="text-xs text-[var(--text)]/50 mt-1">
+            Submit and manage your project templates
+          </p>
+        </div>
+        <button
+          onClick={onSubmit}
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all"
+        >
+          <Plus size={16} />
+          Submit Base
+        </button>
+      </div>
+
+      {bases.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mb-4">
+            <Rocket size={32} className="text-[var(--text)]/30" />
+          </div>
+          <h3 className="text-lg font-semibold text-[var(--text)] mb-2">No bases yet</h3>
+          <p className="text-sm text-[var(--text)]/50 max-w-sm mb-6">
+            Submit your first base template by providing a git repository URL. Share your project
+            templates with the community or keep them private.
+          </p>
+          <button
+            onClick={onSubmit}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all"
+          >
+            <Plus size={16} />
+            Submit Your First Base
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {bases.map((base) => (
+            <div
+              key={base.id}
+              className="bg-white/[0.03] border border-white/10 rounded-2xl p-5 hover:border-white/20 transition-all group"
+            >
+              {/* Header row */}
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{base.icon}</span>
+                  <div>
+                    <h4 className="text-sm font-semibold text-[var(--text)] line-clamp-1">
+                      {base.name}
+                    </h4>
+                    <span className="text-xs text-[var(--text)]/40">{base.category}</span>
+                  </div>
+                </div>
+                {/* Visibility badge */}
+                <div
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                    base.visibility === 'public'
+                      ? 'bg-green-500/20 text-green-400'
+                      : 'bg-gray-500/20 text-gray-400'
+                  }`}
+                >
+                  {base.visibility === 'public' ? (
+                    <Globe size={10} />
+                  ) : (
+                    <LockKey size={10} />
+                  )}
+                  {base.visibility}
+                </div>
+              </div>
+
+              {/* Description */}
+              <p className="text-xs text-[var(--text)]/50 line-clamp-2 mb-3">{base.description}</p>
+
+              {/* Tech stack tags */}
+              {base.tech_stack && base.tech_stack.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {base.tech_stack.slice(0, 4).map((tech) => (
+                    <span
+                      key={tech}
+                      className="px-2 py-0.5 bg-white/5 rounded-md text-[10px] text-[var(--text)]/50"
+                    >
+                      {tech}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Stats */}
+              <div className="flex items-center gap-3 mb-4 text-xs text-[var(--text)]/40">
+                <span>{base.downloads || 0} downloads</span>
+                <span>{base.rating?.toFixed(1) || '5.0'} rating</span>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onToggleVisibility(base)}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-[var(--text)]/60 hover:bg-white/10 transition-all"
+                  title={base.visibility === 'public' ? 'Make Private' : 'Make Public'}
+                >
+                  {base.visibility === 'public' ? <EyeSlash size={12} /> : <Eye size={12} />}
+                  {base.visibility === 'public' ? 'Make Private' : 'Make Public'}
+                </button>
+                <button
+                  onClick={() => onEdit(base)}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs text-[var(--text)]/60 hover:bg-white/10 transition-all"
+                >
+                  <Pencil size={12} />
+                  Edit
+                </button>
+                <button
+                  onClick={() => setDeleteTarget(base)}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400 hover:bg-red-500/20 transition-all"
+                >
+                  <Trash size={12} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) {
+            onDelete(deleteTarget);
+            setDeleteTarget(null);
+          }
+        }}
+        title="Delete Base"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"? This will remove it from the marketplace.`}
+        confirmText="Delete"
         cancelText="Cancel"
         variant="danger"
       />

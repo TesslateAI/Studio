@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useInView } from 'react-intersection-observer';
 import { debounce } from 'lodash';
-import { ArrowLeft, MagnifyingGlass, X, Package } from '@phosphor-icons/react';
+import { ArrowLeft, MagnifyingGlass, X, Package, Plus } from '@phosphor-icons/react';
 import { AgentCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
 import { UserDropdown } from '../components/ui';
+import { SubmitBaseModal } from '../components/modals';
 import { marketplaceApi, authApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { isCanceledError } from '../lib/utils';
@@ -88,6 +89,9 @@ export default function MarketplaceBrowse() {
   const [userName, setUserName] = useState<string>('');
   const [userCredits, setUserCredits] = useState<number>(0);
   const [userTier, setUserTier] = useState<string>('free');
+
+  // State - Submit base modal
+  const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
 
   // Intersection observer for infinite scroll
   const { ref: loadMoreRef, inView } = useInView({
@@ -477,6 +481,17 @@ export default function MarketplaceBrowse() {
                 </div>
 
                 <div className="flex items-center gap-3">
+                  {/* Submit Template Button - Only for bases tab when authenticated */}
+                  {itemType === 'base' && isAuthenticated && (
+                    <button
+                      onClick={() => setShowSubmitBaseModal(true)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-[var(--primary)] text-white rounded-xl text-sm font-medium hover:opacity-90 transition-all whitespace-nowrap"
+                    >
+                      <Plus size={16} weight="bold" />
+                      Submit Template
+                    </button>
+                  )}
+
                   {/* Search Bar - Mobile & Desktop */}
                   <div
                     className={`
@@ -784,6 +799,18 @@ export default function MarketplaceBrowse() {
           </div>
         </div>
       </div>
+
+      {/* Submit Base Modal */}
+      <SubmitBaseModal
+        isOpen={showSubmitBaseModal}
+        onClose={() => setShowSubmitBaseModal(false)}
+        onSuccess={() => {
+          setShowSubmitBaseModal(false);
+          // Refresh the bases list
+          setBasesCache([]);
+          setPage(1);
+        }}
+      />
     </>
   );
 }

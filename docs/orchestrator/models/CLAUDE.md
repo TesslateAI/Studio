@@ -28,7 +28,7 @@
 **User** (models_auth.py)
 - Purpose: User accounts with subscription, billing, and profile data
 - Key fields: `email`, `username`, `subscription_tier`, `stripe_customer_id`, `credits_balance`, `theme_preset`
-- Related: FastAPI-Users compatible (email/password + OAuth)
+- Related: FastAPI-Users compatible (email/password + OAuth), `created_bases` relationship for user-submitted bases
 - Theme: `theme_preset` field stores user's selected theme ID (default: "default-dark")
 
 **Project** (models.py)
@@ -95,9 +95,11 @@
 - Related: Can be forked by users (parent_agent_id), reviewed, purchased
 
 **MarketplaceBase** (models.py)
-- Purpose: Project templates (React, FastAPI, Next.js, etc.)
-- Key fields: `name`, `slug`, `git_repo_url`, `category`, `pricing_type`, `tech_stack`
-- Related: Used to create Containers in projects
+- Purpose: Project templates (React, FastAPI, Next.js, etc.) — both seeded and user-submitted
+- Key fields: `name`, `slug`, `git_repo_url`, `category`, `pricing_type`, `tech_stack`, `created_by_user_id`, `visibility`
+- `created_by_user_id`: NULL for seeded bases, user UUID for user-submitted bases
+- `visibility`: `"private"` (only creator) or `"public"` (marketplace visible), default `"public"`
+- Related: Used to create Containers in projects, User relationship via `created_by_user`
 
 **WorkflowTemplate** (models.py)
 - Purpose: Pre-configured multi-container workflows (drag & drop)

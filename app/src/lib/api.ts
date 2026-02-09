@@ -687,6 +687,43 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  submitBase: async (data: {
+    name: string;
+    description: string;
+    git_repo_url: string;
+    category: string;
+    default_branch?: string;
+    visibility?: string;
+    long_description?: string;
+    icon?: string;
+    tags?: string[];
+    features?: string[];
+    tech_stack?: string[];
+  }) => {
+    const response = await api.post('/api/marketplace/bases/submit', data);
+    return response.data;
+  },
+
+  updateBase: async (baseId: string, data: Record<string, unknown>) => {
+    const response = await api.patch(`/api/marketplace/bases/${baseId}`, data);
+    return response.data;
+  },
+
+  setBaseVisibility: async (baseId: string, visibility: 'private' | 'public') => {
+    const response = await api.patch(`/api/marketplace/bases/${baseId}/visibility`, { visibility });
+    return response.data;
+  },
+
+  deleteBase: async (baseId: string) => {
+    const response = await api.delete(`/api/marketplace/bases/${baseId}`);
+    return response.data;
+  },
+
+  getMyCreatedBases: async () => {
+    const response = await api.get('/api/marketplace/my-created-bases');
+    return response.data;
+  },
+
   // Get user's agent subscriptions
   getUserSubscriptions: async () => {
     const response = await api.get('/api/marketplace/subscriptions');

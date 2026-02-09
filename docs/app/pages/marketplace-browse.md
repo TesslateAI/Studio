@@ -32,6 +32,7 @@ Browse all marketplace items of a specific type with comprehensive filtering, so
 - **URL State Persistence**: Filters sync to URL query params
 - **Responsive Layout**: Sidebar on desktop, horizontal filters on mobile/tablet
 - **User Info Dropdown**: Shows credits and subscription tier when authenticated
+- **Submit Template Button**: When browsing bases (`itemType === 'base'`) and authenticated, a "Submit Template" button appears in the header that opens the `SubmitBaseModal` for submitting user-created project templates
 
 ### State Management
 
@@ -731,7 +732,7 @@ GET /api/marketplace/agents?category={category}&pricing_type={pricing}&search={s
 ```typescript
 GET /api/marketplace/bases?category={category}&pricing_type={pricing}&search={search}&sort={sort}&page={page}&limit={limit}
 
-// Response
+// Response (only returns public and seeded bases; private user-submitted bases are excluded)
 {
   "bases": [
     {
@@ -747,7 +748,10 @@ GET /api/marketplace/bases?category={category}&pricing_type={pricing}&search={se
       "is_active": true,
       "is_purchased": false,
       "avatar_url": "...",
-      "tags": ["next.js", "tailwind"]
+      "tags": ["next.js", "tailwind"],
+      "created_by_user_id": "uuid-or-null",
+      "visibility": "public",
+      "creator_name": "User Name or null"
     }
   ]
 }

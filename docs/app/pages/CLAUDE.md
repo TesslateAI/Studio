@@ -312,21 +312,35 @@ await marketplaceApi.purchaseAgent(slug);
 See: `marketplace.md`
 
 ### Library (`Library.tsx`)
-**Purpose**: User's purchased items and API keys
+**Purpose**: User's purchased items, submitted bases, and API keys
 
 **Tabs**:
 1. **Agents**: Purchased and custom agents with enable/disable
-2. **Models**: Available LLM models with pricing
-3. **API Keys**: Manage external provider keys (OpenAI, Anthropic, etc.)
-4. **Subscriptions**: Current plan and usage
-5. **Credits**: Credit balance and purchase history
+2. **Bases**: User-submitted project templates with visibility toggle, edit, and delete
+3. **Models**: Available LLM models with pricing
+4. **API Keys**: Manage external provider keys (OpenAI, Anthropic, etc.)
+5. **Subscriptions**: Current plan and usage
+6. **Credits**: Credit balance and purchase history
+
+**Bases Tab Features**:
+- "Submit Base" button opens `SubmitBaseModal` (create/edit modes)
+- Card grid showing user's created bases with visibility badge (lock/globe icon)
+- Toggle visibility (Make Private / Make Public)
+- Edit base details
+- Delete base (soft delete with confirmation dialog)
+- Download count display
 
 **State Management**:
 ```typescript
+type TabType = 'agents' | 'bases' | 'models' | 'api-keys' | 'subscriptions';
+
 const [activeTab, setActiveTab] = useState<TabType>('agents');
 const [agents, setAgents] = useState<LibraryAgent[]>([]);
+const [bases, setBases] = useState<LibraryBase[]>([]);
 const [models, setModels] = useState<Model[]>([]);
 const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
+const [editingBase, setEditingBase] = useState<LibraryBase | null>(null);
 ```
 
 **URL State**:
@@ -335,7 +349,7 @@ const [searchParams, setSearchParams] = useSearchParams();
 const tab = searchParams.get('tab') || 'agents';
 
 // Change tab
-setSearchParams({ tab: 'models' });
+setSearchParams({ tab: 'bases' });
 ```
 
 ### Billing Dashboard (`BillingDashboard.tsx`)

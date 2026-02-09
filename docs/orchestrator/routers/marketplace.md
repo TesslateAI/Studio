@@ -1,6 +1,6 @@
 # Marketplace Router
 
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/marketplace.py` (2417 lines)
+**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/marketplace.py` (~2600 lines)
 
 The marketplace router manages the agent and base template marketplace where users can browse, purchase, and publish AI agents and project templates.
 
@@ -241,11 +241,22 @@ Bases are starter project templates (full codebases with frameworks, dependencie
 GET /api/marketplace/bases
 ```
 
-Browse published project bases.
+Browse published project bases. Returns only active bases that are either seeded (no creator) or have `visibility=public`. Private user-submitted bases are excluded.
 
 **Query Parameters**: Same as agents (category, pricing_type, search, sort, skip, limit)
 
-**Response**: Similar to agents response but for bases
+**Visibility Filtering**:
+```python
+query = select(MarketplaceBase).where(
+    MarketplaceBase.is_active == True,
+    or_(
+        MarketplaceBase.created_by_user_id.is_(None),  # seeded bases always visible
+        MarketplaceBase.visibility == "public"           # user bases only when public
+    )
+)
+```
+
+**Response**: Similar to agents response but for bases, now includes `created_by_user_id`, `visibility`, and `creator_name` fields
 
 ### Get Base Details
 
@@ -299,9 +310,120 @@ POST /api/marketplace/bases/{base_id}/reviews
 
 Submit a review for a purchased base. Same structure as agent reviews.
 
+## User-Submitted Bases
+
+Users can submit their own project templates by providing a git repository URL. No admin approval is needed -- users control visibility (private/public) directly.
+
+### Submit Base
+
+```
+POST /api/marketplace/bases/submit
+```
+
+**(Authenticated)** Create a new base from a git repository URL.
+
+**Request Body**:
+```json
+{
+  "name": "My SaaS Template",
+  "description": "Full-stack SaaS with auth, billing, admin",
+  "git_repo_url": "https://github.com/user/saas-template",
+  "category": "fullstack",
+  "default_branch": "main",
+  "visibility": "public",
+  "icon": "📦",
+  "tags": ["nextjs", "stripe", "auth"],
+  "tech_stack": ["Next.js", "PostgreSQL", "Stripe"],
+  "features": ["Authentication", "Billing", "Admin Dashboard"],
+  "long_description": "Detailed markdown description..."
+}
+```
+
+**Validation**:
+- `git_repo_url` must start with `https://`
+- `visibility` must be `"private"` or `"public"`
+- `category` must be one of: `fullstack`, `frontend`, `backend`, `mobile`, `data`, `devops`
+
+**Behavior**:
+- Generates slug from name + user_id + timestamp
+- Sets `created_by_user_id` to current user
+- Sets `pricing_type` to `"free"`
+- Auto-creates `UserPurchasedBase` so creator has it in their library immediately
+- No git clone at submit time -- clone happens only when a project is created from the base
+
+**Response**: Created base object with `id`
+
+### Update Base
+
+```
+PATCH /api/marketplace/bases/{base_id}
+```
+
+**(Authenticated, Owner only)** Update a user-submitted base.
+
+**Request Body**: Partial update of any `BaseSubmitRequest` fields.
+
+**Restrictions**: Must be base creator (`created_by_user_id == current_user.id`). Slug is regenerated if name changes.
+
+### Toggle Base Visibility
+
+```
+PATCH /api/marketplace/bases/{base_id}/visibility
+```
+
+**(Authenticated, Owner only)** Switch a base between private and public.
+
+**Request Body**:
+```json
+{
+  "visibility": "private"
+}
+```
+
+**Behavior**:
+- Private: Only the creator can see and use the base
+- Public: Visible on the marketplace browse page for all users
+
+### Delete Base
+
+```
+DELETE /api/marketplace/bases/{base_id}
+```
+
+**(Authenticated, Owner only)** Soft-delete a user-submitted base (sets `is_active=False`).
+
+### Get My Created Bases
+
+```
+GET /api/marketplace/my-created-bases
+```
+
+**(Authenticated)** Returns all bases created by the current user (both active and inactive are included for management).
+
+**Response**:
+```json
+{
+  "bases": [
+    {
+      "id": "uuid",
+      "name": "My Template",
+      "slug": "my-template-abc123",
+      "description": "...",
+      "git_repo_url": "https://github.com/...",
+      "visibility": "public",
+      "category": "fullstack",
+      "downloads": 42,
+      "rating": 4.5,
+      "created_at": "2025-01-15T10:30:00Z",
+      "is_active": true
+    }
+  ]
+}
+```
+
 ## Creator Endpoints
 
-Creators can publish their own agents and bases to the marketplace.
+Creators can publish their own agents and bases to the marketplace. The creator profile (`/api/creators/{user_id}/profile`) aggregates both published agents and public user-submitted bases, including combined download and review statistics.
 
 ### Publish Agent
 
