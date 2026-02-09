@@ -64,7 +64,17 @@ This builds two images from source and pulls two from Docker Hub:
 | `postgres` | `postgres:15-alpine` (pulled) | instant |
 | `traefik` | `traefik:v3.1` (pulled) | instant |
 
-### 4. Verify Everything is Running
+### 4. Build the Devserver Image
+
+The devserver image is used for **user project containers** (the containers that run user code). It's **not** part of `docker-compose.yml`, so you must build it separately:
+
+```bash
+docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+```
+
+Without this image, starting any user project will fail with `pull access denied for tesslate-devserver`.
+
+### 5. Verify Everything is Running
 
 ```bash
 docker compose ps
@@ -82,7 +92,7 @@ tesslate-traefik        traefik:v3.1                   Up                      0
 
 All services should show `Up` (and `healthy` where applicable). The orchestrator may show `health: starting` for the first ~30 seconds while it runs database migrations.
 
-### 5. Access the Application
+### 6. Access the Application
 
 | Service | URL | Description |
 |---------|-----|-------------|
@@ -95,6 +105,41 @@ All services should show `Up` (and `healthy` where applicable). The orchestrator
 | PostgreSQL | localhost:5432 | Connect with pgAdmin/DBeaver |
 
 The database is auto-initialized on first startup (tables created via Alembic migrations).
+
+### 7. Seed the Database
+
+After the first startup, seed marketplace data (bases, agents, themes):
+
+```bash
+# Copy seed scripts into the backend container
+docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
+docker exec tesslate-orchestrator mkdir -p /tmp/themes
+docker cp scripts/themes/. tesslate-orchestrator:/tmp/themes/
+
+# Run seed scripts (order matters: bases → agents → themes)
+# On Windows (Git Bash/MSYS2), prefix each with MSYS_NO_PATHCONV=1
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python -c "
+import asyncio, sys; sys.path.insert(0, '/app')
+from pathlib import Path
+exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
+asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
+"
+```
+
+This creates:
+- **5 marketplace bases**: Next.js 16, Next.js 15, Vite+React+FastAPI, Vite+React+Go, Expo
+- **5 official agents**: Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent
+- **6 open-source agents**: Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer
+- **7 themes**: default-dark, default-light, midnight, ocean, forest, rose, sunset
+- **1 system account**: Tesslate official account (official@tesslate.com)
+
+All seed scripts are idempotent — safe to re-run without duplicating data.
 
 ## What Gets Created
 
@@ -316,15 +361,17 @@ User projects run as separate containers on `tesslate-network`:
 - Check Traefik dashboard at http://localhost:8080 for registered routes
 - Verify the container has the `com.tesslate.routable=true` label
 
-### Windows-Specific: Node Symlink Issues
+### Node.js Dependencies Not Installing
 
-Docker on Windows can break Node.js symlinks in `node_modules/.bin/`. The devserver container auto-detects and fixes this on startup. If you hit module resolution errors, rebuild:
+When a project starts for the first time, the container automatically installs Node.js dependencies (detected from lockfile: bun → pnpm → yarn → npm). This typically takes 5-15 seconds with Bun or 15-60 seconds with npm.
 
-```bash
-docker compose up -d --build app
-```
+If dependencies aren't installing:
 
-See [symlink-fix.md](../infrastructure/docker/symlink-fix.md) for details.
+1. **Check container logs** for `[TESSLATE] Installing dependencies...`
+2. **Verify the project has a lockfile** (`bun.lock`, `package-lock.json`, etc.)
+3. **Manual install**: `docker exec -it <container-name> sh` then `npm install`
+
+See [dependency-management.md](../infrastructure/docker/symlink-fix.md) for details.
 
 ### LITELLM_DEFAULT_MODELS Warning
 

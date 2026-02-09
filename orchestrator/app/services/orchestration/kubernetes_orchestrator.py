@@ -31,24 +31,24 @@ Key Concepts:
 
 import asyncio
 import logging
-import time
-from typing import Dict, List, Any, Optional
+from datetime import UTC
+from typing import Any
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from kubernetes.client.rest import ApiException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..snapshot_manager import get_snapshot_manager
-
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
-from .kubernetes.client import get_k8s_client, KubernetesClient
+from .kubernetes.client import KubernetesClient, get_k8s_client
 from .kubernetes.helpers import (
-    create_pvc_manifest,
-    create_file_manager_deployment,
     create_container_deployment,
-    create_service_manifest,
+    create_file_manager_deployment,
     create_ingress_manifest,
     create_network_policy_manifest,
+    create_pvc_manifest,
+    create_service_manifest,
     generate_git_clone_script,
 )
 
@@ -70,7 +70,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         from ...config import get_settings
 
         self.settings = get_settings()
-        self._k8s_client: Optional[KubernetesClient] = None
+        self._k8s_client: KubernetesClient | None = None
 
         # Note: Activity tracking is now database-based (Project.last_activity)
         # No in-memory tracking - supports horizontal scaling of backend
@@ -92,11 +92,11 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
     def _sanitize_name(self, name: str) -> str:
         """Sanitize a name for Kubernetes (DNS-1123 compliant)."""
-        safe_name = name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-        safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '-')
-        while '--' in safe_name:
-            safe_name = safe_name.replace('--', '-')
-        safe_name = safe_name.strip('-')
+        safe_name = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
+        safe_name = "".join(c for c in safe_name if c.isalnum() or c == "-")
+        while "--" in safe_name:
+            safe_name = safe_name.replace("--", "-")
+        safe_name = safe_name.strip("-")
         return safe_name[:63]
 
     def _get_namespace(self, project_id: str) -> str:
@@ -104,10 +104,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
         return self.k8s_client.get_project_namespace(project_id)
 
     async def _get_tesslate_config_from_pod(
-        self,
-        namespace: str,
-        container_directory: str
-    ) -> Optional[Any]:
+        self, namespace: str, container_directory: str
+    ) -> Any | None:
         """
         Read and parse TESSLATE.md from the file-manager pod.
 
@@ -126,8 +124,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
             # Find file-manager pod
             logger.info(f"[K8S] Looking for file-manager pod in namespace {namespace}")
             pods = self.k8s_client.core_v1.list_namespaced_pod(
-                namespace=namespace,
-                label_selector="app=file-manager"
+                namespace=namespace, label_selector="app=file-manager"
             )
 
             if not pods.items:
@@ -147,20 +144,26 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 namespace,
                 "file-manager",
                 ["cat", tesslate_path],
-                timeout=10
+                timeout=10,
             )
 
             logger.info(f"[K8S] TESSLATE.md read result: {result[:200] if result else 'None'}...")
 
             if result and not result.startswith("cat:"):
                 config = parse_tesslate_md(result)
-                logger.info(f"[K8S] Parsed config: start_command={config.start_command if config else 'None'}")
+                logger.info(
+                    f"[K8S] Parsed config: start_command={config.start_command if config else 'None'}"
+                )
 
                 if config and config.validate():
-                    logger.info(f"[K8S] ✅ Validated TESSLATE.md: start_command={config.start_command}")
+                    logger.info(
+                        f"[K8S] ✅ Validated TESSLATE.md: start_command={config.start_command}"
+                    )
                     return config
                 else:
-                    logger.warning(f"[K8S] TESSLATE.md validation failed: {config.validation_error if config else 'no config'}")
+                    logger.warning(
+                        f"[K8S] TESSLATE.md validation failed: {config.validation_error if config else 'no config'}"
+                    )
             else:
                 logger.warning(f"[K8S] TESSLATE.md not found or error: {result}")
 
@@ -178,7 +181,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         project_id: UUID,
         user_id: UUID,
         is_hibernated: bool = False,
-        db: Optional[AsyncSession] = None
+        db: AsyncSession | None = None,
     ) -> str:
         """
         Ensure project environment exists (namespace + PVC + file-manager).
@@ -205,9 +208,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
 
         try:
             # 1. Create namespace
-            await self.k8s_client.create_namespace_if_not_exists(
-                namespace, project_id_str, user_id
-            )
+            await self.k8s_client.create_namespace_if_not_exists(namespace, project_id_str, user_id)
 
             # 2. Create NetworkPolicy for isolation
             network_policy = create_network_policy_manifest(namespace, project_id)
@@ -217,7 +218,9 @@ class KubernetesOrchestrator(BaseOrchestrator):
             # If hibernated, try to restore from snapshot (near-instant with lazy loading)
             restore_success = False
             if is_hibernated and db:
-                restore_success = await self._restore_from_snapshot(project_id, user_id, namespace, db)
+                restore_success = await self._restore_from_snapshot(
+                    project_id, user_id, namespace, db
+                )
 
             # Create empty PVC if not hibernated or snapshot restore failed
             if not restore_success:
@@ -229,7 +232,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
                     user_id=user_id,
                     storage_class=self.settings.k8s_storage_class,
                     size=self.settings.k8s_pvc_size,
-                    access_mode=self.settings.k8s_pvc_access_mode
+                    access_mode=self.settings.k8s_pvc_access_mode,
                 )
                 await self.k8s_client.create_pvc(pvc, namespace)
 
@@ -244,15 +247,13 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 user_id=user_id,
                 image=self.settings.k8s_devserver_image,
                 image_pull_policy=self.settings.k8s_image_pull_policy,
-                image_pull_secret=self.settings.k8s_image_pull_secret or None
+                image_pull_secret=self.settings.k8s_image_pull_secret or None,
             )
             await self.k8s_client.create_deployment(file_manager, namespace)
 
             # 6. Wait for file-manager to be ready
             await self.k8s_client.wait_for_deployment_ready(
-                deployment_name="file-manager",
-                namespace=namespace,
-                timeout=60
+                deployment_name="file-manager", namespace=namespace, timeout=60
             )
 
             # Activity tracking is now database-based (via activity_tracker service)
@@ -269,7 +270,7 @@ class KubernetesOrchestrator(BaseOrchestrator):
         project_id: UUID,
         user_id: UUID,
         save_snapshot: bool = True,
-        db: Optional[AsyncSession] = None
+        db: AsyncSession | None = None,
     ) -> None:
         """
         Delete project environment (for hibernation or cleanup).
@@ -297,16 +298,19 @@ class KubernetesOrchestrator(BaseOrchestrator):
                 snapshot_success = await self._save_to_snapshot(project_id, user_id, namespace, db)
                 if not snapshot_success:
                     # Snapshot failed - DO NOT delete namespace to preserve data
-                    logger.error(f"[K8S] ❌ Snapshot failed - NOT deleting namespace to preserve data")
-                    raise RuntimeError(f"Cannot hibernate project {project_id_str}: Snapshot creation failed")
+                    logger.error(
+                        "[K8S] ❌ Snapshot failed - NOT deleting namespace to preserve data"
+                    )
+                    raise RuntimeError(
+                        f"Cannot hibernate project {project_id_str}: Snapshot creation failed"
+                    )
             elif save_snapshot and not db:
-                logger.warning(f"[K8S] save_snapshot=True but no db session provided - skipping snapshot")
+                logger.warning(
+                    "[K8S] save_snapshot=True but no db session provided - skipping snapshot"
+                )
 
             # Delete namespace (cascades all resources including PVC)
-            await asyncio.to_thread(
-                self.k8s_client.core_v1.delete_namespace,
-                name=namespace
-            )
+            await asyncio.to_thread(self.k8s_client.core_v1.delete_namespace, name=namespace)
             logger.info(f"[K8S] ✅ Deleted namespace: {namespace}")
 
         except ApiException as e:
@@ -325,7 +329,9 @@ class KubernetesOrchestrator(BaseOrchestrator):
         This method is a no-op for K8s since directories are created
         as part of the pod initialization process.
         """
-        logger.debug(f"[K8S] ensure_project_directory called for {project_slug} (no-op in K8s mode)")
+        logger.debug(
+            f"[K8S] ensure_project_directory called for {project_slug} (no-op in K8s mode)"
+        )
         # No-op in K8s mode - directories are created by pods on PVC
         pass
 
@@ -339,8 +345,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
         user_id: UUID,
         container_id: UUID,
         container_directory: str,
-        git_url: Optional[str] = None,
-        git_branch: str = "main"
+        git_url: str | None = None,
+        git_branch: str = "main",
     ) -> bool:
         """
         Initialize files for a container (called when container added to graph).
@@ -400,7 +406,7 @@ fi
                 namespace,
                 "file-manager",
                 ["/bin/sh", "-c", check_script],
-                30
+                30,
             )
             check_result = check_result.strip()
             logger.info(f"[K8S] Directory check result for {target_dir}: '{check_result}'")
@@ -408,10 +414,14 @@ fi
             if check_result.startswith("EXISTS:"):
                 file_count = int(check_result.split(":")[1]) if ":" in check_result else 0
                 if file_count >= 3:  # At least package.json, README.md, and one more file
-                    logger.info(f"[K8S] Directory {target_dir} already exists with {file_count} files, skipping git clone")
+                    logger.info(
+                        f"[K8S] Directory {target_dir} already exists with {file_count} files, skipping git clone"
+                    )
                     return True
                 else:
-                    logger.warning(f"[K8S] Directory {target_dir} exists but only has {file_count} files, will re-clone")
+                    logger.warning(
+                        f"[K8S] Directory {target_dir} exists but only has {file_count} files, will re-clone"
+                    )
                     # Fall through to clone
 
             # CRITICAL: git_url is REQUIRED - containers must have a marketplace base with git repo
@@ -425,10 +435,7 @@ fi
             # install_deps=False - dependencies are installed by the container's start_command
             # This keeps file init fast and non-blocking
             script = generate_git_clone_script(
-                git_url=git_url,
-                branch=git_branch,
-                target_dir=target_dir,
-                install_deps=False
+                git_url=git_url, branch=git_branch, target_dir=target_dir, install_deps=False
             )
 
             # Execute script in file-manager pod
@@ -438,7 +445,7 @@ fi
                 namespace,
                 "file-manager",
                 ["/bin/sh", "-c", script],
-                timeout=60  # Just git clone, should be fast
+                timeout=60,  # Just git clone, should be fast
             )
 
             logger.info(f"[K8S] ✅ Files initialized for {container_directory}")
@@ -457,11 +464,11 @@ fi
         self,
         project,
         container,
-        all_containers: List,
-        connections: List,
+        all_containers: list,
+        connections: list,
         user_id: UUID,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        db: AsyncSession,
+    ) -> dict[str, Any]:
         """
         Start a single container (create Deployment + Service + Ingress).
 
@@ -482,13 +489,16 @@ fi
         project_id = str(project.id)
         namespace = self._get_namespace(project_id)
         # Use container.name if directory is "." or empty (root directory = use container name)
-        dir_for_k8s = container.name if container.directory in (".", "", None) else container.directory
+        dir_for_k8s = (
+            container.name if container.directory in (".", "", None) else container.directory
+        )
         container_directory = self._sanitize_name(dir_for_k8s)
 
         logger.info(f"[K8S] Starting container '{container_directory}' in namespace {namespace}")
 
         # Import WebSocket manager for status updates
         from ...routers.chat import get_chat_connection_manager
+
         ws_manager = get_chat_connection_manager()
 
         async def send_progress(phase: str, message: str, progress: int, **kwargs):
@@ -499,7 +509,7 @@ fi
                     "phase": phase,
                     "message": message,
                     "progress": progress,
-                    **kwargs
+                    **kwargs,
                 }
                 await ws_manager.send_status_update(user_id, project.id, status)
             except Exception:
@@ -507,7 +517,7 @@ fi
 
         try:
             # Check if project was hibernated (needs snapshot restoration)
-            is_hibernated = project.environment_status == 'hibernated'
+            is_hibernated = project.environment_status == "hibernated"
 
             # Send initial progress
             await send_progress("creating_environment", "Creating project environment...", 10)
@@ -516,13 +526,17 @@ fi
             namespace_exists = await self.k8s_client.namespace_exists(namespace)
             if not namespace_exists:
                 if is_hibernated:
-                    await send_progress("restoring_files", "Restoring project files from snapshot...", 20)
+                    await send_progress(
+                        "restoring_files", "Restoring project files from snapshot...", 20
+                    )
 
-                await self.ensure_project_environment(project.id, user_id, is_hibernated=is_hibernated, db=db)
+                await self.ensure_project_environment(
+                    project.id, user_id, is_hibernated=is_hibernated, db=db
+                )
 
                 # Update environment_status to 'active' after restore
                 if is_hibernated:
-                    project.environment_status = 'active'
+                    project.environment_status = "active"
                     project.hibernated_at = None
                     await db.commit()
                     logger.info(f"[K8S] Restored hibernated project {project.slug} from snapshot")
@@ -531,21 +545,23 @@ fi
             # CRITICAL: Initialize container files BEFORE starting
             # Skip if project was restored from snapshot (files already exist)
             if is_hibernated:
-                logger.info(f"[K8S] Skipping git clone - project restored from snapshot")
+                logger.info("[K8S] Skipping git clone - project restored from snapshot")
             else:
                 # This clones from git or sets up the project directory
                 git_url = None
-                if container.base and hasattr(container.base, 'git_repo_url'):
+                if container.base and hasattr(container.base, "git_repo_url"):
                     git_url = container.base.git_repo_url
 
                 await send_progress("initializing_files", "Setting up project files...", 50)
-                logger.info(f"[K8S] Initializing files for container {container_directory} (git_url={git_url})")
+                logger.info(
+                    f"[K8S] Initializing files for container {container_directory} (git_url={git_url})"
+                )
                 await self.initialize_container_files(
                     project_id=project.id,
                     user_id=user_id,
                     container_id=container.id,
                     container_directory=container_directory,
-                    git_url=git_url
+                    git_url=git_url,
                 )
 
             # Get base config for port and startup command
@@ -559,14 +575,20 @@ fi
             if base_config and base_config.start_command:
                 # Convert multi-line commands to single-line shell command
                 startup_command = " && ".join(
-                    line.strip() for line in base_config.start_command.strip().split('\n')
-                    if line.strip() and not line.strip().startswith('#')
+                    line.strip()
+                    for line in base_config.start_command.strip().split("\n")
+                    if line.strip() and not line.strip().startswith("#")
                 )
                 logger.info(f"[K8S] ✅ Using TESSLATE.md start_command: {startup_command}")
             else:
                 # Fallback: generic command that installs deps and starts dev server
                 startup_command = "npm install && npm run dev"
                 logger.warning(f"[K8S] ⚠️ No base_config found, using fallback: {startup_command}")
+
+            # Prepend node_modules/.bin permission fix (safety net for all platforms)
+            from ...services.base_config_parser import get_node_modules_fix_prefix
+
+            startup_command = get_node_modules_fix_prefix() + startup_command
 
             logger.info(f"[K8S] Container config: port={port}, cmd={startup_command}")
 
@@ -584,8 +606,9 @@ fi
                 startup_command=startup_command,
                 image_pull_policy=self.settings.k8s_image_pull_policy,
                 image_pull_secret=self.settings.k8s_image_pull_secret or None,
-                enable_pod_affinity=self.settings.k8s_enable_pod_affinity and len(all_containers) > 1,
-                affinity_topology_key=self.settings.k8s_affinity_topology_key
+                enable_pod_affinity=self.settings.k8s_enable_pod_affinity
+                and len(all_containers) > 1,
+                affinity_topology_key=self.settings.k8s_affinity_topology_key,
             )
             await self.k8s_client.create_deployment(deployment, namespace)
 
@@ -595,7 +618,7 @@ fi
                 project_id=project.id,
                 container_id=container.id,
                 container_directory=container_directory,
-                port=port
+                port=port,
             )
             await self.k8s_client.create_service(service, namespace)
 
@@ -609,7 +632,7 @@ fi
                 port=port,
                 domain=self.settings.app_domain,
                 ingress_class=self.settings.k8s_ingress_class,
-                tls_secret=self.settings.k8s_wildcard_tls_secret or None
+                tls_secret=self.settings.k8s_wildcard_tls_secret or None,
             )
             await self.k8s_client.create_ingress(ingress, namespace)
 
@@ -624,11 +647,7 @@ fi
 
             # Send ready notification with URL
             await send_progress(
-                "ready",
-                "Container is ready!",
-                100,
-                container_status="ready",
-                url=preview_url
+                "ready", "Container is ready!", 100, container_status="ready", url=preview_url
             )
 
             return {
@@ -637,7 +656,7 @@ fi
                 "container_directory": container_directory,
                 "url": preview_url,
                 "namespace": namespace,
-                "port": port
+                "port": port,
             }
 
         except Exception as e:
@@ -645,11 +664,7 @@ fi
             raise
 
     async def stop_container(
-        self,
-        project_slug: str,
-        project_id: UUID,
-        container_name: str,
-        user_id: UUID
+        self, project_slug: str, project_id: UUID, container_name: str, user_id: UUID
     ) -> None:
         """
         Stop a single container (delete Deployment + Service + Ingress).
@@ -680,7 +695,7 @@ fi
             # Delete Ingress
             await self.k8s_client.delete_ingress(ingress_name, namespace)
 
-            logger.info(f"[K8S] ✅ Container stopped (files persist on PVC)")
+            logger.info("[K8S] ✅ Container stopped (files persist on PVC)")
 
         except Exception as e:
             if "404" not in str(e):
@@ -688,12 +703,8 @@ fi
                 raise
 
     async def get_container_status(
-        self,
-        project_slug: str,
-        project_id: UUID,
-        container_name: Optional[str],
-        user_id: UUID
-    ) -> Dict[str, Any]:
+        self, project_slug: str, project_id: UUID, container_name: str | None, user_id: UUID
+    ) -> dict[str, Any]:
         """Get status of a single container or the project environment.
 
         If container_name is None, returns overall project/file-manager status.
@@ -708,7 +719,7 @@ fi
                 deployment = await asyncio.to_thread(
                     self.k8s_client.apps_v1.read_namespaced_deployment,
                     name=deployment_name,
-                    namespace=namespace
+                    namespace=namespace,
                 )
                 ready = (deployment.status.ready_replicas or 0) > 0
                 return {
@@ -717,7 +728,7 @@ fi
                     "ready": ready,
                     "replicas": deployment.status.replicas,
                     "ready_replicas": deployment.status.ready_replicas,
-                    "url": None  # Project-level doesn't have a single URL
+                    "url": None,  # Project-level doesn't have a single URL
                 }
             except ApiException as e:
                 if e.status == 404:
@@ -732,7 +743,7 @@ fi
             deployment = await asyncio.to_thread(
                 self.k8s_client.apps_v1.read_namespaced_deployment,
                 name=deployment_name,
-                namespace=namespace
+                namespace=namespace,
             )
 
             ready = (deployment.status.ready_replicas or 0) > 0
@@ -742,7 +753,7 @@ fi
                 "container_name": container_name,
                 "ready": ready,
                 "replicas": deployment.status.replicas,
-                "ready_replicas": deployment.status.ready_replicas
+                "ready_replicas": deployment.status.ready_replicas,
             }
 
         except ApiException as e:
@@ -755,27 +766,22 @@ fi
     # =========================================================================
 
     async def start_project(
-        self,
-        project,
-        containers: List,
-        connections: List,
-        user_id: UUID,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
+    ) -> dict[str, Any]:
         """Start all containers for a project."""
-        project_id = str(project.id)
-
         logger.info(f"[K8S] Starting project {project.slug} with {len(containers)} containers")
 
         # Check if project was hibernated (needs snapshot restoration)
-        is_hibernated = project.environment_status == 'hibernated'
+        is_hibernated = project.environment_status == "hibernated"
 
         # Ensure environment exists (with snapshot restoration if hibernated)
-        namespace = await self.ensure_project_environment(project.id, user_id, is_hibernated=is_hibernated, db=db)
+        namespace = await self.ensure_project_environment(
+            project.id, user_id, is_hibernated=is_hibernated, db=db
+        )
 
         # Update environment_status to 'active' after restore
         if is_hibernated:
-            project.environment_status = 'active'
+            project.environment_status = "active"
             project.hibernated_at = None
             await db.commit()
             logger.info(f"[K8S] Restored hibernated project {project.slug} from snapshot")
@@ -789,7 +795,7 @@ fi
                 all_containers=containers,
                 connections=connections,
                 user_id=user_id,
-                db=db
+                db=db,
             )
             container_urls[container.name] = result.get("url")
 
@@ -799,15 +805,10 @@ fi
             "status": "running",
             "project_slug": project.slug,
             "namespace": namespace,
-            "containers": container_urls
+            "containers": container_urls,
         }
 
-    async def stop_project(
-        self,
-        project_slug: str,
-        project_id: UUID,
-        user_id: UUID
-    ) -> None:
+    async def stop_project(self, project_slug: str, project_id: UUID, user_id: UUID) -> None:
         """Stop all containers for a project (but keep files)."""
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
@@ -819,50 +820,40 @@ fi
             deployments = await asyncio.to_thread(
                 self.k8s_client.apps_v1.list_namespaced_deployment,
                 namespace=namespace,
-                label_selector="tesslate.io/component=dev-container"
+                label_selector="tesslate.io/component=dev-container",
             )
 
             for deployment in deployments.items:
-                await self.k8s_client.delete_deployment(
-                    deployment.metadata.name, namespace
-                )
+                await self.k8s_client.delete_deployment(deployment.metadata.name, namespace)
 
             # Delete all dev container services
             services = await asyncio.to_thread(
                 self.k8s_client.core_v1.list_namespaced_service,
                 namespace=namespace,
-                label_selector="tesslate.io/container-id"
+                label_selector="tesslate.io/container-id",
             )
 
             for service in services.items:
-                await self.k8s_client.delete_service(
-                    service.metadata.name, namespace
-                )
+                await self.k8s_client.delete_service(service.metadata.name, namespace)
 
             # Delete all dev container ingresses
             ingresses = await asyncio.to_thread(
                 self.k8s_client.networking_v1.list_namespaced_ingress,
                 namespace=namespace,
-                label_selector="tesslate.io/container-id"
+                label_selector="tesslate.io/container-id",
             )
 
             for ingress in ingresses.items:
-                await self.k8s_client.delete_ingress(
-                    ingress.metadata.name, namespace
-                )
+                await self.k8s_client.delete_ingress(ingress.metadata.name, namespace)
 
-            logger.info(f"[K8S] ✅ Project stopped (file-manager and files persist)")
+            logger.info("[K8S] ✅ Project stopped (file-manager and files persist)")
 
         except ApiException as e:
             if e.status != 404:
                 logger.error(f"[K8S] Error stopping project: {e}")
                 raise
 
-    async def delete_project_namespace(
-        self,
-        project_id: UUID,
-        user_id: UUID
-    ) -> None:
+    async def delete_project_namespace(self, project_id: UUID, user_id: UUID) -> None:
         """
         Delete the entire Kubernetes namespace for a project.
 
@@ -877,10 +868,7 @@ fi
         try:
             # Check if namespace exists
             try:
-                await asyncio.to_thread(
-                    self.k8s_client.core_v1.read_namespace,
-                    name=namespace
-                )
+                await asyncio.to_thread(self.k8s_client.core_v1.read_namespace, name=namespace)
             except ApiException as e:
                 if e.status == 404:
                     logger.info(f"[K8S] Namespace {namespace} does not exist, nothing to delete")
@@ -888,10 +876,7 @@ fi
                 raise
 
             # Delete the namespace (this cascades to all resources in it)
-            await asyncio.to_thread(
-                self.k8s_client.core_v1.delete_namespace,
-                name=namespace
-            )
+            await asyncio.to_thread(self.k8s_client.core_v1.delete_namespace, name=namespace)
 
             logger.info(f"[K8S] Namespace {namespace} deleted successfully")
 
@@ -901,36 +886,23 @@ fi
                 raise
 
     async def restart_project(
-        self,
-        project,
-        containers: List,
-        connections: List,
-        user_id: UUID,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
+    ) -> dict[str, Any]:
         """Restart all containers for a project."""
         await self.stop_project(project.slug, project.id, user_id)
         return await self.start_project(project, containers, connections, user_id, db)
 
-    async def get_project_status(
-        self,
-        project_slug: str,
-        project_id: UUID
-    ) -> Dict[str, Any]:
+    async def get_project_status(self, project_slug: str, project_id: UUID) -> dict[str, Any]:
         """Get status of all containers in a project."""
         namespace = self._get_namespace(str(project_id))
 
         try:
             # Check if namespace exists
-            await asyncio.to_thread(
-                self.k8s_client.core_v1.read_namespace,
-                name=namespace
-            )
+            await asyncio.to_thread(self.k8s_client.core_v1.read_namespace, name=namespace)
 
             # Get all pods
             pods = await asyncio.to_thread(
-                self.k8s_client.core_v1.list_namespaced_pod,
-                namespace=namespace
+                self.k8s_client.core_v1.list_namespaced_pod, namespace=namespace
             )
 
             # Build URL helper
@@ -946,7 +918,7 @@ fi
                     container_statuses["file-manager"] = {
                         "phase": pod.status.phase,
                         "ready": self.k8s_client.is_pod_ready(pod),
-                        "running": self.k8s_client.is_pod_ready(pod)
+                        "running": self.k8s_client.is_pod_ready(pod),
                     }
                 elif container_dir:
                     is_ready = self.k8s_client.is_pod_ready(pod)
@@ -956,14 +928,10 @@ fi
                         "phase": pod.status.phase,
                         "ready": is_ready,
                         "running": is_ready,
-                        "url": url
+                        "url": url,
                     }
 
-            return {
-                "status": "active",
-                "namespace": namespace,
-                "containers": container_statuses
-            }
+            return {"status": "active", "namespace": namespace, "containers": container_statuses}
 
         except ApiException as e:
             if e.status == 404:
@@ -1002,7 +970,9 @@ fi
             # Get file-manager pod
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
             if not pod_name:
-                logger.warning(f"[K8S] No file-manager pod found in {namespace} - assuming not initialized")
+                logger.warning(
+                    f"[K8S] No file-manager pod found in {namespace} - assuming not initialized"
+                )
                 return False
 
             # Check if /app has any subdirectories with actual files
@@ -1016,23 +986,23 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 namespace,
                 "file-manager",
                 ["/bin/sh", "-c", check_script],
-                10  # Short timeout since this is a quick check
+                10,  # Short timeout since this is a quick check
             )
 
             has_files = bool(result and result.strip())
-            logger.info(f"[K8S] Project initialization check for {namespace}: {'initialized' if has_files else 'NOT initialized'}")
+            logger.info(
+                f"[K8S] Project initialization check for {namespace}: {'initialized' if has_files else 'NOT initialized'}"
+            )
             return has_files
 
         except Exception as e:
-            logger.warning(f"[K8S] Error checking project initialization: {e} - assuming not initialized")
+            logger.warning(
+                f"[K8S] Error checking project initialization: {e} - assuming not initialized"
+            )
             return False
 
     async def _save_to_snapshot(
-        self,
-        project_id: UUID,
-        user_id: UUID,
-        namespace: str,
-        db: AsyncSession
+        self, project_id: UUID, user_id: UUID, namespace: str, db: AsyncSession
     ) -> bool:
         """
         Create a VolumeSnapshot of the project PVC (for hibernation).
@@ -1076,7 +1046,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 user_id=user_id,
                 db=db,
                 snapshot_type="hibernation",
-                pvc_name="project-storage"
+                pvc_name="project-storage",
             )
 
             if error:
@@ -1085,8 +1055,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
             # CRITICAL: Wait for snapshot to become ready before allowing PVC deletion
             success, wait_error = await snapshot_manager.wait_for_snapshot_ready(
-                snapshot=snapshot,
-                db=db
+                snapshot=snapshot, db=db
             )
 
             if not success:
@@ -1101,11 +1070,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             return False
 
     async def _restore_from_snapshot(
-        self,
-        project_id: UUID,
-        user_id: UUID,
-        namespace: str,
-        db: AsyncSession
+        self, project_id: UUID, user_id: UUID, namespace: str, db: AsyncSession
     ) -> bool:
         """
         Create a PVC from a VolumeSnapshot (after hibernation).
@@ -1138,17 +1103,14 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
             # Create PVC from snapshot
             success, error = await snapshot_manager.restore_from_snapshot(
-                project_id=project_id,
-                user_id=user_id,
-                db=db,
-                pvc_name="project-storage"
+                project_id=project_id, user_id=user_id, db=db, pvc_name="project-storage"
             )
 
             if not success:
                 logger.error(f"[K8S:RESTORE] ❌ Failed to restore from snapshot: {error}")
                 return False
 
-            logger.info(f"[K8S:RESTORE] ✅ PVC created from snapshot (lazy loading active)")
+            logger.info("[K8S:RESTORE] ✅ PVC created from snapshot (lazy loading active)")
             return True
 
         except Exception as e:
@@ -1156,10 +1118,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             return False
 
     async def hibernate_project(
-        self,
-        project_id: UUID,
-        user_id: UUID,
-        db: Optional[AsyncSession] = None
+        self, project_id: UUID, user_id: UUID, db: AsyncSession | None = None
     ) -> bool:
         """
         Hibernate a project (create snapshot and delete K8s resources).
@@ -1177,19 +1136,13 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         logger.info(f"[K8S] Hibernating project {project_id}")
 
         await self.delete_project_environment(
-            project_id=project_id,
-            user_id=user_id,
-            save_snapshot=True,
-            db=db
+            project_id=project_id, user_id=user_id, save_snapshot=True, db=db
         )
 
         return True
 
     async def restore_project(
-        self,
-        project_id: UUID,
-        user_id: UUID,
-        db: Optional[AsyncSession] = None
+        self, project_id: UUID, user_id: UUID, db: AsyncSession | None = None
     ) -> str:
         """
         Restore a hibernated project (create K8s resources from snapshot).
@@ -1208,10 +1161,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         logger.info(f"[K8S] Restoring project {project_id}")
 
         namespace = await self.ensure_project_environment(
-            project_id=project_id,
-            user_id=user_id,
-            is_hibernated=True,
-            db=db
+            project_id=project_id, user_id=user_id, is_hibernated=True, db=db
         )
 
         return namespace
@@ -1227,16 +1177,13 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         container_name: str,
         file_path: str,
         project_slug: str = None,
-        subdir: str = None
-    ) -> Optional[str]:
+        subdir: str = None,
+    ) -> str | None:
         """Read a file from project storage."""
         namespace = self._get_namespace(str(project_id))
 
         # Build full path including subdir for multi-container projects
-        if subdir:
-            full_path = f"/app/{subdir}/{file_path}"
-        else:
-            full_path = f"/app/{file_path}"
+        full_path = f"/app/{subdir}/{file_path}" if subdir else f"/app/{file_path}"
 
         try:
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -1247,7 +1194,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     project_id=str(project_id),
                     file_path=file_path,
                     container_name=container_name,
-                    subdir=subdir
+                    subdir=subdir,
                 )
 
             result = await asyncio.to_thread(
@@ -1256,7 +1203,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 namespace,
                 "file-manager",
                 ["cat", full_path],
-                timeout=30
+                timeout=30,
             )
             return result
 
@@ -1272,16 +1219,13 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         file_path: str,
         content: str,
         project_slug: str = None,
-        subdir: str = None
+        subdir: str = None,
     ) -> bool:
         """Write a file to project storage."""
         namespace = self._get_namespace(str(project_id))
 
         # Build full path including subdir for multi-container projects
-        if subdir:
-            full_path = f"/app/{subdir}/{file_path}"
-        else:
-            full_path = f"/app/{file_path}"
+        full_path = f"/app/{subdir}/{file_path}" if subdir else f"/app/{file_path}"
 
         try:
             pod_name = await self.k8s_client.get_file_manager_pod(namespace)
@@ -1292,11 +1236,12 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     file_path=file_path,
                     content=content,
                     container_name=container_name,
-                    subdir=subdir
+                    subdir=subdir,
                 )
 
             # Use base64 to handle special characters
             import base64
+
             encoded = base64.b64encode(content.encode()).decode()
 
             # Ensure directory exists
@@ -1307,7 +1252,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 namespace,
                 "file-manager",
                 ["mkdir", "-p", dir_path],
-                timeout=10
+                timeout=10,
             )
 
             # Write file
@@ -1317,7 +1262,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 namespace,
                 "file-manager",
                 ["sh", "-c", f"echo '{encoded}' | base64 -d > {full_path}"],
-                timeout=30
+                timeout=30,
             )
 
             return True
@@ -1327,11 +1272,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             return False
 
     async def delete_file(
-        self,
-        user_id: UUID,
-        project_id: UUID,
-        container_name: str,
-        file_path: str
+        self, user_id: UUID, project_id: UUID, container_name: str, file_path: str
     ) -> bool:
         """Delete a file from project storage."""
         namespace = self._get_namespace(str(project_id))
@@ -1343,7 +1284,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     user_id=user_id,
                     project_id=str(project_id),
                     file_path=file_path,
-                    container_name=container_name
+                    container_name=container_name,
                 )
 
             await asyncio.to_thread(
@@ -1352,7 +1293,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 namespace,
                 "file-manager",
                 ["rm", "-f", f"/app/{file_path}"],
-                timeout=10
+                timeout=10,
             )
 
             return True
@@ -1362,12 +1303,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             return False
 
     async def list_files(
-        self,
-        user_id: UUID,
-        project_id: UUID,
-        container_name: str,
-        directory: str = "."
-    ) -> List[Dict[str, Any]]:
+        self, user_id: UUID, project_id: UUID, container_name: str, directory: str = "."
+    ) -> list[dict[str, Any]]:
         """List files in project storage."""
         namespace = self._get_namespace(str(project_id))
 
@@ -1378,7 +1315,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     user_id=user_id,
                     project_id=str(project_id),
                     directory=directory,
-                    container_name=container_name
+                    container_name=container_name,
                 )
 
             # Use ls with JSON-friendly output
@@ -1389,7 +1326,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 namespace,
                 "file-manager",
                 ["sh", "-c", f"ls -la {full_path} 2>/dev/null || echo 'EMPTY'"],
-                timeout=30
+                timeout=30,
             )
 
             # Parse ls output into file list
@@ -1402,12 +1339,14 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     name = " ".join(parts[8:])
                     if name in [".", ".."]:
                         continue
-                    files.append({
-                        "name": name,
-                        "type": "directory" if parts[0].startswith("d") else "file",
-                        "size": int(parts[4]) if parts[4].isdigit() else 0,
-                        "permissions": parts[0]
-                    })
+                    files.append(
+                        {
+                            "name": name,
+                            "type": "directory" if parts[0].startswith("d") else "file",
+                            "size": int(parts[4]) if parts[4].isdigit() else 0,
+                            "permissions": parts[0],
+                        }
+                    )
 
             return files
 
@@ -1424,9 +1363,9 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         user_id: UUID,
         project_id: UUID,
         container_name: str,
-        command: List[str],
+        command: list[str],
         timeout: int = 120,
-        working_dir: Optional[str] = None
+        working_dir: str | None = None,
     ) -> str:
         """Execute a command in project environment."""
         namespace = self._get_namespace(str(project_id))
@@ -1449,7 +1388,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     project_id=str(project_id),
                     command=full_command,
                     timeout=timeout,
-                    container_name=container_name
+                    container_name=container_name,
                 )
 
             return await asyncio.to_thread(
@@ -1458,7 +1397,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 namespace,
                 container,
                 full_command,
-                timeout=timeout
+                timeout=timeout,
             )
 
         except Exception as e:
@@ -1466,11 +1405,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             raise
 
     async def is_container_ready(
-        self,
-        user_id: UUID,
-        project_id: UUID,
-        container_name: str
-    ) -> Dict[str, Any]:
+        self, user_id: UUID, project_id: UUID, container_name: str
+    ) -> dict[str, Any]:
         """Check if a container is ready for commands."""
         namespace = self._get_namespace(str(project_id))
 
@@ -1484,7 +1420,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             user_id=user_id,
             project_id=str(project_id),
             check_responsive=True,
-            container_name=container_name
+            container_name=container_name,
         )
 
     # =========================================================================
@@ -1492,10 +1428,7 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
     # =========================================================================
 
     def track_activity(
-        self,
-        user_id: UUID,
-        project_id: str,
-        container_name: Optional[str] = None
+        self, user_id: UUID, project_id: str, container_name: str | None = None
     ) -> None:
         """
         DEPRECATED: No-op method retained for interface compatibility.
@@ -1505,32 +1438,33 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         """
         # Log warning on first call to help identify callers that need updating
         logger.debug(
-            f"[K8S] track_activity() called but is a no-op. "
-            f"Use activity_tracker.track_project_activity() instead."
+            "[K8S] track_activity() called but is a no-op. "
+            "Use activity_tracker.track_project_activity() instead."
         )
 
-    async def cleanup_idle_environments(
-        self,
-        idle_timeout_minutes: int = None
-    ) -> List[str]:
+    async def cleanup_idle_environments(self, idle_timeout_minutes: int = None) -> list[str]:
         """
         Cleanup idle environments by querying database for inactive projects.
 
         Called periodically by cleanup cronjob.
         Projects are considered idle if last_activity is older than threshold.
         """
-        from datetime import datetime, timedelta, timezone
-        from sqlalchemy import select, or_
+        from datetime import datetime, timedelta
+
+        from sqlalchemy import or_, select
+
         from ...database import AsyncSessionLocal
         from ...models import Project
 
         if idle_timeout_minutes is None:
             idle_timeout_minutes = self.settings.k8s_hibernation_idle_minutes
 
-        logger.info(f"[K8S:CLEANUP] Checking for idle environments (timeout: {idle_timeout_minutes} min)")
+        logger.info(
+            f"[K8S:CLEANUP] Checking for idle environments (timeout: {idle_timeout_minutes} min)"
+        )
 
         hibernated = []
-        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=idle_timeout_minutes)
+        cutoff_time = datetime.now(UTC) - timedelta(minutes=idle_timeout_minutes)
 
         try:
             async with AsyncSessionLocal() as db:
@@ -1539,11 +1473,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                 # Include projects where last_activity is NULL (never tracked) or older than cutoff
                 result = await db.execute(
                     select(Project).where(
-                        Project.environment_status == 'active',
-                        or_(
-                            Project.last_activity < cutoff_time,
-                            Project.last_activity.is_(None)
-                        )
+                        Project.environment_status == "active",
+                        or_(Project.last_activity < cutoff_time, Project.last_activity.is_(None)),
                     )
                 )
                 idle_projects = result.scalars().all()
@@ -1552,18 +1483,25 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
 
                 # Import WebSocket manager for status updates
                 from ...routers.chat import get_chat_connection_manager
+
                 ws_manager = get_chat_connection_manager()
 
                 for project in idle_projects:
                     if project.last_activity:
-                        idle_minutes = (datetime.now(timezone.utc) - project.last_activity).total_seconds() / 60
-                        logger.info(f"[K8S:CLEANUP] Hibernating project {project.slug} (idle {idle_minutes:.1f} min)")
+                        idle_minutes = (
+                            datetime.now(UTC) - project.last_activity
+                        ).total_seconds() / 60
+                        logger.info(
+                            f"[K8S:CLEANUP] Hibernating project {project.slug} (idle {idle_minutes:.1f} min)"
+                        )
                     else:
-                        logger.info(f"[K8S:CLEANUP] Hibernating project {project.slug} (no activity tracked)")
+                        logger.info(
+                            f"[K8S:CLEANUP] Hibernating project {project.slug} (no activity tracked)"
+                        )
 
                     try:
                         # Mark as hibernating and notify user
-                        project.environment_status = 'hibernating'
+                        project.environment_status = "hibernating"
                         await db.commit()
 
                         # Send WebSocket notification to redirect user
@@ -1574,18 +1512,20 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                                 status={
                                     "environment_status": "hibernating",
                                     "message": "Saving project files...",
-                                    "action": "redirect_to_projects"
-                                }
+                                    "action": "redirect_to_projects",
+                                },
                             )
                         except Exception as ws_err:
-                            logger.debug(f"[K8S:CLEANUP] Could not send WebSocket notification: {ws_err}")
+                            logger.debug(
+                                f"[K8S:CLEANUP] Could not send WebSocket notification: {ws_err}"
+                            )
 
                         # Hibernate project (create snapshot + delete namespace)
                         await self.hibernate_project(project.id, project.owner_id, db=db)
 
                         # Update database status
-                        project.environment_status = 'hibernated'
-                        project.hibernated_at = datetime.now(timezone.utc)
+                        project.environment_status = "hibernated"
+                        project.hibernated_at = datetime.now(UTC)
                         await db.commit()
 
                         # Send completion notification
@@ -1595,11 +1535,13 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                                 project_id=project.id,
                                 status={
                                     "environment_status": "hibernated",
-                                    "message": "Project saved successfully"
-                                }
+                                    "message": "Project saved successfully",
+                                },
                             )
                         except Exception as ws_err:
-                            logger.debug(f"[K8S:CLEANUP] Could not send completion notification: {ws_err}")
+                            logger.debug(
+                                f"[K8S:CLEANUP] Could not send completion notification: {ws_err}"
+                            )
 
                         hibernated.append(str(project.id))
                         logger.info(f"[K8S:CLEANUP] ✅ Hibernated {project.slug}")
@@ -1610,11 +1552,15 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                         # CRITICAL: Reset status to 'active' so project isn't stuck in 'hibernating'
                         # The earlier commit set it to 'hibernating', so we need a new commit to fix it
                         try:
-                            project.environment_status = 'active'
+                            project.environment_status = "active"
                             await db.commit()
-                            logger.info(f"[K8S:CLEANUP] Reset {project.slug} status to 'active' after hibernation failure")
+                            logger.info(
+                                f"[K8S:CLEANUP] Reset {project.slug} status to 'active' after hibernation failure"
+                            )
                         except Exception as reset_err:
-                            logger.error(f"[K8S:CLEANUP] Failed to reset status for {project.slug}: {reset_err}")
+                            logger.error(
+                                f"[K8S:CLEANUP] Failed to reset status for {project.slug}: {reset_err}"
+                            )
 
         except Exception as e:
             logger.error(f"[K8S:CLEANUP] ❌ Database error: {e}")
@@ -1632,15 +1578,15 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         project_id: UUID,
         container_name: str,
         pattern: str,
-        directory: str = "."
-    ) -> List[Dict[str, Any]]:
+        directory: str = ".",
+    ) -> list[dict[str, Any]]:
         """Find files matching a glob pattern."""
         return await self.k8s_client.glob_files_in_pod(
             user_id=user_id,
             project_id=str(project_id),
             pattern=pattern,
             directory=directory,
-            container_name=container_name
+            container_name=container_name,
         )
 
     async def grep_files(
@@ -1652,8 +1598,8 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         directory: str = ".",
         file_pattern: str = "*",
         case_sensitive: bool = True,
-        max_results: int = 100
-    ) -> List[Dict[str, Any]]:
+        max_results: int = 100,
+    ) -> list[dict[str, Any]]:
         """Search file contents for a pattern."""
         return await self.k8s_client.grep_in_pod(
             user_id=user_id,
@@ -1663,12 +1609,12 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
             file_pattern=file_pattern,
             case_sensitive=case_sensitive,
             max_results=max_results,
-            container_name=container_name
+            container_name=container_name,
         )
 
 
 # Singleton instance
-_kubernetes_orchestrator: Optional[KubernetesOrchestrator] = None
+_kubernetes_orchestrator: KubernetesOrchestrator | None = None
 
 
 def get_kubernetes_orchestrator() -> KubernetesOrchestrator:

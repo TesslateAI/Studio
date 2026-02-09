@@ -347,7 +347,11 @@ class DockerOrchestrator(BaseOrchestrator):
                         service_name = container_info["Service"]
                         is_running = container_info["State"] == "running"
                         # Include URL for running containers so frontend doesn't re-start them
-                        container_url = f"http://{project_slug}-{service_name}.localhost" if is_running else None
+                        container_url = (
+                            f"http://{project_slug}-{service_name}.localhost"
+                            if is_running
+                            else None
+                        )
                         containers_status[service_name] = {
                             "name": container_info["Name"],
                             "state": container_info["State"],
@@ -574,7 +578,19 @@ class DockerOrchestrator(BaseOrchestrator):
     ) -> None:
         """Copy a base from cache to a project directory."""
         if exclude_patterns is None:
-            exclude_patterns = [".git", "__pycache__", "*.pyc", ".DS_Store"]
+            # node_modules is excluded — container installs deps on first boot
+            # This avoids broken symlinks when copying between filesystems/platforms
+            exclude_patterns = [
+                ".git",
+                "node_modules",
+                ".next",
+                "__pycache__",
+                ".venv",
+                "dist",
+                "build",
+                "*.pyc",
+                ".DS_Store",
+            ]
 
         target_display = f"{project_slug}/{target_subdir}" if target_subdir else project_slug
         logger.info(f"[DOCKER] Copying base {base_slug} to project {target_display}")

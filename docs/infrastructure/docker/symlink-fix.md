@@ -1,274 +1,156 @@
-# Node.js Symlink Fix for Docker on Windows
+# Node.js Dependency Management in Docker
 
 ## Overview
 
-This document explains how Tesslate Studio handles broken Node.js symlinks when running Docker containers on Windows hosts.
+This document explains how Tesslate Studio handles Node.js dependencies (`node_modules`) in Docker containers across all platforms.
 
-**Source File**: `orchestrator/app/services/base_config_parser.py` (see `_fix_node_modules_symlinks_command` method)
-
----
-
-## The Problem
-
-### Why Symlinks Break
-
-When you run Docker on Windows with bind mounts or volume copies, Unix symbolic links in `node_modules/.bin/` get corrupted. Instead of being proper symlinks, they become regular file copies of the target.
-
-**How it happens:**
-
-1. A base template or project has `node_modules/` with properly installed dependencies
-2. Files in `node_modules/.bin/` are Unix symlinks pointing to executables in package directories (e.g., `next` -> `../next/dist/bin/next`)
-3. When these files are copied through Windows filesystem (Docker Desktop volumes, file copies, etc.), symlinks become regular files
-4. The copied files contain code with relative imports like `require("../server/require-hook")` that expect to be in the original symlink location
-
-### Symptoms
-
-When symlinks are broken, you will see errors like:
-
-```
-Error: Cannot find module '../server/require-hook'
-  at node_modules/.bin/next:4:12
-```
-
-Or more generally:
-- `npm run dev` fails immediately
-- Executables in `node_modules/.bin/` crash with module resolution errors
-- `npx` commands fail to run properly
-
-### Why This Specifically Affects Windows Docker
-
-- **Linux Docker**: Symlinks are preserved natively
-- **macOS Docker**: Symlinks are preserved via gRPC FUSE mounts
-- **Windows Docker**: NTFS symlinks require special permissions and often get converted to file copies when crossing filesystem boundaries
+**Source File**: `orchestrator/app/services/base_config_parser.py`
 
 ---
 
-## The Solution
+## Design Principle: Never Copy node_modules
 
-Tesslate Studio automatically detects and fixes broken symlinks on container startup.
+Tesslate Studio **never copies `node_modules`** between filesystems. Instead, dependencies are always installed fresh inside the container on first boot.
 
-### Detection Logic
+**Why?**
 
-The fix script checks if `node_modules/.bin/` contains any regular files instead of symlinks:
+1. **Cross-platform safety**: Copying `node_modules` between Windows, macOS, and Linux breaks symlinks in `node_modules/.bin/`
+2. **Correctness**: Native addons compiled on one OS won't work on another
+3. **Simplicity**: No detection logic, no repair scripts, no platform-specific workarounds
+4. **Speed**: Modern package managers (bun, pnpm) install from cache in seconds
 
-```bash
-for f in node_modules/.bin/*; do
-    if [ -f "$f" ] && [ ! -L "$f" ]; then
-        BROKEN=true; break;
-    fi;
-done;
+---
+
+## How It Works
+
+### 1. Base Cache Preparation
+
+When a marketplace base is cached (e.g., `nextjs-16`), dependencies are installed inside a Linux container and stored in the `tesslate-base-cache` Docker volume.
+
+### 2. Project Creation (File Copy)
+
+When a user creates a project from a base, the orchestrator copies files from cache to the project volume but **skips generated directories**:
+
+```python
+# orchestrator/app/routers/projects.py
+_SKIP_DIRS = {".git", "node_modules", ".next", "__pycache__", ".venv", "dist", "build"}
+
+for item in os.listdir(cached_base_path):
+    if item in _SKIP_DIRS:
+        continue
+    # Copy source files, configs, package.json, lockfiles...
 ```
 
-**Logic:**
-- `-f "$f"` = file exists and is a regular file
-- `! -L "$f"` = file is NOT a symbolic link
-- If any file in `.bin/` is a regular file (not a symlink), symlinks are considered broken
+This means `package.json` and lockfiles (e.g., `bun.lock`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`) are copied, but `node_modules` is not.
 
-### Repair Strategy
+### 3. Container Startup (Dependency Install)
 
-When broken symlinks are detected, the fix runs automatically:
-
-1. **Primary Fix - npm rebuild**
-   ```bash
-   npm rebuild
-   ```
-   This regenerates the `node_modules/.bin/` symlinks without reinstalling all packages.
-
-2. **Fallback - Full Reinstall**
-   If `npm rebuild` fails, the script removes `node_modules/` and runs a fresh install:
-   ```bash
-   rm -rf node_modules && npm install
-   ```
-
-### Complete Fix Script
+On container startup, the startup command checks for missing dependencies and installs them:
 
 ```bash
-if [ -d "node_modules" ] && [ -d "node_modules/.bin" ]; then
-  BROKEN=false;
-  for f in node_modules/.bin/*; do
-    if [ -f "$f" ] && [ ! -L "$f" ]; then
-      BROKEN=true; break;
-    fi;
-  done;
-  if [ "$BROKEN" = "true" ]; then
-    echo "[TESSLATE] Detected broken node_modules symlinks (copied from Windows), running npm rebuild..." &&
-    npm rebuild 2>/dev/null || (
-      echo "[TESSLATE] Rebuild failed, reinstalling dependencies..." &&
-      rm -rf node_modules && npm install
-    );
+if [ -f "package.json" ] && [ ! -d "node_modules" ]; then
+  echo "[TESSLATE] Installing dependencies..." &&
+  if [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then bun install;
+  elif [ -f "pnpm-lock.yaml" ]; then pnpm install;
+  elif [ -f "yarn.lock" ]; then yarn install;
+  else npm install;
   fi;
 fi
 ```
 
----
+This runs **before** the dev server starts. It:
+- Detects the correct package manager from the lockfile
+- Only runs if `node_modules` doesn't exist (no-op on subsequent starts)
+- Works identically on Docker and Kubernetes
 
-## When It Runs
+### 4. Subsequent Starts
 
-### Automatic Execution
-
-The symlink fix runs **automatically on every container startup** as part of the startup command chain. It is prepended to:
-
-1. **Custom start commands** from `TESSLATE.md` files
-2. **Generic fallback commands** when no configuration exists
-
-This means every Node.js project gets the fix applied without any user intervention.
-
-### No-Op Behavior
-
-The fix is designed to be a no-op (do nothing) when:
-- `node_modules/` directory does not exist
-- `node_modules/.bin/` directory does not exist
-- All files in `.bin/` are already proper symlinks
-- The project is not a Node.js project
-
-This ensures zero overhead for projects that don't need the fix.
+After the first boot installs dependencies, `node_modules` persists on the project's Docker volume. Future container restarts skip the install step entirely (the `[ ! -d "node_modules" ]` check passes immediately).
 
 ---
 
-## Manual Fix Commands
+## Package Manager Detection
 
-If you need to manually fix broken symlinks inside a running container:
+The startup script auto-detects the package manager from lockfiles:
 
-### Option 1: npm rebuild (Recommended)
+| Lockfile | Package Manager | Install Command |
+|----------|----------------|-----------------|
+| `bun.lock` or `bun.lockb` | Bun | `bun install` |
+| `pnpm-lock.yaml` | pnpm | `pnpm install` |
+| `yarn.lock` | Yarn | `yarn install` |
+| `package-lock.json` (default) | npm | `npm install` |
 
-```bash
-npm rebuild
-```
+---
 
-This recreates symlinks in `node_modules/.bin/` without downloading packages again.
+## Directories Excluded from Copy
 
-### Option 2: Full Reinstall
+These directories are never copied from base cache to project volume:
 
-If rebuild fails or you want a clean slate:
+| Directory | Why Excluded |
+|-----------|-------------|
+| `node_modules` | Platform-specific, installed fresh in container |
+| `.next` | Build output, regenerated on dev server start |
+| `__pycache__` | Python bytecode, regenerated automatically |
+| `.venv` | Python virtual env, platform-specific |
+| `dist` | Build output |
+| `build` | Build output |
+| `.git` | Version control metadata |
 
-```bash
-rm -rf node_modules
-npm install
-```
+---
 
-### Option 3: Fix Specific Package
+## Cross-Platform Behavior
 
-If only one package's symlinks are broken:
+| Host OS | Docker Engine | Dependencies | Notes |
+|---------|---------------|-------------|-------|
+| Linux | Native | Installed in container | Works perfectly |
+| macOS | Docker Desktop | Installed in container | Works perfectly |
+| Windows | Docker Desktop | Installed in container | Works perfectly |
+| Windows | WSL2 Backend | Installed in container | Works perfectly |
 
-```bash
-npm rebuild <package-name>
-```
+Because dependencies are always installed inside the Linux container, there are **no platform-specific issues**.
 
-Example:
-```bash
-npm rebuild next
-npm rebuild typescript
-```
+---
+
+## Performance
+
+| Scenario | Time |
+|----------|------|
+| First start (bun install) | 5-15 seconds |
+| First start (npm install) | 15-60 seconds |
+| Subsequent starts (node_modules exists) | ~0ms (instant check) |
+
+The devserver Docker image pre-caches common packages, making first installs faster.
 
 ---
 
 ## Troubleshooting
 
-### Fix Ran But Still Getting Errors
+### Dependencies Not Installing
 
-1. **Check if the fix actually ran:**
-   Look for `[TESSLATE] Detected broken node_modules symlinks` in container logs.
+1. **Check container logs** for `[TESSLATE] Installing dependencies...` message
+2. **Verify lockfile exists**: The project must have a lockfile (`bun.lock`, `package-lock.json`, etc.)
+3. **Check TESSLATE.md**: If the base has a custom start command, it must include the dep install prefix
 
-2. **Verify symlinks are now correct:**
-   ```bash
-   ls -la node_modules/.bin/ | head -20
-   ```
-   You should see `lrwxrwxrwx` (symlink indicator) for each file, not `-rwxr-xr-x` (regular file).
+### Wrong Package Manager
 
-3. **Manual rebuild:**
-   ```bash
-   npm rebuild
-   ```
+If the wrong package manager is used, ensure the correct lockfile is in the project root. The detection order is: bun → pnpm → yarn → npm (default).
 
-### npm rebuild Fails
+### Manual Install
 
-Common causes:
+If you need to manually install dependencies inside a running container:
 
-1. **Missing native dependencies:**
-   Some packages need compilation. Install build tools:
-   ```bash
-   apt-get update && apt-get install -y build-essential python3
-   npm rebuild
-   ```
+```bash
+# Access the container
+docker exec -it <container-name> sh
 
-2. **Permission issues:**
-   ```bash
-   chown -R $(whoami) node_modules
-   npm rebuild
-   ```
-
-3. **Corrupted package-lock.json:**
-   ```bash
-   rm -rf node_modules package-lock.json
-   npm install
-   ```
-
-### Symlinks Keep Breaking
-
-If symlinks break repeatedly:
-
-1. **Avoid bind mounts for node_modules:**
-   Use a named volume for `node_modules/` instead of bind-mounting the entire project directory.
-
-   Docker Compose example:
-   ```yaml
-   volumes:
-     - ./:/app
-     - node_modules:/app/node_modules  # Named volume
-   ```
-
-2. **Install dependencies inside container:**
-   Don't copy `node_modules/` from the host. Instead, let the container run `npm install` on startup.
-
-### Package Manager Compatibility
-
-The fix works with all Node.js package managers:
-
-| Package Manager | Rebuild Command |
-|-----------------|-----------------|
-| npm             | `npm rebuild`   |
-| yarn            | `yarn rebuild`  |
-| pnpm            | `pnpm rebuild`  |
-| bun             | `bun install --force` |
-
-The automatic fix uses `npm rebuild` by default, which works in most cases. For other package managers, use the manual commands above.
-
----
-
-## Technical Details
-
-### Why npm rebuild Works
-
-`npm rebuild` runs the `postinstall` scripts and regenerates symlinks by:
-1. Reading the dependency tree from `package-lock.json`
-2. Recreating bin links in `node_modules/.bin/`
-3. Running any native addon compilations
-
-This is faster than a full `npm install` because it doesn't download packages.
-
-### Performance Impact
-
-| Scenario | Time Impact |
-|----------|-------------|
-| No fix needed (symlinks OK) | ~0ms (instant check) |
-| npm rebuild | 5-30 seconds |
-| Full reinstall | 30 seconds - 5 minutes |
-
-The detection is nearly instant because it only checks the first file in `.bin/` that fails the symlink test.
-
-### Cross-Platform Behavior
-
-| Host OS | Docker Engine | Symlinks Preserved | Fix Needed |
-|---------|---------------|-------------------|------------|
-| Linux   | Native        | Yes               | No         |
-| macOS   | Docker Desktop| Yes               | No         |
-| Windows | Docker Desktop| No                | Yes        |
-| Windows | WSL2 Backend  | Usually           | Sometimes  |
+# Install with the appropriate package manager
+bun install    # or npm install, yarn install, pnpm install
+```
 
 ---
 
 ## Related Documentation
 
-- [Docker Compose Orchestrator](../../orchestrator/services/docker-compose-orchestrator.md)
+- [Docker Setup Guide](../../guides/docker-setup.md)
 - [Base Config Parser](../../orchestrator/services/base-config-parser.md)
-- [Container Startup Commands](../../orchestrator/services/container-startup.md)
+- [Dockerfiles](dockerfiles.md)

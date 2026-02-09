@@ -158,7 +158,7 @@ User projects in Kubernetes use ephemeral storage with S3 persistence:
 3. **Dehydration** (PreStop Hook):
    ```
    - Triggered when pod terminates
-   - Zip /workspace (exclude node_modules, .git, etc.)
+   - Zip /workspace (exclude .git, __pycache__, .venv, dist, build, etc.)
    - Upload to S3
    - Exit (pod terminates)
    ```
@@ -485,7 +485,7 @@ Example: Expire inactive projects after 180 days (uncomment rule)
 4. **Restart NGINX after backend changes**: Clears endpoint cache
 5. **Use overlay patches**: Don't modify base manifests directly
 6. **Test in Minikube before AWS**: Catches K8s-specific issues early
-7. **Monitor S3 costs**: Large node_modules can inflate storage costs (use exclude patterns)
+7. **Monitor S3 costs**: Exclude generated dirs (node_modules, .next, dist, etc.) from S3 archives
 8. **Check namespace quotas**: Resource quotas prevent runaway project creation
 
 ## Emergency Procedures

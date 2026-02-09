@@ -236,7 +236,7 @@ docs/
 │   └── layouts/                # Page layouts (Settings, Marketplace)
 ├── infrastructure/              # DevOps documentation
 │   ├── kubernetes/             # K8s manifests
-│   ├── docker/                 # Docker setup (symlink fix, etc.)
+│   ├── docker/                 # Docker setup (dependency management, etc.)
 │   └── terraform/              # AWS IaC
 └── guides/                      # How-to guides
     └── theme-system.md         # Theme system complete guide
@@ -262,6 +262,8 @@ Each `CLAUDE.md` file contains:
 | Task | Start Here |
 |------|------------|
 | Docker setup from scratch | `docs/guides/docker-setup.md` |
+| Database seeding | `CLAUDE.md` → "Database Seeding" section (this file) |
+| Database migrations | `docs/guides/database-migrations.md` |
 | Understanding system architecture | `docs/architecture/CLAUDE.md` |
 | Backend API development | `docs/orchestrator/routers/CLAUDE.md` |
 | AI agent development | `docs/orchestrator/agent/CLAUDE.md` |
@@ -291,6 +293,9 @@ cp .env.example .env           # configure SECRET_KEY, LITELLM_API_BASE, LITELLM
 docker compose up --build -d   # build images and start all services
 docker compose ps              # verify all 4 services are healthy
 # Access: http://localhost (frontend), http://localhost:8000/docs (API docs)
+
+# IMPORTANT: Build devserver image (required for user project containers)
+docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
 ```
 
 #### Docker Clean Slate Reset
@@ -299,6 +304,74 @@ docker compose down --volumes --remove-orphans
 docker images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep -i tesslate | awk '{print $2}' | sort -u | xargs docker rmi -f
 docker compose up --build -d
 ```
+
+### Database Seeding
+
+Seeds marketplace bases, agents, open-source agents, and themes. **Required after first setup or clean slate reset.**
+
+Scripts are in `scripts/seed/` and are idempotent (safe to re-run).
+
+#### Seed All (Docker Compose)
+```bash
+# 1. Run migrations first
+docker exec tesslate-orchestrator alembic upgrade head
+
+# 2. Copy seed scripts into container
+docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
+
+# 3. Copy theme JSON files
+docker exec tesslate-orchestrator mkdir -p /tmp/themes
+docker cp scripts/themes/. tesslate-orchestrator:/tmp/themes/
+
+# 4. Run seed scripts (order matters: bases first, then agents)
+# On Windows, prefix each command with MSYS_NO_PATHCONV=1
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
+# Themes script needs themes_dir override since it's not in its expected relative path:
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python -c "
+import asyncio, sys; sys.path.insert(0, '/app')
+from pathlib import Path
+exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
+asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
+"
+```
+
+#### Seed All (Kubernetes)
+```bash
+# Get pod name
+POD=$(kubectl get pod -n tesslate -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}')
+
+# Copy scripts
+kubectl cp scripts/seed/seed_marketplace_bases.py tesslate/$POD:/tmp/
+kubectl cp scripts/seed/seed_marketplace_agents.py tesslate/$POD:/tmp/
+kubectl cp scripts/seed/seed_opensource_agents.py tesslate/$POD:/tmp/
+kubectl cp scripts/seed/seed_themes.py tesslate/$POD:/tmp/
+kubectl cp scripts/themes tesslate/$POD:/tmp/themes
+
+# Run (on Windows prefix with MSYS_NO_PATHCONV=1)
+kubectl exec -n tesslate $POD -- python /tmp/seed_marketplace_bases.py
+kubectl exec -n tesslate $POD -- python /tmp/seed_marketplace_agents.py
+kubectl exec -n tesslate $POD -- python /tmp/seed_opensource_agents.py
+kubectl exec -n tesslate $POD -- python -c "
+import asyncio, sys; sys.path.insert(0, '/app')
+from pathlib import Path
+exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
+asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
+"
+```
+
+#### What Gets Seeded
+
+| Script | Data | Count |
+|--------|------|-------|
+| `seed_marketplace_bases.py` | Project templates (Next.js 16, Next.js 15, Vite+React+FastAPI, Vite+React+Go, Expo) | 5 |
+| `seed_marketplace_agents.py` | Official agents + Tesslate account (Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent) | 5 |
+| `seed_opensource_agents.py` | Community agents (Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer) | 6 |
+| `seed_themes.py` | UI themes (default-dark, default-light, midnight, ocean, forest, rose, sunset) | 7 |
 
 ### Kubernetes (Minikube/Production)
 - `DEPLOYMENT_MODE=kubernetes` in config

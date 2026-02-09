@@ -87,6 +87,12 @@ docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
 
 # Build frontend image
 docker build -t tesslate-frontend:latest -f app/Dockerfile.prod app/
+
+# Seed database (after first startup or clean slate reset)
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
+# See CLAUDE.md "Database Seeding" section for full instructions including themes
 ```
 
 ## Architecture Diagrams
@@ -114,6 +120,8 @@ Load this root CLAUDE.md when:
 | Task | Go To |
 |------|-------|
 | Set up Docker from scratch | [guides/docker-setup.md](guides/docker-setup.md) |
+| Seed the database | [guides/docker-setup.md](guides/docker-setup.md) (Step 6) or root [CLAUDE.md](../CLAUDE.md) "Database Seeding" |
+| Run database migrations | [guides/database-migrations.md](guides/database-migrations.md) |
 | Add a new API endpoint | [orchestrator/routers/CLAUDE.md](orchestrator/routers/CLAUDE.md) |
 | Modify the AI agent | [orchestrator/agent/CLAUDE.md](orchestrator/agent/CLAUDE.md) |
 | Add a new tool for the agent | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) |

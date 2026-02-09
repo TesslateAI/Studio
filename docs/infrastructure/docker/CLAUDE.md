@@ -100,6 +100,12 @@ docker compose up --build -d
 | `tesslate-base-cache` | Pre-installed marketplace bases |
 | `tesslate-projects-data` | All user project source code |
 
+## Dependency Management
+
+`node_modules` is **never** copied between filesystems. When a project is created from a base template, generated directories (`node_modules`, `.next`, `__pycache__`, `.venv`, `dist`, `build`) are skipped during the file copy. The container installs dependencies on first boot using the lockfile-detected package manager (bun → pnpm → yarn → npm).
+
+See [symlink-fix.md](symlink-fix.md) for full details.
+
 ## When to Load This Context
 
 - Setting up Docker Compose for the first time

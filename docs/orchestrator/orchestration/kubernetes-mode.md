@@ -11,7 +11,7 @@ Kubernetes mode is designed for **production deployment** at scale. It supports 
 **Key Features**:
 - **Namespace per project** pattern for complete isolation
 - **File-manager pod** + **dev container pods** (separate lifecycles)
-- **EBS VolumeSnapshot** for hibernation/restoration (instant restore, node_modules preserved)
+- **EBS VolumeSnapshot** for hibernation/restoration (instant restore, deps auto-installed on first boot)
 - **Pod affinity** for shared RWO storage (multi-container projects)
 - **NetworkPolicy** for strict network isolation
 - **Timeline UI** - up to 5 snapshots per project for version history
@@ -186,7 +186,7 @@ The EBS VolumeSnapshot pattern hibernates idle projects to save resources:
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                  ACTIVE STATE                               │
-│  (Cycle continues... node_modules preserved!)               │
+│  (Cycle continues... deps auto-installed if missing!)        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -208,7 +208,7 @@ The EBS VolumeSnapshot pattern hibernates idle projects to save resources:
 
 **Why VolumeSnapshots are superior**:
 - ✅ Near-instant restore (< 10s vs 30-90s with S3 ZIP)
-- ✅ node_modules preserved (no npm install on restore!)
+- ✅ Fast restore (EBS lazy-loads data on access)
 - ✅ Non-blocking creation (returns immediately)
 - ✅ Timeline UI - up to 5 manual snapshots per project
 - ✅ 30-day soft delete retention for recovery

@@ -358,7 +358,7 @@ def create_ingress_manifest(
 │    ↓                                                    │
 │  Dev containers start (optional)                        │
 │                                                         │
-│  ✅ Project ready - node_modules preserved!             │
+│  ✅ Project ready - deps installed on first boot!        │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
@@ -459,7 +459,7 @@ spec:
 
 **Advantages**:
 - ✅ Near-instant restore (< 10 seconds) - EBS lazy-loads data
-- ✅ node_modules preserved - no npm install on restore!
+- ✅ Fast restore (EBS lazy-loads data on access)
 - ✅ Fast I/O (EBS block storage)
 - ✅ Non-blocking snapshot creation (returns immediately)
 - ✅ Timeline UI - up to 5 snapshots for version history

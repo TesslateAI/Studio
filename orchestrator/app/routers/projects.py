@@ -637,9 +637,20 @@ async def _setup_base_project(
                 volume_project_path = f"/projects/{db_project.slug}"
                 os.makedirs(volume_project_path, exist_ok=True)
 
-                # Copy all files from temp to volume (excluding .git)
+                # Copy source files to volume (skip generated/dependency dirs)
+                # node_modules is NOT copied — the container installs deps on first boot
+                # This avoids broken symlinks when copying between filesystems/platforms
+                _SKIP_DIRS = {
+                    ".git",
+                    "node_modules",
+                    ".next",
+                    "__pycache__",
+                    ".venv",
+                    "dist",
+                    "build",
+                }
                 for item in os.listdir(temp_clone_dir):
-                    if item == ".git":
+                    if item in _SKIP_DIRS:
                         continue
                     src = os.path.join(temp_clone_dir, item)
                     dst = os.path.join(volume_project_path, item)
@@ -665,9 +676,12 @@ async def _setup_base_project(
             volume_project_path = f"/projects/{db_project.slug}"
             os.makedirs(volume_project_path, exist_ok=True)
 
-            # Copy all files from cache to volume (excluding .git)
+            # Copy source files to volume (skip generated/dependency dirs)
+            # node_modules is NOT copied — the container installs deps on first boot
+            # This avoids broken symlinks when copying between filesystems/platforms
+            _SKIP_DIRS = {".git", "node_modules", ".next", "__pycache__", ".venv", "dist", "build"}
             for item in os.listdir(cached_base_path):
-                if item == ".git":
+                if item in _SKIP_DIRS:
                     continue
                 src = os.path.join(cached_base_path, item)
                 dst = os.path.join(volume_project_path, item)

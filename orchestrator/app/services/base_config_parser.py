@@ -352,36 +352,36 @@ async def get_base_config_from_volume(project_slug: str) -> BaseConfig | None:
         return None
 
 
+def get_node_modules_fix_prefix() -> str:
+    """Public API for K8s orchestrator."""
+    return _install_deps_if_missing_command()
+
+
 def _fix_node_modules_symlinks_command() -> str:
-    """
-    Generate a shell snippet that checks for broken node_modules symlinks and fixes them.
+    """For Docker Compose (uses $$ to escape Docker Compose variable interpolation)."""
+    return _install_deps_if_missing_command(escape_dollars=True)
 
-    This is needed because when copying bases from Docker volumes on Windows,
-    Unix symlinks in node_modules/.bin/ get converted to regular files (copies
-    of the target file). These copies have broken relative imports like:
-        require("../server/require-hook")
-    which only work when the file is in the correct location (via symlink).
 
-    The fix is to run `npm rebuild` which recreates the symlinks properly,
-    or if that fails, delete node_modules and reinstall.
+def _install_deps_if_missing_command(escape_dollars: bool = False) -> str:
     """
+    Generate a shell snippet that installs dependencies if node_modules is missing.
+
+    node_modules is never copied between filesystems — it's always installed
+    fresh inside the container to avoid broken symlinks and permission issues.
+    This detects the lockfile to pick the right package manager.
+
+    Args:
+        escape_dollars: If True, escape $ as $$ for Docker Compose.
+    """
+    # No shell variables used, so escape_dollars is a no-op for now.
+    # Kept as parameter for future-proofing if we ever need shell vars.
     return (
-        # Check if node_modules exists and has potentially broken symlinks
-        'if [ -d "node_modules" ] && [ -d "node_modules/.bin" ]; then '
-        # Check for broken symlinks: files in .bin should be symlinks on Linux.
-        # If any .bin file is a regular file (not a symlink), symlinks are broken.
-        '  BROKEN=false; '
-        '  for f in node_modules/.bin/*; do '
-        '    if [ -f "$f" ] && [ ! -L "$f" ]; then '
-        '      BROKEN=true; break; '
-        '    fi; '
-        '  done; '
-        '  if [ "$BROKEN" = "true" ]; then '
-        '    echo "[TESSLATE] Detected broken node_modules symlinks (copied from Windows), running npm rebuild..." && '
-        '    npm rebuild 2>/dev/null || ('
-        '      echo "[TESSLATE] Rebuild failed, reinstalling dependencies..." && '
-        '      rm -rf node_modules && npm install'
-        "    ); "
+        'if [ -f "package.json" ] && [ ! -d "node_modules" ]; then '
+        '  echo "[TESSLATE] Installing dependencies..." && '
+        '  if [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then bun install; '
+        '  elif [ -f "pnpm-lock.yaml" ]; then pnpm install; '
+        '  elif [ -f "yarn.lock" ]; then yarn install; '
+        "  else npm install; "
         "  fi; "
         "fi && "
     )
@@ -423,10 +423,8 @@ def generate_startup_command(config: BaseConfig | None) -> list[str]:
         # This ensures Python packages installed with --user and other user-level tools work
         'export PATH="$HOME/.local/bin:/home/node/.local/bin:$PATH" && '
         # Install dependencies (only if missing) for all supported languages
-        'echo "[TESSLATE] Starting dev environment..." && '
+        'echo "[TESSLATE] Starting dev environment..." && ' + symlink_fix +
         # Fix broken node_modules symlinks (from Windows volume copies)
-        + symlink_fix
-        +
         # Node.js (check multiple package file locations for multi-dir projects)
         'if [ -f "package.json" ]; then '
         '  [ ! -d "node_modules" ] && echo "[TESSLATE] Installing Node.js dependencies..." && npm install || true; '

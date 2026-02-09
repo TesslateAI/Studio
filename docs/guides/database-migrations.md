@@ -490,6 +490,46 @@ See existing migrations in `orchestrator/alembic/versions/` for reference:
 | `a1b2c3d4e5f6_add_deployment_models.py` | Deployment feature |
 | `20251220_add_avatar_url_to_users.py` | Adding column example |
 
+## Database Seeding
+
+After running migrations on a fresh database, seed marketplace data:
+
+```bash
+# Docker Compose
+docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_bases.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_opensource_agents.py
+```
+
+For themes, also copy the JSON files:
+```bash
+docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
+docker exec tesslate-orchestrator mkdir -p /tmp/themes
+docker cp scripts/themes/. tesslate-orchestrator:/tmp/themes/
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python -c "
+import asyncio, sys; sys.path.insert(0, '/app')
+from pathlib import Path
+exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
+asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
+"
+```
+
+See the **Database Seeding** section in the root [CLAUDE.md](../../CLAUDE.md) for the full reference including Kubernetes instructions.
+
+### Seed Scripts Reference
+
+| Script | Location | Seeds |
+|--------|----------|-------|
+| `seed_marketplace_bases.py` | `scripts/seed/` | 5 project templates |
+| `seed_marketplace_agents.py` | `scripts/seed/` | 5 official agents + Tesslate account |
+| `seed_opensource_agents.py` | `scripts/seed/` | 6 open-source agents |
+| `seed_themes.py` | `scripts/seed/` | 7 UI themes (reads from `scripts/themes/*.json`) |
+
+All scripts are **idempotent** — safe to re-run without duplicating data.
+
 ## Next Steps
 
 - [Adding Routers](adding-routers.md) - Create API endpoints for new models

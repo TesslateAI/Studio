@@ -24,6 +24,13 @@ from .database import Base
 from .models_auth import User  # noqa: F401 - Re-export for backwards compatibility
 
 # Import kanban models so they're included in Base.metadata
+from .models_kanban import (  # noqa: F401
+    KanbanBoard,
+    KanbanColumn,
+    KanbanTask,
+    KanbanTaskComment,
+    ProjectNote,
+)
 
 
 class Project(Base):

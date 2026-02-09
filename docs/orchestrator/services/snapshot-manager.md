@@ -13,7 +13,7 @@ The `SnapshotManager` service handles EBS VolumeSnapshot operations for project 
 | Feature | Description |
 |---------|-------------|
 | **Non-blocking** | Snapshot creation returns immediately; frontend polls for status |
-| **Near-instant restore** | EBS lazy-loads data, no npm install needed (node_modules preserved) |
+| **Near-instant restore** | EBS lazy-loads data from snapshot for fast startup |
 | **Timeline UI** | Up to 5 snapshots per project for version history |
 | **Soft delete** | Snapshots retained 30 days after project deletion |
 
@@ -96,7 +96,7 @@ async def restore_from_snapshot(
     Create PVC with dataSource pointing to VolumeSnapshot.
 
     EBS lazy-loads data on first read - near-instant startup.
-    node_modules preserved - no npm install needed!
+    EBS lazy-loads data - fast startup!
 
     Returns:
         (True, None) on success
