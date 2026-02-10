@@ -117,13 +117,13 @@ build_images() {
     cd "$PROJECT_ROOT"
 
     log_info "Building backend..."
-    docker build -t "$BACKEND_REPO:latest" -f orchestrator/Dockerfile orchestrator/
+    docker build --no-cache -t "$BACKEND_REPO:latest" -f orchestrator/Dockerfile orchestrator/
 
     log_info "Building frontend..."
-    docker build -t "$FRONTEND_REPO:latest" -f app/Dockerfile.prod app/
+    docker build --no-cache -t "$FRONTEND_REPO:latest" -f app/Dockerfile.prod app/
 
     log_info "Building devserver..."
-    docker build -t "$DEVSERVER_REPO:latest" -f orchestrator/Dockerfile.devserver orchestrator/
+    docker build --no-cache -t "$DEVSERVER_REPO:latest" -f orchestrator/Dockerfile.devserver orchestrator/
 
     log_success "All images built!"
 }
@@ -183,6 +183,11 @@ deploy_app() {
 
     # Apply Kubernetes manifests
     kubectl apply -k "$PROJECT_ROOT/k8s/overlays/aws"
+
+    # Delete pods to force pull of new images (imagePullPolicy: Always)
+    log_info "Deleting pods to force image pull..."
+    kubectl delete pod -n tesslate -l app=tesslate-backend
+    kubectl delete pod -n tesslate -l app=tesslate-frontend
 
     log_info "Waiting for deployments to be ready..."
     kubectl rollout status deployment/tesslate-backend -n tesslate --timeout=300s

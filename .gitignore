@@ -159,6 +159,7 @@ k8s/terraform/**/*.tfvars
 !k8s/terraform/**/*.tfvars.example
 k8s/terraform/**/*.tfstate
 k8s/terraform/**/*.tfstate.*
+k8s/terraform/**/tfplan
 k8s/terraform/**/.terraform/
 k8s/terraform/**/.terraform.lock.hcl
 k8s/terraform/**/crash.log
