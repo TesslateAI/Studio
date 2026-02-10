@@ -26,6 +26,7 @@ import {
   Gear,
   Article,
   Kanban,
+  TreeStructure,
 } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
@@ -1286,6 +1287,12 @@ export const ProjectGraphCanvas = () => {
   }
 
   const leftSidebarItems = [
+    {
+      icon: <TreeStructure size={18} />,
+      title: 'Architecture',
+      onClick: () => setActiveView('graph'),
+      active: activeView === 'graph',
+    },
     {
       icon: <Code size={18} />,
       title: 'Code',
