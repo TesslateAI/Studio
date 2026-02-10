@@ -101,7 +101,7 @@ Detailed view of a marketplace item with description, features, reviews, and pur
 - **Feature List**: Bullet points
 - **Screenshots**: Image gallery
 - **Pricing**: Free, credits, or subscription
-- **Reviews**: Star ratings and comments
+- **Reviews**: Star ratings and comments (agents and bases)
 - **Creator Info**: Link to creator profile
 - **Related Items**: Suggestions
 
@@ -146,25 +146,40 @@ const loadReviews = async () => {
 ```
 
 ### Review System
+
+Reviews are supported for both agents and bases. The `loadReviews`, `handleSubmitReview`, and `handleDeleteReview` functions dispatch to the correct API method based on `item.item_type`:
+
 ```typescript
-const handleSubmitReview = async (rating: number, comment: string) => {
-  try {
-    await marketplaceApi.createReview(slug, { rating, comment });
-    toast.success('Review submitted');
-    loadReviews();
-  } catch (error) {
-    toast.error('Failed to submit review');
-  }
+// Load reviews - dispatches by item type
+const loadReviews = async () => {
+  if (!item?.id || (item.item_type !== 'agent' && item.item_type !== 'base')) return;
+  const data =
+    item.item_type === 'agent'
+      ? await marketplaceApi.getAgentReviews(item.id)
+      : await marketplaceApi.getBaseReviews(item.id);
+  setReviews(data.reviews || []);
 };
 
-const handleUpdateReview = async (reviewId: string, rating: number, comment: string) => {
-  try {
-    await marketplaceApi.updateReview(reviewId, { rating, comment });
-    toast.success('Review updated');
-    loadReviews();
-  } catch (error) {
-    toast.error('Failed to update review');
+// Submit review - upsert (create or update)
+const handleSubmitReview = async () => {
+  if (item.item_type === 'agent') {
+    await marketplaceApi.createAgentReview(item.id, reviewRating, reviewComment || undefined);
+  } else {
+    await marketplaceApi.createBaseReview(item.id, reviewRating, reviewComment || undefined);
   }
+  toast.success(editingReview ? 'Review updated!' : 'Review submitted!');
+  loadReviews();
+};
+
+// Delete review
+const handleDeleteReview = async () => {
+  if (item.item_type === 'agent') {
+    await marketplaceApi.deleteAgentReview(item.id);
+  } else {
+    await marketplaceApi.deleteBaseReview(item.id);
+  }
+  toast.success('Review deleted');
+  loadReviews();
 };
 ```
 
@@ -397,16 +412,15 @@ POST /api/marketplace/agents/{slug}/purchase
 // Create Stripe checkout session (paid items)
 POST /api/marketplace/agents/{slug}/checkout
 
-// Get reviews
-GET /api/marketplace/agents/{slug}/reviews
+// Agent reviews
+GET /api/marketplace/agents/{id}/reviews?page=1&limit=10
+POST /api/marketplace/agents/{id}/review?rating=5&comment=text
+DELETE /api/marketplace/agents/{id}/review
 
-// Create review
-POST /api/marketplace/agents/{slug}/reviews
-{ rating: number, comment: string }
-
-// Update review
-PUT /api/marketplace/reviews/{review_id}
-{ rating: number, comment: string }
+// Base reviews (same shape as agent reviews)
+GET /api/marketplace/bases/{id}/reviews?page=1&limit=10
+POST /api/marketplace/bases/{id}/review?rating=5&comment=text
+DELETE /api/marketplace/bases/{id}/review
 
 // Get items by creator
 GET /api/marketplace/creator/{user_id}/items
@@ -459,8 +473,9 @@ const debouncedSearch = useCallback(
 - Check Stripe configuration (for paid items)
 
 **Issue**: Reviews not loading
-- Verify review endpoint
-- Check authentication
+- Verify review endpoint (agents use `/agents/{id}/reviews`, bases use `/bases/{id}/reviews`)
+- Check `item.item_type` is `'agent'` or `'base'` (other types skip review loading)
+- Check authentication (reviews are public, but `is_own_review` requires auth)
 
 **Issue**: Images not loading
 - Check CORS settings

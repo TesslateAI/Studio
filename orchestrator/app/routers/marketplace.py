@@ -1888,7 +1888,7 @@ async def get_agent_reviews(
                 "user_id": str(user.id),
                 "user_name": user.name or user.email.split("@")[0],
                 "user_avatar_url": user.avatar_url,
-                "is_own_review": str(user.id) == str(current_user.id),
+                "is_own_review": (str(user.id) == str(current_user.id)) if current_user else False,
             }
         )
 
@@ -2217,6 +2217,175 @@ async def get_user_bases(
         )
 
     return {"bases": response}
+
+
+# ============================================================================
+# Base Reviews
+# ============================================================================
+
+
+@router.post("/bases/{base_id}/review")
+async def create_base_review(
+    base_id: str,
+    rating: int = Query(ge=1, le=5),
+    comment: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Create or update a review for a base.
+    """
+    # Verify user owns the base
+    purchase_result = await db.execute(
+        select(UserPurchasedBase).where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.base_id == base_id,
+            UserPurchasedBase.is_active,
+        )
+    )
+    purchase = purchase_result.scalar_one_or_none()
+
+    if not purchase:
+        raise HTTPException(status_code=403, detail="You must own this base to review it")
+
+    # Check for existing review
+    existing_result = await db.execute(
+        select(BaseReview).where(
+            BaseReview.user_id == current_user.id, BaseReview.base_id == base_id
+        )
+    )
+    existing_review = existing_result.scalar_one_or_none()
+
+    if existing_review:
+        # Update existing review
+        existing_review.rating = rating
+        existing_review.comment = comment
+        existing_review.created_at = datetime.now(UTC)
+    else:
+        # Create new review
+        review = BaseReview(
+            base_id=base_id, user_id=current_user.id, rating=rating, comment=comment
+        )
+        db.add(review)
+
+    # Update base's average rating
+    rating_result = await db.execute(
+        select(func.avg(BaseReview.rating), func.count(BaseReview.id)).where(
+            BaseReview.base_id == base_id
+        )
+    )
+    avg_rating, review_count = rating_result.one()
+
+    base_result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = base_result.scalar_one()
+    base.rating = float(avg_rating) if avg_rating else 5.0
+    base.reviews_count = review_count
+
+    await db.commit()
+
+    return {"message": "Review submitted successfully", "rating": rating}
+
+
+@router.get("/bases/{base_id}/reviews")
+async def get_base_reviews(
+    base_id: str,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
+):
+    """
+    Get all reviews for a base with user info.
+    Public endpoint - authentication is optional.
+    Returns paginated reviews with user avatar and name.
+    """
+    # Check base exists
+    base_result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = base_result.scalar_one_or_none()
+    if not base:
+        raise HTTPException(status_code=404, detail="Base not found")
+
+    # Get reviews with user info
+    offset = (page - 1) * limit
+    reviews_result = await db.execute(
+        select(BaseReview, User)
+        .join(User, User.id == BaseReview.user_id)
+        .where(BaseReview.base_id == base_id)
+        .order_by(BaseReview.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    reviews = reviews_result.all()
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count(BaseReview.id)).where(BaseReview.base_id == base_id)
+    )
+    total = count_result.scalar() or 0
+
+    response = []
+    for review, user in reviews:
+        response.append(
+            {
+                "id": str(review.id),
+                "rating": review.rating,
+                "comment": review.comment,
+                "created_at": review.created_at.isoformat() if review.created_at else None,
+                "user_id": str(user.id),
+                "user_name": user.name or user.email.split("@")[0],
+                "user_avatar_url": user.avatar_url,
+                "is_own_review": (str(user.id) == str(current_user.id)) if current_user else False,
+            }
+        )
+
+    return {
+        "reviews": response,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": offset + len(reviews) < total,
+    }
+
+
+@router.delete("/bases/{base_id}/review")
+async def delete_base_review(
+    base_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Delete current user's review for a base.
+    """
+    # Find user's review
+    review_result = await db.execute(
+        select(BaseReview).where(
+            BaseReview.user_id == current_user.id, BaseReview.base_id == base_id
+        )
+    )
+    review = review_result.scalar_one_or_none()
+
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # Delete the review
+    await db.delete(review)
+
+    # Update base's average rating
+    rating_result = await db.execute(
+        select(func.avg(BaseReview.rating), func.count(BaseReview.id)).where(
+            BaseReview.base_id == base_id
+        )
+    )
+    avg_rating, review_count = rating_result.one()
+
+    base_result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = base_result.scalar_one()
+    base.rating = float(avg_rating) if avg_rating else 5.0
+    base.reviews_count = review_count or 0
+
+    await db.commit()
+
+    return {"message": "Review deleted successfully"}
 
 
 # ============================================================================

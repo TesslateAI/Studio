@@ -176,44 +176,72 @@ Purchases an agent (free or paid).
 **Credit Deduction**:
 For paid agents, credits are deducted from user's balance. Transaction recorded in `MarketplaceTransaction`.
 
-### Review Agent
+### Review Agent (Create or Update)
 
 ```
-POST /api/marketplace/agents/{agent_id}/reviews
+POST /api/marketplace/agents/{agent_id}/review?rating=5&comment=Great+agent
 ```
 
-Submit a review for a purchased agent.
+Create or update (upsert) a review for a purchased agent. If the user already has a review, it overwrites rating/comment/timestamp.
 
-**Request Body**:
+**Query Parameters**:
+- `rating` (required, 1-5): Star rating
+- `comment` (optional): Review text
+
+**Response**:
 ```json
 {
-  "rating": 5,
-  "review_text": "Great agent, very helpful!"
+  "message": "Review submitted successfully",
+  "rating": 5
 }
 ```
 
-**Response**: Review object
-
 **Restrictions**:
-- Must have purchased agent
-- One review per user per agent
+- Must have purchased agent (`UserPurchasedAgent` with `is_active=True`)
+- One review per user per agent (upsert pattern)
 - Rating must be 1-5
 
-### Update Review
+**Side effect**: Recalculates `MarketplaceAgent.rating` (avg) and `.reviews_count` via SQL aggregate.
+
+### Get Agent Reviews
 
 ```
-PATCH /api/marketplace/agents/{agent_id}/reviews/{review_id}
+GET /api/marketplace/agents/{agent_id}/reviews?page=1&limit=10
 ```
 
-Update an existing review.
+**(Public, optional auth)** Paginated reviews with user info.
 
-### Delete Review
+**Response**:
+```json
+{
+  "reviews": [
+    {
+      "id": "uuid",
+      "rating": 5,
+      "comment": "Great agent!",
+      "created_at": "2025-01-01T00:00:00",
+      "user_id": "uuid",
+      "user_name": "John",
+      "user_avatar_url": "https://...",
+      "is_own_review": false
+    }
+  ],
+  "total": 42,
+  "page": 1,
+  "limit": 10,
+  "has_more": true
+}
+```
+
+### Delete Agent Review
 
 ```
-DELETE /api/marketplace/agents/{agent_id}/reviews/{review_id}
+DELETE /api/marketplace/agents/{agent_id}/review
 ```
 
-Delete a review (own reviews only).
+**(Authenticated)** Delete current user's own review. Recalculates agent rating after deletion.
+
+**Permission model**: Only your own review (filtered by `current_user.id`). No admin override.
 
 ### Get My Agents
 
@@ -302,13 +330,40 @@ After purchasing, users can create projects using this base:
 }
 ```
 
-### Review Base
+### Review Base (Create or Update)
 
 ```
-POST /api/marketplace/bases/{base_id}/reviews
+POST /api/marketplace/bases/{base_id}/review?rating=5&comment=Great+template
 ```
 
-Submit a review for a purchased base. Same structure as agent reviews.
+Create or update (upsert) a review for a purchased base. Mirrors the agent review endpoint exactly.
+
+**Query Parameters**:
+- `rating` (required, 1-5): Star rating
+- `comment` (optional): Review text
+
+**Restrictions**:
+- Must have purchased base (`UserPurchasedBase` with `is_active=True`)
+- One review per user per base (upsert pattern)
+- Rating must be 1-5
+
+**Side effect**: Recalculates `MarketplaceBase.rating` (avg) and `.reviews_count` via SQL aggregate.
+
+### Get Base Reviews
+
+```
+GET /api/marketplace/bases/{base_id}/reviews?page=1&limit=10
+```
+
+**(Public, optional auth)** Paginated reviews with user info. Same response shape as agent reviews.
+
+### Delete Base Review
+
+```
+DELETE /api/marketplace/bases/{base_id}/review
+```
+
+**(Authenticated)** Delete current user's own review. Recalculates base rating after deletion.
 
 ## User-Submitted Bases
 
@@ -679,8 +734,7 @@ Standard categories for agents and bases:
 
 6. **User leaves review**:
    ```
-   POST /api/marketplace/agents/{id}/reviews
-   {"rating": 5, "review_text": "Excellent!"}
+   POST /api/marketplace/agents/{id}/review?rating=5&comment=Excellent!
    ```
 
 ## Revenue Sharing

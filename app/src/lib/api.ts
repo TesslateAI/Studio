@@ -816,6 +816,30 @@ export const marketplaceApi = {
     const response = await api.delete(`/api/marketplace/agents/${agentId}/review`);
     return response.data;
   },
+
+  // Get reviews for a base
+  getBaseReviews: async (baseId: string, params?: { page?: number; limit?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    const response = await api.get(`/api/marketplace/bases/${baseId}/reviews?${queryParams}`);
+    return response.data;
+  },
+
+  // Create or update a review for a base
+  createBaseReview: async (baseId: string, rating: number, comment?: string) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('rating', rating.toString());
+    if (comment) queryParams.append('comment', comment);
+    const response = await api.post(`/api/marketplace/bases/${baseId}/review?${queryParams}`);
+    return response.data;
+  },
+
+  // Delete user's review for a base
+  deleteBaseReview: async (baseId: string) => {
+    const response = await api.delete(`/api/marketplace/bases/${baseId}/review`);
+    return response.data;
+  },
 };
 
 // Creator/Author profile API
