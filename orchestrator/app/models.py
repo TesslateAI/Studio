@@ -877,7 +877,9 @@ class MarketplaceBase(Base):
     created_by_user_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    visibility = Column(String, default="public", server_default="public")  # "private" or "public"
+    visibility = Column(
+        String, default="private", server_default="private"
+    )  # "private" or "public"
 
     # Relationships
     created_by_user = relationship("User", foreign_keys=[created_by_user_id])

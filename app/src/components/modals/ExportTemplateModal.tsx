@@ -29,7 +29,7 @@ export function ExportTemplateModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('fullstack');
-  const [visibility, setVisibility] = useState<'private' | 'public'>('public');
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
   const [icon, setIcon] = useState('\u{1F4E6}');
   const [tags, setTags] = useState('');
   const [techStack, setTechStack] = useState('');
@@ -43,7 +43,7 @@ export function ExportTemplateModal({
       setName('');
       setDescription('');
       setCategory('fullstack');
-      setVisibility('public');
+      setVisibility('private');
       setIcon('\u{1F4E6}');
       setTags('');
       setTechStack('');

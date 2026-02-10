@@ -914,7 +914,7 @@ class BaseSubmitRequest(BaseModel):
     git_repo_url: str
     category: str  # fullstack, frontend, backend, mobile, data, devops
     default_branch: str = "main"
-    visibility: str = "public"  # "private" or "public"
+    visibility: str = "private"  # "private" or "public"
     long_description: str | None = None
     icon: str = "\U0001f4e6"
     tags: list[str] | None = None
@@ -988,7 +988,7 @@ class TemplateExportRequest(BaseModel):
     name: str
     description: str
     category: str  # fullstack, frontend, backend, mobile, data, devops
-    visibility: str = "public"  # "private" or "public"
+    visibility: str = "private"  # "private" or "public"
     icon: str = "\U0001f4e6"
     tags: list[str] | None = None
     features: list[str] | None = None

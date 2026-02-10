@@ -2086,7 +2086,7 @@ async def get_marketplace_bases(
                 "created_by_user_id": str(base.created_by_user_id)
                 if base.created_by_user_id
                 else None,
-                "visibility": base.visibility or "public",
+                "visibility": base.visibility or "private",
             }
         )
 
@@ -2165,7 +2165,7 @@ async def get_base_details(
         "usage_count": base.downloads,
         "archive_size_bytes": base.archive_size_bytes,
         "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
-        "visibility": base.visibility or "public",
+        "visibility": base.visibility or "private",
         "reviews": [
             {
                 "id": review.id,
@@ -2745,7 +2745,7 @@ async def get_my_created_bases(
                 "tags": base.tags,
                 "features": base.features,
                 "tech_stack": base.tech_stack,
-                "visibility": base.visibility or "public",
+                "visibility": base.visibility or "private",
                 "downloads": base.downloads or 0,
                 "rating": base.rating or 5.0,
                 "source_type": base.source_type or "git",
