@@ -115,9 +115,19 @@ export default function Register() {
 
       toast.success('Account created successfully!');
 
-      // Auto-login after registration (triggers 2FA)
+      // Auto-login after registration
       const loginResponse = await authApi.login(formData.email, formData.password);
 
+      if (loginResponse.access_token && !loginResponse.requires_2fa) {
+        // 2FA disabled — JWT issued directly, complete login
+        localStorage.setItem('token', loginResponse.access_token);
+        await checkAuth({ force: true });
+        refreshUserTheme();
+        navigate('/dashboard');
+        return;
+      }
+
+      // 2FA required — show OTP input
       setTwoFaRequired(true);
       setTempToken(loginResponse.temp_token);
       setResendCooldown(60);

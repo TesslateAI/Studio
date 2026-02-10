@@ -59,6 +59,7 @@ Tesslate Studio consists of four major systems:
 | `SMTP_USERNAME` | SMTP authentication username |
 | `SMTP_PASSWORD` | SMTP authentication password |
 | `SMTP_SENDER_EMAIL` | Sender email address (e.g., noreply@domain.com) |
+| `TWO_FA_ENABLED` | Enable email 2FA for logins (default: false) |
 
 ### Project URL Patterns
 

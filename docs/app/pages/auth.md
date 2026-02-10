@@ -7,11 +7,11 @@
 **Layout**: Split-screen (form left, gradient animation right)
 
 ### Purpose
-User authentication via email/password (with mandatory email 2FA) or OAuth providers.
+User authentication via email/password (with optional email 2FA) or OAuth providers.
 
 ### Features
-- **Email/Password Login**: Credentials → email 2FA verification → JWT token
-- **Email 2FA**: Mandatory 6-digit code sent via email after credential validation
+- **Email/Password Login**: Credentials → direct JWT issuance (default), or email 2FA verification → JWT token (when `TWO_FA_ENABLED=true`)
+- **Email 2FA**: 6-digit code sent via email after credential validation (controlled by `TWO_FA_ENABLED` env var)
 - **OAuth Login**: Google, GitHub (bypasses 2FA)
 - **Forgot Password**: Link to `/forgot-password`
 - **Register Link**: Navigate to registration
@@ -313,10 +313,15 @@ POST /api/auth/login (form-encoded)
   ↓
 Backend validates credentials
   ↓ (if valid)
-Backend generates 6-digit code, stores hash in EmailVerificationCode
-  ↓
-Backend returns { requires_2fa: true, temp_token: "...", method: "email" }
-  ↓ (async, non-blocking)
+                      ┌─── TWO_FA_ENABLED=false (default) ──┐
+                      │ Backend issues JWT directly           │
+                      │ Returns { access_token }              │
+                      └───────────────────────────────────────┘
+                      ┌─── TWO_FA_ENABLED=true ──────────────┐
+                      │ Backend generates 6-digit code        │
+                      │ Returns { requires_2fa, temp_token }  │
+                      └───────────────────────────────────────┘
+  ↓ (if 2FA enabled)
 Email sent with 6-digit code (or logged to console if SMTP not configured)
   ↓
 Frontend shows 2FA code input (6 digit boxes)
@@ -532,11 +537,14 @@ SMTP_SENDER_EMAIL=noreply@yourdomain.com
 
 ### 2FA Settings (`config.py`)
 ```python
+two_fa_enabled: bool = False                # Set to True to enable email 2FA
 two_fa_code_length: int = 6
 two_fa_code_expiry_seconds: int = 600      # 10 minutes
 two_fa_max_attempts: int = 5
 two_fa_temp_token_expiry_seconds: int = 600
 ```
+
+**Note**: When `TWO_FA_ENABLED=false`, the login endpoint returns a JWT directly after password verification (skipping the temp token / email code flow). The frontend handles this transparently since the response either has `requires_2fa: true` (show code input) or `access_token` (go to dashboard).
 
 ## Troubleshooting
 

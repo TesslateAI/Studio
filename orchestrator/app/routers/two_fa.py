@@ -86,7 +86,13 @@ async def custom_login(
             detail="LOGIN_BAD_CREDENTIALS",
         )
 
-    # Always generate code and return temp token (mandatory 2FA)
+    # If 2FA is disabled globally, issue JWT directly
+    if not settings.two_fa_enabled:
+        strategy = get_jwt_strategy()
+        token = await strategy.write_token(user)
+        return LoginResponse(access_token=token)
+
+    # Generate code and return temp token (mandatory 2FA)
     code = await create_verification_code(db, user.id, "2fa_login")
     await db.commit()
 

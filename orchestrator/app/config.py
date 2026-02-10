@@ -352,6 +352,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Two-Factor Authentication
     # ==========================================================================
+    two_fa_enabled: bool = False  # Set to True to enable email 2FA for logins
     two_fa_code_length: int = 6
     two_fa_code_expiry_seconds: int = 600  # 10 minutes
     two_fa_max_attempts: int = 5

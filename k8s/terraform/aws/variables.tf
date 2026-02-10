@@ -275,6 +275,12 @@ variable "smtp_sender_email" {
   default     = ""
 }
 
+variable "two_fa_enabled" {
+  description = "Enable email 2FA for email/password logins"
+  type        = bool
+  default     = false
+}
+
 # -----------------------------------------------------------------------------
 # Feature Flags
 # -----------------------------------------------------------------------------

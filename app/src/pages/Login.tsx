@@ -105,7 +105,16 @@ export default function Login() {
     try {
       const response = await authApi.login(formData.email, formData.password);
 
-      // Login always requires 2FA — show OTP input
+      if (response.access_token && !response.requires_2fa) {
+        // 2FA disabled — JWT issued directly, complete login
+        localStorage.setItem('token', response.access_token);
+        await checkAuth({ force: true });
+        refreshUserTheme();
+        navigate('/dashboard');
+        return;
+      }
+
+      // 2FA required — show OTP input
       setTwoFaRequired(true);
       setTempToken(response.temp_token);
       setResendCooldown(60);

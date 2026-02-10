@@ -133,6 +133,7 @@ resource "kubernetes_secret" "app_secrets" {
     SMTP_PASSWORD     = var.smtp_password
     SMTP_USE_TLS      = tostring(var.smtp_use_tls)
     SMTP_SENDER_EMAIL = var.smtp_sender_email
+    TWO_FA_ENABLED    = tostring(var.two_fa_enabled)
   }
 
   type = "Opaque"

@@ -156,6 +156,12 @@ spec:
                 secretKeyRef:
                   name: tesslate-app-secrets
                   key: SMTP_SENDER_EMAIL
+            - name: TWO_FA_ENABLED
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: TWO_FA_ENABLED
+                  optional: true
             # Cookies
             - name: COOKIE_SECURE
               value: "true"
