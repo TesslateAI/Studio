@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   X,
   Play,
@@ -12,6 +12,7 @@ import {
 } from '@phosphor-icons/react';
 import api from '../lib/api';
 import { toast } from 'react-hot-toast';
+import { connectionEvents } from '../utils/connectionEvents';
 
 interface SavedEnvVar {
   key: string;
@@ -57,9 +58,40 @@ export const ContainerPropertiesPanel = ({
   const [editedName, setEditedName] = useState(containerName);
   const [isRenamingContainer, setIsRenamingContainer] = useState(false);
 
+  const fetchContainerDetailsCallback = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await api.get(`/api/projects/${projectSlug}/containers/${containerId}`);
+      const keys: string[] = response.data.env_var_keys || [];
+      setSavedEnvVars(keys.map((key) => ({ key, isEditing: false, pendingValue: '' })));
+      setInjectedEnvVars(response.data.injected_env_vars || []);
+    } catch (error: unknown) {
+      console.error('Failed to fetch container details:', error);
+      if ((error as { response?: { status?: number } }).response?.status === 404) {
+        toast.error('Container not found. Please refresh the page to sync with the latest data.');
+        onClose();
+      } else {
+        toast.error('Failed to load container details');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose is stable enough; including it causes infinite re-fetch loops since parent passes an inline arrow function
+  }, [containerId, projectSlug]);
+
   useEffect(() => {
-    fetchContainerDetails();
-  }, [containerId]);
+    fetchContainerDetailsCallback();
+  }, [fetchContainerDetailsCallback]);
+
+  // Re-fetch when connections change (env injection added/removed)
+  useEffect(() => {
+    const unsubscribe = connectionEvents.on((detail) => {
+      if (detail.sourceContainerId === containerId || detail.targetContainerId === containerId) {
+        fetchContainerDetailsCallback();
+      }
+    });
+    return unsubscribe;
+  }, [containerId, fetchContainerDetailsCallback]);
 
   // Reset edited name when container changes
   useEffect(() => {
@@ -92,28 +124,6 @@ export const ContainerPropertiesPanel = ({
       setEditedName(containerName); // Reset on error
     } finally {
       setIsRenamingContainer(false);
-    }
-  };
-
-  const fetchContainerDetails = async () => {
-    try {
-      setIsLoading(true);
-      const response = await api.get(`/api/projects/${projectSlug}/containers/${containerId}`);
-      const keys: string[] = response.data.env_var_keys || [];
-      setSavedEnvVars(keys.map((key) => ({ key, isEditing: false, pendingValue: '' })));
-      setInjectedEnvVars(response.data.injected_env_vars || []);
-    } catch (error: unknown) {
-      console.error('Failed to fetch container details:', error);
-
-      // Handle 404 - container was deleted or doesn't exist
-      if ((error as { response?: { status?: number } }).response?.status === 404) {
-        toast.error('Container not found. Please refresh the page to sync with the latest data.');
-        onClose(); // Close the panel since container doesn't exist
-      } else {
-        toast.error('Failed to load container details');
-      }
-    } finally {
-      setIsLoading(false);
     }
   };
 

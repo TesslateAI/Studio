@@ -45,6 +45,7 @@ import { ExternalServiceCredentialModal } from '../components/ExternalServiceCre
 import api, { projectsApi, configApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
+import { connectionEvents } from '../utils/connectionEvents';
 import toast from 'react-hot-toast';
 import {
   EnvInjectionEdge,
@@ -565,6 +566,9 @@ export const ProjectGraphCanvas = () => {
             eds
           )
         );
+        // Notify panels that connections changed so injected env vars refresh
+        connectionEvents.emit('connection-created', connection.source, connection.target);
+
         toast.success(
           isSourceService ? 'Connected — env vars will be injected' : 'Connection created'
         );
@@ -1249,6 +1253,12 @@ export const ProjectGraphCanvas = () => {
 
       // Remove edges from local state
       setEdges((eds) => eds.filter((e) => !deletedEdges.some((de) => de.id === e.id)));
+
+      // Notify panels that connections changed so injected env vars refresh
+      for (const edge of deletedEdges) {
+        connectionEvents.emit('connection-deleted', edge.source, edge.target);
+      }
+
       toast.success(`Deleted ${deletedEdges.length} connection(s)`);
     },
     [setNodes, setEdges]
