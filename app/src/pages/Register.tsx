@@ -4,11 +4,13 @@ import { authApi } from '../lib/api';
 import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
 import { useTheme } from '../theme/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function Register() {
   const navigate = useNavigate();
   const { refreshUserTheme } = useTheme();
+  const { checkAuth } = useAuth();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -66,6 +68,8 @@ export default function Register() {
     try {
       const response = await authApi.verify2fa(tempToken, code);
       localStorage.setItem('token', response.access_token);
+      // Update AuthContext so PrivateRoute allows navigation
+      await checkAuth({ force: true });
       refreshUserTheme();
       toast.success('Logged in successfully!');
       setLoading(false);
