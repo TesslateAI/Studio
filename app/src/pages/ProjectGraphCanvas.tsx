@@ -553,8 +553,18 @@ export const ProjectGraphCanvas = () => {
           connector_type: connectorType,
         });
 
-        // Update local state - animations disabled for performance
-        setEdges((eds) => addEdge({ ...connection, type: 'smoothstep', animated: false }, eds));
+        // Update local state - use correct edge type for connector semantics
+        const edgeType = getEdgeType(connectorType);
+        setEdges((eds) =>
+          addEdge(
+            {
+              ...connection,
+              type: edgeType === 'default' ? 'smoothstep' : edgeType,
+              animated: false,
+            },
+            eds
+          )
+        );
         toast.success(
           isSourceService ? 'Connected — env vars will be injected' : 'Connection created'
         );
@@ -1182,16 +1192,19 @@ export const ProjectGraphCanvas = () => {
     [handleOpenBuilder]
   );
 
-  // Edge click handler - selects the edge for deletion
+  // Edge click handler - selects the edge (delete button appears on the edge)
   const handleEdgeClick = useCallback((_: React.MouseEvent, _edge: Edge) => {
     // Edge is automatically selected by ReactFlow when clicked
-    // Show a visual hint that Del key can delete it
-    toast(`Press Delete to remove this connection`, {
-      id: 'edge-hint',
-      duration: 2000,
-      icon: '🗑️',
-    });
+    // The EdgeDeleteButton component renders a delete button on the selected edge
   }, []);
+
+  // Prevent keyboard delete from removing nodes - only allow edge deletion
+  const handleBeforeDelete = useCallback(
+    async ({ edges: edgesToDelete }: { nodes: Node[]; edges: Edge[] }) => {
+      return { nodes: [] as Node[], edges: edgesToDelete };
+    },
+    []
+  );
 
   // Edge deletion handler - called when Delete key is pressed on selected edges
   const handleEdgesDelete = useCallback(
@@ -1604,6 +1617,7 @@ export const ProjectGraphCanvas = () => {
                 onNodeDoubleClick={handleNodeDoubleClick}
                 onEdgeClick={handleEdgeClick}
                 onEdgesDelete={handleEdgesDelete}
+                onBeforeDelete={handleBeforeDelete}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 theme={theme}

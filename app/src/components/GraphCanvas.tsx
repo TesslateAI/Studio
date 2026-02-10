@@ -12,6 +12,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
+  type OnBeforeDelete,
 } from '@xyflow/react';
 import { Hand } from '@phosphor-icons/react';
 
@@ -24,11 +25,15 @@ interface GraphCanvasProps {
   onDrop: (event: React.DragEvent) => void;
   onDragOver: (event: React.DragEvent) => void;
   onNodeDragStart?: () => void;
-  onNodeDragStop: (event: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent, node: Node) => void;
+  onNodeDragStop: (
+    event: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent,
+    node: Node
+  ) => void;
   onNodeClick: (event: React.MouseEvent, node: Node) => void;
   onNodeDoubleClick: (event: React.MouseEvent, node: Node) => void;
   onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void;
   onEdgesDelete?: (edges: Edge[]) => void;
+  onBeforeDelete?: OnBeforeDelete;
   nodeTypes: NodeTypes;
   edgeTypes: EdgeTypes;
   theme: 'dark' | 'light';
@@ -55,14 +60,12 @@ const GraphCanvasComponent = ({
   onNodeDoubleClick,
   onEdgeClick,
   onEdgesDelete,
+  onBeforeDelete,
   nodeTypes,
   edgeTypes,
   theme,
 }: GraphCanvasProps) => {
-  const bgColor = useMemo(
-    () => (theme === 'dark' ? '#2a2a2a' : '#e5e7eb'),
-    [theme]
-  );
+  const bgColor = useMemo(() => (theme === 'dark' ? '#2a2a2a' : '#e5e7eb'), [theme]);
 
   return (
     <ReactFlow
@@ -79,6 +82,7 @@ const GraphCanvasComponent = ({
       onNodeDoubleClick={onNodeDoubleClick}
       onEdgeClick={onEdgeClick}
       onEdgesDelete={onEdgesDelete}
+      onBeforeDelete={onBeforeDelete}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       defaultViewport={DEFAULT_VIEWPORT}
@@ -104,7 +108,7 @@ const GraphCanvasComponent = ({
       autoPanOnNodeDrag={false}
       autoPanOnConnect={false}
       // Enable Delete key for edge deletion
-      deleteKeyCode="Delete"
+      deleteKeyCode={['Delete', 'Backspace']}
       selectionKeyCode={null}
       multiSelectionKeyCode={null}
       // Disable snapping for smoother drag
@@ -113,23 +117,24 @@ const GraphCanvasComponent = ({
       selectionOnDrag={false}
       className="bg-[#0a0a0a] touch-none"
     >
-      <Background
-        variant={BackgroundVariant.Dots}
-        gap={20}
-        size={0.8}
-        color={bgColor}
-      />
+      <Background variant={BackgroundVariant.Dots} gap={20} size={0.8} color={bgColor} />
       <Controls className="!bg-[var(--surface)] !border-[var(--sidebar-border)] !shadow-lg [&>button]:!bg-[var(--surface)] [&>button]:!border-[var(--sidebar-border)] [&>button]:!fill-[var(--text)] [&>button:hover]:!bg-[var(--sidebar-hover)]" />
 
       {/* Desktop hint */}
-      <Panel position="top-right" className="hidden md:block bg-[var(--surface)] px-4 py-2 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
+      <Panel
+        position="top-right"
+        className="hidden md:block bg-[var(--surface)] px-4 py-2 rounded-lg shadow-lg border border-[var(--sidebar-border)]"
+      >
         <p className="text-xs text-[var(--text)]/60">
           Double-click a container to open the builder
         </p>
       </Panel>
 
       {/* Mobile hint - positioned below floating buttons */}
-      <Panel position="top-center" className="md:hidden !top-16 bg-[var(--surface)] px-3 py-1.5 rounded-lg shadow-lg border border-[var(--sidebar-border)]">
+      <Panel
+        position="top-center"
+        className="md:hidden !top-16 bg-[var(--surface)] px-3 py-1.5 rounded-lg shadow-lg border border-[var(--sidebar-border)]"
+      >
         <p className="text-[10px] text-[var(--text)]/60 flex items-center gap-1.5">
           <Hand size={12} className="text-[var(--primary)]" />
           Pinch to zoom - Drag to pan
@@ -148,7 +153,8 @@ const arePropsEqual = (prev: GraphCanvasProps, next: GraphCanvasProps): boolean 
     prev.nodeTypes === next.nodeTypes &&
     prev.edgeTypes === next.edgeTypes &&
     prev.onEdgeClick === next.onEdgeClick &&
-    prev.onEdgesDelete === next.onEdgesDelete
+    prev.onEdgesDelete === next.onEdgesDelete &&
+    prev.onBeforeDelete === next.onBeforeDelete
   );
 };
 
