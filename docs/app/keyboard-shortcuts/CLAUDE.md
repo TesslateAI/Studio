@@ -463,7 +463,6 @@ const contextCommands = allCommands.filter((cmd) => {
 | `Cmd/Ctrl + R` | Refresh preview |
 | `Cmd/Ctrl + Shift + G` | Toggle Git panel |
 | `Cmd/Ctrl + Shift + N` | Toggle Notes panel |
-| `Cmd/Ctrl + Shift + A` | Toggle Architecture panel |
 | `Cmd/Ctrl + Shift + S` | Toggle Settings panel |
 | `Cmd/Ctrl + B` | Toggle left sidebar |
 | `Cmd/Ctrl + .` | Toggle right sidebar |

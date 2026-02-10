@@ -190,15 +190,6 @@ Panels are rendered in FloatingPanel components:
 // Project.tsx
 const [activePanel, setActivePanel] = useState<PanelType | null>(null);
 
-{activePanel === 'architecture' && (
-  <FloatingPanel
-    title="Architecture"
-    onClose={() => setActivePanel(null)}
-  >
-    <ArchitecturePanel projectSlug={project.slug} />
-  </FloatingPanel>
-)}
-
 {activePanel === 'git' && (
   <FloatingPanel title="Git">
     <GitHubPanel projectSlug={project.slug} />

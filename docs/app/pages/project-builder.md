@@ -48,7 +48,6 @@ Switch between different main content areas:
 ### 5. Floating Panels
 Toggle-able sidebar panels for additional features:
 - **GitHub**: Git operations (commit, push, pull, branch)
-- **Architecture**: Container visualization
 - **Notes**: Rich text notes with TipTap editor
 - **Settings**: Project configuration (env vars, preview mode)
 
@@ -76,7 +75,6 @@ Project Builder
 │   │   └── Terminal
 │   └── Panel toggles
 │       ├── GitHub
-│       ├── Architecture
 │       ├── Notes
 │       └── Settings
 │
@@ -449,15 +447,6 @@ const togglePanel = (panel: PanelType) => {
     onClose={() => setActivePanel(null)}
   >
     <GitHubPanel projectSlug={slug} />
-  </FloatingPanel>
-)}
-
-{activePanel === 'architecture' && (
-  <FloatingPanel
-    title="Architecture"
-    onClose={() => setActivePanel(null)}
-  >
-    <ArchitecturePanel projectSlug={slug} />
   </FloatingPanel>
 )}
 

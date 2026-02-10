@@ -26,7 +26,6 @@ import {
   Gear,
   Article,
   Kanban,
-  X,
 } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
@@ -38,17 +37,23 @@ import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { Tooltip } from '../components/ui/Tooltip';
 import { MobileWarning } from '../components/MobileWarning';
 import { MobileMenu } from '../components/ui/MobileMenu';
-import { ChatContainer } from '../components/chat/ChatContainer';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../components/panels';
 import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, marketplaceApi, configApi } from '../lib/api';
+import api, { projectsApi, configApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import toast from 'react-hot-toast';
-import { EnvInjectionEdge, HttpApiEdge, DatabaseEdge, CacheEdge, BrowserPreviewEdge, getEdgeType } from '../components/edges';
+import {
+  EnvInjectionEdge,
+  HttpApiEdge,
+  DatabaseEdge,
+  CacheEdge,
+  BrowserPreviewEdge,
+  getEdgeType,
+} from '../components/edges';
 import { getLayoutedElements } from '../utils/autoLayout';
 
 const nodeTypes: NodeTypes = {
@@ -86,14 +91,6 @@ interface ContainerConnection {
   label?: string;
 }
 
-interface UIAgent {
-  id: string;
-  name: string;
-  icon: string;
-  backendId: number;
-  mode: 'stream' | 'agent';
-}
-
 export const ProjectGraphCanvas = () => {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
@@ -108,7 +105,6 @@ export const ProjectGraphCanvas = () => {
   const slugRef = useRef(slug);
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
-  const [agents, setAgents] = useState<UIAgent[]>([]);
   const [_appDomain, setAppDomain] = useState<string>('localhost');
   const appDomainRef = useRef<string>('localhost');
   const [isRunning, setIsRunning] = useState(false);
@@ -118,7 +114,11 @@ export const ProjectGraphCanvas = () => {
     const saved = localStorage.getItem('graphCanvasSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
-  const [selectedContainer, setSelectedContainer] = useState<{id: string, name: string, status: string} | null>(null);
+  const [selectedContainer, setSelectedContainer] = useState<{
+    id: string;
+    name: string;
+    status: string;
+  } | null>(null);
 
   // Drag state for pausing polling during drag operations - critical for performance
   const [isDragging, setIsDragging] = useState(false);
@@ -160,7 +160,6 @@ export const ProjectGraphCanvas = () => {
     if (slug) {
       fetchProjectData();
       loadFiles();
-      loadAgents();
     }
   }, [slug]);
 
@@ -181,7 +180,8 @@ export const ProjectGraphCanvas = () => {
             let hasChanges = false;
             const updatedNodes = currentNodes.map((node) => {
               // Find matching container by service name (sanitized container name)
-              const serviceName = node.data.name?.toLowerCase()
+              const serviceName = node.data.name
+                ?.toLowerCase()
                 .replace(/[^a-z0-9-]/g, '-')
                 .replace(/-+/g, '-')
                 .replace(/^-|-$/g, '');
@@ -336,10 +336,12 @@ export const ProjectGraphCanvas = () => {
 
         let baseUrl = '';
         if (connectedContainer) {
-          const sanitizedName = connectedContainer.name?.toLowerCase()
-            .replace(/[^a-z0-9-]/g, '-')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '') || 'app';
+          const sanitizedName =
+            connectedContainer.name
+              ?.toLowerCase()
+              .replace(/[^a-z0-9-]/g, '-')
+              .replace(/-+/g, '-')
+              .replace(/^-|-$/g, '') || 'app';
           // URL format: {project-slug}-{container-name}.{app_domain}
           const domain = appDomainRef.current;
           const protocol = domain.includes('localhost') ? 'http' : 'https';
@@ -404,83 +406,67 @@ export const ProjectGraphCanvas = () => {
     }
   };
 
-  const loadAgents = async () => {
-    try {
-      // Load agents from user's library (enabled agents only)
-      const libraryData = await marketplaceApi.getMyAgents();
-      const enabledAgents = libraryData.agents.filter((agent: Record<string, unknown>) => agent.is_enabled);
+  const handleFileUpdate = useCallback(
+    async (filePath: string, content: string) => {
+      if (!slug) return;
 
-      // Convert backend agents to UI format
-      const uiAgents = enabledAgents.map((agent: Record<string, unknown>) => ({
-        id: agent.slug as string,
-        name: agent.name as string,
-        icon: (agent.icon as string) || '🤖',
-        backendId: agent.id as string,
-        mode: agent.mode as string
-      }));
+      // Track if this is a new file or an update
+      const isNewFile = !files.find((f) => f.file_path === filePath);
 
-      setAgents(uiAgents);
-    } catch (error) {
-      console.error('Failed to load agents:', error);
-      toast.error('Failed to load agents');
-    }
-  };
+      setFiles((prev) => {
+        const existing = prev.find((f) => f.file_path === filePath);
+        if (existing) {
+          return prev.map((f) => (f.file_path === filePath ? { ...f, content } : f));
+        }
+        return [...prev, { file_path: filePath, content }];
+      });
 
-  const handleFileUpdate = useCallback(async (filePath: string, content: string) => {
-    if (!slug) return;
+      try {
+        await projectsApi.saveFile(slug, filePath, content);
 
-    // Track if this is a new file or an update
-    const isNewFile = !files.find(f => f.file_path === filePath);
-
-    setFiles(prev => {
-      const existing = prev.find(f => f.file_path === filePath);
-      if (existing) {
-        return prev.map(f =>
-          f.file_path === filePath ? { ...f, content } : f
-        );
+        // Emit file event to refresh the code editor file tree
+        fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
+      } catch (error) {
+        console.error('Failed to save file:', error);
+        toast.error(`Failed to save ${filePath}`);
       }
-      return [...prev, { file_path: filePath, content }];
-    });
-
-    try {
-      await projectsApi.saveFile(slug, filePath, content);
-
-      // Emit file event to refresh the code editor file tree
-      fileEvents.emit(isNewFile ? 'file-created' : 'file-updated', filePath);
-    } catch (error) {
-      console.error('Failed to save file:', error);
-      toast.error(`Failed to save ${filePath}`);
-    }
-  }, [slug, files]);
+    },
+    [slug, files]
+  );
 
   const togglePanel = (panel: PanelType) => {
     setActivePanel(activePanel === panel ? null : panel);
   };
 
   // Stable callback for deleting browser preview nodes - must be defined before onConnect
-  const handleDeleteBrowser = useCallback(async (browserId: string) => {
-    try {
-      // Delete from backend
-      await api.delete(`/api/projects/${slug}/browser-previews/${browserId}`);
+  const handleDeleteBrowser = useCallback(
+    async (browserId: string) => {
+      try {
+        // Delete from backend
+        await api.delete(`/api/projects/${slug}/browser-previews/${browserId}`);
 
-      // Remove the browser node
-      setNodes((nds) => nds.filter((node) => node.id !== browserId));
-      // Remove any edges connected to this browser
-      setEdges((eds) => eds.filter((edge) => edge.source !== browserId && edge.target !== browserId));
-      toast.success('Browser removed');
-    } catch (error) {
-      console.error('Failed to delete browser preview:', error);
-      toast.error('Failed to delete browser preview');
-    }
-  }, [slug, setNodes, setEdges]);
+        // Remove the browser node
+        setNodes((nds) => nds.filter((node) => node.id !== browserId));
+        // Remove any edges connected to this browser
+        setEdges((eds) =>
+          eds.filter((edge) => edge.source !== browserId && edge.target !== browserId)
+        );
+        toast.success('Browser removed');
+      } catch (error) {
+        console.error('Failed to delete browser preview:', error);
+        toast.error('Failed to delete browser preview');
+      }
+    },
+    [slug, setNodes, setEdges]
+  );
 
   const onConnect: OnConnect = useCallback(
     async (connection) => {
       if (!connection.source || !connection.target) return;
 
       // Check if target is a browser preview node
-      const targetNode = nodesRef.current.find(n => n.id === connection.target);
-      const sourceNode = nodesRef.current.find(n => n.id === connection.source);
+      const targetNode = nodesRef.current.find((n) => n.id === connection.target);
+      const sourceNode = nodesRef.current.find((n) => n.id === connection.source);
 
       if (targetNode?.type === 'browserPreview' && sourceNode) {
         // This is a connection to a browser preview - update browser data
@@ -489,10 +475,12 @@ export const ProjectGraphCanvas = () => {
 
         // Build the preview URL based on container name
         // Format: {project-slug}-{container-name}.{appDomain}
-        const sanitizedName = containerName?.toLowerCase()
-          .replace(/[^a-z0-9-]/g, '-')
-          .replace(/-+/g, '-')
-          .replace(/^-|-$/g, '') || 'app';
+        const sanitizedName =
+          containerName
+            ?.toLowerCase()
+            .replace(/[^a-z0-9-]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '') || 'app';
 
         const domain = appDomainRef.current;
         const protocol = domain.includes('localhost') ? 'http' : 'https';
@@ -500,7 +488,9 @@ export const ProjectGraphCanvas = () => {
 
         try {
           // Save connection to backend
-          await api.post(`/api/projects/${slug}/browser-previews/${connection.target}/connect/${connection.source}`);
+          await api.post(
+            `/api/projects/${slug}/browser-previews/${connection.target}/connect/${connection.source}`
+          );
 
           // Update the browser node with container data
           setNodes((nds) =>
@@ -522,11 +512,16 @@ export const ProjectGraphCanvas = () => {
           );
 
           // Add the edge with browser_preview type
-          setEdges((eds) => addEdge({
-            ...connection,
-            type: 'browser_preview',
-            animated: false,
-          }, eds));
+          setEdges((eds) =>
+            addEdge(
+              {
+                ...connection,
+                type: 'browser_preview',
+                animated: false,
+              },
+              eds
+            )
+          );
 
           toast.success(`Connected ${containerName} to browser`);
         } catch (error) {
@@ -607,7 +602,8 @@ export const ProjectGraphCanvas = () => {
       }
 
       // Check if this is an external service that needs credentials
-      const isExternalService = item.type === 'service' &&
+      const isExternalService =
+        item.type === 'service' &&
         (item.service_type === 'external' || item.service_type === 'hybrid') &&
         item.credential_fields?.length > 0;
 
@@ -744,7 +740,9 @@ export const ProjectGraphCanvas = () => {
           const targetId = templateIdToContainerId[edgeTemplate.target];
 
           if (!sourceId || !targetId) {
-            console.warn(`Missing container for edge: ${edgeTemplate.source} -> ${edgeTemplate.target}`);
+            console.warn(
+              `Missing container for edge: ${edgeTemplate.source} -> ${edgeTemplate.target}`
+            );
             continue;
           }
 
@@ -929,7 +927,7 @@ export const ProjectGraphCanvas = () => {
 
   // Stable callback - uses ref to access latest nodes without dependency
   const handleContainerClick = useCallback((containerId: string) => {
-    const containerNode = nodesRef.current.find(n => n.id === containerId);
+    const containerNode = nodesRef.current.find((n) => n.id === containerId);
     if (containerNode) {
       setSelectedContainer({
         id: containerId,
@@ -944,7 +942,7 @@ export const ProjectGraphCanvas = () => {
   const handleDeleteContainer = useCallback(
     async (containerId: string) => {
       // Get container name for the confirmation message - use ref for latest nodes
-      const containerNode = nodesRef.current.find(n => n.id === containerId);
+      const containerNode = nodesRef.current.find((n) => n.id === containerId);
       const containerName = containerNode?.data?.name || 'this container';
       const currentSlug = slugRef.current;
 
@@ -969,7 +967,7 @@ export const ProjectGraphCanvas = () => {
 
         if (deleteFiles) {
           // Find all files that belong to this container - use ref for latest files
-          const containerFiles = filesRef.current.filter(file => {
+          const containerFiles = filesRef.current.filter((file) => {
             // Files are typically organized as: containerName/...
             const pathParts = file.file_path.split('/');
             return pathParts[0] === containerName || pathParts[0] === containerId;
@@ -981,7 +979,7 @@ export const ProjectGraphCanvas = () => {
           }
 
           // Delete each file
-          const deletePromises = containerFiles.map(file =>
+          const deletePromises = containerFiles.map((file) =>
             projectsApi.deleteFile(currentSlug!, file.file_path)
           );
 
@@ -1136,79 +1134,97 @@ export const ProjectGraphCanvas = () => {
   };
 
   // Stable callback - uses ref for slug
-  const handleOpenBuilder = useCallback((containerId: string) => {
-    navigate(`/project/${slugRef.current}/builder?container=${containerId}`);
-  }, [navigate]);
+  const handleOpenBuilder = useCallback(
+    (containerId: string) => {
+      navigate(`/project/${slugRef.current}/builder?container=${containerId}`);
+    },
+    [navigate]
+  );
 
   // Stable callbacks for ReactFlow to prevent re-renders
-  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    // Don't try to select browser preview nodes as containers
-    if (node.type === 'browserPreview') {
-      return;
-    }
-    handleContainerClick(node.id);
-  }, [handleContainerClick]);
+  const handleNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      // Don't try to select browser preview nodes as containers
+      if (node.type === 'browserPreview') {
+        return;
+      }
+      handleContainerClick(node.id);
+    },
+    [handleContainerClick]
+  );
 
-  const handleNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
-    // Only allow double-click navigation for base containers, not services or browser previews
-    if (node.type === 'browserPreview') {
-      return; // Don't open builder for browser preview nodes
-    }
-    const containerType = node.data?.containerType || 'base';
-    if (containerType === 'base') {
-      handleOpenBuilder(node.id);
-    }
-  }, [handleOpenBuilder]);
+  const handleNodeDoubleClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      // Only allow double-click navigation for base containers, not services or browser previews
+      if (node.type === 'browserPreview') {
+        return; // Don't open builder for browser preview nodes
+      }
+      const containerType = node.data?.containerType || 'base';
+      if (containerType === 'base') {
+        handleOpenBuilder(node.id);
+      }
+    },
+    [handleOpenBuilder]
+  );
 
   // Edge click handler - selects the edge for deletion
   const handleEdgeClick = useCallback((_: React.MouseEvent, _edge: Edge) => {
     // Edge is automatically selected by ReactFlow when clicked
     // Show a visual hint that Del key can delete it
-    toast(`Press Delete to remove this connection`, { id: 'edge-hint', duration: 2000, icon: '🗑️' });
+    toast(`Press Delete to remove this connection`, {
+      id: 'edge-hint',
+      duration: 2000,
+      icon: '🗑️',
+    });
   }, []);
 
   // Edge deletion handler - called when Delete key is pressed on selected edges
-  const handleEdgesDelete = useCallback(async (deletedEdges: Edge[]) => {
-    for (const edge of deletedEdges) {
-      try {
-        // Check if this is a browser preview edge
-        if (edge.type === 'browser_preview' || edge.id.startsWith('browser-edge-')) {
-          // Find the browser preview node and disconnect it
-          const browserPreviewId = edge.target;
-          await api.delete(`/api/projects/${slugRef.current}/browser-previews/${browserPreviewId}/disconnect`);
+  const handleEdgesDelete = useCallback(
+    async (deletedEdges: Edge[]) => {
+      for (const edge of deletedEdges) {
+        try {
+          // Check if this is a browser preview edge
+          if (edge.type === 'browser_preview' || edge.id.startsWith('browser-edge-')) {
+            // Find the browser preview node and disconnect it
+            const browserPreviewId = edge.target;
+            await api.delete(
+              `/api/projects/${slugRef.current}/browser-previews/${browserPreviewId}/disconnect`
+            );
 
-          // Update the browser node to remove connected container data
-          setNodes((nds) =>
-            nds.map((node) =>
-              node.id === browserPreviewId
-                ? {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      connectedContainerId: undefined,
-                      connectedContainerName: undefined,
-                      connectedPort: undefined,
-                      baseUrl: undefined,
-                    },
-                  }
-                : node
-            )
-          );
-        } else {
-          // Regular container-to-container connection - delete from backend
-          await api.delete(`/api/projects/${slugRef.current}/containers/connections/${edge.id}`);
+            // Update the browser node to remove connected container data
+            setNodes((nds) =>
+              nds.map((node) =>
+                node.id === browserPreviewId
+                  ? {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        connectedContainerId: undefined,
+                        connectedContainerName: undefined,
+                        connectedPort: undefined,
+                        baseUrl: undefined,
+                      },
+                    }
+                  : node
+              )
+            );
+          } else {
+            // Regular container-to-container connection - delete from backend
+            await api.delete(`/api/projects/${slugRef.current}/containers/connections/${edge.id}`);
+          }
+        } catch (error) {
+          console.error('Failed to delete connection:', error);
+          toast.error('Failed to delete connection');
+          return; // Stop processing further deletions on error
         }
-      } catch (error) {
-        console.error('Failed to delete connection:', error);
-        toast.error('Failed to delete connection');
-        return; // Stop processing further deletions on error
       }
-    }
 
-    // Remove edges from local state
-    setEdges((eds) => eds.filter((e) => !deletedEdges.some((de) => de.id === e.id)));
-    toast.success(`Deleted ${deletedEdges.length} connection(s)`);
-  }, [setNodes, setEdges]);
+      // Remove edges from local state
+      setEdges((eds) => eds.filter((e) => !deletedEdges.some((de) => de.id === e.id)));
+      toast.success(`Deleted ${deletedEdges.length} connection(s)`);
+    },
+    [setNodes, setEdges]
+  );
 
   if (!project) {
     return (
@@ -1220,22 +1236,16 @@ export const ProjectGraphCanvas = () => {
 
   const leftSidebarItems = [
     {
-      icon: <FlowArrow size={18} />,
-      title: 'Architecture',
-      onClick: () => setActiveView('graph'),
-      active: activeView === 'graph'
-    },
-    {
       icon: <Code size={18} />,
       title: 'Code',
       onClick: () => setActiveView('code'),
-      active: activeView === 'code'
+      active: activeView === 'code',
     },
     {
       icon: <Kanban size={18} />,
       title: 'Kanban Board',
       onClick: () => setActiveView('kanban'),
-      active: activeView === 'kanban'
+      active: activeView === 'kanban',
     },
     // Builder navigation - accessible on mobile via menu
     {
@@ -1244,46 +1254,50 @@ export const ProjectGraphCanvas = () => {
       onClick: () => navigate(`/project/${slug}/builder`),
     },
     // Auto Layout - only shows when on graph view
-    ...(activeView === 'graph' ? [{
-      icon: <FlowArrow size={18} />,
-      title: 'Auto Layout',
-      onClick: handleAutoLayout,
-    }] : []),
+    ...(activeView === 'graph'
+      ? [
+          {
+            icon: <FlowArrow size={18} />,
+            title: 'Auto Layout',
+            onClick: handleAutoLayout,
+          },
+        ]
+      : []),
   ];
 
   const rightSidebarItems = [
     {
       icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
       title: 'Toggle Theme',
-      onClick: toggleTheme
+      onClick: toggleTheme,
     },
     {
       icon: <BookOpen size={18} />,
       title: 'Notes',
       onClick: () => togglePanel('notes'),
-      active: activePanel === 'notes'
+      active: activePanel === 'notes',
     },
     {
       icon: <GitBranch size={18} />,
       title: 'GitHub Sync',
       onClick: () => togglePanel('github'),
-      active: activePanel === 'github'
+      active: activePanel === 'github',
     },
     {
       icon: <Storefront size={18} />,
       title: 'Agents',
-      onClick: () => navigate('/marketplace')
+      onClick: () => navigate('/marketplace'),
     },
     {
       icon: <Article size={18} />,
       title: 'Documentation',
-      onClick: () => window.open('https://docs.tesslate.com', '_blank')
+      onClick: () => window.open('https://docs.tesslate.com', '_blank'),
     },
     {
       icon: <Gear size={18} />,
       title: 'Settings',
       onClick: () => togglePanel('settings'),
-      active: activePanel === 'settings'
+      active: activePanel === 'settings',
     },
   ];
 
@@ -1300,19 +1314,30 @@ export const ProjectGraphCanvas = () => {
         initial={false}
         animate={{ width: isLeftSidebarExpanded ? 192 : 48 }}
         transition={{
-          type: "spring",
+          type: 'spring',
           stiffness: 700,
           damping: 28,
-          mass: 0.4
+          mass: 0.4,
         }}
         className="hidden md:flex flex-col bg-[var(--surface)] border-r border-[var(--sidebar-border)] overflow-x-hidden"
       >
         {/* Tesslate Logo */}
-        <div className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}>
+        <div
+          className={`flex items-center h-12 flex-shrink-0 ${isLeftSidebarExpanded ? 'px-3 gap-3' : 'justify-center'} border-b border-[var(--sidebar-border)]`}
+        >
           <svg className="w-5 h-5 text-[var(--primary)] flex-shrink-0" viewBox="0 0 161.9 126.66">
-            <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-            <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-            <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+            <path
+              d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"
+              fill="currentColor"
+            />
+            <path
+              d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"
+              fill="currentColor"
+            />
+            <path
+              d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"
+              fill="currentColor"
+            />
           </svg>
           {isLeftSidebarExpanded && (
             <span className="text-lg font-bold text-[var(--text)]">Tesslate</span>
@@ -1326,7 +1351,10 @@ export const ProjectGraphCanvas = () => {
               onClick={() => navigate('/dashboard')}
               className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
             >
-              <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+              <ArrowLeft
+                size={18}
+                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+              />
               <span className="text-sm font-medium text-[var(--text)]">Back to Projects</span>
             </button>
           ) : (
@@ -1335,7 +1363,10 @@ export const ProjectGraphCanvas = () => {
                 onClick={() => navigate('/dashboard')}
                 className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
               >
-                <ArrowLeft size={18} className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+                <ArrowLeft
+                  size={18}
+                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+                />
               </button>
             </Tooltip>
           )}
@@ -1343,15 +1374,13 @@ export const ProjectGraphCanvas = () => {
           <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
 
           {/* Main View Toggles */}
-          {leftSidebarItems.map((item, index) => (
+          {leftSidebarItems.map((item, index) =>
             isLeftSidebarExpanded ? (
               <button
                 key={index}
                 onClick={item.onClick}
                 className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                  item.active
-                    ? 'bg-[var(--sidebar-active)]'
-                    : 'hover:bg-[var(--sidebar-hover)]'
+                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
                 {React.cloneElement(item.icon, {
@@ -1359,7 +1388,7 @@ export const ProjectGraphCanvas = () => {
                     item.active
                       ? 'text-[var(--text)]'
                       : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`
+                  }`,
                 })}
                 <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
               </button>
@@ -1368,9 +1397,7 @@ export const ProjectGraphCanvas = () => {
                 <button
                   onClick={item.onClick}
                   className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                    item.active
-                      ? 'bg-[var(--sidebar-active)]'
-                      : 'hover:bg-[var(--sidebar-hover)]'
+                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                   }`}
                 >
                   {React.cloneElement(item.icon, {
@@ -1378,25 +1405,23 @@ export const ProjectGraphCanvas = () => {
                       item.active
                         ? 'text-[var(--text)]'
                         : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                    }`
+                    }`,
                   })}
                 </button>
               </Tooltip>
             )
-          ))}
+          )}
 
           <div className="h-px bg-[var(--sidebar-border)] my-1 mx-2 flex-shrink-0" />
 
           {/* Settings & Tools */}
-          {rightSidebarItems.map((item, index) => (
+          {rightSidebarItems.map((item, index) =>
             isLeftSidebarExpanded ? (
               <button
                 key={index}
                 onClick={item.onClick}
                 className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                  item.active
-                    ? 'bg-[var(--sidebar-active)]'
-                    : 'hover:bg-[var(--sidebar-hover)]'
+                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
                 {React.cloneElement(item.icon, {
@@ -1404,7 +1429,7 @@ export const ProjectGraphCanvas = () => {
                     item.active
                       ? 'text-[var(--text)]'
                       : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                  }`
+                  }`,
                 })}
                 <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
               </button>
@@ -1413,9 +1438,7 @@ export const ProjectGraphCanvas = () => {
                 <button
                   onClick={item.onClick}
                   className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                    item.active
-                      ? 'bg-[var(--sidebar-active)]'
-                      : 'hover:bg-[var(--sidebar-hover)]'
+                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                   }`}
                 >
                   {React.cloneElement(item.icon, {
@@ -1423,12 +1446,12 @@ export const ProjectGraphCanvas = () => {
                       item.active
                         ? 'text-[var(--text)]'
                         : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
-                    }`
+                    }`,
                   })}
                 </button>
               </Tooltip>
             )
-          ))}
+          )}
 
           {/* Spacer to push collapse button to bottom */}
           <div className="flex-1" />
@@ -1441,7 +1464,11 @@ export const ProjectGraphCanvas = () => {
               onClick={() => setIsLeftSidebarExpanded(false)}
               className="group flex items-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3"
             >
-              <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+              <List
+                size={18}
+                weight="bold"
+                className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+              />
               <span className="text-sm font-medium text-[var(--text)]">Collapse</span>
             </button>
           ) : (
@@ -1450,7 +1477,11 @@ export const ProjectGraphCanvas = () => {
                 onClick={() => setIsLeftSidebarExpanded(true)}
                 className="group flex items-center justify-center h-9 hover:bg-[var(--sidebar-hover)] transition-colors w-full flex-shrink-0"
               >
-                <List size={18} weight="bold" className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors" />
+                <List
+                  size={18}
+                  weight="bold"
+                  className="text-[var(--text)]/40 group-hover:text-[var(--text)] transition-colors"
+                />
               </button>
             </Tooltip>
           )}
@@ -1465,7 +1496,7 @@ export const ProjectGraphCanvas = () => {
             items={[
               { label: 'Projects', href: '/dashboard' },
               { label: project.name, href: `/project/${slug}` },
-              { label: 'Architecture' }
+              { label: 'Architecture' },
             ]}
           />
 
@@ -1516,8 +1547,18 @@ export const ProjectGraphCanvas = () => {
             className="md:hidden p-2 hover:bg-[var(--sidebar-hover)] active:bg-[var(--sidebar-active)] rounded-lg transition-colors"
             aria-label="Open menu"
           >
-            <svg className="w-6 h-6 text-[var(--text)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            <svg
+              className="w-6 h-6 text-[var(--text)]"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             </svg>
           </button>
         </div>
@@ -1527,7 +1568,10 @@ export const ProjectGraphCanvas = () => {
           {/* Graph View */}
           <div className={`w-full h-full ${activeView === 'graph' ? 'flex' : 'hidden'} relative`}>
             {/* React Flow canvas */}
-            <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform" ref={reactFlowWrapper}>
+            <div
+              className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform"
+              ref={reactFlowWrapper}
+            >
               {/* Floating component drawer */}
               <MarketplaceSidebar />
 
@@ -1568,7 +1612,7 @@ export const ProjectGraphCanvas = () => {
                         : node
                     )
                   );
-                  setSelectedContainer({...selectedContainer, status: newStatus});
+                  setSelectedContainer({ ...selectedContainer, status: newStatus });
                 }}
                 onNameChange={(newName) => {
                   // Update node name in the graph - local state is already updated
@@ -1580,7 +1624,7 @@ export const ProjectGraphCanvas = () => {
                     )
                   );
                   // Update selected container state
-                  setSelectedContainer({...selectedContainer, name: newName});
+                  setSelectedContainer({ ...selectedContainer, name: newName });
                   // PERFORMANCE: Removed fetchProjectData() - local state is sufficient
                 }}
               />
@@ -1588,12 +1632,10 @@ export const ProjectGraphCanvas = () => {
           </div>
 
           {/* Code View */}
-          <div className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}>
-            <CodeEditor
-              projectId={project?.id}
-              files={files}
-              onFileUpdate={handleFileUpdate}
-            />
+          <div
+            className={`w-full h-full ${activeView === 'code' ? 'flex' : 'hidden'} flex-col overflow-hidden`}
+          >
+            <CodeEditor projectId={project?.id} files={files} onFileUpdate={handleFileUpdate} />
           </div>
 
           {/* Kanban View */}
@@ -1631,53 +1673,25 @@ export const ProjectGraphCanvas = () => {
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
 
-      {/* Chat Interface or Empty State */}
-      {agents.length > 0 ? (
-        <ChatContainer
-          projectId={project?.id}
-          containerId={selectedContainer?.id}
-          viewContext="graph"
-          agents={agents}
-          currentAgent={agents[0]}
-          onSelectAgent={(agent) => console.log('Selected agent:', agent)}
-          onFileUpdate={handleFileUpdate}
-          projectFiles={files}
-          projectName={project?.name}
-          sidebarExpanded={isLeftSidebarExpanded}
-        />
-      ) : (
-        <div className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none">
-          <div className="bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-2xl shadow-2xl p-8 max-w-md pointer-events-auto">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-[rgba(255,107,0,0.2)] rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Storefront className="w-8 h-8 text-[var(--primary)]" weight="fill" />
-              </div>
-              <h3 className="font-heading text-xl font-bold text-[var(--text)] mb-2">
-                No Agents Enabled
-              </h3>
-              <p className="text-[var(--text)]/60 mb-6">
-                Add agents from the marketplace to your library and enable them to start building
-              </p>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => navigate('/library')}
-                  className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
-                >
-                  <Storefront size={20} weight="fill" />
-                  Go to Library
-                </button>
-                <button
-                  onClick={() => navigate('/marketplace')}
-                  className="w-full bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] border border-[var(--sidebar-border)] text-[var(--text)] py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
-                >
-                  <Storefront size={20} weight="fill" />
-                  Browse Marketplace
-                </button>
-              </div>
-            </div>
+      {/* Coming Soon Banner */}
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 pointer-events-auto max-w-[calc(100vw-2rem)]">
+        <div className="bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-2xl shadow-2xl px-4 py-3 md:px-8 md:py-5 flex items-center gap-3 md:gap-4">
+          <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-500/20 rounded-xl flex items-center justify-center flex-shrink-0">
+            <FlowArrow className="text-blue-400 w-5 h-5 md:w-6 md:h-6" />
           </div>
+          <div className="min-w-0">
+            <h3 className="font-heading text-sm md:text-base font-bold text-[var(--text)]">
+              Architecture Chat Coming Soon
+            </h3>
+            <p className="text-xs md:text-sm text-[var(--text)]/60 truncate">
+              AI-powered architecture editing is in development.
+            </p>
+          </div>
+          <span className="text-xs px-2 py-1 rounded-full bg-blue-500/20 text-blue-400 font-semibold whitespace-nowrap hidden sm:inline">
+            Coming Soon
+          </span>
         </div>
-      )}
+      </div>
 
       {/* Discord Support */}
       <DiscordSupport />

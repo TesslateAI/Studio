@@ -128,9 +128,7 @@ ProjectGraphCanvas
 │       ├── Browser Preview Nodes
 │       └── Connection Edges
 │
-├── Right Sidebar (chat)
-│   └── ChatContainer
-│       └── View context: 'graph'
+├── Coming Soon Banner (architecture chat placeholder)
 │
 ├── Floating Panels
 │   ├── GitHubPanel
@@ -567,30 +565,9 @@ export function HttpApiEdge({
 // Similar for DatabaseEdge, CacheEdge, etc.
 ```
 
-## AI Chat with Graph Tools
+## AI Chat (Coming Soon)
 
-The chat interface has access to graph-specific tools:
-
-```typescript
-<ChatContainer
-  projectId={project.id}
-  viewContext="graph" // Enable graph-scoped tools
-  agents={agents}
-  currentAgent={currentAgent}
-  onSelectAgent={setCurrentAgent}
-  onFileUpdate={() => {}}
-  projectFiles={files}
-  projectName={project.name}
-/>
-```
-
-**Graph-scoped tools**:
-- `add_container`: Create new container node
-- `update_container`: Modify container properties
-- `delete_container`: Remove container
-- `create_connection`: Add edge between containers
-- `delete_connection`: Remove edge
-- `get_architecture`: Get current graph structure
+The architecture canvas chat is currently disabled and shows a "Coming Soon" banner. AI-powered architecture editing via chat is planned for a future release. Users should use the Builder view (`/project/:slug/builder`) for chat-based interactions.
 
 ## Container Properties Panel
 

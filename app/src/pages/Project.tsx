@@ -39,7 +39,6 @@ import { DiscordSupport } from '../components/DiscordSupport';
 import { useContainerStartup } from '../hooks/useContainerStartup';
 import {
   GitHubPanel,
-  ArchitecturePanel,
   NotesPanel,
   SettingsPanel,
   AssetsPanel,
@@ -59,7 +58,7 @@ import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 
-type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
+type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
 
 interface UIAgent {
@@ -237,15 +236,6 @@ export default function Project() {
     (e) => {
       e.preventDefault();
       togglePanel('settings');
-    },
-    { enableOnFormTags: false }
-  );
-
-  useHotkeys(
-    'mod+shift+a',
-    (e) => {
-      e.preventDefault();
-      togglePanel('architecture');
     },
     { enableOnFormTags: false }
   );
@@ -773,12 +763,6 @@ export default function Project() {
       icon: <Cube size={18} />,
       title: 'Components',
       onClick: () => toast('Components library coming soon!', { icon: '🧩' }),
-    },
-    {
-      icon: <FlowArrow size={18} />,
-      title: 'Architecture',
-      onClick: () => togglePanel('architecture'),
-      active: activePanel === 'architecture',
     },
   ];
 
@@ -1448,17 +1432,6 @@ export default function Project() {
         onClose={() => setActivePanel(null)}
       >
         <GitHubPanel projectId={project?.id} />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="Architecture"
-        icon={<FlowArrow size={20} />}
-        isOpen={activePanel === 'architecture'}
-        onClose={() => setActivePanel(null)}
-        defaultSize={{ width: 900, height: 700 }}
-        defaultPosition={{ x: 200, y: 100 }}
-      >
-        <ArchitecturePanel projectSlug={slug!} />
       </FloatingPanel>
 
       <FloatingPanel
