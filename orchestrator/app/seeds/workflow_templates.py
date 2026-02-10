@@ -7,8 +7,11 @@ Usage: python -m app.seeds.workflow_templates
 
 import asyncio
 import uuid
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import WorkflowTemplate
 
 # Workflow template definitions
 WORKFLOW_TEMPLATES = [
@@ -41,15 +44,15 @@ A production-ready starter template combining Next.js 14 with Supabase for a com
                     "type": "base",
                     "base_slug": "nextjs",
                     "name": "Frontend",
-                    "position": {"x": 100, "y": 150}
+                    "position": {"x": 100, "y": 150},
                 },
                 {
                     "template_id": "database",
                     "type": "service",
                     "service_slug": "supabase",
                     "name": "Supabase",
-                    "position": {"x": 450, "y": 150}
-                }
+                    "position": {"x": 450, "y": 150},
+                },
             ],
             "edges": [
                 {
@@ -60,16 +63,16 @@ A production-ready starter template combining Next.js 14 with Supabase for a com
                         "env_mapping": {
                             "NEXT_PUBLIC_SUPABASE_URL": "SUPABASE_URL",
                             "NEXT_PUBLIC_SUPABASE_ANON_KEY": "SUPABASE_ANON_KEY",
-                            "SUPABASE_SERVICE_ROLE_KEY": "SUPABASE_SERVICE_ROLE_KEY"
+                            "SUPABASE_SERVICE_ROLE_KEY": "SUPABASE_SERVICE_ROLE_KEY",
                         }
-                    }
+                    },
                 }
             ],
-            "required_credentials": ["supabase"]
+            "required_credentials": ["supabase"],
         },
         "required_credentials": ["supabase"],
         "pricing_type": "free",
-        "is_featured": True
+        "is_featured": True,
     },
     {
         "name": "React + FastAPI + PostgreSQL",
@@ -99,50 +102,42 @@ A robust full-stack template with clear separation of concerns.
                     "type": "base",
                     "base_slug": "react-vite",
                     "name": "Frontend",
-                    "position": {"x": 100, "y": 100}
+                    "position": {"x": 100, "y": 100},
                 },
                 {
                     "template_id": "backend",
                     "type": "base",
                     "base_slug": "fastapi",
                     "name": "API",
-                    "position": {"x": 100, "y": 300}
+                    "position": {"x": 100, "y": 300},
                 },
                 {
                     "template_id": "database",
                     "type": "service",
                     "service_slug": "postgres",
                     "name": "PostgreSQL",
-                    "position": {"x": 450, "y": 300}
-                }
+                    "position": {"x": 450, "y": 300},
+                },
             ],
             "edges": [
                 {
                     "source": "frontend",
                     "target": "backend",
                     "connector_type": "http_api",
-                    "config": {
-                        "env_mapping": {
-                            "VITE_API_URL": "http://{container_name}:{port}"
-                        }
-                    }
+                    "config": {"env_mapping": {"VITE_API_URL": "http://{container_name}:{port}"}},
                 },
                 {
                     "source": "backend",
                     "target": "database",
                     "connector_type": "database",
-                    "config": {
-                        "env_mapping": {
-                            "DATABASE_URL": "DATABASE_URL"
-                        }
-                    }
-                }
+                    "config": {"env_mapping": {"DATABASE_URL": "DATABASE_URL"}},
+                },
             ],
-            "required_credentials": []
+            "required_credentials": [],
         },
         "required_credentials": [],
         "pricing_type": "free",
-        "is_featured": True
+        "is_featured": True,
     },
     {
         "name": "REST API + PostgreSQL + Redis",
@@ -172,50 +167,42 @@ A scalable backend template with caching and database layers.
                     "type": "base",
                     "base_slug": "fastapi",
                     "name": "API Server",
-                    "position": {"x": 100, "y": 200}
+                    "position": {"x": 100, "y": 200},
                 },
                 {
                     "template_id": "database",
                     "type": "service",
                     "service_slug": "postgres",
                     "name": "PostgreSQL",
-                    "position": {"x": 400, "y": 100}
+                    "position": {"x": 400, "y": 100},
                 },
                 {
                     "template_id": "cache",
                     "type": "service",
                     "service_slug": "redis",
                     "name": "Redis Cache",
-                    "position": {"x": 400, "y": 300}
-                }
+                    "position": {"x": 400, "y": 300},
+                },
             ],
             "edges": [
                 {
                     "source": "api",
                     "target": "database",
                     "connector_type": "database",
-                    "config": {
-                        "env_mapping": {
-                            "DATABASE_URL": "DATABASE_URL"
-                        }
-                    }
+                    "config": {"env_mapping": {"DATABASE_URL": "DATABASE_URL"}},
                 },
                 {
                     "source": "api",
                     "target": "cache",
                     "connector_type": "cache",
-                    "config": {
-                        "env_mapping": {
-                            "REDIS_URL": "REDIS_URL"
-                        }
-                    }
-                }
+                    "config": {"env_mapping": {"REDIS_URL": "REDIS_URL"}},
+                },
             ],
-            "required_credentials": []
+            "required_credentials": [],
         },
         "required_credentials": [],
         "pricing_type": "free",
-        "is_featured": False
+        "is_featured": False,
     },
     {
         "name": "AI Chat Backend",
@@ -245,67 +232,55 @@ Build AI chat applications with this ready-to-use backend.
                     "type": "base",
                     "base_slug": "fastapi",
                     "name": "Chat API",
-                    "position": {"x": 250, "y": 100}
+                    "position": {"x": 250, "y": 100},
                 },
                 {
                     "template_id": "ai",
                     "type": "service",
                     "service_slug": "openai",
                     "name": "OpenAI",
-                    "position": {"x": 500, "y": 100}
+                    "position": {"x": 500, "y": 100},
                 },
                 {
                     "template_id": "database",
                     "type": "service",
                     "service_slug": "postgres",
                     "name": "Chat History",
-                    "position": {"x": 100, "y": 300}
+                    "position": {"x": 100, "y": 300},
                 },
                 {
                     "template_id": "cache",
                     "type": "service",
                     "service_slug": "redis",
                     "name": "Sessions",
-                    "position": {"x": 400, "y": 300}
-                }
+                    "position": {"x": 400, "y": 300},
+                },
             ],
             "edges": [
                 {
                     "source": "api",
                     "target": "ai",
                     "connector_type": "env_injection",
-                    "config": {
-                        "env_mapping": {
-                            "OPENAI_API_KEY": "OPENAI_API_KEY"
-                        }
-                    }
+                    "config": {"env_mapping": {"OPENAI_API_KEY": "OPENAI_API_KEY"}},
                 },
                 {
                     "source": "api",
                     "target": "database",
                     "connector_type": "database",
-                    "config": {
-                        "env_mapping": {
-                            "DATABASE_URL": "DATABASE_URL"
-                        }
-                    }
+                    "config": {"env_mapping": {"DATABASE_URL": "DATABASE_URL"}},
                 },
                 {
                     "source": "api",
                     "target": "cache",
                     "connector_type": "cache",
-                    "config": {
-                        "env_mapping": {
-                            "REDIS_URL": "REDIS_URL"
-                        }
-                    }
-                }
+                    "config": {"env_mapping": {"REDIS_URL": "REDIS_URL"}},
+                },
             ],
-            "required_credentials": ["openai"]
+            "required_credentials": ["openai"],
         },
         "required_credentials": ["openai"],
         "pricing_type": "free",
-        "is_featured": True
+        "is_featured": True,
     },
     {
         "name": "SaaS Starter with Payments",
@@ -335,29 +310,29 @@ Launch your SaaS product with all the essentials built-in.
                     "type": "base",
                     "base_slug": "nextjs",
                     "name": "Web App",
-                    "position": {"x": 50, "y": 200}
+                    "position": {"x": 50, "y": 200},
                 },
                 {
                     "template_id": "database",
                     "type": "service",
                     "service_slug": "supabase",
                     "name": "Supabase",
-                    "position": {"x": 350, "y": 100}
+                    "position": {"x": 350, "y": 100},
                 },
                 {
                     "template_id": "payments",
                     "type": "service",
                     "service_slug": "stripe",
                     "name": "Stripe",
-                    "position": {"x": 350, "y": 300}
+                    "position": {"x": 350, "y": 300},
                 },
                 {
                     "template_id": "email",
                     "type": "service",
                     "service_slug": "resend",
                     "name": "Resend",
-                    "position": {"x": 600, "y": 200}
-                }
+                    "position": {"x": 600, "y": 200},
+                },
             ],
             "edges": [
                 {
@@ -367,9 +342,9 @@ Launch your SaaS product with all the essentials built-in.
                     "config": {
                         "env_mapping": {
                             "NEXT_PUBLIC_SUPABASE_URL": "SUPABASE_URL",
-                            "NEXT_PUBLIC_SUPABASE_ANON_KEY": "SUPABASE_ANON_KEY"
+                            "NEXT_PUBLIC_SUPABASE_ANON_KEY": "SUPABASE_ANON_KEY",
                         }
-                    }
+                    },
                 },
                 {
                     "source": "frontend",
@@ -378,26 +353,22 @@ Launch your SaaS product with all the essentials built-in.
                     "config": {
                         "env_mapping": {
                             "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY",
-                            "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": "STRIPE_PUBLISHABLE_KEY"
+                            "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": "STRIPE_PUBLISHABLE_KEY",
                         }
-                    }
+                    },
                 },
                 {
                     "source": "frontend",
                     "target": "email",
                     "connector_type": "env_injection",
-                    "config": {
-                        "env_mapping": {
-                            "RESEND_API_KEY": "RESEND_API_KEY"
-                        }
-                    }
-                }
+                    "config": {"env_mapping": {"RESEND_API_KEY": "RESEND_API_KEY"}},
+                },
             ],
-            "required_credentials": ["supabase", "stripe", "resend"]
+            "required_credentials": ["supabase", "stripe", "resend"],
         },
         "required_credentials": ["supabase", "stripe", "resend"],
         "pricing_type": "free",
-        "is_featured": True
+        "is_featured": True,
     },
     {
         "name": "Monitoring Stack",
@@ -426,55 +397,58 @@ Add observability to your infrastructure with this monitoring stack.
                     "type": "service",
                     "service_slug": "prometheus",
                     "name": "Prometheus",
-                    "position": {"x": 100, "y": 200}
+                    "position": {"x": 100, "y": 200},
                 },
                 {
                     "template_id": "grafana",
                     "type": "service",
                     "service_slug": "grafana",
                     "name": "Grafana",
-                    "position": {"x": 400, "y": 200}
-                }
+                    "position": {"x": 400, "y": 200},
+                },
             ],
             "edges": [
                 {
                     "source": "grafana",
                     "target": "prometheus",
                     "connector_type": "http_api",
-                    "config": {
-                        "env_mapping": {
-                            "PROMETHEUS_URL": "http://{container_name}:{port}"
-                        }
-                    }
+                    "config": {"env_mapping": {"PROMETHEUS_URL": "http://{container_name}:{port}"}},
                 }
             ],
-            "required_credentials": []
+            "required_credentials": [],
         },
         "required_credentials": [],
         "pricing_type": "free",
-        "is_featured": False
-    }
+        "is_featured": False,
+    },
 ]
 
 
-async def seed_workflow_templates():
-    """Seed workflow templates into the database."""
-    from ..database import AsyncSessionLocal
-    from ..models import WorkflowTemplate
+async def seed_workflow_templates(db: AsyncSession = None) -> int:
+    """Seed workflow templates into the database.
 
-    async with AsyncSessionLocal() as db:
+    Args:
+        db: Optional async session. If None, creates its own session (for standalone use).
+
+    Returns:
+        Number of newly created templates.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    async def _seed(session: AsyncSession) -> int:
+        created = 0
         for template_data in WORKFLOW_TEMPLATES:
-            # Check if already exists
-            result = await db.execute(
+            result = await session.execute(
                 select(WorkflowTemplate).where(WorkflowTemplate.slug == template_data["slug"])
             )
             existing = result.scalar_one_or_none()
 
             if existing:
-                print(f"Workflow '{template_data['slug']}' already exists, skipping...")
+                logger.info("Workflow '%s' already exists, skipping", template_data["slug"])
                 continue
 
-            # Create new workflow
             workflow = WorkflowTemplate(
                 id=uuid.uuid4(),
                 name=template_data["name"],
@@ -489,13 +463,30 @@ async def seed_workflow_templates():
                 pricing_type=template_data.get("pricing_type", "free"),
                 price=template_data.get("price", 0),
                 is_featured=template_data.get("is_featured", False),
-                is_active=True
+                is_active=True,
             )
-            db.add(workflow)
-            print(f"Created workflow: {template_data['name']}")
+            session.add(workflow)
+            created += 1
+            logger.info("Created workflow: %s", template_data["name"])
 
-        await db.commit()
-        print(f"\nSeeded {len(WORKFLOW_TEMPLATES)} workflow templates!")
+        if created:
+            await session.commit()
+
+        logger.info(
+            "Workflow templates: %d created, %d already existed",
+            created,
+            len(WORKFLOW_TEMPLATES) - created,
+        )
+        return created
+
+    if db is not None:
+        return await _seed(db)
+
+    # Standalone mode: create own session
+    from ..database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        return await _seed(session)
 
 
 if __name__ == "__main__":

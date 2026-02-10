@@ -154,65 +154,6 @@ app.add_middleware(DynamicCORSMiddleware)
 app.add_middleware(CSRFProtectionMiddleware)
 
 
-def load_agents_config():
-    """Load agent definitions from agents_config.json file."""
-    import json
-    from pathlib import Path
-
-    # Agent config is located at app/agent/agents_config.json
-    # Works for both local development and K8s deployment
-    config_path = Path(__file__).parent / "agent" / "agents_config.json"
-
-    if config_path.exists():
-        logger.info(f"Loading agent definitions from: {config_path}")
-        with open(config_path, encoding="utf-8") as f:
-            return json.load(f)
-
-    logger.error(f"agents_config.json not found at: {config_path}")
-    return []
-
-
-async def seed_default_agents():
-    """
-    Seed the database with default marketplace agents if they don't exist.
-
-    NOTE: This now uses MarketplaceAgent (factory system).
-    Agents require:  name, slug, description, category, system_prompt, mode,
-                    agent_type, pricing_type, source_type, etc.
-    """
-    from sqlalchemy import select
-
-    from .database import AsyncSessionLocal
-    from .models import MarketplaceAgent
-
-    async with AsyncSessionLocal() as session:
-        try:
-            # Check if agents already exist
-            result = await session.execute(select(MarketplaceAgent))
-            existing_agents = result.scalars().all()
-
-            if existing_agents:
-                logger.info(
-                    f"Agents already seeded ({len(existing_agents)} marketplace agents found)"
-                )
-                return
-
-            # For now, skip seeding - agents should be added via marketplace or migration
-            logger.info(
-                "No agents found. Add marketplace agents via migration scripts or admin panel."
-            )
-            logger.info("Skipping automatic seed - using new marketplace agent system")
-
-            # Future: Load from marketplace_agents_config.json
-            # agent_configs = load_agents_config()
-            # ...
-
-        except Exception as e:
-            logger.error(f"Error checking agents: {e}")
-            # Don't fail startup if agents aren't seeded
-            logger.warning("Continuing without seeding agents")
-
-
 async def shell_session_cleanup_loop():
     """Background task to clean up idle shell sessions."""
     import asyncio
@@ -443,8 +384,11 @@ async def startup():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
 
-    # Seed default agents if they don't exist
-    await seed_default_agents()
+    # Seed database (bases, agents, themes, workflows) — non-blocking background task
+    from .seeds import run_all_seeds
+
+    asyncio.create_task(run_all_seeds())
+    logger.info("Database seeding started as background task")
 
     # Start background cleanup tasks
     asyncio.create_task(shell_session_cleanup_loop())

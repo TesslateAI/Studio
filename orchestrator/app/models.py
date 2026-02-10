@@ -1237,7 +1237,7 @@ class UsageLog(Base):
 
 
 class Theme(Base):
-    """UI themes stored as JSON. Loaded from scripts/themes/ and served via API."""
+    """UI themes stored as JSON. Auto-seeded from app/seeds/themes/ on startup."""
 
     __tablename__ = "themes"
 
