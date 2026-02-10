@@ -16,6 +16,8 @@ import {
   ChatCircle,
   Trash,
   X,
+  ShieldCheck,
+  Users,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import {
@@ -63,6 +65,7 @@ export default function MarketplaceDetail() {
   const [relatedItems, setRelatedItems] = useState<MarketplaceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
+  const [forking, setForking] = useState(false);
 
   // Review state
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -193,6 +196,23 @@ export default function MarketplaceDetail() {
       }
     } catch {
       toast.error('Failed to add to library');
+    }
+  };
+
+  const handleFork = async () => {
+    if (!item || !isAuthenticated) return;
+
+    setForking(true);
+    try {
+      await marketplaceApi.forkAgent(item.id);
+      toast.success(`Forked "${item.name}" to your library! You can now customize it.`);
+      navigate('/library?tab=agents');
+    } catch (error: unknown) {
+      console.error('Fork failed:', error);
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to fork agent');
+    } finally {
+      setForking(false);
     }
   };
 
@@ -401,6 +421,18 @@ export default function MarketplaceDetail() {
                     Open Source
                   </span>
                 )}
+                {item.creator_type === 'community' && (
+                  <span className="flex items-center gap-1.5 px-3 py-1 bg-purple-500/15 text-purple-400 text-sm rounded-lg font-medium">
+                    <Users size={14} weight="bold" />
+                    Community
+                  </span>
+                )}
+                {item.creator_type === 'official' && (
+                  <span className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/15 text-blue-400 text-sm rounded-lg font-medium">
+                    <ShieldCheck size={14} weight="bold" />
+                    Official
+                  </span>
+                )}
               </div>
 
               {/* Description */}
@@ -500,6 +532,37 @@ export default function MarketplaceDetail() {
                     )}
                   </button>
                 )}
+
+                {/* Fork Button - for installed open-source agents */}
+                {item.is_purchased &&
+                  isAuthenticated &&
+                  item.source_type === 'open' &&
+                  item.is_forkable && (
+                    <button
+                      onClick={handleFork}
+                      disabled={forking}
+                      className={`
+                    flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all
+                    ${
+                      theme === 'light'
+                        ? 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 border border-purple-500/20'
+                        : 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20'
+                    }
+                  `}
+                    >
+                      {forking ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-purple-400/30 border-t-purple-400 rounded-full animate-spin" />
+                          Forking...
+                        </>
+                      ) : (
+                        <>
+                          <GitFork size={18} weight="bold" />
+                          Fork &amp; Customize
+                        </>
+                      )}
+                    </button>
+                  )}
 
                 {/* Price Badge */}
                 {item.pricing_type === 'free' && (

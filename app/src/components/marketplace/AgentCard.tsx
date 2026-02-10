@@ -1,7 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, Lightning, GitFork, Star } from '@phosphor-icons/react';
+import { Check, Lightning, GitFork, Star, ShieldCheck, Users } from '@phosphor-icons/react';
 import { useTheme } from '../../theme/ThemeContext';
+import { marketplaceApi } from '../../lib/api';
+import toast from 'react-hot-toast';
 
 export interface MarketplaceItem {
   id: string;
@@ -60,6 +62,7 @@ export function formatInstalls(count: number): string {
 export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCardProps) {
   const navigate = useNavigate();
   const { theme } = useTheme();
+  const [forking, setForking] = React.useState(false);
 
   const handleClick = () => {
     navigate(`/marketplace/${item.slug}`);
@@ -73,6 +76,23 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
       return;
     }
     onInstall(item);
+  };
+
+  const handleFork = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isAuthenticated || forking) return;
+
+    setForking(true);
+    try {
+      await marketplaceApi.forkAgent(item.id);
+      toast.success(`Forked "${item.name}" to your library!`);
+      navigate('/library?tab=agents');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to fork agent');
+    } finally {
+      setForking(false);
+    }
   };
 
   const creatorId = item.forked_by_user_id || item.created_by_user_id;
@@ -128,17 +148,31 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
         >
           {item.name}
         </h3>
-        {item.source_type === 'open' && (
-          <span className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 bg-green-500/15 text-green-500 text-[10px] rounded font-medium">
-            <GitFork size={10} weight="bold" />
-            Open
-          </span>
-        )}
-        {item.source_type === 'archive' && (
-          <span className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
-            Exported
-          </span>
-        )}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {item.source_type === 'open' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/15 text-green-500 text-[10px] rounded font-medium">
+              <GitFork size={10} weight="bold" />
+              Open
+            </span>
+          )}
+          {item.source_type === 'archive' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
+              Exported
+            </span>
+          )}
+          {item.creator_type === 'community' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
+              <Users size={10} weight="bold" />
+              Community
+            </span>
+          )}
+          {item.creator_type === 'official' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/15 text-blue-400 text-[10px] rounded font-medium">
+              <ShieldCheck size={10} weight="bold" />
+              Official
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Description */}
@@ -212,24 +246,39 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
             </div>
           </div>
 
-          {/* Install Button */}
-          {item.is_purchased && isAuthenticated ? (
-            <span className="flex items-center gap-1 px-2.5 py-1 bg-green-500/15 text-green-500 rounded-lg text-xs font-medium">
-              <Check size={12} weight="bold" />
-              Installed
-            </span>
-          ) : !isAuthenticated ? (
-            <button
-              onClick={handleInstall}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md"
-            >
-              Sign Up
-            </button>
-          ) : (
-            <button
-              onClick={handleInstall}
-              disabled={!item.is_active}
-              className={`
+          {/* Install / Fork Buttons */}
+          <div className="flex items-center gap-1.5">
+            {item.is_purchased &&
+              isAuthenticated &&
+              item.source_type === 'open' &&
+              item.is_forkable && (
+                <button
+                  onClick={handleFork}
+                  disabled={forking}
+                  title="Fork & Customize"
+                  className="flex items-center gap-1 px-2 py-1 bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 rounded-lg text-xs font-medium transition-colors"
+                >
+                  <GitFork size={12} weight="bold" />
+                  {forking ? '...' : 'Fork'}
+                </button>
+              )}
+            {item.is_purchased && isAuthenticated ? (
+              <span className="flex items-center gap-1 px-2.5 py-1 bg-green-500/15 text-green-500 rounded-lg text-xs font-medium">
+                <Check size={12} weight="bold" />
+                Installed
+              </span>
+            ) : !isAuthenticated ? (
+              <button
+                onClick={handleInstall}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md"
+              >
+                Sign Up
+              </button>
+            ) : (
+              <button
+                onClick={handleInstall}
+                disabled={!item.is_active}
+                className={`
                 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all
                 ${
                   item.is_active
@@ -239,14 +288,15 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
                       : 'bg-white/5 text-white/40 cursor-not-allowed'
                 }
               `}
-            >
-              {item.is_active
-                ? item.pricing_type === 'free'
-                  ? 'Install'
-                  : `$${item.price}/mo`
-                : 'Soon'}
-            </button>
-          )}
+              >
+                {item.is_active
+                  ? item.pricing_type === 'free'
+                    ? 'Install'
+                    : `$${item.price}/mo`
+                  : 'Soon'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

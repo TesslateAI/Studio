@@ -652,6 +652,12 @@ export const marketplaceApi = {
     return response.data;
   },
 
+  // Permanently delete a custom/forked agent
+  deleteCustomAgent: async (agentId: string) => {
+    const response = await api.delete(`/api/marketplace/agents/${agentId}`);
+    return response.data;
+  },
+
   // Verify Stripe purchase and add to library
   verifyPurchase: async (sessionId: string, agentSlug?: string) => {
     const response = await api.post('/api/marketplace/verify-purchase', {

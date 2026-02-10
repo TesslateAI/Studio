@@ -619,8 +619,12 @@ export default function Library() {
                 response = await marketplaceApi.createCustomAgent(createData);
 
                 // Update with additional fields (tools, tool_configs, avatar_url)
-                if (updatedData.tools || updatedData.tool_configs || updatedData.avatar_url) {
-                  await marketplaceApi.updateAgent(response.id, {
+                const agentId = response.agent_id || response.id;
+                if (
+                  agentId &&
+                  (updatedData.tools || updatedData.tool_configs || updatedData.avatar_url)
+                ) {
+                  await marketplaceApi.updateAgent(agentId, {
                     tools: updatedData.tools,
                     tool_configs: updatedData.tool_configs,
                     avatar_url: updatedData.avatar_url,
@@ -641,8 +645,17 @@ export default function Library() {
               loadLibraryAgents();
             } catch (error: unknown) {
               console.error('Save failed:', error);
-              const err = error as { response?: { data?: { detail?: string } } };
-              toast.error(err.response?.data?.detail || 'Failed to save agent');
+              const err = error as {
+                response?: { data?: { detail?: string | Array<{ msg: string }> } };
+              };
+              const detail = err.response?.data?.detail;
+              const message =
+                typeof detail === 'string'
+                  ? detail
+                  : Array.isArray(detail)
+                    ? detail.map((d) => d.msg).join(', ')
+                    : 'Failed to save agent';
+              toast.error(message);
             }
           }}
         />
@@ -686,8 +699,17 @@ function AgentsTab({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [agentToDelete, setAgentToDelete] = useState<LibraryAgent | null>(null);
 
+  const [deleteAction, setDeleteAction] = useState<'remove' | 'delete'>('remove');
+
   const handleRemove = (agent: LibraryAgent) => {
     setAgentToDelete(agent);
+    setDeleteAction('remove');
+    setShowDeleteDialog(true);
+  };
+
+  const handleDelete = (agent: LibraryAgent) => {
+    setAgentToDelete(agent);
+    setDeleteAction('delete');
     setShowDeleteDialog(true);
   };
 
@@ -695,15 +717,27 @@ function AgentsTab({
     if (!agentToDelete) return;
 
     setShowDeleteDialog(false);
-    const removingToast = toast.loading(`Removing ${agentToDelete.name}...`);
+    const isDelete = deleteAction === 'delete';
+    const actionToast = toast.loading(
+      isDelete ? `Deleting ${agentToDelete.name}...` : `Removing ${agentToDelete.name}...`
+    );
 
     try {
-      await marketplaceApi.removeFromLibrary(agentToDelete.id);
-      toast.success(`${agentToDelete.name} removed from library`, { id: removingToast });
+      if (isDelete) {
+        await marketplaceApi.deleteCustomAgent(agentToDelete.id);
+        toast.success(`${agentToDelete.name} deleted permanently`, { id: actionToast });
+      } else {
+        await marketplaceApi.removeFromLibrary(agentToDelete.id);
+        toast.success(`${agentToDelete.name} removed from library`, { id: actionToast });
+      }
       onReload();
-    } catch (error) {
-      console.error('Remove failed:', error);
-      toast.error('Failed to remove agent from library', { id: removingToast });
+    } catch (error: unknown) {
+      console.error(`${isDelete ? 'Delete' : 'Remove'} failed:`, error);
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(
+        err.response?.data?.detail || `Failed to ${isDelete ? 'delete' : 'remove'} agent`,
+        { id: actionToast }
+      );
     } finally {
       setAgentToDelete(null);
     }
@@ -809,11 +843,12 @@ function AgentsTab({
             onTogglePublish={() => onTogglePublish(agent)}
             onModelChange={(model) => onModelChange(agent, model)}
             onRemove={() => handleRemove(agent)}
+            onDelete={() => handleDelete(agent)}
           />
         ))}
       </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete/Remove Confirmation Dialog */}
       <ConfirmDialog
         isOpen={showDeleteDialog}
         onClose={() => {
@@ -821,9 +856,13 @@ function AgentsTab({
           setAgentToDelete(null);
         }}
         onConfirm={confirmRemoveAgent}
-        title="Remove Agent"
-        message={`Remove "${agentToDelete?.name}" from your library? This cannot be undone.`}
-        confirmText="Remove"
+        title={deleteAction === 'delete' ? 'Delete Agent' : 'Remove Agent'}
+        message={
+          deleteAction === 'delete'
+            ? `Permanently delete "${agentToDelete?.name}"? This will remove the agent entirely and cannot be undone.`
+            : `Remove "${agentToDelete?.name}" from your library? This cannot be undone.`
+        }
+        confirmText={deleteAction === 'delete' ? 'Delete Permanently' : 'Remove'}
         cancelText="Cancel"
         variant="danger"
       />
@@ -1800,6 +1839,7 @@ function AgentCard({
   onTogglePublish,
   onModelChange,
   onRemove,
+  onDelete,
 }: {
   agent: LibraryAgent;
   availableModels: string[];
@@ -1809,6 +1849,7 @@ function AgentCard({
   onTogglePublish: () => void;
   onModelChange: (model: string) => void;
   onRemove: () => void;
+  onDelete: () => void;
 }) {
   const canEdit = agent.source_type === 'open' || agent.is_custom;
   const canChangeModel = agent.source_type === 'open' || agent.is_custom;
@@ -2021,15 +2062,25 @@ function AgentCard({
         </button>
       </div>
 
-      {/* Remove Button */}
-      <div className="mt-3">
-        <button
-          onClick={onRemove}
-          className="w-full py-2 px-3 bg-white/5 hover:bg-[var(--status-error)]/10 border border-[var(--text)]/15 hover:border-[var(--status-error)]/20 text-[var(--text)]/60 hover:text-[var(--status-error)] rounded-lg transition-colors flex items-center justify-center gap-2"
-        >
-          <Trash size={16} />
-          Remove from Library
-        </button>
+      {/* Remove / Delete Buttons */}
+      <div className="mt-3 space-y-2">
+        {agent.is_custom && !agent.is_published ? (
+          <button
+            onClick={onDelete}
+            className="w-full py-2 px-3 bg-[var(--status-error)]/10 hover:bg-[var(--status-error)]/20 border border-[var(--status-error)]/20 hover:border-[var(--status-error)]/30 text-[var(--status-error)] rounded-lg transition-colors flex items-center justify-center gap-2 font-medium"
+          >
+            <Trash size={16} weight="bold" />
+            Delete Agent
+          </button>
+        ) : (
+          <button
+            onClick={onRemove}
+            className="w-full py-2 px-3 bg-white/5 hover:bg-[var(--status-error)]/10 border border-[var(--text)]/15 hover:border-[var(--status-error)]/20 text-[var(--text)]/60 hover:text-[var(--status-error)] rounded-lg transition-colors flex items-center justify-center gap-2"
+          >
+            <Trash size={16} />
+            Remove from Library
+          </button>
+        )}
       </div>
 
       {/* Purchase Date */}

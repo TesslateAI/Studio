@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Check, X, Pencil, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getAuthHeaders } from '../lib/api';
 
 export interface Tool {
   name: string;
@@ -24,11 +25,7 @@ interface ToolManagementProps {
   availableModels?: string[];
 }
 
-export function ToolManagement({
-  selectedTools,
-  toolConfigs,
-  onToolsChange,
-}: ToolManagementProps) {
+export function ToolManagement({ selectedTools, toolConfigs, onToolsChange }: ToolManagementProps) {
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingTool, setEditingTool] = useState<string | null>(null);
@@ -45,6 +42,7 @@ export function ToolManagement({
     try {
       const response = await fetch('/api/agents/tools/available', {
         credentials: 'include',
+        headers: getAuthHeaders(),
       });
 
       if (!response.ok) {
@@ -85,10 +83,7 @@ export function ToolManagement({
     setExpandedCategories(newExpanded);
   };
 
-  const updateToolConfig = (
-    toolName: string,
-    config: Partial<ToolConfig>
-  ) => {
+  const updateToolConfig = (toolName: string, config: Partial<ToolConfig>) => {
     const newToolConfigs = {
       ...toolConfigs,
       [toolName]: {
@@ -113,16 +108,9 @@ export function ToolManagement({
       .filter((t) => t.category === category)
       .map((t) => t.name);
 
-    const newSelectedTools = [
-      ...new Set([...selectedTools, ...toolsInCategory]),
-    ];
+    const newSelectedTools = [...new Set([...selectedTools, ...toolsInCategory])];
     onToolsChange(newSelectedTools, toolConfigs);
-    toast.success(
-      `Selected all ${toolsInCategory.length} tools in ${category.replace(
-        '_',
-        ' '
-      )}`
-    );
+    toast.success(`Selected all ${toolsInCategory.length} tools in ${category.replace('_', ' ')}`);
   };
 
   const deselectAllInCategory = (category: string) => {
@@ -130,9 +118,7 @@ export function ToolManagement({
       .filter((t) => t.category === category)
       .map((t) => t.name);
 
-    const newSelectedTools = selectedTools.filter(
-      (t) => !toolsInCategory.includes(t)
-    );
+    const newSelectedTools = selectedTools.filter((t) => !toolsInCategory.includes(t));
 
     // Remove configs for deselected tools
     const newToolConfigs = { ...toolConfigs };
@@ -141,18 +127,19 @@ export function ToolManagement({
     });
 
     onToolsChange(newSelectedTools, newToolConfigs);
-    toast.success(
-      `Deselected all tools in ${category.replace('_', ' ')}`
-    );
+    toast.success(`Deselected all tools in ${category.replace('_', ' ')}`);
   };
 
-  const groupedTools = availableTools.reduce((acc, tool) => {
-    if (!acc[tool.category]) {
-      acc[tool.category] = [];
-    }
-    acc[tool.category].push(tool);
-    return acc;
-  }, {} as Record<string, Tool[]>);
+  const groupedTools = availableTools.reduce(
+    (acc, tool) => {
+      if (!acc[tool.category]) {
+        acc[tool.category] = [];
+      }
+      acc[tool.category].push(tool);
+      return acc;
+    },
+    {} as Record<string, Tool[]>
+  );
 
   const filteredTools = searchQuery
     ? availableTools.filter(
@@ -173,12 +160,9 @@ export function ToolManagement({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[var(--text)]">
-          Tool Configuration
-        </h3>
+        <h3 className="text-sm font-semibold text-[var(--text)]">Tool Configuration</h3>
         <div className="text-xs text-[var(--text)]/60">
-          {selectedTools.length} tool{selectedTools.length !== 1 ? 's' : ''}{' '}
-          selected
+          {selectedTools.length} tool{selectedTools.length !== 1 ? 's' : ''} selected
         </div>
       </div>
 
@@ -238,13 +222,10 @@ export function ToolManagement({
                     <ChevronUp size={16} className="text-[var(--text)]" />
                   )}
                   <span className="text-sm font-medium text-[var(--text)]">
-                    {category.replace('_', ' ').replace(/\b\w/g, (l) =>
-                      l.toUpperCase()
-                    )}
+                    {category.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
                   </span>
                   <span className="text-xs text-[var(--text)]/60">
-                    ({tools.filter((t) => selectedTools.includes(t.name)).length}
-                    /{tools.length})
+                    ({tools.filter((t) => selectedTools.includes(t.name)).length}/{tools.length})
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -326,12 +307,8 @@ function ToolItem({
   onResetConfig,
   onCancelEdit,
 }: ToolItemProps) {
-  const [editDescription, setEditDescription] = useState(
-    config?.description || tool.description
-  );
-  const [editExamples, setEditExamples] = useState(
-    config?.examples || tool.examples || []
-  );
+  const [editDescription, setEditDescription] = useState(config?.description || tool.description);
+  const [editExamples, setEditExamples] = useState(config?.examples || tool.examples || []);
   const [editSystemPrompt, setEditSystemPrompt] = useState(
     config?.system_prompt || tool.system_prompt || ''
   );
@@ -352,7 +329,8 @@ function ToolItem({
   const handleSave = () => {
     onSaveConfig({
       description: editDescription !== tool.description ? editDescription : undefined,
-      examples: JSON.stringify(editExamples) !== JSON.stringify(tool.examples) ? editExamples : undefined,
+      examples:
+        JSON.stringify(editExamples) !== JSON.stringify(tool.examples) ? editExamples : undefined,
       system_prompt: editSystemPrompt !== (tool.system_prompt || '') ? editSystemPrompt : undefined,
     });
   };
@@ -381,9 +359,7 @@ function ToolItem({
           {/* Tool Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-[var(--text)] font-mono">
-                {tool.name}
-              </span>
+              <span className="text-sm font-medium text-[var(--text)] font-mono">{tool.name}</span>
               {hasCustomConfig && (
                 <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">
                   Custom
@@ -438,9 +414,7 @@ function ToolItem({
         // Edit Mode
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-[var(--text)] font-mono">
-              {tool.name}
-            </span>
+            <span className="text-sm font-medium text-[var(--text)] font-mono">{tool.name}</span>
             <button
               type="button"
               onClick={(e) => {
@@ -456,9 +430,7 @@ function ToolItem({
 
           {/* Description */}
           <div>
-            <label className="block text-xs text-[var(--text)]/60 mb-1">
-              Description
-            </label>
+            <label className="block text-xs text-[var(--text)]/60 mb-1">Description</label>
             <textarea
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
@@ -469,9 +441,7 @@ function ToolItem({
 
           {/* Examples */}
           <div>
-            <label className="block text-xs text-[var(--text)]/60 mb-1">
-              Examples
-            </label>
+            <label className="block text-xs text-[var(--text)]/60 mb-1">Examples</label>
             <div className="space-y-1">
               {editExamples.map((example, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -528,7 +498,10 @@ function ToolItem({
           {/* System Prompt */}
           <div>
             <label className="block text-xs text-[var(--text)]/60 mb-1">
-              System Prompt <span className="text-[var(--text)]/40">(optional - additional instructions for this tool)</span>
+              System Prompt{' '}
+              <span className="text-[var(--text)]/40">
+                (optional - additional instructions for this tool)
+              </span>
             </label>
             <textarea
               value={editSystemPrompt}
@@ -538,7 +511,8 @@ function ToolItem({
               className="w-full px-2 py-1.5 bg-white/5 border border-[var(--text)]/15 rounded text-[var(--text)] text-xs focus:outline-none focus:border-orange-500/50 resize-none font-mono"
             />
             <p className="mt-1 text-[10px] text-[var(--text)]/40">
-              This prompt will be included when the agent uses this tool. Use it to customize tool behavior.
+              This prompt will be included when the agent uses this tool. Use it to customize tool
+              behavior.
             </p>
           </div>
 

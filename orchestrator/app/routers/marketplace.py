@@ -1110,13 +1110,13 @@ async def fork_agent(
 
 @router.post("/agents/create")
 async def create_custom_agent(
-    name: str,
-    description: str,
-    system_prompt: str,
-    mode: str = "stream",
-    agent_type: str = "StreamAgent",
-    model: str = "qwen-3-235b-a22b-thinking-2507",
-    category: str = "custom",
+    name: str = Body(...),
+    description: str = Body(...),
+    system_prompt: str = Body(...),
+    mode: str = Body(default="stream"),
+    agent_type: str = Body(default="StreamAgent"),
+    model: str = Body(default="qwen-3-235b-a22b-thinking-2507"),
+    category: str = Body(default="custom"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -1565,6 +1565,47 @@ async def unpublish_agent(
     await db.commit()
 
     return {"message": "Agent unpublished successfully", "agent_id": agent_id, "success": True}
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_custom_agent(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Permanently delete a user's custom/forked agent.
+    Agent must be owned by the user and not currently published.
+    """
+    result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
+    agent = result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify ownership
+    if agent.forked_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own custom agents")
+
+    # Must unpublish before deleting
+    if agent.is_published:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete a published agent. Unpublish it first.",
+        )
+
+    # Delete related records (purchases, project assignments, reviews)
+    await db.execute(
+        UserPurchasedAgent.__table__.delete().where(UserPurchasedAgent.agent_id == agent_id)
+    )
+    await db.execute(ProjectAgent.__table__.delete().where(ProjectAgent.agent_id == agent_id))
+    await db.execute(AgentReview.__table__.delete().where(AgentReview.agent_id == agent_id))
+
+    # Delete the agent
+    await db.delete(agent)
+    await db.commit()
+
+    return {"message": "Agent deleted permanently", "agent_id": agent_id, "success": True}
 
 
 # ============================================================================
