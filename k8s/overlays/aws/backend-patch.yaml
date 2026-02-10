@@ -125,6 +125,37 @@ spec:
               value: "120"
             - name: K8S_DEHYDRATION_EXCLUDE_PATTERNS
               value: "node_modules,.git,__pycache__,venv,.venv"
+            # SMTP (Email / 2FA)
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SMTP_HOST
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SMTP_PORT
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SMTP_USERNAME
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SMTP_PASSWORD
+            - name: SMTP_USE_TLS
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SMTP_USE_TLS
+            - name: SMTP_SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SMTP_SENDER_EMAIL
             # Cookies
             - name: COOKIE_SECURE
               value: "true"

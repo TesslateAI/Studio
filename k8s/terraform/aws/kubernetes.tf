@@ -125,6 +125,14 @@ resource "kubernetes_secret" "app_secrets" {
     # Stripe
     STRIPE_SECRET_KEY    = var.stripe_secret_key
     STRIPE_WEBHOOK_SECRET = var.stripe_webhook_secret
+
+    # SMTP (Email / 2FA)
+    SMTP_HOST         = var.smtp_host
+    SMTP_PORT         = tostring(var.smtp_port)
+    SMTP_USERNAME     = var.smtp_username
+    SMTP_PASSWORD     = var.smtp_password
+    SMTP_USE_TLS      = tostring(var.smtp_use_tls)
+    SMTP_SENDER_EMAIL = var.smtp_sender_email
   }
 
   type = "Opaque"

@@ -235,6 +235,47 @@ variable "stripe_webhook_secret" {
 }
 
 # -----------------------------------------------------------------------------
+# SMTP Configuration (Email / 2FA)
+# -----------------------------------------------------------------------------
+variable "smtp_host" {
+  description = "SMTP server hostname"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_port" {
+  description = "SMTP server port"
+  type        = number
+  default     = 587
+}
+
+variable "smtp_username" {
+  description = "SMTP authentication username"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "smtp_password" {
+  description = "SMTP authentication password"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "smtp_use_tls" {
+  description = "Whether to use TLS for SMTP"
+  type        = bool
+  default     = true
+}
+
+variable "smtp_sender_email" {
+  description = "Email address to send from"
+  type        = string
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
 # Feature Flags
 # -----------------------------------------------------------------------------
 variable "enable_cluster_autoscaler" {
