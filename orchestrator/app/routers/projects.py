@@ -4889,7 +4889,7 @@ async def _start_container_background_task(
                 settings = get_settings()
                 if settings.deployment_mode == "docker":
                     # Docker mode always uses HTTP on localhost
-                    container_url = f"http://{project.slug}-{service_name}.localhost"
+                    container_url = f"http://{project.slug}-{service_name}.{settings.app_domain}"
                 else:
                     protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
                     container_url = (
@@ -5008,7 +5008,7 @@ async def _start_container_background_task(
                 ).strip("-")
                 if settings.deployment_mode == "docker":
                     # Docker mode always uses HTTP on localhost
-                    container_url = f"http://{project.slug}-{sanitized_name}.localhost"
+                    container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
                 else:
                     protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
                     container_url = (
@@ -5102,7 +5102,7 @@ async def start_single_container(
             )
             sanitized_name = "".join(c for c in sanitized_name if c.isalnum() or c == "-")
             sanitized_name = re.sub(r"-+", "-", sanitized_name).strip("-")
-            container_url = f"http://{project.slug}-{sanitized_name}.localhost"
+            container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
 
             logger.info(
                 f"[COMPOSE] Container {container.name} already running, returning fast path"
@@ -5265,10 +5265,10 @@ async def check_container_health(
         )
     else:
         # Docker URL pattern: {project_slug}-{container}.localhost
-        external_url = f"http://{project.slug}-{container_dir}.localhost"
+        external_url = f"http://{project.slug}-{container_dir}.{settings.app_domain}"
         # Health check through Traefik (orchestrator can't reach container directly)
         health_check_url = "http://traefik"
-        health_check_headers = {"Host": f"{project.slug}-{container_dir}.localhost"}
+        health_check_headers = {"Host": f"{project.slug}-{container_dir}.{settings.app_domain}"}
 
     try:
         async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
@@ -5436,7 +5436,7 @@ async def _restart_container_background_task(
             )
             if settings.deployment_mode == "docker":
                 # Docker mode always uses HTTP on localhost
-                container_url = f"http://{project.slug}-{sanitized_name}.localhost"
+                container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
             else:
                 protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
                 container_url = (

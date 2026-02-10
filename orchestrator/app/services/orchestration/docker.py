@@ -29,6 +29,7 @@ import aiofiles.os
 import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config import get_settings
 from ..secret_manager_env import build_env_overrides
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
@@ -118,8 +119,6 @@ class DockerOrchestrator(BaseOrchestrator):
     """
 
     def __init__(self, use_volumes: bool = True):
-        from ...config import get_settings
-
         self.settings = get_settings()
 
         self.compose_files_dir = os.path.abspath("docker-compose-projects")
@@ -252,7 +251,7 @@ class DockerOrchestrator(BaseOrchestrator):
             for container in containers:
                 service_name = self._sanitize_service_name(container.name)
                 sanitized_name = f"{project.slug}-{service_name}"
-                url = f"http://{sanitized_name}.localhost"
+                url = f"http://{sanitized_name}.{self.settings.app_domain}"
                 container_urls[container.name] = url
 
             # Track activity in database
@@ -353,7 +352,7 @@ class DockerOrchestrator(BaseOrchestrator):
                         is_running = container_info["State"] == "running"
                         # Include URL for running containers so frontend doesn't re-start them
                         container_url = (
-                            f"http://{project_slug}-{service_name}.localhost"
+                            f"http://{project_slug}-{service_name}.{self.settings.app_domain}"
                             if is_running
                             else None
                         )
@@ -468,7 +467,7 @@ class DockerOrchestrator(BaseOrchestrator):
         await self._connect_traefik_to_network(project.slug)
 
         sanitized_name = f"{project.slug}-{service_name}"
-        url = f"http://{sanitized_name}.localhost"
+        url = f"http://{sanitized_name}.{self.settings.app_domain}"
 
         return {"status": "running", "container_name": container.name, "url": url}
 
@@ -522,7 +521,9 @@ class DockerOrchestrator(BaseOrchestrator):
             sanitized_name = f"{project_slug}-{service_name}"
             return {
                 "status": "running" if container_info["running"] else "stopped",
-                "url": f"http://{sanitized_name}.localhost" if container_info["running"] else None,
+                "url": f"http://{sanitized_name}.{self.settings.app_domain}"
+                if container_info["running"]
+                else None,
                 **container_info,
             }
 
@@ -1400,7 +1401,7 @@ class DockerOrchestrator(BaseOrchestrator):
                 "traefik.enable": "true",
                 "com.tesslate.routable": "true",  # For Traefik discovery
                 "traefik.docker.network": network_name,  # Use project network
-                f"traefik.http.routers.{sanitized_container_name}.rule": f"Host(`{sanitized_container_name}.localhost`)",
+                f"traefik.http.routers.{sanitized_container_name}.rule": f"Host(`{sanitized_container_name}.{self.settings.app_domain}`)",
                 f"traefik.http.services.{sanitized_container_name}.loadbalancer.server.port": str(
                     container_port
                 ),
@@ -1505,7 +1506,7 @@ class DockerOrchestrator(BaseOrchestrator):
             labels.update(
                 {
                     "traefik.enable": "true",
-                    f"traefik.http.routers.{sanitized_container_name}.rule": f"Host(`{sanitized_container_name}.localhost`)",
+                    f"traefik.http.routers.{sanitized_container_name}.rule": f"Host(`{sanitized_container_name}.{self.settings.app_domain}`)",
                     f"traefik.http.services.{sanitized_container_name}.loadbalancer.server.port": str(
                         service_def.internal_port
                     ),
