@@ -5,7 +5,7 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 import logging
 import re
 from datetime import UTC, datetime
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, func, or_, select
@@ -26,8 +26,8 @@ from ..models import (
     UserPurchasedBase,
 )
 from ..schemas import BaseSubmitRequest, BaseUpdateRequest
-from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..services.cache_service import cache
+from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..users import current_active_user, current_optional_user
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ settings = get_settings()
 _MODELS_CACHE_TTL = 300
 
 
-async def _get_cached_litellm_models() -> List[Dict[str, Any]]:
+async def _get_cached_litellm_models() -> list[dict[str, Any]]:
     """
     Get LiteLLM models with distributed caching.
 
@@ -308,8 +308,9 @@ async def get_marketplace_agents(
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
-            MarketplaceAgent.is_active == True,
-            (MarketplaceAgent.forked_by_user_id.is_(None)) | (MarketplaceAgent.is_published == True),
+            MarketplaceAgent.is_active.is_(True),
+            (MarketplaceAgent.forked_by_user_id.is_(None))
+            | (MarketplaceAgent.is_published.is_(True)),
         )
     )
 
@@ -421,7 +422,9 @@ async def get_marketplace_agents(
 
 @router.get("/agents/{slug}")
 async def get_agent_details(
-    slug: str, db: AsyncSession = Depends(get_db), current_user: User | None = Depends(current_optional_user)
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
 ):
     """
     Get detailed information about a specific agent.
@@ -1963,7 +1966,7 @@ async def get_marketplace_bases(
     - Unauthenticated: Shows catalog without purchase status
     """
     query = select(MarketplaceBase).where(
-        MarketplaceBase.is_active == True,
+        MarketplaceBase.is_active.is_(True),
         or_(
             MarketplaceBase.created_by_user_id.is_(None),  # seeded bases always visible
             MarketplaceBase.visibility == "public",  # user bases only when public
@@ -2036,10 +2039,12 @@ async def get_marketplace_bases(
                 "is_featured": base.is_featured,
                 "is_active": base.is_active,
                 "is_purchased": base.id in purchased_base_ids,
-                "source_type": "open",  # All bases are open source
+                "source_type": base.source_type or "git",
                 "is_forkable": False,  # Bases can't be forked
                 "usage_count": base.downloads,
-                "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
+                "created_by_user_id": str(base.created_by_user_id)
+                if base.created_by_user_id
+                else None,
                 "visibility": base.visibility or "public",
             }
         )
@@ -2064,9 +2069,12 @@ async def get_base_details(
         raise HTTPException(status_code=404, detail="Base not found")
 
     # Private bases are only visible to their creator
-    if base.visibility == "private" and base.created_by_user_id:
-        if not current_user or current_user.id != base.created_by_user_id:
-            raise HTTPException(status_code=404, detail="Base not found")
+    if (
+        base.visibility == "private"
+        and base.created_by_user_id
+        and (not current_user or current_user.id != base.created_by_user_id)
+    ):
+        raise HTTPException(status_code=404, detail="Base not found")
 
     # Check if user has purchased this base (only if authenticated)
     is_purchased = False
@@ -2111,9 +2119,10 @@ async def get_base_details(
         "is_featured": base.is_featured,
         "is_active": base.is_active,
         "is_purchased": is_purchased,
-        "source_type": "open",
+        "source_type": base.source_type or "git",
         "is_forkable": False,
         "usage_count": base.downloads,
+        "archive_size_bytes": base.archive_size_bytes,
         "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
         "visibility": base.visibility or "public",
         "reviews": [
@@ -2322,7 +2331,9 @@ async def set_base_visibility(
     if not base:
         raise HTTPException(status_code=404, detail="Base not found")
     if base.created_by_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You can only change visibility of bases you created")
+        raise HTTPException(
+            status_code=403, detail="You can only change visibility of bases you created"
+        )
 
     base.visibility = visibility
     await db.commit()
@@ -2352,7 +2363,145 @@ async def delete_base(
     base.is_active = False
     await db.commit()
 
+    # Clean up archive file if this is an archive-based template
+    if base.source_type == "archive" and base.archive_path:
+        try:
+            from ..services.template_storage import get_template_storage
+
+            storage = get_template_storage()
+            await storage.delete_archive(base.archive_path)
+        except Exception as e:
+            logger.warning(f"[MARKETPLACE] Failed to delete archive for base {base.id}: {e}")
+
     return {"id": str(base.id), "success": True}
+
+
+@router.post("/templates/{base_id}/re-export")
+async def re_export_template(
+    base_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Re-export a template from its source project (updates the archive)."""
+    import os
+
+    from ..services.task_manager import get_task_manager
+
+    result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = result.scalar_one_or_none()
+
+    if not base:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if base.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only re-export templates you created")
+    if base.source_type != "archive":
+        raise HTTPException(status_code=400, detail="Only archive templates can be re-exported")
+    if not base.source_project_id:
+        raise HTTPException(status_code=400, detail="Template has no linked source project")
+
+    # Verify source project exists and is owned by user
+    result = await db.execute(select(Project).where(Project.id == base.source_project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Source project no longer exists")
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You don't own the source project")
+
+    # Capture values from ORM objects before request session closes
+    project_slug = project.slug
+    project_id = project.id
+    base_name = base.name
+    base_archive_path = base.archive_path
+    user_id = current_user.id
+
+    settings = get_settings()
+    task_manager = get_task_manager()
+    task = task_manager.create_task(
+        user_id=user_id,
+        task_type="template_re_export",
+        metadata={
+            "template_id": str(base_id),
+            "template_name": base_name,
+        },
+    )
+
+    async def _run_re_export():
+        from ..database import AsyncSessionLocal
+        from ..models import ProjectFile as ProjectFileModel
+        from ..services.template_export import export_project_to_archive
+        from ..services.template_storage import get_template_storage
+
+        try:
+            task.update_progress(5, 100, "Preparing re-export...")
+
+            use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
+            if settings.deployment_mode == "docker" and use_volumes:
+                project_path = f"/projects/{project_slug}"
+            elif settings.deployment_mode == "kubernetes":
+                import tempfile
+
+                project_path = tempfile.mkdtemp(prefix=f"reexport-{project_slug}-")
+                async with AsyncSessionLocal() as export_db:
+                    from sqlalchemy import select as sa_select
+
+                    result = await export_db.execute(
+                        sa_select(ProjectFileModel).where(ProjectFileModel.project_id == project_id)
+                    )
+                    db_files = result.scalars().all()
+                    for db_file in db_files:
+                        file_full_path = os.path.join(project_path, db_file.file_path)
+                        os.makedirs(os.path.dirname(file_full_path), exist_ok=True)
+                        with open(file_full_path, "w") as f:
+                            f.write(db_file.content or "")
+            else:
+                project_path = os.path.join("/app/projects", project_slug)
+
+            if not os.path.exists(project_path):
+                raise FileNotFoundError(
+                    "Project directory not found. Make sure the project is running."
+                )
+
+            archive_bytes = await export_project_to_archive(
+                project_path, task=task, max_size_mb=settings.template_max_size_mb
+            )
+
+            # Delete old archive if it exists
+            storage = get_template_storage()
+            if base_archive_path:
+                try:
+                    await storage.delete_archive(base_archive_path)
+                except Exception as del_err:
+                    logger.warning(f"[TEMPLATE] Could not delete old archive: {del_err}")
+
+            archive_path = await storage.store_archive(user_id, base_id, archive_bytes)
+
+            async with AsyncSessionLocal() as update_db:
+                from sqlalchemy import select as sa_select
+
+                result = await update_db.execute(
+                    sa_select(MarketplaceBase).where(MarketplaceBase.id == base_id)
+                )
+                updated_base = result.scalar_one()
+                updated_base.archive_path = archive_path
+                updated_base.archive_size_bytes = len(archive_bytes)
+                await update_db.commit()
+
+            task.update_progress(100, 100, "Template re-exported successfully!")
+            task.result = {"template_id": str(base_id)}
+
+            if settings.deployment_mode == "kubernetes" and project_path.startswith("/tmp"):
+                import shutil
+
+                shutil.rmtree(project_path, ignore_errors=True)
+
+        except Exception as e:
+            logger.error(f"[TEMPLATE] Re-export failed: {e}", exc_info=True)
+            task.error = str(e)
+
+    background_tasks.add_task(_run_re_export)
+
+    return {"id": str(base_id), "task_id": task.id}
 
 
 @router.get("/my-created-bases")
@@ -2362,10 +2511,12 @@ async def get_my_created_bases(
 ):
     """Get all bases created/submitted by the current user."""
     result = await db.execute(
-        select(MarketplaceBase).where(
+        select(MarketplaceBase)
+        .where(
             MarketplaceBase.created_by_user_id == current_user.id,
-            MarketplaceBase.is_active == True,
-        ).order_by(MarketplaceBase.created_at.desc())
+            MarketplaceBase.is_active.is_(True),
+        )
+        .order_by(MarketplaceBase.created_at.desc())
     )
     bases = result.scalars().all()
 
@@ -2387,6 +2538,8 @@ async def get_my_created_bases(
                 "visibility": base.visibility or "public",
                 "downloads": base.downloads or 0,
                 "rating": base.rating or 5.0,
+                "source_type": base.source_type or "git",
+                "archive_size_bytes": base.archive_size_bytes,
                 "created_at": base.created_at.isoformat() if base.created_at else None,
             }
             for base in bases

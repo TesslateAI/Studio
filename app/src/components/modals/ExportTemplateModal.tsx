@@ -1,33 +1,14 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Globe, LockSimple } from '@phosphor-icons/react';
-import { marketplaceApi } from '../../lib/api';
+import { projectsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 
-interface LibraryBase {
-  id: string;
-  name: string;
-  slug: string;
-  description: string;
-  long_description?: string;
-  git_repo_url?: string | null;
-  default_branch?: string | null;
-  source_type?: 'git' | 'archive';
-  category: string;
-  icon: string;
-  visibility: 'private' | 'public';
-  tags?: string[];
-  features?: string[];
-  tech_stack?: string[];
-  downloads: number;
-  rating: number;
-  created_at: string;
-}
-
-interface SubmitBaseModalProps {
+interface ExportTemplateModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  editBase?: LibraryBase | null;
+  projectSlug: string;
 }
 
 const CATEGORIES = [
@@ -39,11 +20,14 @@ const CATEGORIES = [
   { value: 'devops', label: 'DevOps' },
 ];
 
-export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: SubmitBaseModalProps) {
+export function ExportTemplateModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  projectSlug,
+}: ExportTemplateModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [gitRepoUrl, setGitRepoUrl] = useState('');
-  const [defaultBranch, setDefaultBranch] = useState('main');
   const [category, setCategory] = useState('fullstack');
   const [visibility, setVisibility] = useState<'private' | 'public'>('public');
   const [icon, setIcon] = useState('\u{1F4E6}');
@@ -53,26 +37,11 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
   const [longDescription, setLongDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const isEditMode = !!editBase;
-
+  // Reset form when modal opens
   useEffect(() => {
-    if (editBase) {
-      setName(editBase.name);
-      setDescription(editBase.description);
-      setGitRepoUrl(editBase.git_repo_url || '');
-      setDefaultBranch(editBase.default_branch || 'main');
-      setCategory(editBase.category);
-      setVisibility(editBase.visibility);
-      setIcon(editBase.icon);
-      setTags((editBase.tags || []).join(', '));
-      setTechStack((editBase.tech_stack || []).join(', '));
-      setFeatures((editBase.features || []).join(', '));
-      setLongDescription(editBase.long_description || '');
-    } else {
+    if (isOpen) {
       setName('');
       setDescription('');
-      setGitRepoUrl('');
-      setDefaultBranch('main');
       setCategory('fullstack');
       setVisibility('public');
       setIcon('\u{1F4E6}');
@@ -81,9 +50,7 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
       setFeatures('');
       setLongDescription('');
     }
-  }, [editBase, isOpen]);
-
-  if (!isOpen) return null;
+  }, [isOpen]);
 
   const parseCommaSeparated = (value: string): string[] => {
     return value
@@ -92,25 +59,15 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
       .filter(Boolean);
   };
 
-  const isArchive = editBase?.source_type === 'archive';
-
   const handleSubmit = async () => {
     if (!name.trim() || !description.trim()) {
       toast.error('Name and description are required');
       return;
     }
-    if (!isArchive && !gitRepoUrl.trim()) {
-      toast.error('Git URL is required');
-      return;
-    }
-    if (!isArchive && !gitRepoUrl.startsWith('https://')) {
-      toast.error('Git URL must start with https://');
-      return;
-    }
 
     setIsSubmitting(true);
     try {
-      const data: Record<string, unknown> = {
+      const data = {
         name: name.trim(),
         description: description.trim(),
         category,
@@ -121,36 +78,29 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
         features: parseCommaSeparated(features),
         long_description: longDescription.trim() || undefined,
       };
-      if (!isArchive) {
-        data.git_repo_url = gitRepoUrl.trim();
-        data.default_branch = defaultBranch.trim() || 'main';
-      }
 
-      if (isEditMode && editBase) {
-        await marketplaceApi.updateBase(editBase.id, data);
-        toast.success('Base updated successfully');
-      } else {
-        await marketplaceApi.submitBase(data);
-        toast.success('Base submitted successfully!');
-      }
+      await projectsApi.exportAsTemplate(projectSlug, data);
+      toast.success('Template export started! It will be available shortly.');
       onSuccess();
       onClose();
     } catch (error: unknown) {
-      console.error('Failed to submit base:', error);
+      console.error('Failed to export template:', error);
       const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to submit base');
+      toast.error(err.response?.data?.detail || 'Failed to export template');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  if (!isOpen) return null;
+
   const inputClass =
     'w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)]/50 transition-colors placeholder:text-[var(--text)]/30';
   const labelClass = 'block text-xs font-medium text-[var(--text)]/70 mb-1';
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[300]"
       onClick={onClose}
     >
       <div
@@ -159,9 +109,7 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="font-heading text-lg font-bold text-[var(--text)]">
-            {isEditMode ? 'Edit Base Template' : 'Submit Base Template'}
-          </h2>
+          <h2 className="font-heading text-lg font-bold text-[var(--text)]">Export as Template</h2>
           <button
             onClick={onClose}
             className="text-[var(--text)]/40 hover:text-[var(--text)] transition-colors p-1"
@@ -172,9 +120,13 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
 
         {/* Body */}
         <div className="px-6 py-4 space-y-4">
+          <p className="text-xs text-[var(--text)]/50">
+            Package this project as a reusable template. Others can use it to start new projects.
+          </p>
+
           {/* Name */}
           <div>
-            <label className={labelClass}>Name *</label>
+            <label className={labelClass}>Template Name *</label>
             <input
               type="text"
               value={name}
@@ -196,48 +148,20 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
             />
           </div>
 
-          {/* Git Repo URL - hidden for archive templates */}
-          {!isArchive && (
-            <div>
-              <label className={labelClass}>Git Repository URL *</label>
-              <input
-                type="url"
-                value={gitRepoUrl}
-                onChange={(e) => setGitRepoUrl(e.target.value)}
-                placeholder="https://github.com/user/repo"
-                className={inputClass}
-              />
-            </div>
-          )}
-
-          {/* Row: Branch + Category */}
-          <div className={isArchive ? '' : 'grid grid-cols-2 gap-3'}>
-            {!isArchive && (
-              <div>
-                <label className={labelClass}>Default Branch</label>
-                <input
-                  type="text"
-                  value={defaultBranch}
-                  onChange={(e) => setDefaultBranch(e.target.value)}
-                  placeholder="main"
-                  className={inputClass}
-                />
-              </div>
-            )}
-            <div>
-              <label className={labelClass}>Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className={inputClass}
-              >
-                {CATEGORIES.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Category */}
+          <div>
+            <label className={labelClass}>Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className={inputClass}
+            >
+              {CATEGORIES.map((cat) => (
+                <option key={cat.value} value={cat.value}>
+                  {cat.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Visibility */}
@@ -348,12 +272,7 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
           </button>
           <button
             onClick={handleSubmit}
-            disabled={
-              isSubmitting ||
-              !name.trim() ||
-              !description.trim() ||
-              (!isArchive && !gitRepoUrl.trim())
-            }
+            disabled={isSubmitting || !name.trim() || !description.trim()}
             className="flex-1 bg-[var(--primary)] text-white py-2.5 rounded-xl font-medium hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             {isSubmitting ? (
@@ -373,16 +292,15 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   />
                 </svg>
-                {isEditMode ? 'Updating...' : 'Submitting...'}
+                Exporting...
               </span>
-            ) : isEditMode ? (
-              'Update Base'
             ) : (
-              'Submit Base'
+              'Export Template'
             )}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

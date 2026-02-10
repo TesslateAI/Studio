@@ -14,7 +14,7 @@ export interface MarketplaceItem {
   mode?: string;
   agent_type?: string;
   model?: string;
-  source_type: 'open' | 'closed';
+  source_type: 'open' | 'closed' | 'git' | 'archive';
   is_forkable: boolean;
   is_active: boolean;
   icon: string;
@@ -93,42 +93,39 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
         group relative flex flex-col p-4 rounded-xl border cursor-pointer
         transition-all duration-200 ease-out
         hover:-translate-y-1 hover:shadow-xl
-        ${theme === 'light'
-          ? 'bg-white border-black/10 hover:border-[var(--primary)]/40'
-          : 'bg-[#1a1a1c] border-white/10 hover:border-[var(--primary)]/40'
+        ${
+          theme === 'light'
+            ? 'bg-white border-black/10 hover:border-[var(--primary)]/40'
+            : 'bg-[#1a1a1c] border-white/10 hover:border-[var(--primary)]/40'
         }
         ${!item.is_active ? 'opacity-60' : ''}
       `}
     >
       {/* Icon */}
       <div className="mb-3">
-        <div className={`
+        <div
+          className={`
           w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden
           ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-        `}>
+        `}
+        >
           {item.avatar_url ? (
-            <img
-              src={item.avatar_url}
-              alt={item.name}
-              className="w-full h-full object-cover"
-            />
+            <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover" />
           ) : (
-            <img
-              src="/favicon.svg"
-              alt="Tesslate"
-              className="w-8 h-8"
-            />
+            <img src="/favicon.svg" alt="Tesslate" className="w-8 h-8" />
           )}
         </div>
       </div>
 
       {/* Title & Badge Row */}
       <div className="flex items-start justify-between gap-2 mb-1">
-        <h3 className={`
+        <h3
+          className={`
           font-heading font-semibold text-sm sm:text-base leading-tight
           group-hover:text-[var(--primary)] transition-colors
           ${theme === 'light' ? 'text-black' : 'text-white'}
-        `}>
+        `}
+        >
           {item.name}
         </h3>
         {item.source_type === 'open' && (
@@ -137,13 +134,20 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
             Open
           </span>
         )}
+        {item.source_type === 'archive' && (
+          <span className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
+            Exported
+          </span>
+        )}
       </div>
 
       {/* Description */}
-      <p className={`
+      <p
+        className={`
         text-xs sm:text-sm leading-relaxed line-clamp-2 mb-3 min-h-[32px] sm:min-h-[40px]
         ${theme === 'light' ? 'text-black/60' : 'text-white/60'}
-      `}>
+      `}
+      >
         {item.description}
       </p>
 
@@ -160,10 +164,12 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
               `}
             >
-              <div className={`
+              <div
+                className={`
                 w-5 h-5 rounded-full overflow-hidden flex-shrink-0
                 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}
-              `}>
+              `}
+              >
                 {item.creator_avatar_url ? (
                   <img
                     src={item.creator_avatar_url}
@@ -183,20 +189,24 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
 
             {/* Rating */}
             {item.rating > 0 && (
-              <div className={`
+              <div
+                className={`
                 flex items-center gap-1 text-xs
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
-              `}>
+              `}
+              >
                 <Star size={12} weight="fill" className="text-amber-400" />
                 <span>{item.rating.toFixed(1)}</span>
               </div>
             )}
 
             {/* Uses Count */}
-            <div className={`
+            <div
+              className={`
               flex items-center gap-1 text-xs
               ${theme === 'light' ? 'text-black/40' : 'text-white/40'}
-            `}>
+            `}
+            >
               <Lightning size={12} weight="fill" />
               <span>{formatInstalls(usageCount)} uses</span>
             </div>
@@ -221,18 +231,20 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
               disabled={!item.is_active}
               className={`
                 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all
-                ${item.is_active
-                  ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md'
-                  : theme === 'light'
-                    ? 'bg-black/5 text-black/40 cursor-not-allowed'
-                    : 'bg-white/5 text-white/40 cursor-not-allowed'
+                ${
+                  item.is_active
+                    ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md'
+                    : theme === 'light'
+                      ? 'bg-black/5 text-black/40 cursor-not-allowed'
+                      : 'bg-white/5 text-white/40 cursor-not-allowed'
                 }
               `}
             >
               {item.is_active
-                ? (item.pricing_type === 'free' ? 'Install' : `$${item.price}/mo`)
-                : 'Soon'
-              }
+                ? item.pricing_type === 'free'
+                  ? 'Install'
+                  : `$${item.price}/mo`
+                : 'Soon'}
             </button>
           )}
         </div>

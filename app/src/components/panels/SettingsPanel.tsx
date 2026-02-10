@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Check, Layers } from 'lucide-react';
+import { Settings, Monitor, Check, Layers, Package } from 'lucide-react';
 import { ChatCentered } from '@phosphor-icons/react';
 import { projectsApi } from '../../lib/api';
 import { useChatPosition, type ChatPosition } from '../../contexts/ChatPositionContext';
+import { ExportTemplateModal } from '../modals/ExportTemplateModal';
 import toast from 'react-hot-toast';
 
 interface SettingsPanelProps {
@@ -17,6 +18,7 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingChatPos, setSavingChatPos] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const { chatPosition, setChatPosition } = useChatPosition();
 
   useEffect(() => {
@@ -275,7 +277,47 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
             </div>
           </div>
         </div>
+
+        {/* Divider */}
+        <div className="border-t border-[var(--text)]/10 my-6" />
+
+        {/* Template Export */}
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Package size={18} className="text-[var(--text)]/60" />
+              <h3 className="text-sm font-medium text-[var(--text)]">Template Export</h3>
+            </div>
+            <p className="text-xs text-[var(--text)]/60 mb-4">
+              Share this project as a reusable template on the marketplace
+            </p>
+
+            <button
+              onClick={() => setShowExportModal(true)}
+              className="w-full p-4 rounded-lg border-2 border-[var(--text)]/15 bg-white/5 hover:border-[var(--primary)]/50 hover:bg-[var(--primary)]/5 transition-all cursor-pointer text-left"
+            >
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-white/10">
+                  <Package size={20} className="text-[var(--text)]/60" />
+                </div>
+                <div className="flex-1">
+                  <span className="font-medium text-[var(--text)]">Export as Template</span>
+                  <p className="text-xs text-[var(--text)]/60 mt-1">
+                    Package your project files into a shareable template archive
+                  </p>
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
       </div>
+
+      <ExportTemplateModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onSuccess={() => {}}
+        projectSlug={projectSlug}
+      />
     </div>
   );
 }

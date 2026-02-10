@@ -132,8 +132,8 @@ interface LibraryBase {
   slug: string;
   description: string;
   long_description?: string;
-  git_repo_url: string;
-  default_branch: string;
+  git_repo_url?: string;
+  default_branch?: string;
   category: string;
   icon: string;
   visibility: 'private' | 'public';
@@ -142,6 +142,8 @@ interface LibraryBase {
   tech_stack?: string[];
   downloads: number;
   rating: number;
+  source_type?: 'git' | 'archive';
+  archive_size_bytes?: number;
   created_at: string;
 }
 
@@ -566,8 +568,14 @@ export default function Library() {
             <BasesTab
               bases={bases}
               loading={loading}
-              onSubmit={() => { setEditingBase(null); setShowSubmitBaseModal(true); }}
-              onEdit={(base) => { setEditingBase(base); setShowSubmitBaseModal(true); }}
+              onSubmit={() => {
+                setEditingBase(null);
+                setShowSubmitBaseModal(true);
+              }}
+              onEdit={(base) => {
+                setEditingBase(base);
+                setShowSubmitBaseModal(true);
+              }}
               onToggleVisibility={handleToggleBaseVisibility}
               onDelete={handleDeleteBase}
             />
@@ -643,7 +651,10 @@ export default function Library() {
       {/* Submit/Edit Base Modal */}
       <SubmitBaseModal
         isOpen={showSubmitBaseModal}
-        onClose={() => { setShowSubmitBaseModal(false); setEditingBase(null); }}
+        onClose={() => {
+          setShowSubmitBaseModal(false);
+          setEditingBase(null);
+        }}
         onSuccess={loadCreatedBases}
         editBase={editingBase}
       />
@@ -901,20 +912,23 @@ function BasesTab({
                     <span className="text-xs text-[var(--text)]/40">{base.category}</span>
                   </div>
                 </div>
-                {/* Visibility badge */}
-                <div
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    base.visibility === 'public'
-                      ? 'bg-green-500/20 text-green-400'
-                      : 'bg-gray-500/20 text-gray-400'
-                  }`}
-                >
-                  {base.visibility === 'public' ? (
-                    <Globe size={10} />
-                  ) : (
-                    <LockKey size={10} />
+                {/* Badges */}
+                <div className="flex items-center gap-1.5">
+                  {base.source_type === 'archive' && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-500/20 text-purple-400">
+                      Exported
+                    </span>
                   )}
-                  {base.visibility}
+                  <div
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                      base.visibility === 'public'
+                        ? 'bg-green-500/20 text-green-400'
+                        : 'bg-gray-500/20 text-gray-400'
+                    }`}
+                  >
+                    {base.visibility === 'public' ? <Globe size={10} /> : <LockKey size={10} />}
+                    {base.visibility}
+                  </div>
                 </div>
               </div>
 
@@ -939,6 +953,13 @@ function BasesTab({
               <div className="flex items-center gap-3 mb-4 text-xs text-[var(--text)]/40">
                 <span>{base.downloads || 0} downloads</span>
                 <span>{base.rating?.toFixed(1) || '5.0'} rating</span>
+                {base.source_type === 'archive' && base.archive_size_bytes && (
+                  <span>
+                    {base.archive_size_bytes < 1024 * 1024
+                      ? `${(base.archive_size_bytes / 1024).toFixed(0)} KB`
+                      : `${(base.archive_size_bytes / 1024 / 1024).toFixed(1)} MB`}
+                  </span>
+                )}
               </div>
 
               {/* Actions */}

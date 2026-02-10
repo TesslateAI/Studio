@@ -6,3 +6,4 @@ export { ConfirmDialog } from './ConfirmDialog';
 export { CreateProjectModal } from './CreateProjectModal';
 export { DeploymentModal } from './DeploymentModal';
 export { SubmitBaseModal } from './SubmitBaseModal';
+export { ExportTemplateModal } from './ExportTemplateModal';

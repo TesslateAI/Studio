@@ -828,8 +828,16 @@ class MarketplaceBase(Base):
     long_description = Column(Text, nullable=True)
 
     # Git repository for template
-    git_repo_url = Column(String(500), nullable=False)
+    git_repo_url = Column(String(500), nullable=True)
     default_branch = Column(String(100), default="main")
+
+    # Template archive fields (for exported app templates)
+    source_type = Column(String(20), default="git", server_default="git", nullable=False)
+    archive_path = Column(String(500), nullable=True)
+    archive_size_bytes = Column(BigInteger, nullable=True)
+    source_project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Template metadata
     category = Column(String, nullable=False)  # fullstack, frontend, backend, mobile, etc.

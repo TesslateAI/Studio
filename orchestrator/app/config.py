@@ -358,6 +358,12 @@ class Settings(BaseSettings):
     two_fa_temp_token_expiry_seconds: int = 600  # 10 minutes
 
     # ==========================================================================
+    # Template Export Configuration
+    # ==========================================================================
+    template_storage_path: str = "/templates"
+    template_max_size_mb: int = 100
+
+    # ==========================================================================
     # Container Cleanup Configuration
     # ==========================================================================
     # Two-tier cleanup system for idle dev containers

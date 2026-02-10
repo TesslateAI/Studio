@@ -42,6 +42,7 @@ from ..models import (
     ProjectAsset,
     ProjectFile,
     User,
+    UserPurchasedBase,
 )
 from ..schemas import BrowserPreview as BrowserPreviewSchema
 from ..schemas import (
@@ -52,6 +53,7 @@ from ..schemas import (
     ContainerRename,
     ContainerUpdate,
     ProjectCreate,
+    TemplateExportRequest,
 )
 from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
@@ -536,6 +538,140 @@ async def _setup_github_project(
     await db.commit()
 
 
+async def _setup_archive_base_project(
+    base_repo: MarketplaceBase,
+    db_project: Project,
+    user_id: UUID,
+    settings,
+    db: AsyncSession,
+    task: Task,
+    project_path: str,
+) -> str:
+    """Setup project from an archive-based marketplace base (exported template)."""
+    import subprocess
+
+    from ..services.template_export import extract_archive_to_directory
+    from ..services.template_storage import get_template_storage
+
+    use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
+
+    if not base_repo.archive_path:
+        raise ValueError("Archive template has no archive file. Export may still be in progress.")
+
+    task.update_progress(20, 100, "Retrieving template archive...")
+
+    storage = get_template_storage()
+    archive_bytes = await storage.retrieve_archive(base_repo.archive_path)
+
+    task.update_progress(40, 100, "Extracting template files...")
+
+    if settings.deployment_mode == "docker" and use_volumes:
+        volume_project_path = f"/projects/{db_project.slug}"
+        os.makedirs(volume_project_path, exist_ok=True)
+        files_extracted = await extract_archive_to_directory(archive_bytes, volume_project_path)
+
+        # Fix permissions for devserver (runs as user 1000:1000)
+        subprocess.run(["chown", "-R", "1000:1000", volume_project_path], check=True)
+        logger.info(f"[CREATE] Extracted {files_extracted} files to volume: {volume_project_path}")
+        task.update_progress(80, 100, f"Extracted {files_extracted} files")
+
+    elif settings.deployment_mode == "kubernetes":
+        # K8s: Extract to temp directory and save to DB
+        import tempfile
+
+        temp_dir = tempfile.mkdtemp(prefix=f"archive-extract-{db_project.slug}-")
+        try:
+            files_extracted = await extract_archive_to_directory(archive_bytes, temp_dir)
+            task.update_progress(60, 100, "Saving files to database...")
+
+            files_saved = 0
+            walk_results = await walk_directory_async(
+                temp_dir,
+                exclude_dirs=[
+                    "node_modules",
+                    ".git",
+                    "dist",
+                    "build",
+                    ".next",
+                    "__pycache__",
+                    "venv",
+                ],
+            )
+            for root, _dirs, files in walk_results:
+                for file in files:
+                    if file.startswith(".") or file.endswith(
+                        (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
+                    ):
+                        continue
+                    file_full_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_full_path, temp_dir).replace("\\", "/")
+                    try:
+                        content = await read_file_async(file_full_path)
+                        db_file = ProjectFile(
+                            project_id=db_project.id, file_path=relative_path, content=content
+                        )
+                        db.add(db_file)
+                        files_saved += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"[CREATE] Could not read extracted file {relative_path}: {e}"
+                        )
+
+            await db.commit()
+            task.update_progress(80, 100, f"Saved {files_saved} files to database")
+            logger.info(f"[CREATE] Saved {files_saved} extracted files for K8s mode")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    else:
+        # Bind mount mode
+        os.makedirs(project_path, exist_ok=True)
+        files_extracted = await extract_archive_to_directory(archive_bytes, project_path)
+        task.update_progress(80, 100, f"Extracted {files_extracted} files")
+
+    await db.commit()
+
+    # Create container linked to the base
+    task.update_progress(90, 100, "Creating container from template")
+
+    # Check for TESSLATE.md in the archive for port config
+    from ..services.base_config_parser import parse_tesslate_md
+
+    internal_port = 3000  # Default fallback
+    if settings.deployment_mode == "docker" and use_volumes:
+        tesslate_path = os.path.join(f"/projects/{db_project.slug}", "TESSLATE.md")
+    else:
+        tesslate_path = os.path.join(project_path, "TESSLATE.md")
+
+    if os.path.exists(tesslate_path):
+        try:
+            tesslate_content = await read_file_async(tesslate_path)
+            base_config = parse_tesslate_md(tesslate_content)
+            internal_port = base_config.port
+            logger.info(f"[CREATE] Parsed port {internal_port} from template TESSLATE.md")
+        except Exception as e:
+            logger.warning(f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000")
+
+    container = Container(
+        project_id=db_project.id,
+        base_id=base_repo.id,
+        name=base_repo.slug.lower(),
+        directory=".",
+        container_name=f"{db_project.slug}-{base_repo.slug.lower()}",
+        internal_port=internal_port,
+        container_type="base",
+        status="stopped",
+        position_x=200,
+        position_y=200,
+    )
+    db.add(container)
+    await db.commit()
+    await db.refresh(container)
+    logger.info(f"[CREATE] Created container {container.id} from archive template {base_repo.slug}")
+
+    return str(container.id)
+
+
 async def _setup_base_project(
     project_data: ProjectCreate,
     db_project: Project,
@@ -580,6 +716,12 @@ async def _setup_base_project(
 
     # Note: MarketplaceBase doesn't have a metadata column - framework detection
     # happens via TESSLATE.md parsing during container startup
+
+    # Handle archive-based templates (exported from projects)
+    if base_repo.source_type == "archive":
+        return await _setup_archive_base_project(
+            base_repo, db_project, user_id, settings, db, task, project_path
+        )
 
     # Track if we're using a temp clone directory (for K8s mode without local cache)
     # Must be defined before try block so finally block can reference it
@@ -1960,6 +2102,156 @@ async def update_project_settings(
         await db.rollback()
         logger.error(f"[SETTINGS] Failed to update settings: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}") from e
+
+
+@router.post("/{project_slug}/export-template")
+async def export_project_as_template(
+    project_slug: str,
+    export_data: TemplateExportRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export a project as a reusable template archive.
+
+    Creates a MarketplaceBase record with source_type='archive' and starts
+    a background task to package the project files into a tar.gz archive.
+    """
+    settings = get_settings()
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    # Create the marketplace base record
+    template_slug = generate_project_slug(export_data.name)
+
+    marketplace_base = MarketplaceBase(
+        name=export_data.name,
+        slug=template_slug,
+        description=export_data.description,
+        long_description=export_data.long_description,
+        category=export_data.category,
+        icon=export_data.icon or "\U0001f4e6",
+        tags=export_data.tags,
+        features=export_data.features,
+        tech_stack=export_data.tech_stack,
+        visibility=export_data.visibility,
+        pricing_type="free",
+        price=0,
+        source_type="archive",
+        git_repo_url=None,
+        source_project_id=project.id,
+        created_by_user_id=current_user.id,
+    )
+    db.add(marketplace_base)
+    await db.flush()
+
+    # Auto-add to user's library
+    user_purchase = UserPurchasedBase(
+        user_id=current_user.id,
+        base_id=marketplace_base.id,
+        purchase_type="free",
+        is_active=True,
+    )
+    db.add(user_purchase)
+    await db.commit()
+    await db.refresh(marketplace_base)
+
+    base_id = marketplace_base.id
+
+    # Capture ORM values before request session closes
+    proj_slug = project.slug
+    proj_id = project.id
+    user_id = current_user.id
+
+    # Start background export task
+    task_manager = get_task_manager()
+    task = task_manager.create_task(
+        user_id=current_user.id,
+        task_type="template_export",
+        metadata={
+            "template_id": str(base_id),
+            "template_name": export_data.name,
+            "project_slug": project_slug,
+        },
+    )
+
+    async def _run_export():
+        from ..database import AsyncSessionLocal
+        from ..services.template_export import export_project_to_archive
+        from ..services.template_storage import get_template_storage
+
+        try:
+            task.update_progress(5, 100, "Preparing export...")
+
+            # Determine the project path
+            use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
+            if settings.deployment_mode == "docker" and use_volumes:
+                project_path = f"/projects/{proj_slug}"
+            elif settings.deployment_mode == "kubernetes":
+                # K8s: We need to reconstruct from DB files
+                import tempfile
+
+                project_path = tempfile.mkdtemp(prefix=f"export-{proj_slug}-")
+                async with AsyncSessionLocal() as export_db:
+                    result = await export_db.execute(
+                        select(ProjectFile).where(ProjectFile.project_id == proj_id)
+                    )
+                    db_files = result.scalars().all()
+
+                    for db_file in db_files:
+                        file_full_path = os.path.join(project_path, db_file.file_path)
+                        os.makedirs(os.path.dirname(file_full_path), exist_ok=True)
+                        with open(file_full_path, "w") as f:
+                            f.write(db_file.content or "")
+
+                    logger.info(f"[TEMPLATE] Reconstructed {len(db_files)} files for K8s export")
+            else:
+                project_path = os.path.join("/app/projects", proj_slug)
+
+            if not os.path.exists(project_path):
+                raise FileNotFoundError(
+                    f"Project directory not found: {project_path}. "
+                    "Make sure the project containers are running."
+                )
+
+            # Create archive
+            archive_bytes = await export_project_to_archive(
+                project_path,
+                task=task,
+                max_size_mb=settings.template_max_size_mb,
+            )
+
+            # Store archive
+            storage = get_template_storage()
+            archive_path = await storage.store_archive(user_id, base_id, archive_bytes)
+
+            # Update the marketplace base record
+            async with AsyncSessionLocal() as update_db:
+                result = await update_db.execute(
+                    select(MarketplaceBase).where(MarketplaceBase.id == base_id)
+                )
+                base = result.scalar_one()
+                base.archive_path = archive_path
+                base.archive_size_bytes = len(archive_bytes)
+                await update_db.commit()
+
+            task.update_progress(100, 100, "Template exported successfully!")
+            task.result = {"template_id": str(base_id), "slug": template_slug}
+
+            # Cleanup temp dir for K8s
+            if settings.deployment_mode == "kubernetes" and project_path.startswith("/tmp"):
+                shutil.rmtree(project_path, ignore_errors=True)
+
+        except Exception as e:
+            logger.error(f"[TEMPLATE] Export failed: {e}", exc_info=True)
+            task.error = str(e)
+
+    background_tasks.add_task(_run_export)
+
+    return {
+        "id": str(base_id),
+        "slug": template_slug,
+        "task_id": task.id,
+    }
 
 
 @router.post("/{project_id}/fork", response_model=ProjectSchema)

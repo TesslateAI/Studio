@@ -358,6 +358,23 @@ export const projectsApi = {
     const response = await api.patch(`/api/projects/${slug}/settings`, { settings });
     return response.data;
   },
+  exportAsTemplate: async (
+    slug: string,
+    data: {
+      name: string;
+      description: string;
+      category: string;
+      visibility?: string;
+      icon?: string;
+      tags?: string[];
+      tech_stack?: string[];
+      features?: string[];
+      long_description?: string;
+    }
+  ) => {
+    const response = await api.post(`/api/projects/${slug}/export-template`, data);
+    return response.data;
+  },
   forkProject: async (id: string) => {
     const response = await api.post(`/api/projects/${id}/fork`);
     return response.data;
