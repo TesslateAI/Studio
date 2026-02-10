@@ -54,6 +54,11 @@ Tesslate Studio consists of four major systems:
 | `LITELLM_API_BASE` | LLM API endpoint |
 | `S3_BUCKET_NAME` | Project storage bucket |
 | `APP_DOMAIN` | Application domain (localhost, your-domain.com) |
+| `SMTP_HOST` | SMTP server for email (2FA codes, password resets) |
+| `SMTP_PORT` | SMTP port (default: 587) |
+| `SMTP_USERNAME` | SMTP authentication username |
+| `SMTP_PASSWORD` | SMTP authentication password |
+| `SMTP_SENDER_EMAIL` | Sender email address (e.g., noreply@domain.com) |
 
 ### Project URL Patterns
 
@@ -119,6 +124,7 @@ Load this root CLAUDE.md when:
 
 | Task | Go To |
 |------|-------|
+| Email 2FA & password reset | [app/pages/auth.md](app/pages/auth.md) |
 | Set up Docker from scratch | [guides/docker-setup.md](guides/docker-setup.md) |
 | Seed the database | [guides/docker-setup.md](guides/docker-setup.md) (Step 6) or root [CLAUDE.md](../CLAUDE.md) "Database Seeding" |
 | Run database migrations | [guides/database-migrations.md](guides/database-migrations.md) |

@@ -68,7 +68,9 @@ Load this context when:
 ### Settings Pages
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/ProfileSettings.tsx`**: User profile, avatar, bio
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/PreferencesSettings.tsx`**: Theme, diagram model
-- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/SecuritySettings.tsx`**: Password, 2FA, sessions
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/SecuritySettings.tsx`**: Password change, 2FA status display, sessions
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/ForgotPassword.tsx`**: Request password reset email
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/ResetPassword.tsx`**: Set new password via token from email
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/DeploymentSettings.tsx`**: Provider credentials
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/ApiKeysSettings.tsx`**: API key management
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/BillingSettings.tsx`**: Subscription, invoices

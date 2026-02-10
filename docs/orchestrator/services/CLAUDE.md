@@ -51,6 +51,10 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **deployment/providers/netlify.py** - Netlify deployment implementation
 - **deployment/providers/cloudflare.py** - Cloudflare Workers deployment
 
+### Authentication & Email
+- **email_service.py** (174 lines) - `EmailService` for async SMTP email (2FA codes, password reset links), falls back to console logging in dev
+- **two_fa_service.py** (165 lines) - `TwoFAService` for 6-digit code generation, verification (argon2 hash), temp token signing (itsdangerous)
+
 ### Configuration
 - **base_config_parser.py** (560 lines) - Parse TESSLATE.md for project config
 - **service_definitions.py** (1,385 lines) - Database/Redis/etc service definitions
@@ -501,4 +505,18 @@ from services.cache_service import cache
 value = await cache.get("my_key")
 await cache.set("my_key", data, ttl=300)
 models = await cache.get_or_set("models", lambda: fetch_models(), ttl=600)
+
+# Use email service (singleton, async SMTP or console fallback)
+from services.email_service import get_email_service
+email_service = get_email_service()
+await email_service.send_2fa_code("user@example.com", "123456")
+await email_service.send_password_reset("user@example.com", "https://app.com/reset?token=...")
+
+# Use 2FA service
+from services.two_fa_service import TwoFAService
+two_fa = TwoFAService()
+code = await two_fa.create_verification_code(user_id, "2fa_login", db)
+is_valid = await two_fa.verify_code(user_id, "2fa_login", submitted_code, db)
+temp_token = two_fa.create_temp_token(str(user_id))
+user_id = two_fa.validate_temp_token(temp_token)
 ```

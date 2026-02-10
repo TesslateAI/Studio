@@ -25,7 +25,9 @@ Load this context when:
 | Library | `Library.tsx` | `/library` | User's purchased items and API keys |
 | Billing | `BillingDashboard.tsx` | `/billing` | Subscription management |
 | Account Settings | `AccountSettings.tsx` | `/settings` | Profile and preferences |
-| Login | `Login.tsx` | `/login` | JWT and OAuth authentication |
+| Login | `Login.tsx` | `/login` | JWT + email 2FA and OAuth authentication |
+| Forgot Password | `ForgotPassword.tsx` | `/forgot-password` | Request password reset email |
+| Reset Password | `ResetPassword.tsx` | `/reset-password` | Set new password via token |
 | Admin | `AdminDashboard.tsx` | `/admin` | Platform administration |
 
 ## Common Page Patterns
@@ -392,29 +394,48 @@ const [formData, setFormData] = useState({ name: '', email: '' });
 ```
 
 ### Login (`Login.tsx`)
-**Purpose**: User authentication
+**Purpose**: User authentication with mandatory email 2FA
 
 **Features**:
-- Email/password login (JWT)
-- OAuth login (Google, GitHub)
-- Remember me checkbox
+- Email/password login with mandatory 2FA (6-digit email code)
+- OAuth login (Google, GitHub) - bypasses 2FA
 - Forgot password link
 - Register link
 
 **Authentication Flow**:
 ```typescript
-// JWT login
+// Step 1: Submit credentials → get temp token
 const response = await authApi.login(email, password);
-localStorage.setItem('token', response.access_token);
+// response = { requires_2fa: true, temp_token: "...", method: "email" }
+
+// Step 2: Verify 2FA code → get JWT
+const jwt = await authApi.verify2fa(tempToken, code);
+localStorage.setItem('token', jwt.access_token);
+await checkAuth({ force: true });
 navigate('/dashboard');
 
-// OAuth login
+// OAuth login (bypasses 2FA)
 window.location.href = `${API_URL}/api/auth/google/authorize`;
-// OAuth provider redirects to /oauth/callback
-// Callback page checks cookie auth and redirects to /dashboard
 ```
 
 See: `auth.md`
+
+### Forgot Password (`ForgotPassword.tsx`)
+**Purpose**: Start password reset flow
+
+**Features**:
+- Email input form
+- Always shows success (prevents user enumeration)
+- Email with reset link sent asynchronously
+
+### Reset Password (`ResetPassword.tsx`)
+**Purpose**: Complete password reset with token from email
+
+**Features**:
+- Token read from `?token=` URL query param
+- New password + confirmation inputs
+- Validates token signature and expiry
+- Redirects to `/login` on success
 
 ### Admin Dashboard (`AdminDashboard.tsx`)
 **Purpose**: Platform administration

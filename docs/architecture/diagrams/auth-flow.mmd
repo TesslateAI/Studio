@@ -6,7 +6,7 @@ flowchart TD
 
     LoginPage --> ChooseMethod{Auth Method?}
 
-    %% JWT Bearer Token Flow
+    %% Email/Password + 2FA Flow
     ChooseMethod -->|Email/Password| EmailLogin[Enter credentials]
     EmailLogin --> SubmitLogin[POST /api/auth/login]
     SubmitLogin --> ValidateCreds{Credentials<br/>valid?}
@@ -14,12 +14,39 @@ flowchart TD
     ValidateCreds -->|No| LoginError[Show error message]
     LoginError --> LoginPage
 
-    ValidateCreds -->|Yes| GenerateJWT[Generate JWT token:<br/>- user_id<br/>- email<br/>- role<br/>- exp: 7 days]
-    GenerateJWT --> ReturnToken[Return:<br/>- access_token<br/>- token_type: bearer<br/>- user info]
-    ReturnToken --> StoreToken[Store token in localStorage]
-    StoreToken --> Dashboard
+    ValidateCreds -->|Yes| Generate2FA[Generate 6-digit code<br/>Hash with argon2<br/>Store in EmailVerificationCode]
+    Generate2FA --> SendEmail[Send code via email<br/>async, non-blocking]
+    SendEmail --> ReturnTempToken[Return:<br/>- requires_2fa: true<br/>- temp_token signed<br/>- method: email]
+    ReturnTempToken --> Show2FAInput[Show 2FA code input<br/>6 digit boxes]
 
-    %% OAuth Flow
+    Show2FAInput --> UserEntersCode[User enters 6-digit code]
+    UserEntersCode --> Submit2FA[POST /api/auth/2fa/verify<br/>temp_token + code]
+    Submit2FA --> ValidateToken{Temp token<br/>valid?}
+
+    ValidateToken -->|No - Expired/Invalid| TokenError[Show error:<br/>Token expired]
+    TokenError --> LoginPage
+
+    ValidateToken -->|Yes| VerifyCode{Code<br/>correct?}
+
+    VerifyCode -->|No| CheckAttempts{Attempts<br/>&lt; 5?}
+    CheckAttempts -->|Yes| CodeError[Show error:<br/>Wrong code]
+    CodeError --> Show2FAInput
+    CheckAttempts -->|No| MaxAttempts[Code invalidated<br/>Must resend]
+    MaxAttempts --> Show2FAInput
+
+    VerifyCode -->|Yes| MarkUsed[Mark code as used]
+    MarkUsed --> GenerateJWT[Generate JWT token:<br/>- user_id<br/>- email<br/>- exp: 7 days]
+    GenerateJWT --> ReturnToken[Return access_token]
+    ReturnToken --> StoreToken[Store token in localStorage]
+    StoreToken --> ForceCheckAuth[checkAuth force: true<br/>Update AuthContext]
+    ForceCheckAuth --> Dashboard
+
+    %% Resend Code
+    Show2FAInput --> ResendCode{Resend code?<br/>60s cooldown}
+    ResendCode -->|Yes| ResendRequest[POST /api/auth/2fa/resend<br/>temp_token]
+    ResendRequest --> Generate2FA
+
+    %% OAuth Flow (bypasses 2FA)
     ChooseMethod -->|OAuth - GitHub| GitHubOAuth[Redirect to GitHub OAuth]
     ChooseMethod -->|OAuth - Google| GoogleOAuth[Redirect to Google OAuth]
 
@@ -49,17 +76,23 @@ flowchart TD
     StoreOAuthToken --> RedirectDashboard[Redirect to dashboard]
     RedirectDashboard --> Dashboard
 
-    %% Cookie-based Session Flow
-    ChooseMethod -->|Session Cookie| SessionAuth[Cookie sent automatically<br/>by browser]
+    %% Password Reset Flow
+    LoginPage --> ForgotPwd{Forgot<br/>password?}
+    ForgotPwd -->|Yes| ForgotPage[/forgot-password page]
+    ForgotPage --> SubmitForgot[POST /api/auth/forgot-password<br/>email]
+    SubmitForgot --> GenerateResetToken[Generate signed reset token<br/>1 hour expiry]
+    GenerateResetToken --> SendResetEmail[Send reset URL via email<br/>async, non-blocking]
+    SendResetEmail --> ShowSuccess[Always show success<br/>prevents email enumeration]
 
-    SessionAuth --> CheckCookie{Cookie<br/>valid?}
+    ShowSuccess --> UserClicksLink[User clicks email link]
+    UserClicksLink --> ResetPage[/reset-password?token=...]
+    ResetPage --> SubmitReset[POST /api/auth/reset-password<br/>token + new password]
+    SubmitReset --> ValidateResetToken{Token<br/>valid?}
 
-    CheckCookie -->|No| CookieError[Clear cookie]
-    CookieError --> LoginPage
-
-    CheckCookie -->|Yes| ExtractUserId[Extract user_id from JWT]
-    ExtractUserId --> LoadUserSession[Load user from database]
-    LoadUserSession --> Dashboard
+    ValidateResetToken -->|No| ResetError[Show error:<br/>Invalid/expired token]
+    ValidateResetToken -->|Yes| UpdatePassword[Update user.hashed_password]
+    UpdatePassword --> ResetSuccess[Show success message]
+    ResetSuccess --> LoginPage
 
     %% Authenticated Requests
     Dashboard --> MakeRequest[User makes API request]
@@ -77,16 +110,8 @@ flowchart TD
     VerifyJWT -->|No - Invalid| Return401
     VerifyJWT -->|Yes| ExtractUser[Extract user from JWT]
 
-    Return401 --> TriggerRefresh{Refresh<br/>available?}
-
-    TriggerRefresh -->|No| ClearAuth[Clear auth state]
+    Return401 --> ClearAuth[Clear auth state]
     ClearAuth --> LoginPage
-
-    TriggerRefresh -->|Yes| RefreshToken[POST /api/auth/refresh]
-    RefreshToken --> GenerateNewJWT[Generate new JWT token]
-    GenerateNewJWT --> ReturnNewToken[Return new access_token]
-    ReturnNewToken --> StoreToken
-    StoreToken --> MakeRequest
 
     ExtractUser --> AttachToRequest[Attach user to request.state]
     AttachToRequest --> RouteHandler[Route handler executes]
@@ -121,10 +146,11 @@ flowchart TD
     classDef error fill:#f44336,stroke:#333,stroke-width:2px,color:#fff
     classDef success fill:#8bc34a,stroke:#333,stroke-width:2px,color:#000
     classDef external fill:#9c27b0,stroke:#333,stroke-width:2px,color:#fff
+    classDef twofa fill:#00bcd4,stroke:#333,stroke-width:2px,color:#fff
 
     class Start,Dashboard startEnd
-    class EmailLogin,SubmitLogin,GenerateJWT,ReturnToken,StoreToken,OAuthCallback,ExchangeCode,GetUserInfo,CreateUser,UpdateUser,GenerateSessionJWT,SetCookie,StoreOAuthToken,SessionAuth,ExtractUserId,LoadUserSession,MakeRequest,AddAuthHeader,SendCookie,APIMiddleware,ExtractUser,AttachToRequest,RouteHandler,ProcessRequest,GenerateNewJWT,ReturnNewToken,RefreshToken,GenerateCSRF,ClearTokens process
-    class CheckAuth,ChooseMethod,ValidateCreds,UserAuthorize,CheckUserExists,CheckCookie,CheckAuthType,VerifyJWT,TriggerRefresh,CheckPermissions,CSRFCheck,ValidateCSRF,LogoutAction decision
-    class LoginError,OAuthCancel,CookieError,Return401,Return403,ClearAuth error
+    class EmailLogin,SubmitLogin,Generate2FA,SendEmail,ReturnTempToken,Show2FAInput,UserEntersCode,Submit2FA,MarkUsed,GenerateJWT,ReturnToken,StoreToken,ForceCheckAuth,ResendRequest,OAuthCallback,ExchangeCode,GetUserInfo,CreateUser,UpdateUser,GenerateSessionJWT,SetCookie,StoreOAuthToken,SessionAuth,ExtractUserId,LoadUserSession,MakeRequest,AddAuthHeader,SendCookie,APIMiddleware,ExtractUser,AttachToRequest,RouteHandler,ProcessRequest,GenerateNewJWT,ReturnNewToken,RefreshToken,GenerateCSRF,ClearTokens,ForgotPage,SubmitForgot,GenerateResetToken,SendResetEmail,ShowSuccess,UserClicksLink,ResetPage,SubmitReset,UpdatePassword,ResetSuccess process
+    class CheckAuth,ChooseMethod,ValidateCreds,ValidateToken,VerifyCode,CheckAttempts,UserAuthorize,CheckUserExists,CheckAuthType,VerifyJWT,CheckPermissions,CSRFCheck,ValidateCSRF,LogoutAction,ForgotPwd,ValidateResetToken,ResendCode decision
+    class LoginError,TokenError,CodeError,MaxAttempts,OAuthCancel,CookieError,Return401,Return403,ClearAuth,ResetError error
     class RedirectDashboard,ReturnResponse success
     class GitHubOAuth,GoogleOAuth,OAuthProvider external

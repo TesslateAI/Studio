@@ -97,6 +97,7 @@ await orchestrator.start_project(project, containers, connections, user_id, db)
 |--------|-----------|---------|
 | projects | `/api/projects` | Project CRUD, files, containers |
 | chat | `/api/chat` | Agent chat, streaming |
+| two_fa | `/api/auth` | Email 2FA login, verification, password reset |
 | marketplace | `/api/marketplace` | Agent/base marketplace |
 | billing | `/api/billing` | Subscriptions, credits |
 | git | `/api/git` | Git operations |

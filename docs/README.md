@@ -50,6 +50,7 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │                     External Services                             │   │
 │  │  LiteLLM (AI)   Stripe (billing)   OAuth (GitHub/Google)         │   │
+│  │  SMTP Email (2FA, password reset)                                │   │
 │  │  Vercel/Netlify/Cloudflare (external deployment)                 │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
@@ -194,5 +195,5 @@ When adding new documentation:
 
 ## Version
 
-Documentation version: 2026.1
-Last updated: January 2026
+Documentation version: 2026.2
+Last updated: February 2026

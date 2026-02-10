@@ -27,9 +27,10 @@
 ### Core Application Models
 **User** (models_auth.py)
 - Purpose: User accounts with subscription, billing, and profile data
-- Key fields: `email`, `username`, `subscription_tier`, `stripe_customer_id`, `credits_balance`, `theme_preset`
+- Key fields: `email`, `username`, `subscription_tier`, `stripe_customer_id`, `credits_balance`, `theme_preset`, `two_fa_enabled`, `two_fa_method`
 - Related: FastAPI-Users compatible (email/password + OAuth), `created_bases` relationship for user-submitted bases
 - Theme: `theme_preset` field stores user's selected theme ID (default: "default-dark")
+- 2FA: `two_fa_enabled` (bool, default False), `two_fa_method` (string, default "email") - currently all email/password logins require 2FA regardless of the flag
 
 **Project** (models.py)
 - Purpose: User projects with multi-container support
@@ -183,6 +184,14 @@
 **ProjectNote** (models_kanban.py)
 - Purpose: Rich text notes (TipTap editor)
 - Key fields: `project_id`, `content`, `content_format`
+
+### Authentication Models
+**EmailVerificationCode** (models.py)
+- Purpose: Store hashed 2FA codes and password reset tokens
+- Key fields: `user_id` (FK users, CASCADE), `code_hash` (argon2), `purpose` ("2fa_login"/"password_reset"), `attempts` (int), `max_attempts` (default 5), `expires_at`, `used` (bool)
+- Index: `ix_email_verification_codes_user_id` on `user_id`
+- Security: Codes are hashed with argon2 (via `get_password_hash()`), never stored plaintext
+- Lifecycle: Created on login, invalidated on successful verification or max attempts exceeded, cleaned up after 1 hour
 
 ### Feedback System Models
 **FeedbackPost** (models.py)
@@ -464,6 +473,7 @@ await db.commit()
 id, email, hashed_password, is_active, is_verified, name, username, slug
 subscription_tier, stripe_customer_id, credits_balance, total_spend
 litellm_api_key, avatar_url, bio, referral_code
+two_fa_enabled, two_fa_method
 ```
 
 ### Project Fields

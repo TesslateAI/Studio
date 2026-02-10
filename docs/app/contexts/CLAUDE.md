@@ -62,6 +62,18 @@ interface AuthContextValue {
   checkAuth: (options?: { force?: boolean }) => Promise<boolean>;
   clearError: () => void;
 }
+```
+
+### 2FA Integration
+
+After successful 2FA verification, the Login page must call `checkAuth({ force: true })` to update the AuthContext state. Without this, the context may still show `unauthenticated` even though a valid JWT was stored, causing redirect loops.
+
+```typescript
+// After 2FA verification stores the JWT:
+localStorage.setItem('token', response.access_token);
+await checkAuth({ force: true }); // Critical: force AuthContext refresh
+navigate('/dashboard');
+```
 
 interface AuthUser {
   id: string;
