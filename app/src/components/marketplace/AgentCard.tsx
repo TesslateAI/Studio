@@ -187,9 +187,9 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
 
       {/* Footer */}
       <div className="mt-auto pt-3 border-t border-white/5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-y-2">
           {/* Author & Stats */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Creator Avatar */}
             <button
               onClick={handleCreatorClick}
@@ -247,7 +247,7 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
           </div>
 
           {/* Install / Fork Buttons */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
             {item.is_purchased &&
               isAuthenticated &&
               item.source_type === 'open' &&
