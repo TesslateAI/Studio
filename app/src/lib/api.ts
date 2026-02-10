@@ -83,12 +83,16 @@ api.interceptors.response.use(
       const isTasksApi = error.config?.url?.includes('/api/tasks/');
       const isMarketplacePage = window.location.pathname.startsWith('/marketplace');
       const isPreferencesApi = error.config?.url?.includes('/api/users/preferences');
+      const isPasswordResetPage =
+        window.location.pathname === '/forgot-password' ||
+        window.location.pathname === '/reset-password';
 
       // Skip redirect for:
       // - Tasks API (transient errors during background operations)
       // - Marketplace pages (public access, 401 is expected for unauthenticated)
       // - Preferences API (optional, fails silently for unauthenticated)
-      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi) {
+      // - Password reset pages (public, no auth required)
+      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi && !isPasswordResetPage) {
         localStorage.removeItem('token');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
@@ -187,6 +191,17 @@ export const authApi = {
   getGoogleAuthUrl: async () => {
     const response = await api.get('/api/auth/google/authorize');
     return response.data.authorization_url;
+  },
+
+  // Password reset
+  forgotPassword: async (email: string) => {
+    const response = await api.post('/api/auth/forgot-password', { email });
+    return response.data;
+  },
+
+  resetPassword: async (token: string, password: string) => {
+    const response = await api.post('/api/auth/reset-password', { token, password });
+    return response.data;
   },
 };
 

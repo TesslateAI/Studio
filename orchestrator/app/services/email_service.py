@@ -8,6 +8,7 @@ when SMTP is not configured (local development).
 import logging
 from email.message import EmailMessage
 from functools import lru_cache
+from html import escape as html_escape
 
 import aiosmtplib
 
@@ -67,6 +68,35 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send 2FA email to {to_email}: {e}")
 
+    async def send_password_reset(self, to_email: str, reset_url: str) -> None:
+        """
+        Send a password reset link via email.
+
+        If SMTP is not configured, logs the reset URL to the console instead.
+        This is non-blocking and safe to fire-and-forget via asyncio.create_task.
+        """
+        subject = "Reset your Tesslate password"
+
+        if not self.is_configured:
+            logger.info(
+                f"[EMAIL-DEV] Password reset for {to_email}: {reset_url} "
+                "(SMTP not configured, printing to console)"
+            )
+            return
+
+        try:
+            html = _build_password_reset_html(reset_url)
+            plain = (
+                f"You requested a password reset for your Tesslate account.\n\n"
+                f"Click the link below to reset your password:\n{reset_url}\n\n"
+                "This link expires in 1 hour.\n"
+                "If you did not request a password reset, you can safely ignore this email."
+            )
+            await self._send(to_email, subject, plain, html)
+            logger.info(f"Password reset email sent to {to_email}")
+        except Exception as e:
+            logger.error(f"Failed to send password reset email to {to_email}: {e}")
+
     async def _send(self, to_email: str, subject: str, plain: str, html: str | None = None) -> None:
         """Send an email via SMTP with optional HTML body."""
         msg = EmailMessage()
@@ -106,6 +136,33 @@ def _build_2fa_html(digits: list[str]) -> str:
         "</div>"
         '<p style="color: #999; font-size: 12px;">'
         "If you didn&#39;t request this code, you can safely ignore this email."
+        "</p>"
+        "</div>"
+    )
+
+
+def _build_password_reset_html(reset_url: str) -> str:
+    """Build a styled HTML email for password reset."""
+    safe_url = html_escape(reset_url, quote=True)
+    return (
+        '<div style="font-family: -apple-system, BlinkMacSystemFont,'
+        " 'Segoe UI', Roboto, sans-serif; max-width: 480px;"
+        ' margin: 0 auto; padding: 40px 20px;">'
+        '<h2 style="color: #111; margin-bottom: 8px;">Reset your password</h2>'
+        '<p style="color: #666; font-size: 14px; margin-bottom: 24px;">'
+        "Click the button below to reset your password. This link expires in 1 hour."
+        "</p>"
+        '<div style="text-align: center; margin-bottom: 24px;">'
+        f'<a href="{safe_url}" style="display: inline-block; background: #111;'
+        " color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none;"
+        ' font-weight: 600; font-size: 14px;">Reset Password</a>'
+        "</div>"
+        '<p style="color: #999; font-size: 12px; margin-bottom: 16px;">'
+        "If the button doesn&#39;t work, copy and paste this link into your browser:"
+        "</p>"
+        f'<p style="color: #666; font-size: 12px; word-break: break-all;">{safe_url}</p>'
+        '<p style="color: #999; font-size: 12px; margin-top: 24px;">'
+        "If you didn&#39;t request this, you can safely ignore this email."
         "</p>"
         "</div>"
     )
