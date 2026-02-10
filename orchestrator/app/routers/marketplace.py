@@ -2972,3 +2972,18 @@ async def increment_workflow_downloads(
     await db.commit()
 
     return {"success": True, "downloads": workflow.downloads}
+
+
+@router.get("/services/{slug}")
+async def get_service_definition(
+    slug: str,
+    current_user: User = Depends(current_active_user),
+):
+    """Return a service definition by slug (for credential field metadata)."""
+    from ..services.service_definitions import get_service, service_to_dict
+
+    service = get_service(slug)
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    return service_to_dict(service)

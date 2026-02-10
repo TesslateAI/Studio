@@ -50,6 +50,7 @@ from ..schemas import (
     BrowserPreviewUpdate,
     ContainerConnectionCreate,
     ContainerCreate,
+    ContainerCredentialUpdate,
     ContainerRename,
     ContainerUpdate,
     ProjectCreate,
@@ -4395,6 +4396,77 @@ async def update_container(
         await db.rollback()
         logger.error(f"[CONTAINER] Failed to update container: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update container: {str(e)}") from e
+
+
+@router.put("/{project_slug}/containers/{container_id}/credentials", response_model=ContainerSchema)
+async def update_container_credentials(
+    project_slug: str,
+    container_id: UUID,
+    body: ContainerCredentialUpdate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update credentials for an external service container."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    if container.deployment_mode != "external":
+        raise HTTPException(status_code=400, detail="Container is not an external service")
+
+    try:
+        from ..services.deployment_encryption import get_deployment_encryption_service
+
+        encryption_service = get_deployment_encryption_service()
+        encrypted = encryption_service.encrypt(json.dumps(body.credentials))
+
+        # Update existing credential or create a new one
+        credential = None
+        if container.credentials_id:
+            credential = await db.get(DeploymentCredential, container.credentials_id)
+
+        if credential:
+            credential.access_token_encrypted = encrypted
+            if body.external_endpoint is not None:
+                credential.provider_metadata = {
+                    **(credential.provider_metadata or {}),
+                    "external_endpoint": body.external_endpoint,
+                }
+                flag_modified(credential, "provider_metadata")
+        else:
+            credential = DeploymentCredential(
+                user_id=current_user.id,
+                project_id=project.id,
+                provider=container.service_slug or "external",
+                access_token_encrypted=encrypted,
+                provider_metadata={
+                    "service_type": "external",
+                    "external_endpoint": body.external_endpoint,
+                },
+            )
+            db.add(credential)
+            await db.flush()
+            container.credentials_id = credential.id
+
+        if body.external_endpoint is not None:
+            container.external_endpoint = body.external_endpoint
+
+        await db.commit()
+        await db.refresh(container)
+
+        logger.info(f"[CONTAINER] Updated credentials for container {container_id}")
+
+        injected = await get_injected_env_vars_for_container(db, container.id, project.id)
+        return _container_response(container, injected_env_vars=injected)
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to update credentials: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update credentials: {str(e)}"
+        ) from e
 
 
 @router.post("/{project_slug}/containers/{container_id}/rename", response_model=ContainerSchema)

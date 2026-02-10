@@ -182,6 +182,13 @@ class ContainerUpdate(BaseModel):
     deployment_mode: str | None = None
 
 
+class ContainerCredentialUpdate(BaseModel):
+    """Schema for updating credentials on an external service container."""
+
+    credentials: dict[str, str]
+    external_endpoint: str | None = None
+
+
 class ContainerRename(BaseModel):
     """Schema for renaming a container (includes folder rename)."""
 

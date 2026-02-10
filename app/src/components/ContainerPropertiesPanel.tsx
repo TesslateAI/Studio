@@ -9,10 +9,15 @@ import {
   PencilSimple,
   Check,
   Lock,
+  Key,
 } from '@phosphor-icons/react';
 import api from '../lib/api';
 import { toast } from 'react-hot-toast';
 import { connectionEvents } from '../utils/connectionEvents';
+import {
+  ExternalServiceCredentialModal,
+  type ExternalServiceItem,
+} from './ExternalServiceCredentialModal';
 
 interface SavedEnvVar {
   key: string;
@@ -57,6 +62,14 @@ export const ContainerPropertiesPanel = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(containerName);
   const [isRenamingContainer, setIsRenamingContainer] = useState(false);
+  const [deploymentMode, setDeploymentMode] = useState<string>('container');
+  const [serviceSlug, setServiceSlug] = useState<string | null>(null);
+  const [isCredentialModalOpen, setIsCredentialModalOpen] = useState(false);
+  const [credentialServiceItem, setCredentialServiceItem] = useState<ExternalServiceItem | null>(
+    null
+  );
+
+  const isExternalService = deploymentMode === 'external' && !!serviceSlug;
 
   const fetchContainerDetailsCallback = useCallback(async () => {
     try {
@@ -65,6 +78,8 @@ export const ContainerPropertiesPanel = ({
       const keys: string[] = response.data.env_var_keys || [];
       setSavedEnvVars(keys.map((key) => ({ key, isEditing: false, pendingValue: '' })));
       setInjectedEnvVars(response.data.injected_env_vars || []);
+      setDeploymentMode(response.data.deployment_mode || 'container');
+      setServiceSlug(response.data.service_slug || null);
     } catch (error: unknown) {
       console.error('Failed to fetch container details:', error);
       if ((error as { response?: { status?: number } }).response?.status === 404) {
@@ -259,6 +274,48 @@ export const ContainerPropertiesPanel = ({
     }
   };
 
+  const handleEditCredentials = async () => {
+    if (!serviceSlug) return;
+    try {
+      const response = await api.get(`/api/marketplace/services/${serviceSlug}`);
+      const svc = response.data;
+      setCredentialServiceItem({
+        id: serviceSlug,
+        name: svc.name,
+        slug: svc.slug,
+        icon: svc.icon,
+        service_type: svc.service_type,
+        credential_fields: svc.credential_fields || [],
+        auth_type: svc.auth_type,
+        docs_url: svc.docs_url,
+      });
+      setIsCredentialModalOpen(true);
+    } catch (error) {
+      console.error('Failed to fetch service definition:', error);
+      toast.error('Failed to load service details');
+    }
+  };
+
+  const handleCredentialSubmit = async (
+    credentials: Record<string, string>,
+    externalEndpoint?: string
+  ) => {
+    try {
+      await api.put(`/api/projects/${projectSlug}/containers/${containerId}/credentials`, {
+        credentials,
+        external_endpoint: externalEndpoint,
+      });
+      toast.success('Credentials updated successfully');
+      setIsCredentialModalOpen(false);
+      // Refresh to pick up any changes
+      fetchContainerDetailsCallback();
+    } catch (error) {
+      console.error('Failed to update credentials:', error);
+      toast.error('Failed to update credentials');
+      setIsCredentialModalOpen(false);
+    }
+  };
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -378,6 +435,19 @@ export const ContainerPropertiesPanel = ({
             </button>
           </div>
         </div>
+
+        {/* Edit Credentials (external services only) */}
+        {isExternalService && (
+          <div className="px-3 py-2 border-b border-[var(--border-color)] flex-shrink-0">
+            <button
+              onClick={handleEditCredentials}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[var(--sidebar-hover)] hover:bg-[var(--border-color)] text-[var(--text)] rounded-lg text-xs font-medium transition-colors"
+            >
+              <Key size={14} />
+              Edit Credentials
+            </button>
+          </div>
+        )}
 
         {/* Environment Variables */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-2">
@@ -514,6 +584,17 @@ export const ContainerPropertiesPanel = ({
           )}
         </div>
       </div>
+
+      {/* Credential edit modal for external services */}
+      {credentialServiceItem && (
+        <ExternalServiceCredentialModal
+          isOpen={isCredentialModalOpen}
+          onClose={() => setIsCredentialModalOpen(false)}
+          onSubmit={handleCredentialSubmit}
+          item={credentialServiceItem}
+          mode="edit"
+        />
+      )}
     </>
   );
 };
