@@ -104,6 +104,7 @@ export const ProjectGraphCanvas = () => {
 
   // Refs for stable callback references - prevents node re-renders when parent state changes
   const nodesRef = useRef<Node[]>(nodes);
+  const edgesRef = useRef<Edge[]>(edges);
   const filesRef = useRef<Array<Record<string, unknown>>>([]);
   const slugRef = useRef(slug);
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
@@ -139,6 +140,9 @@ export const ProjectGraphCanvas = () => {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
   useEffect(() => {
     filesRef.current = files;
@@ -537,6 +541,15 @@ export const ProjectGraphCanvas = () => {
           console.error('Failed to connect browser to container:', error);
           toast.error('Failed to connect browser to container');
         }
+        return;
+      }
+
+      // Prevent duplicate connections between the same two containers
+      const duplicate = edgesRef.current.some(
+        (e) => e.source === connection.source && e.target === connection.target
+      );
+      if (duplicate) {
+        toast.error('Connection already exists between these containers');
         return;
       }
 

@@ -3954,6 +3954,19 @@ async def create_container_connection(
         if not target or target.project_id != project.id:
             raise HTTPException(status_code=404, detail="Target container not found")
 
+        # Prevent duplicate connections between the same two containers
+        existing = await db.execute(
+            select(ContainerConnection).where(
+                ContainerConnection.project_id == project.id,
+                ContainerConnection.source_container_id == connection_data.source_container_id,
+                ContainerConnection.target_container_id == connection_data.target_container_id,
+            )
+        )
+        if existing.scalars().first():
+            raise HTTPException(
+                status_code=409, detail="Connection already exists between these containers"
+            )
+
         # Auto-detect connector_type for service containers
         connector_type = connection_data.connector_type
         config = connection_data.config
