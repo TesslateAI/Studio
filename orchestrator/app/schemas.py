@@ -176,7 +176,8 @@ class ContainerUpdate(BaseModel):
     position_x: float | None = None
     position_y: float | None = None
     port: int | None = None
-    environment_vars: dict[str, Any] | None = None
+    env_vars_to_set: dict[str, str] | None = None
+    env_vars_to_delete: list[str] | None = None
     external_endpoint: str | None = None
     deployment_mode: str | None = None
 
@@ -185,6 +186,14 @@ class ContainerRename(BaseModel):
     """Schema for renaming a container (includes folder rename)."""
 
     new_name: str
+
+
+class InjectedEnvVar(BaseModel):
+    """An env var injected from a connected service container."""
+
+    key: str
+    source_container_name: str
+    source_container_id: str
 
 
 class Container(ContainerBase):
@@ -196,11 +205,14 @@ class Container(ContainerBase):
     port: int | None = None
     internal_port: int | None = None
     environment_vars: dict[str, Any] | None = None
+    env_var_keys: list[str] | None = None
+    env_vars_count: int | None = None
     container_type: str = "base"
     service_slug: str | None = None
     deployment_mode: str = "container"
     external_endpoint: str | None = None
     credentials_id: UUID | None = None
+    injected_env_vars: list[InjectedEnvVar] | None = None
     position_x: float
     position_y: float
     status: str

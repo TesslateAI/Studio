@@ -245,6 +245,7 @@ def create_container_deployment(
     image_pull_secret: str = None,
     enable_pod_affinity: bool = True,
     affinity_topology_key: str = "kubernetes.io/hostname",
+    extra_env: dict[str, str] | None = None,
 ) -> client.V1Deployment:
     """
     Create dev container deployment manifest.
@@ -289,6 +290,17 @@ def create_container_deployment(
 
     # Dev server container
     # Use exec to replace shell process - prevents exit when stdin closes
+    env_vars = [
+        client.V1EnvVar(name="HOST", value="0.0.0.0"),
+        client.V1EnvVar(name="PORT", value=str(port)),
+        client.V1EnvVar(name="NODE_ENV", value="development"),
+    ]
+
+    for key, value in (extra_env or {}).items():
+        if key in {"HOST", "PORT", "NODE_ENV"}:
+            continue
+        env_vars.append(client.V1EnvVar(name=key, value=str(value)))
+
     dev_container = client.V1Container(
         name="dev-server",
         image=image,
@@ -305,11 +317,7 @@ def create_container_deployment(
         ports=[client.V1ContainerPort(container_port=port, name="http")],
         working_dir=working_dir,
         volume_mounts=[client.V1VolumeMount(name="project-storage", mount_path="/app")],
-        env=[
-            client.V1EnvVar(name="HOST", value="0.0.0.0"),
-            client.V1EnvVar(name="PORT", value=str(port)),
-            client.V1EnvVar(name="NODE_ENV", value="development"),
-        ],
+        env=env_vars,
         resources=client.V1ResourceRequirements(
             requests={"memory": "256Mi", "cpu": "100m"}, limits={"memory": "1Gi", "cpu": "1000m"}
         ),

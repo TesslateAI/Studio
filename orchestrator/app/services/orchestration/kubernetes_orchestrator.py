@@ -38,6 +38,7 @@ from uuid import UUID
 from kubernetes.client.rest import ApiException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..secret_manager_env import build_env_overrides
 from ..snapshot_manager import get_snapshot_manager
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
@@ -594,6 +595,9 @@ fi
 
             await send_progress("starting_server", "Starting development server...", 70)
 
+            env_overrides = await build_env_overrides(db, project.id, [container])
+            extra_env = env_overrides.get(container.id, {})
+
             # Create Deployment (NO init containers - files already exist!)
             deployment = create_container_deployment(
                 namespace=namespace,
@@ -609,6 +613,7 @@ fi
                 enable_pod_affinity=self.settings.k8s_enable_pod_affinity
                 and len(all_containers) > 1,
                 affinity_topology_key=self.settings.k8s_affinity_topology_key,
+                extra_env=extra_env,
             )
             await self.k8s_client.create_deployment(deployment, namespace)
 

@@ -15,31 +15,24 @@ Architecture:
 This runs in background to avoid blocking the HTTP request.
 """
 
-import os
-import asyncio
 import logging
-from pathlib import Path
+import os
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from ..models import Container, Project, ProjectFile, MarketplaceBase
+from ..database import AsyncSessionLocal
+from ..models import Container, MarketplaceBase, Project
 from ..services.base_cache_manager import get_base_cache_manager
 from ..services.orchestration import get_orchestrator, is_docker_mode
-from ..config import get_settings
-from ..database import AsyncSessionLocal
+from .secret_manager_env import build_env_overrides
 
 logger = logging.getLogger(__name__)
 
 
 async def initialize_container_async(
-    container_id: UUID,
-    project_id: UUID,
-    user_id: UUID,
-    base_slug: str,
-    git_repo_url: str,
-    task
+    container_id: UUID, project_id: UUID, user_id: UUID, base_slug: str, git_repo_url: str, task
 ) -> None:
     """
     Initialize a container asynchronously in the background.
@@ -62,7 +55,6 @@ async def initialize_container_async(
     db = AsyncSessionLocal()
 
     try:
-        settings = get_settings()
         orchestrator = get_orchestrator()
 
         # Get container and project
@@ -70,7 +62,7 @@ async def initialize_container_async(
         project = await db.get(Project, project_id)
 
         if not container or not project:
-            logger.error(f"[CONTAINER-INIT] Container or project not found")
+            logger.error("[CONTAINER-INIT] Container or project not found")
             task.update_progress(0, 100, "Container or project not found")
             raise ValueError("Container or project not found")
 
@@ -86,21 +78,10 @@ async def initialize_container_async(
         base_cache_manager = get_base_cache_manager()
         cached_base_path = await base_cache_manager.get_base_path(base_slug)
 
-        # Check if this is the first container by counting existing containers
-        from sqlalchemy import func
-        from ..models import Container as ContainerModel
-
-        container_count = await db.scalar(
-            select(func.count(ContainerModel.id))
-            .where(ContainerModel.project_id == project_id)
-        )
-
-        is_first_container = container_count == 1  # Only this container exists
-
         # Determine target directory for this container's files
         # For multi-container projects, each container may have its own subdirectory
-        container_dir = container.directory or '.'
-        if container_dir == '.':
+        container_dir = container.directory or "."
+        if container_dir == ".":
             # Root-level container - files go to project root
             target_subdir = None
             container_path = project.slug
@@ -134,37 +115,51 @@ async def initialize_container_async(
                 project_id=project_id,
                 user_id=user_id,
                 container_id=container_id,
-                container_directory=container_dir if container_dir != '.' else container.name.lower().replace(' ', '-'),
-                git_url=git_url
+                container_directory=container_dir
+                if container_dir != "."
+                else container.name.lower().replace(" ", "-"),
+                git_url=git_url,
             )
 
             if success:
                 logger.info(f"[CONTAINER-INIT] ✅ K8s files initialized for {container.name}")
             else:
-                logger.error(f"[CONTAINER-INIT] ❌ K8s file initialization failed for {container.name}")
+                logger.error(
+                    f"[CONTAINER-INIT] ❌ K8s file initialization failed for {container.name}"
+                )
         else:
             # DOCKER MODE: Copy from cache as before
-            container_has_files = await orchestrator.project_has_files(project.slug, subdir=target_subdir)
+            container_has_files = await orchestrator.project_has_files(
+                project.slug, subdir=target_subdir
+            )
 
             if not container_has_files:
                 # This container's directory is empty - copy base files
                 task.update_progress(40, 100, "Copying base files...")
                 if cached_base_path and os.path.exists(cached_base_path):
-                    logger.info(f"[CONTAINER-INIT] Copying base files from cache to /projects/{container_path}")
+                    logger.info(
+                        f"[CONTAINER-INIT] Copying base files from cache to /projects/{container_path}"
+                    )
                     await orchestrator.copy_base_to_project(
                         base_slug,
                         project.slug,
-                        exclude_patterns=['.git', '__pycache__', '*.pyc'],
-                        target_subdir=target_subdir  # Copy to container's subdirectory
+                        exclude_patterns=[".git", "__pycache__", "*.pyc"],
+                        target_subdir=target_subdir,  # Copy to container's subdirectory
                     )
-                    logger.info(f"[CONTAINER-INIT] Successfully copied from cache to {container_path}")
+                    logger.info(
+                        f"[CONTAINER-INIT] Successfully copied from cache to {container_path}"
+                    )
                 else:
-                    logger.warning(f"[CONTAINER-INIT] Base {base_slug} not in cache, skipping file copy")
+                    logger.warning(
+                        f"[CONTAINER-INIT] Base {base_slug} not in cache, skipping file copy"
+                    )
                     # TODO: Fallback to git clone into volume
             else:
                 # Container directory already has files
                 task.update_progress(40, 100, "Using existing project files...")
-                logger.info(f"[CONTAINER-INIT] Reusing existing files at /projects/{container_path}")
+                logger.info(
+                    f"[CONTAINER-INIT] Reusing existing files at /projects/{container_path}"
+                )
 
         # Step 3: Regenerate orchestrator configuration (docker-compose.yml in Docker mode)
         if is_docker_mode():
@@ -179,6 +174,7 @@ async def initialize_container_async(
                 all_containers = containers_result.scalars().all()
 
                 from ..models import ContainerConnection
+
                 connections_result = await db.execute(
                     select(ContainerConnection).where(ContainerConnection.project_id == project_id)
                 )
@@ -186,11 +182,12 @@ async def initialize_container_async(
 
                 # Regenerate docker-compose.yml
                 orchestrator = get_orchestrator()
+                env_overrides = await build_env_overrides(db, project_id, all_containers)
                 await orchestrator.write_compose_file(
-                    project, all_containers, all_connections, user_id
+                    project, all_containers, all_connections, user_id, env_overrides
                 )
 
-                logger.info(f"[CONTAINER-INIT] Updated docker-compose.yml")
+                logger.info("[CONTAINER-INIT] Updated docker-compose.yml")
             except Exception as e:
                 logger.error(f"[CONTAINER-INIT] Failed to update docker-compose: {e}")
         else:

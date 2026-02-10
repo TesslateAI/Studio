@@ -29,6 +29,7 @@ import aiofiles.os
 import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..secret_manager_env import build_env_overrides
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
 
@@ -209,8 +210,12 @@ class DockerOrchestrator(BaseOrchestrator):
         self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
     ) -> dict[str, Any]:
         """Start all containers for a project using Docker Compose."""
+        env_overrides = None
+        if db:
+            env_overrides = await build_env_overrides(db, project.id, containers)
+
         compose_file_path = await self._write_compose_file(
-            project, containers, connections, user_id
+            project, containers, connections, user_id, env_overrides
         )
 
         logger.info(f"[DOCKER] Starting project {project.slug}...")
@@ -426,7 +431,12 @@ class DockerOrchestrator(BaseOrchestrator):
 
         if not os.path.exists(compose_file_path):
             # Generate compose file if it doesn't exist
-            await self._write_compose_file(project, all_containers, connections, user_id)
+            env_overrides = None
+            if db:
+                env_overrides = await build_env_overrides(db, project.id, all_containers)
+            await self._write_compose_file(
+                project, all_containers, connections, user_id, env_overrides
+            )
 
         service_name = self._sanitize_service_name(container.name)
 
@@ -1235,11 +1245,16 @@ class DockerOrchestrator(BaseOrchestrator):
     # =========================================================================
 
     async def _write_compose_file(
-        self, project, containers: list, connections: list, user_id: UUID
+        self,
+        project,
+        containers: list,
+        connections: list,
+        user_id: UUID,
+        env_overrides: dict[UUID, dict[str, str]] | None = None,
     ) -> str:
         """Generate and write docker-compose.yml file for a project."""
         compose_config = await self._generate_compose_config(
-            project, containers, connections, user_id
+            project, containers, connections, user_id, env_overrides
         )
 
         compose_file_path = self._get_compose_file_path(project.slug)
@@ -1251,13 +1266,25 @@ class DockerOrchestrator(BaseOrchestrator):
         return compose_file_path
 
     async def write_compose_file(
-        self, project, containers: list, connections: list, user_id: UUID
+        self,
+        project,
+        containers: list,
+        connections: list,
+        user_id: UUID,
+        env_overrides: dict[UUID, dict[str, str]] | None = None,
     ) -> str:
         """Public method to generate and write docker-compose.yml file."""
-        return await self._write_compose_file(project, containers, connections, user_id)
+        return await self._write_compose_file(
+            project, containers, connections, user_id, env_overrides
+        )
 
     async def _generate_compose_config(
-        self, project, containers: list, connections: list, user_id: UUID
+        self,
+        project,
+        containers: list,
+        connections: list,
+        user_id: UUID,
+        env_overrides: dict[UUID, dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """
         Generate docker-compose.yml configuration from Container models.
@@ -1300,7 +1327,7 @@ class DockerOrchestrator(BaseOrchestrator):
             # Handle service containers differently from base containers
             if container.container_type == "service":
                 service_config = await self._generate_service_container_config(
-                    project, container, service_name, network_name, user_id
+                    project, container, service_name, network_name, user_id, env_overrides
                 )
                 if service_config:
                     compose_config["services"][service_name] = service_config["service"]
@@ -1337,7 +1364,10 @@ class DockerOrchestrator(BaseOrchestrator):
                 project_work_dir = "/app"
 
             # Build environment variables
-            environment = container.environment_vars or {}
+            if env_overrides and container.id in env_overrides:
+                environment = env_overrides[container.id].copy()
+            else:
+                environment = (container.environment_vars or {}).copy()
             environment.update(
                 {
                     "PROJECT_ID": str(project.id),
@@ -1425,7 +1455,13 @@ class DockerOrchestrator(BaseOrchestrator):
         return compose_config
 
     async def _generate_service_container_config(
-        self, project, container, service_name: str, network_name: str, user_id: UUID
+        self,
+        project,
+        container,
+        service_name: str,
+        network_name: str,
+        user_id: UUID,
+        env_overrides: dict[UUID, dict[str, str]] | None = None,
     ) -> dict[str, Any] | None:
         """Generate config for service containers (Postgres, Redis, etc.)."""
         from ...services.service_definitions import ServiceType, get_service
@@ -1453,6 +1489,8 @@ class DockerOrchestrator(BaseOrchestrator):
 
         # Build environment
         environment = service_def.environment_vars.copy()
+        if env_overrides and container.id in env_overrides:
+            environment.update(env_overrides[container.id])
 
         # Build labels
         labels = {

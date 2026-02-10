@@ -59,6 +59,8 @@ from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
 from ..schemas import Project as ProjectSchema
 from ..schemas import ProjectFile as ProjectFileSchema
+from ..services.secret_codec import decode_secret_map, encode_secret_map
+from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
 from ..services.task_manager import Task, get_task_manager
 from ..users import current_active_user, current_superuser
 from ..utils.async_fileio import makedirs_async, read_file_async, walk_directory_async
@@ -3886,8 +3888,9 @@ async def add_container_to_project(
             from ..services.orchestration import get_orchestrator
 
             orchestrator = get_orchestrator()
+            env_overrides = await build_env_overrides(db, project.id, all_containers)
             await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id
+                project, all_containers, all_connections, current_user.id, env_overrides
             )
 
             return {
@@ -3951,12 +3954,29 @@ async def create_container_connection(
         if not target or target.project_id != project.id:
             raise HTTPException(status_code=404, detail="Target container not found")
 
+        # Auto-detect connector_type for service containers
+        connector_type = connection_data.connector_type
+        config = connection_data.config
+        if source.container_type == "service" and source.service_slug:
+            connector_type = "env_injection"
+            # Resolve template keys so the frontend knows what will be injected
+            from ..services.secret_manager_env import resolve_connection_env_vars
+            from ..services.service_definitions import get_service
+
+            svc_def = get_service(source.service_slug)
+            resolved = resolve_connection_env_vars(source, svc_def)
+            if resolved:
+                config = config or {}
+                config["env_mapping"] = {k: k for k in resolved}
+
         # Create connection
         new_connection = ContainerConnection(
             project_id=project.id,
             source_container_id=connection_data.source_container_id,
             target_container_id=connection_data.target_container_id,
             connection_type=connection_data.connection_type,
+            connector_type=connector_type,
+            config=config,
             label=connection_data.label,
         )
 
@@ -3984,8 +4004,9 @@ async def create_container_connection(
             all_connections = connections_result.scalars().all()
 
             orchestrator = get_orchestrator()
+            env_overrides = await build_env_overrides(db, project.id, all_containers)
             await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id
+                project, all_containers, all_connections, current_user.id, env_overrides
             )
 
             logger.info("[CONTAINER] Updated docker-compose.yml with new connection")
@@ -4283,6 +4304,16 @@ async def get_containers_status(
         raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}") from e
 
 
+def _container_response(container, injected_env_vars: list | None = None) -> dict:
+    """Serialize container with write-only env vars (hide values, expose keys only)."""
+    data = ContainerSchema.model_validate(container).model_dump()
+    data["environment_vars"] = None
+    data["env_var_keys"] = container.env_var_keys
+    data["env_vars_count"] = container.env_vars_count
+    data["injected_env_vars"] = injected_env_vars
+    return data
+
+
 @router.get("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
 async def get_container(
     project_slug: str,
@@ -4299,7 +4330,8 @@ async def get_container(
     if not container or container.project_id != project.id:
         raise HTTPException(status_code=404, detail="Container not found")
 
-    return container
+    injected = await get_injected_env_vars_for_container(db, container.id, project.id)
+    return _container_response(container, injected_env_vars=injected)
 
 
 @router.patch("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
@@ -4329,14 +4361,22 @@ async def update_container(
             container.position_y = container_data.position_y
         if container_data.port is not None:
             container.port = container_data.port
-        if container_data.environment_vars is not None:
-            container.environment_vars = container_data.environment_vars
+        if container_data.env_vars_to_set:
+            existing = decode_secret_map(container.environment_vars or {})
+            existing.update(container_data.env_vars_to_set)
+            container.environment_vars = encode_secret_map(existing)
+            flag_modified(container, "environment_vars")
+        if container_data.env_vars_to_delete:
+            existing = decode_secret_map(container.environment_vars or {})
+            for key in container_data.env_vars_to_delete:
+                existing.pop(key, None)
+            container.environment_vars = encode_secret_map(existing)
             flag_modified(container, "environment_vars")
 
         await db.commit()
         await db.refresh(container)
 
-        return container
+        return _container_response(container)
 
     except Exception as e:
         await db.rollback()
@@ -4375,7 +4415,7 @@ async def rename_container(
 
     # If name hasn't changed, return early
     if new_name == container.name:
-        return container
+        return _container_response(container)
 
     try:
         # Sanitize the new name for Docker and directory naming
@@ -4469,8 +4509,9 @@ async def rename_container(
 
             if is_docker_mode():
                 orchestrator = get_orchestrator()
+                env_overrides = await build_env_overrides(db, project.id, all_containers)
                 await orchestrator.write_compose_file(
-                    project, all_containers, all_connections, current_user.id
+                    project, all_containers, all_connections, current_user.id, env_overrides
                 )
                 logger.info("[CONTAINER] Regenerated docker-compose.yml after rename")
         except Exception as e:
@@ -4479,7 +4520,7 @@ async def rename_container(
         logger.info(
             f"[CONTAINER] ✅ Renamed container {container_id} from '{container.name}' to '{new_name}'"
         )
-        return container
+        return _container_response(container)
 
     except HTTPException:
         raise
@@ -4565,8 +4606,13 @@ async def delete_container(
 
                 # Update docker-compose.yml
                 orchestrator = get_orchestrator()
+                env_overrides = await build_env_overrides(db, project.id, remaining_containers)
                 await orchestrator.write_compose_file(
-                    project, remaining_containers, remaining_connections, current_user.id
+                    project,
+                    remaining_containers,
+                    remaining_connections,
+                    current_user.id,
+                    env_overrides,
                 )
 
                 logger.info("[CONTAINER] Updated docker-compose.yml after deletion")

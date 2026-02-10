@@ -241,6 +241,14 @@ class Container(Base):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def env_var_keys(self) -> list:
+        return list((self.environment_vars or {}).keys())
+
+    @property
+    def env_vars_count(self) -> int:
+        return len(self.environment_vars or {})
+
 
 class ContainerConnection(Base):
     """Connections between containers in the React Flow graph (represents dependencies/networking/env vars)."""

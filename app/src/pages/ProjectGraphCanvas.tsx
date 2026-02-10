@@ -88,6 +88,8 @@ interface ContainerConnection {
   source_container_id: string;
   target_container_id: string;
   connection_type: string;
+  connector_type?: string;
+  config?: Record<string, unknown> | null;
   label?: string;
 }
 
@@ -118,6 +120,7 @@ export const ProjectGraphCanvas = () => {
     id: string;
     name: string;
     status: string;
+    port?: number;
   } | null>(null);
 
   // Drag state for pausing polling during drag operations - critical for performance
@@ -370,9 +373,14 @@ export const ProjectGraphCanvas = () => {
         id: connection.id,
         source: connection.source_container_id,
         target: connection.target_container_id,
-        type: 'smoothstep',
+        type: (() => {
+          const connectorType =
+            connection.connector_type || connection.connection_type || 'depends_on';
+          const edgeType = getEdgeType(connectorType);
+          return edgeType === 'default' ? 'smoothstep' : edgeType;
+        })(),
         label: connection.label,
-        animated: false,
+        animated: connection.connector_type === 'http_api',
       }));
 
       // Add browser preview edges for connected browsers
@@ -532,17 +540,24 @@ export const ProjectGraphCanvas = () => {
       }
 
       try {
+        // Auto-detect connector_type: service containers use env_injection
+        const isSourceService = sourceNode?.data?.containerType === 'service';
+        const connectorType = isSourceService ? 'env_injection' : 'depends_on';
+
         // Create connection in backend (for container-to-container connections)
         await api.post(`/api/projects/${slug}/containers/connections`, {
           project_id: project.id,
           source_container_id: connection.source,
           target_container_id: connection.target,
           connection_type: 'depends_on',
+          connector_type: connectorType,
         });
 
         // Update local state - animations disabled for performance
         setEdges((eds) => addEdge({ ...connection, type: 'smoothstep', animated: false }, eds));
-        toast.success('Connection created');
+        toast.success(
+          isSourceService ? 'Connected — env vars will be injected' : 'Connection created'
+        );
       } catch (error) {
         console.error('Failed to create connection:', error);
         toast.error('Failed to create connection');
