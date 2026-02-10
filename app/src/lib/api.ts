@@ -397,7 +397,20 @@ export const projectsApi = {
   },
   startContainer: async (slug: string, containerId: string) => {
     const response = await api.post(`/api/projects/${slug}/containers/${containerId}/start`);
-    const { task_id, already_started } = response.data;
+    const data = response.data;
+
+    // FAST PATH: Container already running (Docker mode returns task_id: null)
+    if (data.already_running && data.url) {
+      return {
+        url: data.url,
+        container_name: data.container_name,
+        message: data.message,
+        task_id: null,
+        already_running: true,
+      };
+    }
+
+    const { task_id, already_started } = data;
 
     if (already_started) {
       console.log('[Container Start] Reusing existing task:', task_id);
@@ -411,7 +424,7 @@ export const projectsApi = {
 
     return {
       ...completedTask.result,
-      message: response.data.message,
+      message: data.message,
       task_id,
     };
   },
