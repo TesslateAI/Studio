@@ -184,6 +184,7 @@ resource "kubectl_manifest" "letsencrypt_issuer" {
           {
             dns01 = {
               cloudflare = {
+                email = "admin@${var.domain_name}"
                 apiTokenSecretRef = {
                   name = "cloudflare-api-token"
                   key  = "api-token"
@@ -226,6 +227,7 @@ resource "kubectl_manifest" "letsencrypt_staging_issuer" {
           {
             dns01 = {
               cloudflare = {
+                email = "admin@${var.domain_name}"
                 apiTokenSecretRef = {
                   name = "cloudflare-api-token"
                   key  = "api-token"
