@@ -10,11 +10,11 @@ Parses pure JSON tool calls:
 - Parameters are JSON objects with tool-specific fields
 """
 
-import re
 import json
 import logging
-from typing import List, Dict, Any, Optional
+import re
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,9 @@ class ToolCall:
         parameters: Tool parameters as dict
         raw_text: Original text that was parsed
     """
+
     name: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     raw_text: str = ""
 
 
@@ -46,13 +47,13 @@ class AgentResponseParser:
         "TASK_COMPLETE",
         "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
         "<task_complete>",
-        "<!-- TASK COMPLETE -->"
+        "<!-- TASK COMPLETE -->",
     ]
 
     def __init__(self):
         logger.info("AgentResponseParser initialized")
 
-    def parse(self, response: str) -> List[ToolCall]:
+    def parse(self, response: str) -> list[ToolCall]:
         """
         Parse a model response to extract all tool calls.
 
@@ -74,7 +75,7 @@ class AgentResponseParser:
 
         return tool_calls
 
-    def _parse_json_format(self, response: str) -> List[ToolCall]:
+    def _parse_json_format(self, response: str) -> list[ToolCall]:
         """
         Parse pure JSON tool calls from response.
 
@@ -101,11 +102,15 @@ class AgentResponseParser:
                             parameters = item.get("parameters", {})
 
                             if tool_name:
-                                tool_calls.append(ToolCall(
-                                    name=tool_name,
-                                    parameters=parameters if isinstance(parameters, dict) else {},
-                                    raw_text=block[:200]
-                                ))
+                                tool_calls.append(
+                                    ToolCall(
+                                        name=tool_name,
+                                        parameters=parameters
+                                        if isinstance(parameters, dict)
+                                        else {},
+                                        raw_text=block[:200],
+                                    )
+                                )
                                 logger.debug(f"Parsed JSON tool call from array: {tool_name}")
 
                 elif parsed and isinstance(parsed, dict) and "tool_name" in parsed:
@@ -114,11 +119,13 @@ class AgentResponseParser:
                     parameters = parsed.get("parameters", {})
 
                     if tool_name:
-                        tool_calls.append(ToolCall(
-                            name=tool_name,
-                            parameters=parameters if isinstance(parameters, dict) else {},
-                            raw_text=block[:200]
-                        ))
+                        tool_calls.append(
+                            ToolCall(
+                                name=tool_name,
+                                parameters=parameters if isinstance(parameters, dict) else {},
+                                raw_text=block[:200],
+                            )
+                        )
                         logger.debug(f"Parsed JSON tool call from object: {tool_name}")
             except Exception as e:
                 logger.debug(f"Failed to parse JSON block: {e}")
@@ -126,7 +133,7 @@ class AgentResponseParser:
 
         return tool_calls
 
-    def _extract_json_blocks(self, text: str) -> List[str]:
+    def _extract_json_blocks(self, text: str) -> list[str]:
         """
         Extract all JSON-like blocks (objects and arrays) from text using balanced bracket matching.
 
@@ -140,9 +147,9 @@ class AgentResponseParser:
 
         while i < len(text):
             # Look for start of JSON block ('{' or '[')
-            if text[i] in ['{', '[']:
+            if text[i] in ["{", "["]:
                 start_char = text[i]
-                end_char = '}' if start_char == '{' else ']'
+                end_char = "}" if start_char == "{" else "]"
 
                 # Find matching closing bracket using balanced counting
                 start = i
@@ -159,7 +166,7 @@ class AgentResponseParser:
                         i += 1
                         continue
 
-                    if char == '\\':
+                    if char == "\\":
                         escape_next = True
                         i += 1
                         continue
@@ -179,7 +186,7 @@ class AgentResponseParser:
 
                             # Found matching bracket
                             if depth == 0:
-                                block = text[start:i+1]
+                                block = text[start : i + 1]
                                 blocks.append(block)
                                 break
 
@@ -189,7 +196,7 @@ class AgentResponseParser:
 
         return blocks
 
-    def _parse_json_with_fixes(self, json_str: str) -> Optional[Any]:
+    def _parse_json_with_fixes(self, json_str: str) -> Any | None:
         """
         Attempt to parse JSON with multiple fallback strategies for common errors.
 
@@ -224,7 +231,7 @@ class AgentResponseParser:
 
         # Strategy 4: Try fixing common newline issues
         try:
-            fixed = json_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+            fixed = json_str.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
             return json.loads(fixed)
         except json.JSONDecodeError:
             pass
@@ -246,19 +253,19 @@ class AgentResponseParser:
 
         def escape_inner_quotes(match):
             """Escape quotes inside a JSON string value."""
-            full_match = match.group(0)
+            _full_match = match.group(0)
             key_part = match.group(1)  # Everything before the value
             value_content = match.group(2)  # The value content
 
             # Escape any unescaped quotes in the value
             # Don't touch already escaped quotes
-            escaped_value = re.sub(r'(?<!\\)"', r'\"', value_content)
+            escaped_value = re.sub(r'(?<!\\)"', r"\"", value_content)
 
             return f'{key_part}"{escaped_value}"'
 
         # Match pattern: "key": "value with possible "quotes""
         # This is complex and may not handle all edge cases perfectly
-        pattern = r'("(?:[^"\\]|\\.)*?":\s*)"((?:[^"\\]|\\.)*)(")'
+        _pattern = r'("(?:[^"\\]|\\.)*?":\s*)"((?:[^"\\]|\\.)*)(")'
 
         try:
             # Try to fix the quotes
@@ -269,7 +276,6 @@ class AgentResponseParser:
         except Exception as e:
             logger.debug(f"Quote fixing error: {e}")
             return json_str
-
 
     def is_complete(self, response: str) -> bool:
         """
@@ -289,7 +295,7 @@ class AgentResponseParser:
 
         return False
 
-    def extract_thought(self, response: str) -> Optional[str]:
+    def extract_thought(self, response: str) -> str | None:
         """
         Extract the THOUGHT section from the response.
 
@@ -302,7 +308,7 @@ class AgentResponseParser:
             The thought text if found, None otherwise
         """
         # Pattern: THOUGHT: text (until next section or tool call)
-        pattern = r'THOUGHT:\s*(.+?)(?=\n(?:EXPLANATION:|<tool_call>|$))'
+        pattern = r"THOUGHT:\s*(.+?)(?=\n(?:EXPLANATION:|<tool_call>|$))"
         match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
 
         if match:
@@ -312,7 +318,7 @@ class AgentResponseParser:
 
         return None
 
-    def extract_explanation(self, response: str) -> Optional[str]:
+    def extract_explanation(self, response: str) -> str | None:
         """
         Extract the EXPLANATION section from the response.
 
@@ -322,7 +328,7 @@ class AgentResponseParser:
         Returns:
             The explanation text if found, None otherwise
         """
-        pattern = r'EXPLANATION:\s*(.+?)(?=\n(?:THOUGHT:|<tool_call>|$))'
+        pattern = r"EXPLANATION:\s*(.+?)(?=\n(?:THOUGHT:|<tool_call>|$))"
         match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
 
         if match:
@@ -346,30 +352,34 @@ class AgentResponseParser:
         """
         # Remove JSON tool calls (arrays first, then objects)
         # Remove arrays: [ ... ]
-        text = re.sub(r'\[(?:[^\[\]]|\[(?:[^\[\]]|\[[^\[\]]*\])*\])*\]', '', response, flags=re.DOTALL)
+        text = re.sub(
+            r"\[(?:[^\[\]]|\[(?:[^\[\]]|\[[^\[\]]*\])*\])*\]", "", response, flags=re.DOTALL
+        )
         # Remove objects: { ... }
-        text = re.sub(r'\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}', '', text, flags=re.DOTALL)
+        text = re.sub(r"\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}", "", text, flags=re.DOTALL)
 
         # Remove <think> and <thinking> tags (internal reasoning from models)
         # First remove complete pairs
-        text = re.sub(r'<think(?:ing)?>.*?</think(?:ing)?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(
+            r"<think(?:ing)?>.*?</think(?:ing)?>", "", text, flags=re.DOTALL | re.IGNORECASE
+        )
         # Then remove orphaned closing tags along with everything before them
         # This handles cases where the opening tag was truncated/missing
-        text = re.sub(r'^.*?</think(?:ing)?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"^.*?</think(?:ing)?>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Finally remove any remaining orphaned opening tags
-        text = re.sub(r'<think(?:ing)?>', '', text, flags=re.IGNORECASE)
+        text = re.sub(r"<think(?:ing)?>", "", text, flags=re.IGNORECASE)
 
         # Remove completion signals
         for signal in self.COMPLETION_SIGNALS:
             # Case-insensitive removal
-            text = re.sub(re.escape(signal), '', text, flags=re.IGNORECASE)
+            text = re.sub(re.escape(signal), "", text, flags=re.IGNORECASE)
 
         # Remove THOUGHT: and EXPLANATION: prefixes
-        text = re.sub(r'^\s*THOUGHT:\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
-        text = re.sub(r'^\s*EXPLANATION:\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
+        text = re.sub(r"^\s*THOUGHT:\s*", "", text, flags=re.IGNORECASE | re.MULTILINE)
+        text = re.sub(r"^\s*EXPLANATION:\s*", "", text, flags=re.IGNORECASE | re.MULTILINE)
 
         # Clean up extra whitespace
-        text = re.sub(r'\n\s*\n', '\n\n', text)
+        text = re.sub(r"\n\s*\n", "\n\n", text)
         text = text.strip()
 
         return text

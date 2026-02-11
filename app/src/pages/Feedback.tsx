@@ -274,6 +274,15 @@ export default function Feedback() {
         ))}
       </div>
 
+      {/* Info Banner */}
+      <div className="bg-[rgba(var(--primary-rgb),0.1)] border-b border-[rgba(var(--primary-rgb),0.3)] px-4 md:px-6 py-1.5 flex items-center gap-2">
+        <ChatCircleDots size={14} className="text-[var(--primary)] shrink-0" weight="fill" />
+        <p className="text-xs text-[var(--text-muted)]">
+          <span className="font-semibold text-[var(--primary)]">Tesslate Studio Feedback</span>{' '}
+          Project-level feedback coming soon!
+        </p>
+      </div>
+
       {/* Scrollable Content */}
       <div className="flex-1 overflow-auto bg-[var(--bg)]">
         <div className="p-4 md:p-6">

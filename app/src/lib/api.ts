@@ -285,7 +285,7 @@ export const projectsApi = {
     } = {
       name,
       description,
-      source_type: sourceType || 'template',
+      source_type: sourceType || 'base',
     };
 
     if (sourceType === 'github') {
@@ -435,6 +435,12 @@ export const projectsApi = {
   },
   getContainersStatus: async (slug: string) => {
     const response = await api.get(`/api/projects/${slug}/containers/status`);
+    return response.data;
+  },
+  downloadTesslateFolder: async (slug: string): Promise<Blob> => {
+    const response = await api.get(`/api/projects/${slug}/download-tesslate`, {
+      responseType: 'blob',
+    });
     return response.data;
   },
   checkContainerHealth: async (
@@ -648,6 +654,7 @@ export const marketplaceApi = {
       tools?: string[];
       tool_configs?: Record<string, { description?: string; examples?: string[] }>;
       avatar_url?: string | null;
+      config?: Record<string, unknown>;
     }
   ) => {
     const response = await api.patch(`/api/marketplace/agents/${agentId}`, data);
@@ -858,6 +865,49 @@ export const marketplaceApi = {
   // Delete user's review for a base
   deleteBaseReview: async (baseId: string) => {
     const response = await api.delete(`/api/marketplace/bases/${baseId}/review`);
+    return response.data;
+  },
+
+  // Subagent management
+  getSubagents: async (agentId: string) => {
+    const response = await api.get(`/api/marketplace/agents/${agentId}/subagents`);
+    return response.data;
+  },
+
+  createSubagent: async (
+    agentId: string,
+    data: {
+      name: string;
+      description: string;
+      system_prompt: string;
+      tools?: string[];
+      model?: string;
+    }
+  ) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/subagents`, data);
+    return response.data;
+  },
+
+  updateSubagent: async (
+    agentId: string,
+    subagentId: string,
+    data: {
+      name?: string;
+      description?: string;
+      system_prompt?: string;
+      tools?: string[];
+      model?: string;
+    }
+  ) => {
+    const response = await api.patch(
+      `/api/marketplace/agents/${agentId}/subagents/${subagentId}`,
+      data
+    );
+    return response.data;
+  },
+
+  deleteSubagent: async (agentId: string, subagentId: string) => {
+    const response = await api.delete(`/api/marketplace/agents/${agentId}/subagents/${subagentId}`);
     return response.data;
   },
 };

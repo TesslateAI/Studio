@@ -538,6 +538,35 @@ class DockerOrchestrator(BaseOrchestrator):
         """Get the filesystem path for a project."""
         return self.projects_path / project_slug
 
+    def _safe_project_path(
+        self, project_slug: str, file_path: str, subdir: str | None = None
+    ) -> Path:
+        """
+        Resolve file_path and verify it stays within the project directory.
+
+        Uses Path.resolve() to collapse all '..' and symlinks, then checks
+        the resolved path is still under the project root. This is a
+        containment check on the resolved absolute path, not pattern matching.
+
+        Raises ValueError if the resolved path escapes the project boundary.
+        """
+        project_root = self.get_project_path(project_slug).resolve()
+
+        base = project_root / subdir if subdir and subdir != "." else project_root
+
+        resolved = (base / file_path).resolve()
+
+        # Containment check: resolved path must be under the project root
+        try:
+            resolved.relative_to(project_root)
+        except ValueError as err:
+            raise ValueError(
+                f"Path escapes project boundary: {file_path!r} "
+                f"(resolved to {resolved}, outside {project_root})"
+            ) from err
+
+        return resolved
+
     async def ensure_project_directory(self, project_slug: str) -> Path:
         """Ensure the project directory exists."""
         project_path = self.get_project_path(project_slug)
@@ -683,10 +712,7 @@ class DockerOrchestrator(BaseOrchestrator):
                 return None
 
         try:
-            project_path = self.get_project_path(project_slug)
-            if subdir and subdir != ".":
-                project_path = project_path / subdir
-            full_path = project_path / file_path
+            full_path = self._safe_project_path(project_slug, file_path, subdir)
 
             if not full_path.exists():
                 return None
@@ -694,6 +720,9 @@ class DockerOrchestrator(BaseOrchestrator):
             async with aiofiles.open(full_path, encoding="utf-8") as f:
                 return await f.read()
 
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in read_file: {e}")
+            return None
         except Exception as e:
             logger.error(f"[DOCKER] Failed to read file {file_path}: {e}")
             return None
@@ -724,10 +753,7 @@ class DockerOrchestrator(BaseOrchestrator):
                 return False
 
         try:
-            project_path = self.get_project_path(project_slug)
-            if subdir and subdir != ".":
-                project_path = project_path / subdir
-            full_path = project_path / file_path
+            full_path = self._safe_project_path(project_slug, file_path, subdir)
 
             await aiofiles.os.makedirs(full_path.parent, exist_ok=True)
 
@@ -737,6 +763,9 @@ class DockerOrchestrator(BaseOrchestrator):
             logger.debug(f"[DOCKER] Wrote file {file_path} to project {project_slug}")
             return True
 
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in write_file: {e}")
+            return False
         except Exception as e:
             logger.error(f"[DOCKER] Failed to write file {file_path}: {e}")
             return False
@@ -757,16 +786,16 @@ class DockerOrchestrator(BaseOrchestrator):
                 return False
 
         try:
-            project_path = self.get_project_path(project_slug)
-            if subdir and subdir != ".":
-                project_path = project_path / subdir
-            full_path = project_path / file_path
+            full_path = self._safe_project_path(project_slug, file_path, subdir)
 
             if full_path.exists():
                 await aiofiles.os.remove(full_path)
                 logger.debug(f"[DOCKER] Deleted file {file_path}")
             return True
 
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in delete_file: {e}")
+            return False
         except Exception as e:
             logger.error(f"[DOCKER] Failed to delete file {file_path}: {e}")
             return False
@@ -786,18 +815,21 @@ class DockerOrchestrator(BaseOrchestrator):
             if not project_slug:
                 return []
 
-        project_path = self.get_project_path(project_slug)
-        if directory and directory != ".":
-            project_path = project_path / directory
-
-        if not project_path.exists():
+        try:
+            walk_root = self._safe_project_path(project_slug, directory or ".")
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in list_files: {e}")
             return []
 
+        if not walk_root.exists():
+            return []
+
+        project_root = self.get_project_path(project_slug)
         files = []
         count = 0
 
         try:
-            for root, dirs, filenames in os.walk(project_path):
+            for root, dirs, filenames in os.walk(walk_root):
                 dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
 
                 for filename in filenames:
@@ -807,7 +839,7 @@ class DockerOrchestrator(BaseOrchestrator):
                         continue
 
                     full_path = Path(root) / filename
-                    rel_path = full_path.relative_to(self.get_project_path(project_slug))
+                    rel_path = full_path.relative_to(project_root)
 
                     files.append({"path": str(rel_path), "name": filename, "type": "file"})
                     count += 1
@@ -828,9 +860,11 @@ class DockerOrchestrator(BaseOrchestrator):
         subdir: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get all files in a project with their content (for Monaco editor)."""
-        project_path = self.get_project_path(project_slug)
-        if subdir and subdir != ".":
-            project_path = project_path / subdir
+        try:
+            project_path = self._safe_project_path(project_slug, subdir or ".")
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in get_files_with_content: {e}")
+            return []
 
         if not project_path.exists():
             return []
@@ -937,7 +971,11 @@ class DockerOrchestrator(BaseOrchestrator):
                 return []
 
         project_path = self.get_project_path(project_slug)
-        search_path = project_path / directory if directory != "." else project_path
+        try:
+            search_path = self._safe_project_path(project_slug, directory or ".")
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in glob_files: {e}")
+            return []
 
         matches = []
         try:
@@ -984,7 +1022,11 @@ class DockerOrchestrator(BaseOrchestrator):
                 return []
 
         project_path = self.get_project_path(project_slug)
-        search_path = project_path / directory if directory != "." else project_path
+        try:
+            search_path = self._safe_project_path(project_slug, directory or ".")
+        except ValueError as e:
+            logger.warning(f"[DOCKER] Path traversal blocked in grep_files: {e}")
+            return []
 
         flags = 0 if case_sensitive else re.IGNORECASE
         try:

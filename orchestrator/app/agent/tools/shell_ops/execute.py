@@ -11,17 +11,17 @@ Retry Strategy:
 import asyncio
 import base64
 import logging
-from typing import Dict, Any
+from typing import Any
 
+from ..output_formatter import strip_ansi_codes, success_output
 from ..registry import Tool, ToolCategory
-from ..output_formatter import success_output, truncate_session_id, strip_ansi_codes
 from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
 @tool_retry
-async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+async def shell_exec_executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
     Execute command and return output.
 
@@ -44,7 +44,7 @@ async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     session_manager = get_shell_session_manager()
 
     # Write command (with authorization check)
-    data_bytes = command.encode('utf-8')
+    data_bytes = command.encode("utf-8")
     await session_manager.write_to_session(session_id, data_bytes, db, user_id=user_id)
 
     # Wait for execution
@@ -54,50 +54,49 @@ async def shell_exec_executor(params: Dict[str, Any], context: Dict[str, Any]) -
     output_data = await session_manager.read_output(session_id, db, user_id=user_id)
 
     # Decode base64 output and strip control characters
-    output_text = base64.b64decode(output_data["output"]).decode('utf-8', errors='replace')
+    output_text = base64.b64decode(output_data["output"]).decode("utf-8", errors="replace")
     output_text = strip_ansi_codes(output_text)
 
     return success_output(
         message=f"Executed '{command.strip()}' in session {session_id}",
         output=output_text,
         session_id=session_id,
-        details={
-            "bytes": output_data["bytes"],
-            "is_eof": output_data["is_eof"]
-        }
+        details={"bytes": output_data["bytes"], "is_eof": output_data["is_eof"]},
     )
 
 
 def register_execute_tools(registry):
     """Register shell execution tool."""
 
-    registry.register(Tool(
-        name="shell_exec",
-        description="Execute a command in an open shell session and wait for output. REQUIRES session_id from shell_open first. DO NOT use 'exit' or close the shell - it stays open for multiple commands.",
-        category=ToolCategory.SHELL,
-        parameters={
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "Shell session ID obtained from shell_open",
+    registry.register(
+        Tool(
+            name="shell_exec",
+            description="Execute a command in an open shell session and wait for output. REQUIRES session_id from shell_open first. DO NOT use 'exit' or close the shell - it stays open for multiple commands.",
+            category=ToolCategory.SHELL,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Shell session ID obtained from shell_open",
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "Command to execute (automatically adds \\n). DO NOT include 'exit' - the shell stays open.",
+                    },
+                    "wait_seconds": {
+                        "type": "number",
+                        "description": "Seconds to wait before reading output (default: 2)",
+                    },
                 },
-                "command": {
-                    "type": "string",
-                    "description": "Command to execute (automatically adds \\n). DO NOT include 'exit' - the shell stays open.",
-                },
-                "wait_seconds": {
-                    "type": "number",
-                    "description": "Seconds to wait before reading output (default: 2)",
-                },
+                "required": ["session_id", "command"],
             },
-            "required": ["session_id", "command"],
-        },
-        executor=shell_exec_executor,
-        examples=[
-            '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "npm install"}}',
-            '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "echo \'Hello\'"}}'
-        ]
-    ))
+            executor=shell_exec_executor,
+            examples=[
+                '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "npm install"}}',
+                '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "echo \'Hello\'"}}',
+            ],
+        )
+    )
 
     logger.info("Registered 1 shell execution tool")

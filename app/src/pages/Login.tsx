@@ -1,17 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import axios from 'axios';
 import { authApi } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
 import { TesslateLogo } from '../components/ui/TesslateLogo';
 import { useTheme } from '../theme/ThemeContext';
-import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Login() {
   const navigate = useNavigate();
   const { refreshUserTheme } = useTheme();
-  const { checkAuth } = useAuth();
+  const auth = useAuth();
+  const { checkAuth } = auth;
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -103,6 +107,15 @@ export default function Login() {
     setLoading(true);
 
     try {
+      // Clear any stale auth state (cookies, tokens) before attempting login
+      // This prevents stale httpOnly cookies from conflicting with the new login
+      // Fire-and-forget: 401s are expected (no session to clear) and harmless
+      localStorage.removeItem('token');
+      Promise.allSettled([
+        axios.post(`${API_URL}/api/auth/jwt/logout`, {}, { withCredentials: true }),
+        axios.post(`${API_URL}/api/auth/cookie/logout`, {}, { withCredentials: true }),
+      ]).catch(() => {});
+
       const response = await authApi.login(formData.email, formData.password);
 
       if (response.access_token && !response.requires_2fa) {
@@ -124,7 +137,11 @@ export default function Login() {
       setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
     } catch (error: unknown) {
       // Handle validation errors (array format from FastAPI/Pydantic)
-      const err = error as { response?: { data?: { detail?: Array<{ msg: string }> | string } } };
+      const err = error as {
+        statusCode?: number;
+        code?: string;
+        response?: { data?: { detail?: Array<{ msg: string }> | string } };
+      };
       if (err.response?.data?.detail && Array.isArray(err.response.data.detail)) {
         const messages = err.response.data.detail.map((e) => e.msg).join(', ');
         toast.error(messages);
@@ -135,6 +152,8 @@ export default function Login() {
         } else {
           toast.error(errorMessage);
         }
+      } else if (err.code === 'INVALID_CREDENTIALS') {
+        toast.error('Invalid email or password');
       } else {
         toast.error('Login failed. Please try again.');
       }

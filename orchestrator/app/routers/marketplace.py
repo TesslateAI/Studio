@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, func, or_, select
@@ -1239,7 +1240,7 @@ async def update_custom_agent(
                 is_forkable=False,
                 parent_agent_id=agent.id,
                 forked_by_user_id=current_user.id,
-                config={},
+                config=update_data.get("config", agent.config or {}),
                 icon=agent.icon,
                 avatar_url=update_data.get("avatar_url", agent.avatar_url),
                 preview_image=agent.preview_image,
@@ -1313,6 +1314,15 @@ async def update_custom_agent(
         agent.avatar_url = update_data["avatar_url"]
     if update_data.get("model"):
         agent.required_models = [update_data["model"]]
+    # Merge config (features, etc.) - deep merge so partial updates work
+    if "config" in update_data and isinstance(update_data["config"], dict):
+        existing_config = agent.config or {}
+        for key, value in update_data["config"].items():
+            if isinstance(value, dict) and isinstance(existing_config.get(key), dict):
+                existing_config[key] = {**existing_config[key], **value}
+            else:
+                existing_config[key] = value
+        agent.config = existing_config
 
     await db.commit()
 
@@ -1403,6 +1413,274 @@ async def toggle_agent(
         "enabled": enabled,
         "success": True,
     }
+
+
+# ============================================================================
+# Subagent CRUD Endpoints
+# ============================================================================
+
+
+@router.get("/agents/{agent_id}/subagents")
+async def list_subagents(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    List subagents for an agent: built-in configs + custom user subagents from DB.
+    """
+    from ..agent.subagent_manager import _get_builtin_configs
+
+    # Built-in subagents
+    builtins = _get_builtin_configs()
+    result_list = []
+    for _name, cfg in builtins.items():
+        result_list.append(
+            {
+                "id": None,
+                "name": cfg.name,
+                "description": cfg.description,
+                "tools": cfg.tools,
+                "system_prompt": cfg.system_prompt,
+                "is_builtin": True,
+                "model": "inherit",
+            }
+        )
+
+    # Custom subagents from DB (item_type="subagent" with parent_agent_id matching)
+    try:
+        agent_uuid = UUID(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent_id: {agent_id}") from exc
+
+    custom_result = await db.execute(
+        select(MarketplaceAgent)
+        .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
+        .where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.is_active == True,  # noqa: E712
+            MarketplaceAgent.item_type == "subagent",
+            MarketplaceAgent.parent_agent_id == agent_uuid,
+        )
+    )
+    custom_subagents = custom_result.scalars().all()
+
+    for sub in custom_subagents:
+        result_list.append(
+            {
+                "id": sub.id,
+                "name": sub.name,
+                "description": sub.description,
+                "tools": sub.tools,
+                "system_prompt": sub.system_prompt,
+                "is_builtin": False,
+                "model": (sub.config or {}).get("model", "inherit"),
+            }
+        )
+
+    return {"subagents": result_list}
+
+
+@router.post("/agents/{agent_id}/subagents")
+async def create_subagent(
+    agent_id: str,
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Create a custom subagent. Creates a MarketplaceAgent with item_type='subagent'.
+    """
+    name = data.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    try:
+        agent_uuid = UUID(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent_id: {agent_id}") from exc
+
+    subagent = MarketplaceAgent(
+        name=name,
+        slug=f"subagent-{name.lower().replace(' ', '-')}-{current_user.id}-{datetime.now(UTC).timestamp()}",
+        description=data.get("description", ""),
+        category="subagent",
+        item_type="subagent",
+        system_prompt=data.get("system_prompt", ""),
+        mode="chat",
+        agent_type="TesslateAgent",
+        tools=data.get("tools"),
+        model=data.get("model", "inherit"),
+        config={"model": data.get("model", "inherit")},
+        parent_agent_id=agent_uuid,
+        forked_by_user_id=current_user.id,
+        pricing_type="free",
+        price=0,
+        source_type="open",
+        is_active=True,
+        is_published=False,
+    )
+
+    db.add(subagent)
+    await db.flush()
+
+    # Auto-add to user's library
+    purchase = UserPurchasedAgent(
+        user_id=current_user.id,
+        agent_id=subagent.id,
+        purchase_type="free",
+        is_active=True,
+    )
+    db.add(purchase)
+    await db.commit()
+
+    return {
+        "success": True,
+        "subagent_id": subagent.id,
+        "message": f"Subagent '{name}' created",
+    }
+
+
+@router.patch("/agents/{agent_id}/subagents/{subagent_id}")
+async def update_subagent(
+    agent_id: str,
+    subagent_id: str,
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Update a subagent's prompt, tools, or config.
+    For built-in subagents (no DB id), this creates a user fork.
+    """
+    # Check if this is a built-in subagent being edited (subagent_id == name)
+    from ..agent.subagent_manager import _get_builtin_configs
+
+    builtins = _get_builtin_configs()
+
+    try:
+        agent_uuid = UUID(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent_id: {agent_id}") from exc
+
+    if subagent_id in builtins:
+        # Fork the built-in: create a custom DB subagent with the user's edits
+        builtin = builtins[subagent_id]
+        forked = MarketplaceAgent(
+            name=data.get("name", builtin.name),
+            slug=f"subagent-{subagent_id}-fork-{current_user.id}-{datetime.now(UTC).timestamp()}",
+            description=data.get("description", builtin.description),
+            category="subagent",
+            item_type="subagent",
+            system_prompt=data.get("system_prompt", builtin.system_prompt),
+            mode="chat",
+            agent_type="TesslateAgent",
+            tools=data.get("tools", builtin.tools),
+            model=data.get("model", "inherit"),
+            config={"model": data.get("model", "inherit")},
+            parent_agent_id=agent_uuid,
+            forked_by_user_id=current_user.id,
+            pricing_type="free",
+            price=0,
+            source_type="open",
+            is_active=True,
+            is_published=False,
+        )
+        db.add(forked)
+        await db.flush()
+
+        purchase = UserPurchasedAgent(
+            user_id=current_user.id,
+            agent_id=forked.id,
+            purchase_type="free",
+            is_active=True,
+        )
+        db.add(purchase)
+        await db.commit()
+
+        return {
+            "success": True,
+            "subagent_id": forked.id,
+            "forked": True,
+            "message": f"Created custom fork of built-in subagent '{subagent_id}'",
+        }
+
+    # Update existing custom subagent
+    try:
+        subagent_uuid = UUID(subagent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid subagent_id: {subagent_id}") from exc
+
+    result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == subagent_uuid,
+            MarketplaceAgent.item_type == "subagent",
+            MarketplaceAgent.forked_by_user_id == current_user.id,
+        )
+    )
+    subagent = result.scalar_one_or_none()
+    if not subagent:
+        raise HTTPException(status_code=404, detail="Subagent not found")
+
+    if "name" in data:
+        subagent.name = data["name"]
+    if "description" in data:
+        subagent.description = data["description"]
+    if "system_prompt" in data:
+        subagent.system_prompt = data["system_prompt"]
+    if "tools" in data:
+        subagent.tools = data["tools"]
+    if "model" in data:
+        existing_config = subagent.config or {}
+        existing_config["model"] = data["model"]
+        subagent.config = existing_config
+
+    await db.commit()
+
+    return {"success": True, "subagent_id": subagent.id, "message": "Subagent updated"}
+
+
+@router.delete("/agents/{agent_id}/subagents/{subagent_id}")
+async def delete_subagent(
+    agent_id: str,
+    subagent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Delete a custom subagent from the user's library.
+    """
+    try:
+        subagent_uuid = UUID(subagent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid subagent_id: {subagent_id}") from exc
+
+    # Remove purchase
+    purchase_result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == subagent_uuid,
+        )
+    )
+    purchase = purchase_result.scalar_one_or_none()
+    if purchase:
+        await db.delete(purchase)
+
+    # Delete the subagent if user owns it
+    result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == subagent_uuid,
+            MarketplaceAgent.item_type == "subagent",
+            MarketplaceAgent.forked_by_user_id == current_user.id,
+        )
+    )
+    subagent = result.scalar_one_or_none()
+    if subagent:
+        await db.delete(subagent)
+
+    await db.commit()
+
+    return {"success": True, "message": "Subagent removed"}
 
 
 @router.delete("/agents/{agent_id}/library")

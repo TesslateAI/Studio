@@ -6,19 +6,18 @@ and connections to the architecture graph canvas.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
+from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
-from ..output_formatter import success_output, error_output
 
 logger = logging.getLogger(__name__)
 
 
 async def graph_add_container_executor(
-    params: Dict[str, Any],
-    context: Dict[str, Any]
-) -> Dict[str, Any]:
+    params: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
     """
     Add a new container to the architecture grid.
 
@@ -40,8 +39,7 @@ async def graph_add_container_executor(
     name = params.get("name")
     if not name:
         return error_output(
-            message="name is required",
-            suggestion="Provide a name for the container"
+            message="name is required", suggestion="Provide a name for the container"
         )
 
     db = context.get("db")
@@ -50,8 +48,7 @@ async def graph_add_container_executor(
 
     if not db or not project_id:
         return error_output(
-            message="Missing required context",
-            suggestion="Ensure db and project_id are in context"
+            message="Missing required context", suggestion="Ensure db and project_id are in context"
         )
 
     try:
@@ -83,7 +80,7 @@ async def graph_add_container_executor(
             service_slug=service_slug if container_type == "service" else None,
             position_x=position_x,
             position_y=position_y,
-            port=port
+            port=port,
         )
 
         db.add(container)
@@ -96,7 +93,7 @@ async def graph_add_container_executor(
             name=container.name,
             directory=container.directory,
             container_type=container_type,
-            position={"x": position_x, "y": position_y}
+            position={"x": position_x, "y": position_y},
         )
 
     except Exception as e:
@@ -104,14 +101,13 @@ async def graph_add_container_executor(
         logger.error(f"Failed to add container: {e}", exc_info=True)
         return error_output(
             message=f"Failed to add container: {str(e)}",
-            suggestion="Check the container configuration"
+            suggestion="Check the container configuration",
         )
 
 
 async def graph_add_browser_preview_executor(
-    params: Dict[str, Any],
-    context: Dict[str, Any]
-) -> Dict[str, Any]:
+    params: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
     """
     Add a browser preview node to the grid.
 
@@ -131,8 +127,7 @@ async def graph_add_browser_preview_executor(
 
     if not db or not project_id:
         return error_output(
-            message="Missing required context",
-            suggestion="Ensure db and project_id are in context"
+            message="Missing required context", suggestion="Ensure db and project_id are in context"
         )
 
     try:
@@ -149,7 +144,7 @@ async def graph_add_browser_preview_executor(
             connected_container_id=UUID(container_id) if container_id else None,
             position_x=position_x,
             position_y=position_y,
-            current_path="/"
+            current_path="/",
         )
 
         db.add(preview)
@@ -160,7 +155,7 @@ async def graph_add_browser_preview_executor(
             message="Added browser preview to the grid",
             preview_id=str(preview.id),
             connected_container_id=container_id,
-            position={"x": position_x, "y": position_y}
+            position={"x": position_x, "y": position_y},
         )
 
     except Exception as e:
@@ -168,14 +163,13 @@ async def graph_add_browser_preview_executor(
         logger.error(f"Failed to add browser preview: {e}", exc_info=True)
         return error_output(
             message=f"Failed to add browser preview: {str(e)}",
-            suggestion="Check the container_id if provided"
+            suggestion="Check the container_id if provided",
         )
 
 
 async def graph_add_connection_executor(
-    params: Dict[str, Any],
-    context: Dict[str, Any]
-) -> Dict[str, Any]:
+    params: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
     """
     Create a connection between two containers.
 
@@ -198,7 +192,7 @@ async def graph_add_connection_executor(
     if not source_id or not target_id:
         return error_output(
             message="source_container_id and target_container_id are required",
-            suggestion="Provide UUIDs for both containers"
+            suggestion="Provide UUIDs for both containers",
         )
 
     db = context.get("db")
@@ -206,12 +200,12 @@ async def graph_add_connection_executor(
 
     if not db or not project_id:
         return error_output(
-            message="Missing required context",
-            suggestion="Ensure db and project_id are in context"
+            message="Missing required context", suggestion="Ensure db and project_id are in context"
         )
 
     try:
         from sqlalchemy import select
+
         from ....models import Container, ContainerConnection
 
         # Verify both containers exist
@@ -232,13 +226,13 @@ async def graph_add_connection_executor(
         if not source:
             return error_output(
                 message=f"Source container {source_id} not found",
-                suggestion="Check the source_container_id"
+                suggestion="Check the source_container_id",
             )
 
         if not target:
             return error_output(
                 message=f"Target container {target_id} not found",
-                suggestion="Check the target_container_id"
+                suggestion="Check the target_container_id",
             )
 
         connector_type = params.get("connector_type", "env_injection")
@@ -254,7 +248,7 @@ async def graph_add_connection_executor(
             connector_type=connector_type,
             connection_type=connector_type,  # Legacy field
             label=label,
-            config=config
+            config=config,
         )
 
         db.add(connection)
@@ -266,7 +260,7 @@ async def graph_add_connection_executor(
             connection_id=str(connection.id),
             source=source.name,
             target=target.name,
-            connector_type=connector_type
+            connector_type=connector_type,
         )
 
     except Exception as e:
@@ -274,14 +268,13 @@ async def graph_add_connection_executor(
         logger.error(f"Failed to add connection: {e}", exc_info=True)
         return error_output(
             message=f"Failed to add connection: {str(e)}",
-            suggestion="Check container IDs and try again"
+            suggestion="Check container IDs and try again",
         )
 
 
 async def graph_remove_item_executor(
-    params: Dict[str, Any],
-    context: Dict[str, Any]
-) -> Dict[str, Any]:
+    params: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
     """
     Remove an item (container, connection, or browser preview) from the grid.
 
@@ -301,14 +294,14 @@ async def graph_remove_item_executor(
     if not item_type or not item_id:
         return error_output(
             message="item_type and item_id are required",
-            suggestion="Specify the type and ID of the item to remove"
+            suggestion="Specify the type and ID of the item to remove",
         )
 
     valid_types = ["container", "connection", "browser_preview"]
     if item_type not in valid_types:
         return error_output(
             message=f"Invalid item_type: {item_type}",
-            suggestion=f"Use one of: {', '.join(valid_types)}"
+            suggestion=f"Use one of: {', '.join(valid_types)}",
         )
 
     db = context.get("db")
@@ -316,13 +309,13 @@ async def graph_remove_item_executor(
 
     if not db or not project_id:
         return error_output(
-            message="Missing required context",
-            suggestion="Ensure db and project_id are in context"
+            message="Missing required context", suggestion="Ensure db and project_id are in context"
         )
 
     try:
-        from sqlalchemy import select, delete
-        from ....models import Container, ContainerConnection, BrowserPreview
+        from sqlalchemy import delete
+
+        from ....models import BrowserPreview, Container, ContainerConnection
 
         item_uuid = UUID(item_id)
 
@@ -335,8 +328,7 @@ async def graph_remove_item_executor(
             )
             if result.rowcount == 0:
                 return error_output(
-                    message=f"Container {item_id} not found",
-                    suggestion="Check the item_id"
+                    message=f"Container {item_id} not found", suggestion="Check the item_id"
                 )
             await db.commit()
             return success_output(message=f"Removed container {item_id}")
@@ -349,8 +341,7 @@ async def graph_remove_item_executor(
             )
             if result.rowcount == 0:
                 return error_output(
-                    message=f"Connection {item_id} not found",
-                    suggestion="Check the item_id"
+                    message=f"Connection {item_id} not found", suggestion="Check the item_id"
                 )
             await db.commit()
             return success_output(message=f"Removed connection {item_id}")
@@ -363,8 +354,7 @@ async def graph_remove_item_executor(
             )
             if result.rowcount == 0:
                 return error_output(
-                    message=f"Browser preview {item_id} not found",
-                    suggestion="Check the item_id"
+                    message=f"Browser preview {item_id} not found", suggestion="Check the item_id"
                 )
             await db.commit()
             return success_output(message=f"Removed browser preview {item_id}")
@@ -373,13 +363,12 @@ async def graph_remove_item_executor(
         await db.rollback()
         logger.error(f"Failed to remove item: {e}", exc_info=True)
         return error_output(
-            message=f"Failed to remove item: {str(e)}",
-            suggestion="Check item type and ID"
+            message=f"Failed to remove item: {str(e)}", suggestion="Check item type and ID"
         )
 
 
 # Tool definitions
-GRID_TOOLS: List[Tool] = [
+GRID_TOOLS: list[Tool] = [
     Tool(
         name="graph_add_container",
         description="Add a new container node to the architecture grid. Creates a container in the project.",
@@ -389,41 +378,32 @@ GRID_TOOLS: List[Tool] = [
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Display name for the container (e.g., 'frontend', 'api')"
+                    "description": "Display name for the container (e.g., 'frontend', 'api')",
                 },
                 "base_id": {
                     "type": "string",
-                    "description": "Optional UUID of marketplace base to use"
+                    "description": "Optional UUID of marketplace base to use",
                 },
                 "container_type": {
                     "type": "string",
                     "enum": ["base", "service"],
-                    "description": "Type: 'base' for app containers, 'service' for infra (postgres, redis)"
+                    "description": "Type: 'base' for app containers, 'service' for infra (postgres, redis)",
                 },
                 "service_slug": {
                     "type": "string",
-                    "description": "For service type: 'postgres', 'redis', 'nginx', etc."
+                    "description": "For service type: 'postgres', 'redis', 'nginx', etc.",
                 },
-                "position_x": {
-                    "type": "number",
-                    "description": "X position on the canvas"
-                },
-                "position_y": {
-                    "type": "number",
-                    "description": "Y position on the canvas"
-                },
-                "port": {
-                    "type": "integer",
-                    "description": "Exposed port for the container"
-                }
+                "position_x": {"type": "number", "description": "X position on the canvas"},
+                "position_y": {"type": "number", "description": "Y position on the canvas"},
+                "port": {"type": "integer", "description": "Exposed port for the container"},
             },
-            "required": ["name"]
+            "required": ["name"],
         },
         executor=graph_add_container_executor,
         examples=[
             '{"tool_name": "graph_add_container", "parameters": {"name": "frontend", "container_type": "base", "port": 3000}}',
-            '{"tool_name": "graph_add_container", "parameters": {"name": "postgres", "container_type": "service", "service_slug": "postgres"}}'
-        ]
+            '{"tool_name": "graph_add_container", "parameters": {"name": "postgres", "container_type": "service", "service_slug": "postgres"}}',
+        ],
     ),
     Tool(
         name="graph_add_browser_preview",
@@ -434,23 +414,17 @@ GRID_TOOLS: List[Tool] = [
             "properties": {
                 "container_id": {
                     "type": "string",
-                    "description": "UUID of container to preview (optional, can connect later)"
+                    "description": "UUID of container to preview (optional, can connect later)",
                 },
-                "position_x": {
-                    "type": "number",
-                    "description": "X position on the canvas"
-                },
-                "position_y": {
-                    "type": "number",
-                    "description": "Y position on the canvas"
-                }
+                "position_x": {"type": "number", "description": "X position on the canvas"},
+                "position_y": {"type": "number", "description": "Y position on the canvas"},
             },
-            "required": []
+            "required": [],
         },
         executor=graph_add_browser_preview_executor,
         examples=[
             '{"tool_name": "graph_add_browser_preview", "parameters": {"container_id": "abc-123", "position_x": 400}}'
-        ]
+        ],
     ),
     Tool(
         name="graph_add_connection",
@@ -461,32 +435,29 @@ GRID_TOOLS: List[Tool] = [
             "properties": {
                 "source_container_id": {
                     "type": "string",
-                    "description": "UUID of the source container"
+                    "description": "UUID of the source container",
                 },
                 "target_container_id": {
                     "type": "string",
-                    "description": "UUID of the target container"
+                    "description": "UUID of the target container",
                 },
                 "connector_type": {
                     "type": "string",
                     "enum": ["env_injection", "http_api", "database", "cache", "depends_on"],
-                    "description": "Type of connection"
+                    "description": "Type of connection",
                 },
-                "label": {
-                    "type": "string",
-                    "description": "Optional label for the connection"
-                },
+                "label": {"type": "string", "description": "Optional label for the connection"},
                 "config": {
                     "type": "object",
-                    "description": "Optional configuration for the connection"
-                }
+                    "description": "Optional configuration for the connection",
+                },
             },
-            "required": ["source_container_id", "target_container_id"]
+            "required": ["source_container_id", "target_container_id"],
         },
         executor=graph_add_connection_executor,
         examples=[
             '{"tool_name": "graph_add_connection", "parameters": {"source_container_id": "abc", "target_container_id": "def", "connector_type": "database"}}'
-        ]
+        ],
     ),
     Tool(
         name="graph_remove_item",
@@ -498,18 +469,15 @@ GRID_TOOLS: List[Tool] = [
                 "item_type": {
                     "type": "string",
                     "enum": ["container", "connection", "browser_preview"],
-                    "description": "Type of item to remove"
+                    "description": "Type of item to remove",
                 },
-                "item_id": {
-                    "type": "string",
-                    "description": "UUID of the item to remove"
-                }
+                "item_id": {"type": "string", "description": "UUID of the item to remove"},
             },
-            "required": ["item_type", "item_id"]
+            "required": ["item_type", "item_id"],
         },
         executor=graph_remove_item_executor,
         examples=[
             '{"tool_name": "graph_remove_item", "parameters": {"item_type": "container", "item_id": "abc-123"}}'
-        ]
+        ],
     ),
 ]

@@ -10,17 +10,18 @@ https://arxiv.org/abs/2210.03629
 """
 
 import logging
-from typing import List, Dict, Any, Optional, AsyncIterator
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from .base import AbstractAgent
 from .models import ModelAdapter
 from .parser import AgentResponseParser, ToolCall
 from .prompts import get_user_message_wrapper
+from .resource_limits import ResourceLimitExceeded, get_resource_limits
 from .tools.registry import ToolRegistry
-from .resource_limits import get_resource_limits, ResourceLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -56,30 +57,28 @@ class ReActStep:
 
     Each step captures the agent's reasoning, actions taken, and observations received.
     """
+
     iteration: int
-    thought: Optional[str]  # Reasoning step
-    tool_calls: List[ToolCall]  # Actions
-    tool_results: List[Dict[str, Any]]  # Observations
+    thought: str | None  # Reasoning step
+    tool_calls: list[ToolCall]  # Actions
+    tool_results: list[dict[str, Any]]  # Observations
     response_text: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     is_complete: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert step to dictionary for JSON serialization."""
         return {
             "iteration": self.iteration,
             "thought": self.thought,
             "tool_calls": [
-                {
-                    "name": tc.name,
-                    "parameters": _convert_uuids_to_strings(tc.parameters)
-                }
+                {"name": tc.name, "parameters": _convert_uuids_to_strings(tc.parameters)}
                 for tc in self.tool_calls
             ],
             "tool_results": _convert_uuids_to_strings(self.tool_results),
             "response_text": self.response_text,
             "timestamp": self.timestamp.isoformat(),
-            "is_complete": self.is_complete
+            "is_complete": self.is_complete,
         }
 
 
@@ -103,8 +102,8 @@ class ReActAgent(AbstractAgent):
     def __init__(
         self,
         system_prompt: str,
-        tools: Optional[ToolRegistry] = None,
-        model: Optional[ModelAdapter] = None
+        tools: ToolRegistry | None = None,
+        model: ModelAdapter | None = None,
     ):
         """
         Initialize the ReAct Agent.
@@ -120,16 +119,15 @@ class ReActAgent(AbstractAgent):
         self.parser = AgentResponseParser()
 
         # Conversation history
-        self.messages: List[Dict[str, str]] = []
+        self.messages: list[dict[str, str]] = []
 
         # Execution tracking
-        self.steps: List[ReActStep] = []
+        self.steps: list[ReActStep] = []
         self.tool_calls_count = 0
         self.last_step_had_errors = False  # Track if previous iteration had errors
 
         logger.info(
-            f"ReActAgent initialized - "
-            f"tools: {len(self.tools._tools) if self.tools else 0}"
+            f"ReActAgent initialized - tools: {len(self.tools._tools) if self.tools else 0}"
         )
 
     def set_model(self, model: ModelAdapter):
@@ -137,10 +135,8 @@ class ReActAgent(AbstractAgent):
         self.model = model
 
     async def run(
-        self,
-        user_request: str,
-        context: Dict[str, Any]
-    ) -> AsyncIterator[Dict[str, Any]]:
+        self, user_request: str, context: dict[str, Any]
+    ) -> AsyncIterator[dict[str, Any]]:
         """
         Run the ReAct agent to complete a user request.
 
@@ -159,29 +155,26 @@ class ReActAgent(AbstractAgent):
             Events with types: agent_step, complete, error
         """
         if not self.model:
-            yield {
-                'type': 'error',
-                'content': 'Model adapter not set. Call set_model() first.'
-            }
+            yield {"type": "error", "content": "Model adapter not set. Call set_model() first."}
             return
 
         logger.info(f"[ReActAgent] Starting - request: {user_request[:100]}...")
 
         # Initialize resource limits tracking
         limits = get_resource_limits()
-        run_id = f"user-{context.get('user_id')}-project-{context.get('project_id')}-{datetime.now(timezone.utc).timestamp()}"
+        run_id = f"user-{context.get('user_id')}-project-{context.get('project_id')}-{datetime.now(UTC).timestamp()}"
 
         # Extract and prepare project context
         project_context = None
-        if 'project_context' in context:
-            project_context = context['project_context']
+        if "project_context" in context:
+            project_context = context["project_context"]
 
         # Add user_id and project_id to project_context for environment context
         if project_context is None:
             project_context = {}
 
-        project_context['user_id'] = context.get('user_id')
-        project_context['project_id'] = context.get('project_id')
+        project_context["user_id"] = context.get("user_id")
+        project_context["project_id"] = context.get("project_id")
 
         # Initialize conversation with system prompt (with marker substitution)
         full_system_prompt = self._get_system_prompt(context)
@@ -190,12 +183,10 @@ class ReActAgent(AbstractAgent):
         user_message = await get_user_message_wrapper(user_request, project_context)
 
         # Build messages list starting with system prompt
-        self.messages = [
-            {"role": "system", "content": full_system_prompt}
-        ]
+        self.messages = [{"role": "system", "content": full_system_prompt}]
 
         # Include chat history if provided (for conversation continuity)
-        chat_history = context.get('chat_history', [])
+        chat_history = context.get("chat_history", [])
         if chat_history:
             logger.info(f"[ReActAgent] Including {len(chat_history)} previous messages for context")
             self.messages.extend(chat_history)
@@ -215,30 +206,31 @@ class ReActAgent(AbstractAgent):
                     limits.add_iteration(run_id)
                 except ResourceLimitExceeded as e:
                     logger.warning(f"[ReActAgent] Resource limit exceeded: {e}")
+                    yield {"type": "error", "content": f"Resource limit exceeded: {str(e)}"}
                     yield {
-                        'type': 'error',
-                        'content': f'Resource limit exceeded: {str(e)}'
-                    }
-                    yield {
-                        'type': 'complete',
-                        'data': {
-                            'success': False,
-                            'iterations': iteration,
-                            'final_response': '',
-                            'error': str(e),
-                            'tool_calls_made': self.tool_calls_count,
-                            'completion_reason': 'resource_limit_exceeded',
-                            'resource_stats': limits.get_stats(run_id)
-                        }
+                        "type": "complete",
+                        "data": {
+                            "success": False,
+                            "iterations": iteration,
+                            "final_response": "",
+                            "error": str(e),
+                            "tool_calls_made": self.tool_calls_count,
+                            "completion_reason": "resource_limit_exceeded",
+                            "resource_stats": limits.get_stats(run_id),
+                        },
                     }
                     return
 
                 # DEBUG: Log full context being sent to LLM
                 logger.debug(f"[ReActAgent] Context sent to LLM (iteration {iteration}):")
                 for idx, msg in enumerate(self.messages):
-                    role = msg['role']
-                    content = msg['content']
-                    logger.debug(f"  Message {idx} [{role}]: {content[:500]}..." if len(content) > 500 else f"  Message {idx} [{role}]: {content}")
+                    role = msg["role"]
+                    content = msg["content"]
+                    logger.debug(
+                        f"  Message {idx} [{role}]: {content[:500]}..."
+                        if len(content) > 500
+                        else f"  Message {idx} [{role}]: {content}"
+                    )
 
                 try:
                     # Step 1: Get model response (streaming)
@@ -247,11 +239,8 @@ class ReActAgent(AbstractAgent):
                         response += chunk
                         # Yield text chunk to keep connection alive and show real-time generation
                         yield {
-                            'type': 'text_chunk',
-                            'data': {
-                                'content': chunk,
-                                'iteration': iteration
-                            }
+                            "type": "text_chunk",
+                            "data": {"content": chunk, "iteration": iteration},
                         }
 
                     # DEBUG: Log full model response
@@ -271,7 +260,9 @@ class ReActAgent(AbstractAgent):
 
                     # DEBUG: Log parsed data
                     logger.debug(f"[ReActAgent] Parsed thought (Reasoning): {thought}")
-                    logger.debug(f"[ReActAgent] Parsed tool_calls (Actions): {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}")
+                    logger.debug(
+                        f"[ReActAgent] Parsed tool_calls (Actions): {[{'name': tc.name, 'params': tc.parameters} for tc in tool_calls]}"
+                    )
                     logger.debug(f"[ReActAgent] Is complete: {is_complete}")
 
                     # Step 3: Execute tools (Actions) if any
@@ -284,56 +275,65 @@ class ReActAgent(AbstractAgent):
                         for idx, result in enumerate(tool_results):
                             if result.get("approval_required"):
                                 from .tools.approval_manager import get_approval_manager
+
                                 approval_mgr = get_approval_manager()
 
                                 # Create approval request
                                 approval_id, request = await approval_mgr.request_approval(
                                     tool_name=result["tool"],
                                     parameters=result["parameters"],
-                                    session_id=result["session_id"]
+                                    session_id=result["session_id"],
                                 )
 
                                 # Emit approval_required event
                                 yield {
-                                    'type': 'approval_required',
-                                    'data': {
-                                        'approval_id': approval_id,
-                                        'tool_name': result["tool"],
-                                        'tool_parameters': result["parameters"],
-                                        'tool_description': f"Execute {result['tool']} operation"
-                                    }
+                                    "type": "approval_required",
+                                    "data": {
+                                        "approval_id": approval_id,
+                                        "tool_name": result["tool"],
+                                        "tool_parameters": result["parameters"],
+                                        "tool_description": f"Execute {result['tool']} operation",
+                                    },
                                 }
 
-                                logger.info(f"[ReActAgent] Waiting for user approval for {result['tool']}")
+                                logger.info(
+                                    f"[ReActAgent] Waiting for user approval for {result['tool']}"
+                                )
 
                                 # Wait for user response
                                 await request.event.wait()
 
-                                logger.info(f"[ReActAgent] Received approval response: {request.response}")
+                                logger.info(
+                                    f"[ReActAgent] Received approval response: {request.response}"
+                                )
 
                                 # Handle response
-                                if request.response == 'stop':
+                                if request.response == "stop":
                                     # User cancelled - terminate agent execution completely
-                                    logger.info(f"[ReActAgent] User stopped execution at {result['tool']}")
+                                    logger.info(
+                                        f"[ReActAgent] User stopped execution at {result['tool']}"
+                                    )
                                     yield {
-                                        'type': 'complete',
-                                        'data': {
-                                            'final_response': "Execution stopped by user.",
-                                            'iterations': iteration,
-                                            'tool_calls_made': self.tool_calls_count,
-                                            'completion_reason': 'user_stopped'
-                                        }
+                                        "type": "complete",
+                                        "data": {
+                                            "final_response": "Execution stopped by user.",
+                                            "iterations": iteration,
+                                            "tool_calls_made": self.tool_calls_count,
+                                            "completion_reason": "user_stopped",
+                                        },
                                     }
                                     return  # Terminate agent execution
                                 else:
                                     # allow_once or allow_all - retry execution with approval check bypassed
-                                    logger.info(f"[ReActAgent] Retrying {tool_calls[idx].name} with approval granted")
+                                    logger.info(
+                                        f"[ReActAgent] Retrying {tool_calls[idx].name} with approval granted"
+                                    )
                                     # Create modified context that skips approval check for this execution
-                                    approved_context = {**context, 'skip_approval_check': True}
+                                    approved_context = {**context, "skip_approval_check": True}
                                     tool_results[idx] = await self.tools.execute(
                                         tool_name=tool_calls[idx].name,
                                         parameters=tool_calls[idx].parameters,
-                                        context=approved_context
+                                        context=approved_context,
                                     )
 
                         # Check if any tools failed or had parse errors
@@ -355,7 +355,7 @@ class ReActAgent(AbstractAgent):
                         tool_calls=tool_calls,
                         tool_results=tool_results,
                         response_text=display_text,
-                        is_complete=is_complete
+                        is_complete=is_complete,
                     )
                     self.steps.append(step)
 
@@ -363,21 +363,20 @@ class ReActAgent(AbstractAgent):
                     step_data = step.to_dict()
 
                     # Add debug data (only included if client requests it)
-                    step_data['_debug'] = {
-                        'full_response': response,
-                        'context_messages_count': len(self.messages),
-                        'context_messages': self.messages.copy(),  # Full context history
-                        'raw_tool_calls': [{'name': tc.name, 'params': tc.parameters} for tc in tool_calls],
-                        'raw_thought': thought,
-                        'is_complete': is_complete,
-                        'conversational_text': conversational,
-                        'display_text': display_text
+                    step_data["_debug"] = {
+                        "full_response": response,
+                        "context_messages_count": len(self.messages),
+                        "context_messages": self.messages.copy(),  # Full context history
+                        "raw_tool_calls": [
+                            {"name": tc.name, "params": tc.parameters} for tc in tool_calls
+                        ],
+                        "raw_thought": thought,
+                        "is_complete": is_complete,
+                        "conversational_text": conversational,
+                        "display_text": display_text,
                     }
 
-                    yield {
-                        'type': 'agent_step',
-                        'data': step_data
-                    }
+                    yield {"type": "agent_step", "data": step_data}
 
                     # Step 4: Update conversation history
                     self.messages.append({"role": "assistant", "content": response})
@@ -407,15 +406,16 @@ class ReActAgent(AbstractAgent):
                         logger.info(f"[ReActAgent] Task completed in {iteration} iterations")
                         conversational_text = self.parser.get_conversational_text(response)
                         yield {
-                            'type': 'complete',
-                            'data': {
-                                'success': True,
-                                'iterations': iteration,
-                                'final_response': conversational_text or "Task completed successfully.",
-                                'tool_calls_made': self.tool_calls_count,
-                                'completion_reason': 'task_complete_signal',
-                                'resource_stats': limits.get_stats(run_id)
-                            }
+                            "type": "complete",
+                            "data": {
+                                "success": True,
+                                "iterations": iteration,
+                                "final_response": conversational_text
+                                or "Task completed successfully.",
+                                "tool_calls_made": self.tool_calls_count,
+                                "completion_reason": "task_complete_signal",
+                                "resource_stats": limits.get_stats(run_id),
+                            },
                         }
                         return
 
@@ -439,37 +439,36 @@ class ReActAgent(AbstractAgent):
                             continue  # Force next iteration
 
                         # No tool calls in this iteration - assume complete
-                        logger.info(f"[ReActAgent] No tool calls in iteration {iteration}, assuming complete")
+                        logger.info(
+                            f"[ReActAgent] No tool calls in iteration {iteration}, assuming complete"
+                        )
                         yield {
-                            'type': 'complete',
-                            'data': {
-                                'success': True,
-                                'iterations': iteration,
-                                'final_response': conversational_text or response,
-                                'tool_calls_made': self.tool_calls_count,
-                                'completion_reason': 'no_more_actions',
-                                'resource_stats': limits.get_stats(run_id)
-                            }
+                            "type": "complete",
+                            "data": {
+                                "success": True,
+                                "iterations": iteration,
+                                "final_response": conversational_text or response,
+                                "tool_calls_made": self.tool_calls_count,
+                                "completion_reason": "no_more_actions",
+                                "resource_stats": limits.get_stats(run_id),
+                            },
                         }
                         return
 
                 except Exception as e:
                     logger.error(f"[ReActAgent] Iteration {iteration} error: {e}", exc_info=True)
+                    yield {"type": "error", "content": f"Agent error: {str(e)}"}
                     yield {
-                        'type': 'error',
-                        'content': f'Agent error: {str(e)}'
-                    }
-                    yield {
-                        'type': 'complete',
-                        'data': {
-                            'success': False,
-                            'iterations': iteration,
-                            'final_response': '',
-                            'error': str(e),
-                            'tool_calls_made': self.tool_calls_count,
-                            'completion_reason': 'error',
-                            'resource_stats': limits.get_stats(run_id)
-                        }
+                        "type": "complete",
+                        "data": {
+                            "success": False,
+                            "iterations": iteration,
+                            "final_response": "",
+                            "error": str(e),
+                            "tool_calls_made": self.tool_calls_count,
+                            "completion_reason": "error",
+                            "resource_stats": limits.get_stats(run_id),
+                        },
                     }
                     return
 
@@ -478,10 +477,8 @@ class ReActAgent(AbstractAgent):
             limits.cleanup_run(run_id)
 
     async def _execute_tool_calls(
-        self,
-        tool_calls: List[ToolCall],
-        context: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+        self, tool_calls: list[ToolCall], context: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """
         Execute a list of tool calls (Actions in ReAct terminology).
 
@@ -494,38 +491,37 @@ class ReActAgent(AbstractAgent):
         """
         if not self.tools:
             logger.error("[ReActAgent] No tool registry available")
-            return [{
-                "success": False,
-                "error": "No tool registry available"
-            } for _ in tool_calls]
+            return [{"success": False, "error": "No tool registry available"} for _ in tool_calls]
 
         results = []
 
         for i, tool_call in enumerate(tool_calls):
             # Handle parse errors specially
             if tool_call.name == "__parse_error__":
-                logger.warning(f"[ReActAgent] Parse error detected for tool: {tool_call.parameters.get('tool_name')}")
+                logger.warning(
+                    f"[ReActAgent] Parse error detected for tool: {tool_call.parameters.get('tool_name')}"
+                )
                 result = {
                     "success": False,
-                    "tool": tool_call.parameters.get('tool_name', 'unknown'),
+                    "tool": tool_call.parameters.get("tool_name", "unknown"),
                     "error": "Tool call parsing failed - Invalid JSON format",
                     "result": {
                         "message": f"Failed to parse tool call for '{tool_call.parameters.get('tool_name', 'unknown')}'",
-                        "error_details": tool_call.parameters.get('error'),
-                        "problematic_json": tool_call.parameters.get('raw_params', ''),
-                        "suggestion": tool_call.parameters.get('suggestion', ''),
-                        "required_action": "You MUST retry this tool call with valid JSON. Fix the formatting errors and try again."
-                    }
+                        "error_details": tool_call.parameters.get("error"),
+                        "problematic_json": tool_call.parameters.get("raw_params", ""),
+                        "suggestion": tool_call.parameters.get("suggestion", ""),
+                        "required_action": "You MUST retry this tool call with valid JSON. Fix the formatting errors and try again.",
+                    },
                 }
                 results.append(result)
                 continue
 
-            logger.info(f"[ReActAgent] Executing action {i+1}/{len(tool_calls)}: {tool_call.name}")
+            logger.info(
+                f"[ReActAgent] Executing action {i + 1}/{len(tool_calls)}: {tool_call.name}"
+            )
 
             result = await self.tools.execute(
-                tool_name=tool_call.name,
-                parameters=tool_call.parameters,
-                context=context
+                tool_name=tool_call.name, parameters=tool_call.parameters, context=context
             )
 
             results.append(result)
@@ -534,11 +530,13 @@ class ReActAgent(AbstractAgent):
             if result.get("success", False):
                 logger.info(f"[ReActAgent] Action {tool_call.name} succeeded")
             else:
-                logger.warning(f"[ReActAgent] Action {tool_call.name} failed: {result.get('error')}")
+                logger.warning(
+                    f"[ReActAgent] Action {tool_call.name} failed: {result.get('error')}"
+                )
 
         return results
 
-    def _format_tool_results(self, results: List[Dict[str, Any]]) -> str:
+    def _format_tool_results(self, results: list[dict[str, Any]]) -> str:
         """
         Format tool results (Observations) for feeding back to the model.
 
@@ -581,21 +579,25 @@ class ReActAgent(AbstractAgent):
                         if len(output_content) > MAX_OUTPUT_LENGTH:
                             # Truncate with warning - show head and tail
                             elided_chars = len(output_content) - MAX_OUTPUT_LENGTH
-                            formatted.append(f"   <warning>Output truncated: {elided_chars} characters elided</warning>")
-                            formatted.append(f"   <suggestion>Try using head, tail, grep, or sed for more selective output</suggestion>")
+                            formatted.append(
+                                f"   <warning>Output truncated: {elided_chars} characters elided</warning>"
+                            )
+                            formatted.append(
+                                "   <suggestion>Try using head, tail, grep, or sed for more selective output</suggestion>"
+                            )
                             formatted.append(f"   <{output_field}_head>")
-                            for line in output_content[:MAX_PREVIEW_LENGTH].split('\n'):
+                            for line in output_content[:MAX_PREVIEW_LENGTH].split("\n"):
                                 formatted.append(f"   | {line}")
                             formatted.append(f"   </{output_field}_head>")
                             formatted.append(f"   <elided>{elided_chars} characters</elided>")
                             formatted.append(f"   <{output_field}_tail>")
-                            for line in output_content[-MAX_PREVIEW_LENGTH:].split('\n'):
+                            for line in output_content[-MAX_PREVIEW_LENGTH:].split("\n"):
                                 formatted.append(f"   | {line}")
                             formatted.append(f"   </{output_field}_tail>")
                         else:
                             # Normal output - not truncated
                             formatted.append(f"   {output_field}:")
-                            for line in output_content.split('\n'):
+                            for line in output_content.split("\n"):
                                 formatted.append(f"   | {line}")
 
                     # Show files list (for directory listings)
@@ -608,7 +610,9 @@ class ReActAgent(AbstractAgent):
                                         file_type = file.get("type", "file")
                                         file_name = file.get("name", file.get("path", "unknown"))
                                         file_size = file.get("size", 0)
-                                        formatted.append(f"     [{file_type}] {file_name} ({file_size} bytes)")
+                                        formatted.append(
+                                            f"     [{file_type}] {file_name} ({file_size} bytes)"
+                                        )
                                     else:
                                         formatted.append(f"     {file}")
                         else:
@@ -628,8 +632,8 @@ class ReActAgent(AbstractAgent):
 
                     # Show stderr if present (errors)
                     if "stderr" in tool_result and tool_result["stderr"]:
-                        formatted.append(f"   stderr:")
-                        stderr_lines = tool_result["stderr"].split('\n')
+                        formatted.append("   stderr:")
+                        stderr_lines = tool_result["stderr"].split("\n")
                         for line in stderr_lines:
                             formatted.append(f"   | {line}")
 
@@ -657,7 +661,9 @@ class ReActAgent(AbstractAgent):
                 if isinstance(result.get("result"), dict):
                     # Show required action FIRST (most important)
                     if "required_action" in result["result"]:
-                        formatted.append(f"   ⚠️ REQUIRED ACTION: {result['result']['required_action']}")
+                        formatted.append(
+                            f"   ⚠️ REQUIRED ACTION: {result['result']['required_action']}"
+                        )
 
                     if "suggestion" in result["result"]:
                         formatted.append(f"   Suggestion: {result['result']['suggestion']}")
@@ -666,13 +672,16 @@ class ReActAgent(AbstractAgent):
                     if "error_details" in result["result"]:
                         formatted.append(f"   Details: {result['result']['error_details']}")
 
-                    if "problematic_json" in result["result"] and result["result"]["problematic_json"]:
-                        formatted.append(f"   Problematic JSON (first 300 chars):")
+                    if (
+                        "problematic_json" in result["result"]
+                        and result["result"]["problematic_json"]
+                    ):
+                        formatted.append("   Problematic JSON (first 300 chars):")
                         formatted.append(f"   {result['result']['problematic_json'][:300]}")
 
         return "\n".join(formatted)
 
-    def _get_system_prompt(self, context: Dict[str, Any]) -> str:
+    def _get_system_prompt(self, context: dict[str, Any]) -> str:
         """
         Build the complete system prompt for the ReAct agent.
 
@@ -721,7 +730,7 @@ class ReActAgent(AbstractAgent):
             "CRITICAL: Every action MUST be preceded by a THOUGHT section explaining your reasoning.",
             "",
             "JSON Formatting Rules (MUST FOLLOW):",
-            "1. ALL quotes inside string values MUST be escaped with backslash: \\\"",
+            '1. ALL quotes inside string values MUST be escaped with backslash: \\"',
             "2. Newlines must be escaped as \\n, tabs as \\t, backslashes as \\\\",
             "3. Use only double quotes for JSON strings, never single quotes",
             "4. Ensure proper JSON syntax: commas between properties, matching braces",
@@ -735,34 +744,34 @@ class ReActAgent(AbstractAgent):
             "",
             "THOUGHT: I need to understand the current file structure to locate the main application file.",
             "",
-            '{',
+            "{",
             '  "tool_name": "read_file",',
             '  "parameters": {',
             '    "file_path": "src/App.jsx"',
-            '  }',
-            '}',
+            "  }",
+            "}",
             "",
             "ReAct Format (Multiple Actions):",
             "",
             "THOUGHT: I'll read the App.jsx file and check the project dependencies to understand the current setup.",
             "",
-            '[',
-            '  {',
+            "[",
+            "  {",
             '    "tool_name": "read_file",',
             '    "parameters": {',
             '      "file_path": "src/App.jsx"',
-            '    }',
-            '  },',
-            '  {',
+            "    }",
+            "  },",
+            "  {",
             '    "tool_name": "bash_exec",',
             '    "parameters": {',
             '      "command": "cat package.json"',
-            '    }',
-            '  }',
-            ']',
+            "    }",
+            "  }",
+            "]",
             "",
             "Available Tools:",
-            ""
+            "",
         ]
 
         # List all available tools with descriptions and parameters
@@ -771,60 +780,64 @@ class ReActAgent(AbstractAgent):
             tools_text.append("")
 
             # Add parameters
-            if hasattr(tool, 'parameters'):
+            if hasattr(tool, "parameters"):
                 params = tool.parameters
                 if isinstance(params, dict):
-                    props = params.get('properties', {})
-                    required = params.get('required', [])
+                    props = params.get("properties", {})
+                    required = params.get("required", [])
 
                     if props:
                         tools_text.append("Parameters:")
                         tools_text.append("")
                         for param_name, param_info in props.items():
-                            param_type = param_info.get('type', 'string')
-                            req_str = 'required' if param_name in required else 'optional'
-                            param_desc = param_info.get('description', '')
-                            tools_text.append(f"  - {param_name} ({param_type}, {req_str}): {param_desc}")
+                            param_type = param_info.get("type", "string")
+                            req_str = "required" if param_name in required else "optional"
+                            param_desc = param_info.get("description", "")
+                            tools_text.append(
+                                f"  - {param_name} ({param_type}, {req_str}): {param_desc}"
+                            )
                             tools_text.append("")
 
             # Add examples if available
-            if hasattr(tool, 'examples') and tool.examples:
+            if hasattr(tool, "examples") and tool.examples:
                 tools_text.append("Examples:")
                 tools_text.append("")
                 for example in tool.examples:
                     tools_text.append(f"  {example}")
                     tools_text.append("")
 
-        tools_text.extend([
-            "ReAct Rules and Constraints:",
-            "",
-            "Explicit Reasoning: ALWAYS include a THOUGHT section before actions explaining your reasoning.",
-            "",
-            "Wait for Observation: ALWAYS wait for the observation from your previous action before issuing the next command. Do not assume the outcome of any action.",
-            "",
-            "Conciseness: Be professional and concise. Do not provide conversational filler.",
-            "",
-            "File Modifications: Read files before modifying them to understand their current state.",
-            "",
-            "Output Truncation: Be aware that long command outputs or file contents may be truncated to preserve context space. You will be notified if this happens.",
-            "",
-            "",
-            "Task Completion:",
-            "",
-            "Output TASK_COMPLETE when you have fully satisfied the user's original request. Do NOT mark complete just because an action succeeded. Verify the entire task is done."
-        ])
+        tools_text.extend(
+            [
+                "ReAct Rules and Constraints:",
+                "",
+                "Explicit Reasoning: ALWAYS include a THOUGHT section before actions explaining your reasoning.",
+                "",
+                "Wait for Observation: ALWAYS wait for the observation from your previous action before issuing the next command. Do not assume the outcome of any action.",
+                "",
+                "Conciseness: Be professional and concise. Do not provide conversational filler.",
+                "",
+                "File Modifications: Read files before modifying them to understand their current state.",
+                "",
+                "Output Truncation: Be aware that long command outputs or file contents may be truncated to preserve context space. You will be notified if this happens.",
+                "",
+                "",
+                "Task Completion:",
+                "",
+                "Output TASK_COMPLETE when you have fully satisfied the user's original request. Do NOT mark complete just because an action succeeded. Verify the entire task is done.",
+            ]
+        )
 
         return "\n".join(tools_text)
 
-    def get_conversation_history(self) -> List[Dict[str, str]]:
+    def get_conversation_history(self) -> list[dict[str, str]]:
         """Get the full conversation history."""
         return self.messages.copy()
 
-    def get_execution_summary(self) -> Dict[str, Any]:
+    def get_execution_summary(self) -> dict[str, Any]:
         """Get a summary of the agent's execution."""
         return {
             "total_steps": len(self.steps),
             "tool_calls_made": self.tool_calls_count,
             "final_iteration": self.steps[-1].iteration if self.steps else 0,
-            "completed": self.steps[-1].is_complete if self.steps else False
+            "completed": self.steps[-1].is_complete if self.steps else False,
         }

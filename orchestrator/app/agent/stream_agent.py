@@ -6,17 +6,18 @@ This encapsulates the original 'stream' mode logic where the AI generates
 code and text that is immediately streamed back to the frontend.
 """
 
-from typing import AsyncIterator, Dict, Any
-from uuid import UUID
-import logging
-import re
 import asyncio
+import logging
 import os
+import re
+from collections.abc import AsyncIterator
+from typing import Any
+from uuid import UUID
+
 import aiofiles
 
-from .base import AbstractAgent
-from openai import AsyncOpenAI
 from ..utils.resource_naming import get_project_path
+from .base import AbstractAgent
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +34,8 @@ class StreamAgent(AbstractAgent):
     """
 
     async def run(
-        self,
-        user_request: str,
-        context: Dict[str, Any]
-    ) -> AsyncIterator[Dict[str, Any]]:
+        self, user_request: str, context: dict[str, Any]
+    ) -> AsyncIterator[dict[str, Any]]:
         """
         Run the stream agent to generate and stream a response.
 
@@ -55,48 +54,42 @@ class StreamAgent(AbstractAgent):
             Events with types: stream, file_ready, status, complete, error
         """
         from ..config import get_settings
+
         settings = get_settings()
 
-        user = context['user']
-        project_id = context.get('project_id')
-        db = context.get('db')
-        project_context_str = context.get('project_context_str', '')
+        user = context["user"]
+        project_id = context.get("project_id")
+        db = context.get("db")
+        project_context_str = context.get("project_context_str", "")
 
         # Get the model to use
-        model = context.get('model') or settings.litellm_default_models.split(",")[0]
+        model = context.get("model") or settings.litellm_default_models.split(",")[0]
 
         # Create OpenAI client using centralized routing (handles OpenRouter vs LiteLLM)
         from .models import get_llm_client
+
         try:
-            client = await get_llm_client(
-                user_id=user.id,
-                model_name=model,
-                db=db
-            )
+            client = await get_llm_client(user_id=user.id, model_name=model, db=db)
         except ValueError as e:
-            yield {
-                'type': 'error',
-                'content': str(e)
-            }
+            yield {"type": "error", "content": str(e)}
             return
 
         # Build the complete prompt starting with system message (with marker substitution)
         processed_system_prompt = self.get_processed_system_prompt(context)
-        messages = [
-            {"role": "system", "content": processed_system_prompt}
-        ]
+        messages = [{"role": "system", "content": processed_system_prompt}]
 
         # Include chat history if provided (for conversation continuity)
-        chat_history = context.get('chat_history', [])
+        chat_history = context.get("chat_history", [])
         if chat_history:
-            logger.info(f"[StreamAgent] Including {len(chat_history)} previous messages for context")
+            logger.info(
+                f"[StreamAgent] Including {len(chat_history)} previous messages for context"
+            )
             messages.extend(chat_history)
 
         # Add current user message
-        messages.append({
-            "role": "user",
-            "content": f"{project_context_str}\n\nUser request: {user_request}"
-        })
+        messages.append(
+            {"role": "user", "content": f"{project_context_str}\n\nUser request: {user_request}"}
+        )
 
         full_response = ""
         processed_files = set()
@@ -107,19 +100,17 @@ class StreamAgent(AbstractAgent):
 
             # Prepare request parameters
             # Strip openrouter/ prefix if present (OpenRouter API expects just the model ID)
-            model_id = model.removeprefix("openrouter/") if model.startswith("openrouter/") else model
+            model_id = (
+                model.removeprefix("openrouter/") if model.startswith("openrouter/") else model
+            )
 
-            stream_params = {
-                "model": model_id,
-                "messages": messages,
-                "stream": True
-            }
+            stream_params = {"model": model_id, "messages": messages, "stream": True}
 
             # Add OpenRouter-specific headers if needed
             if model.startswith("openrouter/"):
                 stream_params["extra_headers"] = {
                     "HTTP-Referer": "https://tesslate.com",
-                    "X-Title": "Tesslate Studio"
+                    "X-Title": "Tesslate Studio",
                 }
 
             stream = await client.chat.completions.create(**stream_params)
@@ -129,7 +120,7 @@ class StreamAgent(AbstractAgent):
                 if chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
                     full_response += content
-                    yield {'type': 'stream', 'content': content}
+                    yield {"type": "stream", "content": content}
 
             logger.info(f"[StreamAgent] Streaming complete, response length: {len(full_response)}")
 
@@ -142,7 +133,9 @@ class StreamAgent(AbstractAgent):
 
                 for i, (file_path, code) in enumerate(code_blocks):
                     if file_path not in processed_files:
-                        logger.info(f"[StreamAgent] Saving file {i+1}/{len(code_blocks)}: {file_path}")
+                        logger.info(
+                            f"[StreamAgent] Saving file {i + 1}/{len(code_blocks)}: {file_path}"
+                        )
                         processed_files.add(file_path)
 
                         # Save the file
@@ -151,16 +144,12 @@ class StreamAgent(AbstractAgent):
                             code=code,
                             project_id=project_id,
                             user_id=user.id,
-                            db=db
+                            db=db,
                         )
 
                         if success:
                             # Notify frontend
-                            yield {
-                                'type': 'file_ready',
-                                'file_path': file_path,
-                                'content': code
-                            }
+                            yield {"type": "file_ready", "file_path": file_path, "content": code}
 
                             # Track if package.json was modified
                             if file_path == "package.json":
@@ -172,12 +161,14 @@ class StreamAgent(AbstractAgent):
 
                 # Run npm install if package.json was modified (K8s only)
                 from ..services.orchestration import is_kubernetes_mode
+
                 if package_json_modified and is_kubernetes_mode():
                     logger.info("[StreamAgent] package.json modified, running npm install")
-                    yield {'type': 'status', 'content': '📦 Installing dependencies...'}
+                    yield {"type": "status", "content": "📦 Installing dependencies..."}
 
                     try:
                         from ..services.orchestration import get_orchestrator
+
                         orchestrator = get_orchestrator()
 
                         await orchestrator.execute_command(
@@ -185,38 +176,38 @@ class StreamAgent(AbstractAgent):
                             project_id=project_id,
                             container_name=None,  # Use default container
                             command=["npm", "install"],
-                            timeout=180
+                            timeout=180,
                         )
 
-                        yield {'type': 'status', 'content': '✅ Dependencies installed successfully'}
+                        yield {
+                            "type": "status",
+                            "content": "✅ Dependencies installed successfully",
+                        }
                     except Exception as e:
                         logger.warning(f"[StreamAgent] npm install failed: {e}")
-                        yield {'type': 'warning', 'content': f'⚠️ Failed to install dependencies: {str(e)}'}
+                        yield {
+                            "type": "warning",
+                            "content": f"⚠️ Failed to install dependencies: {str(e)}",
+                        }
 
             # Send completion event
-            yield {
-                'type': 'complete',
-                'data': {'final_response': full_response}
-            }
+            yield {"type": "complete", "data": {"final_response": full_response}}
 
         except Exception as e:
             logger.error(f"[StreamAgent] Error during streaming: {e}", exc_info=True)
-            yield {
-                'type': 'error',
-                'content': f'Error: {str(e)}'
-            }
+            yield {"type": "error", "content": f"Error: {str(e)}"}
 
     def _extract_code_blocks(self, content: str):
         """Extract code blocks with file paths from the response."""
         patterns = [
             # Standard: ```language\n// File: path\ncode```
-            r'```(?:\w+)?\s*\n(?://|#)\s*File:\s*([^\n]+\.[\w]+)\n(.*?)```',
+            r"```(?:\w+)?\s*\n(?://|#)\s*File:\s*([^\n]+\.[\w]+)\n(.*?)```",
             # Alternative: ```language\n# File: path\ncode```
-            r'```(?:\w+)?\s*\n#\s*File:\s*([^\n]+\.[\w]+)\n(.*?)```',
+            r"```(?:\w+)?\s*\n#\s*File:\s*([^\n]+\.[\w]+)\n(.*?)```",
             # Comment style: ```\n<!-- File: path -->\ncode```
-            r'```[^\n]*\n<!--\s*File:\s*([^\n]+\.[\w]+)\s*-->\n(.*?)```',
+            r"```[^\n]*\n<!--\s*File:\s*([^\n]+\.[\w]+)\s*-->\n(.*?)```",
             # Simple: ```javascript\npath\ncode``` (must have valid extension)
-            r'```(?:\w+)?\s*\n([a-zA-Z0-9_/-]+\.[a-zA-Z0-9]+)\n(.*?)```'
+            r"```(?:\w+)?\s*\n([a-zA-Z0-9_/-]+\.[a-zA-Z0-9]+)\n(.*?)```",
         ]
 
         matches = []
@@ -229,20 +220,21 @@ class StreamAgent(AbstractAgent):
                 code = match[1].strip()
 
                 # Clean up file path
-                file_path = re.sub(r'^(?://|#|<!--)\s*(?:File:\s*)?', '', file_path)
-                file_path = re.sub(r'\s*(?:-->)?\s*$', '', file_path)
+                file_path = re.sub(r"^(?://|#|<!--)\s*(?:File:\s*)?", "", file_path)
+                file_path = re.sub(r"\s*(?:-->)?\s*$", "", file_path)
                 file_path = file_path.strip()
 
                 # Validate file path
-                if (file_path and
-                    '.' in file_path and
-                    not file_path.startswith('//') and
-                    not file_path.startswith('#') and
-                    not file_path.startswith('File:') and
-                    file_path not in processed_paths and
-                    len(file_path) < 200 and
-                    re.match(r'^[a-zA-Z0-9_./\-]+\.[a-zA-Z0-9]+$', file_path)):
-
+                if (
+                    file_path
+                    and "." in file_path
+                    and not file_path.startswith("//")
+                    and not file_path.startswith("#")
+                    and not file_path.startswith("File:")
+                    and file_path not in processed_paths
+                    and len(file_path) < 200
+                    and re.match(r"^[a-zA-Z0-9_./\-]+\.[a-zA-Z0-9]+$", file_path)
+                ):
                     matches.append((file_path, code))
                     processed_paths.add(file_path)
                     logger.debug(f"[StreamAgent] Extracted file: {file_path}")
@@ -250,12 +242,7 @@ class StreamAgent(AbstractAgent):
         return matches
 
     async def _save_file(
-        self,
-        file_path: str,
-        code: str,
-        project_id: UUID,
-        user_id: UUID,
-        db
+        self, file_path: str, code: str, project_id: UUID, user_id: UUID, db
     ) -> bool:
         """
         Save file to database and dev container.
@@ -263,17 +250,17 @@ class StreamAgent(AbstractAgent):
         Returns:
             True if successful, False otherwise
         """
-        from ..services.orchestration import is_kubernetes_mode
-        from ..models import ProjectFile
         from sqlalchemy import select
+
+        from ..models import ProjectFile
+        from ..services.orchestration import is_kubernetes_mode
 
         try:
             # 1. Save to database
             try:
                 result = await db.execute(
                     select(ProjectFile).where(
-                        ProjectFile.project_id == project_id,
-                        ProjectFile.file_path == file_path
+                        ProjectFile.project_id == project_id, ProjectFile.file_path == file_path
                     )
                 )
                 db_file = result.scalar_one_or_none()
@@ -281,11 +268,7 @@ class StreamAgent(AbstractAgent):
                 if db_file:
                     db_file.content = code
                 else:
-                    db_file = ProjectFile(
-                        project_id=project_id,
-                        file_path=file_path,
-                        content=code
-                    )
+                    db_file = ProjectFile(project_id=project_id, file_path=file_path, content=code)
                     db.add(db_file)
 
                 await db.commit()
@@ -298,6 +281,7 @@ class StreamAgent(AbstractAgent):
             # 2. Write to dev container (unified for Docker/K8s)
             try:
                 from ..services.orchestration import get_orchestrator
+
                 orchestrator = get_orchestrator()
 
                 success = await orchestrator.write_file(
@@ -305,7 +289,7 @@ class StreamAgent(AbstractAgent):
                     project_id=project_id,
                     container_name=None,  # Use default container
                     file_path=file_path,
-                    content=code
+                    content=code,
                 )
 
                 if success:
@@ -326,7 +310,7 @@ class StreamAgent(AbstractAgent):
                     if parent_dir:
                         os.makedirs(parent_dir, exist_ok=True)
 
-                    async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
+                    async with aiofiles.open(full_path, "w", encoding="utf-8") as f:
                         await f.write(code)
 
                     logger.info(f"[StreamAgent] Wrote {file_path} to {full_path}")

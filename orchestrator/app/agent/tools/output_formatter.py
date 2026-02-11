@@ -5,14 +5,12 @@ Provides standardized, user-friendly output formatting for all agent tools.
 """
 
 import re
-from typing import Dict, Any, Optional
+from typing import Any
 
 
 def success_output(
-    message: str,
-    details: Optional[Dict[str, Any]] = None,
-    **extra_fields
-) -> Dict[str, Any]:
+    message: str, details: dict[str, Any] | None = None, **extra_fields
+) -> dict[str, Any]:
     """
     Create a standardized success output.
 
@@ -42,10 +40,10 @@ def success_output(
 
 def error_output(
     message: str,
-    suggestion: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None,
-    **extra_fields
-) -> Dict[str, Any]:
+    suggestion: str | None = None,
+    details: dict[str, Any] | None = None,
+    **extra_fields,
+) -> dict[str, Any]:
     """
     Create a standardized error output.
 
@@ -112,7 +110,7 @@ def truncate_session_id(session_id: str, length: int = 8) -> str:
     return session_id[:length]
 
 
-def pluralize(count: int, singular: str, plural: Optional[str] = None) -> str:
+def pluralize(count: int, singular: str, plural: str | None = None) -> str:
     """
     Pluralize a word based on count.
 
@@ -145,11 +143,11 @@ def strip_ansi_codes(text: str) -> str:
         Clean text without ANSI codes
     """
     # ANSI escape code pattern (ESC followed by various characters)
-    ansi_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
-    text = ansi_pattern.sub('', text)
+    ansi_pattern = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+    text = ansi_pattern.sub("", text)
 
     # Remove other common control characters (but keep newlines and tabs)
-    control_pattern = re.compile(r'[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]')
-    text = control_pattern.sub('', text)
+    control_pattern = re.compile(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]")
+    text = control_pattern.sub("", text)
 
     return text

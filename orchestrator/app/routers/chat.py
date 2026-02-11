@@ -870,6 +870,7 @@ async def agent_chat(
         tool_calls_made = 0
         completion_reason = "unknown"
         error = None
+        session_id = None
 
         try:
             async for event in agent_instance.run(request.message, context):
@@ -919,6 +920,7 @@ async def agent_chat(
                     final_response = data.get("final_response", "")
                     tool_calls_made = data.get("tool_calls_made", 0)
                     completion_reason = data.get("completion_reason", "complete")
+                    session_id = data.get("session_id")
 
                 elif event_type == "error":
                     error = event.get("content", "Unknown error")
@@ -963,6 +965,10 @@ async def agent_chat(
             "iterations": iterations,
             "tool_calls_made": tool_calls_made,
             "completion_reason": completion_reason,
+            "session_id": session_id,
+            "trajectory_path": f".tesslate/trajectories/trajectory_{session_id}.json"
+            if session_id
+            else None,
             "steps": [
                 {
                     "iteration": step.iteration,
@@ -1312,6 +1318,7 @@ async def agent_chat_stream(
             iterations = 0
             tool_calls_made = 0
             completion_reason = "task_complete"
+            session_id = None
 
             logger.info(
                 f"[SSE-AGENT] Starting agent.run() for project {request.project_id}, message: {request.message[:100]}..."
@@ -1338,6 +1345,7 @@ async def agent_chat_stream(
                     iterations = complete_data.get("iterations", iterations)
                     tool_calls_made = complete_data.get("tool_calls_made", tool_calls_made)
                     completion_reason = complete_data.get("completion_reason", completion_reason)
+                    session_id = complete_data.get("session_id")
                     logger.info(
                         f"[SSE-AGENT] Agent complete - iterations={iterations}, tool_calls={tool_calls_made}, reason={completion_reason}"
                     )
@@ -1369,6 +1377,10 @@ async def agent_chat_stream(
                 "iterations": iterations,
                 "tool_calls_made": tool_calls_made,
                 "completion_reason": completion_reason,
+                "session_id": session_id,
+                "trajectory_path": f".tesslate/trajectories/trajectory_{session_id}.json"
+                if session_id
+                else None,
                 "steps": [
                     {
                         "iteration": step.get("iteration"),
@@ -2002,6 +2014,20 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
                     agent_metadata["iterations"] = data.get("iterations", 0)
                     agent_metadata["tool_calls_made"] = data.get("tool_calls_made", 0)
                     agent_metadata["completion_reason"] = data.get("completion_reason", "unknown")
+
+                # Trajectory metadata (works for all agent types)
+                if agent_metadata is None:
+                    agent_metadata = {
+                        "agent_mode": True,
+                        "agent_type": agent_model.agent_type,
+                        "steps": [],
+                    }
+                ws_session_id = data.get("session_id")
+                if ws_session_id:
+                    agent_metadata["session_id"] = ws_session_id
+                    agent_metadata["trajectory_path"] = (
+                        f".tesslate/trajectories/trajectory_{ws_session_id}.json"
+                    )
             elif event_type == "agent_step":
                 # Collect steps for metadata
                 if agent_metadata is None:

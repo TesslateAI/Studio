@@ -78,6 +78,7 @@ The heart of Tesslate Studio. Agents receive user requests, call LLMs with syste
 - **StreamAgent**: Real-time streaming responses
 - **IterativeAgent**: Multi-step tool execution
 - **ReActAgent**: Reasoning + Acting pattern
+- **TesslateAgent**: Production agent with native function calling, trajectory recording, planning mode, subagents, and context compaction
 
 See: [Agent Documentation](orchestrator/agent/README.md)
 

@@ -6,19 +6,18 @@ in specific containers when viewing the architecture graph.
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Any
 from uuid import UUID
 
+from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
-from ..output_formatter import success_output, error_output
 
 logger = logging.getLogger(__name__)
 
 
 async def graph_shell_open_executor(
-    params: Dict[str, Any],
-    context: Dict[str, Any]
-) -> Dict[str, Any]:
+    params: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
     """
     Open a shell session in a specific container.
 
@@ -36,7 +35,7 @@ async def graph_shell_open_executor(
     if not container_id:
         return error_output(
             message="container_id is required",
-            suggestion="Provide the UUID of the container to connect to"
+            suggestion="Provide the UUID of the container to connect to",
         )
 
     db = context.get("db")
@@ -46,11 +45,12 @@ async def graph_shell_open_executor(
     if not db or not user_id or not project_id:
         return error_output(
             message="Missing required context",
-            suggestion="Ensure db, user_id, and project_id are in context"
+            suggestion="Ensure db, user_id, and project_id are in context",
         )
 
     try:
         from sqlalchemy import select
+
         from ....models import Container
         from ....services.shell_session_manager import get_shell_session_manager
 
@@ -64,8 +64,7 @@ async def graph_shell_open_executor(
 
         if not container:
             return error_output(
-                message=f"Container {container_id} not found",
-                suggestion="Check the container_id"
+                message=f"Container {container_id} not found", suggestion="Check the container_id"
             )
 
         command = params.get("command", "/bin/sh")
@@ -86,27 +85,25 @@ async def graph_shell_open_executor(
             session_id=session_info["session_id"],
             container_id=str(container.id),
             container_name=container.name,
-            command=command
+            command=command,
         )
 
     except ValueError as e:
         # Session limit reached
         return error_output(
-            message=str(e),
-            suggestion="Close existing sessions or use an existing session_id"
+            message=str(e), suggestion="Close existing sessions or use an existing session_id"
         )
     except Exception as e:
         logger.error(f"Failed to open shell: {e}", exc_info=True)
         return error_output(
             message=f"Failed to open shell: {str(e)}",
-            suggestion="Check if the container is running"
+            suggestion="Check if the container is running",
         )
 
 
 async def graph_shell_exec_executor(
-    params: Dict[str, Any],
-    context: Dict[str, Any]
-) -> Dict[str, Any]:
+    params: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
     """
     Execute a command in a specific container.
 
@@ -129,29 +126,28 @@ async def graph_shell_exec_executor(
 
     if not container_id:
         return error_output(
-            message="container_id is required",
-            suggestion="Provide the UUID of the container"
+            message="container_id is required", suggestion="Provide the UUID of the container"
         )
 
     if not command:
         return error_output(
-            message="command is required",
-            suggestion="Provide the command to execute"
+            message="command is required", suggestion="Provide the command to execute"
         )
 
     db = context.get("db")
     user_id = context.get("user_id")
     project_id = context.get("project_id")
-    project_slug = context.get("project_slug")
+    _project_slug = context.get("project_slug")
 
     if not db or not user_id or not project_id:
         return error_output(
             message="Missing required context",
-            suggestion="Ensure db, user_id, and project_id are in context"
+            suggestion="Ensure db, user_id, and project_id are in context",
         )
 
     try:
         from sqlalchemy import select
+
         from ....models import Container
         from ....services.orchestration import get_orchestrator
 
@@ -165,8 +161,7 @@ async def graph_shell_exec_executor(
 
         if not container:
             return error_output(
-                message=f"Container {container_id} not found",
-                suggestion="Check the container_id"
+                message=f"Container {container_id} not found", suggestion="Check the container_id"
             )
 
         timeout = params.get("timeout", 120)
@@ -180,7 +175,7 @@ async def graph_shell_exec_executor(
             container_name=container_name,
             command=command if isinstance(command, list) else command.split(),
             timeout=timeout,
-            working_dir=None
+            working_dir=None,
         )
 
         if result.get("success"):
@@ -189,27 +184,26 @@ async def graph_shell_exec_executor(
                 container_id=str(container.id),
                 container_name=container.name,
                 output=result.get("output", ""),
-                exit_code=result.get("exit_code", 0)
+                exit_code=result.get("exit_code", 0),
             )
         else:
             return error_output(
                 message=f"Command failed: {result.get('error', 'Unknown error')}",
                 suggestion="Check the command syntax and container state",
-                output=result.get("output", "")
+                output=result.get("output", ""),
             )
 
     except Exception as e:
         logger.error(f"Failed to execute command: {e}", exc_info=True)
         return error_output(
             message=f"Failed to execute command: {str(e)}",
-            suggestion="Check if the container is running"
+            suggestion="Check if the container is running",
         )
 
 
 async def graph_shell_close_executor(
-    params: Dict[str, Any],
-    context: Dict[str, Any]
-) -> Dict[str, Any]:
+    params: dict[str, Any], context: dict[str, Any]
+) -> dict[str, Any]:
     """
     Close a shell session.
 
@@ -226,15 +220,14 @@ async def graph_shell_close_executor(
     if not session_id:
         return error_output(
             message="session_id is required",
-            suggestion="Provide the session_id from graph_shell_open"
+            suggestion="Provide the session_id from graph_shell_open",
         )
 
     db = context.get("db")
 
     if not db:
         return error_output(
-            message="Missing required context",
-            suggestion="Ensure db is in context"
+            message="Missing required context", suggestion="Ensure db is in context"
         )
 
     try:
@@ -243,21 +236,17 @@ async def graph_shell_close_executor(
         session_manager = get_shell_session_manager()
         await session_manager.close_session(session_id, db)
 
-        return success_output(
-            message=f"Closed shell session {session_id}",
-            session_id=session_id
-        )
+        return success_output(message=f"Closed shell session {session_id}", session_id=session_id)
 
     except Exception as e:
         logger.error(f"Failed to close shell: {e}", exc_info=True)
         return error_output(
-            message=f"Failed to close shell: {str(e)}",
-            suggestion="Check the session_id"
+            message=f"Failed to close shell: {str(e)}", suggestion="Check the session_id"
         )
 
 
 # Tool definitions
-SHELL_TOOLS: List[Tool] = [
+SHELL_TOOLS: list[Tool] = [
     Tool(
         name="graph_shell_open",
         description="Open an interactive shell session in a specific container. Returns session_id for subsequent operations.",
@@ -267,19 +256,17 @@ SHELL_TOOLS: List[Tool] = [
             "properties": {
                 "container_id": {
                     "type": "string",
-                    "description": "UUID of the container to connect to"
+                    "description": "UUID of the container to connect to",
                 },
                 "command": {
                     "type": "string",
-                    "description": "Shell command to run (default: /bin/sh)"
-                }
+                    "description": "Shell command to run (default: /bin/sh)",
+                },
             },
-            "required": ["container_id"]
+            "required": ["container_id"],
         },
         executor=graph_shell_open_executor,
-        examples=[
-            '{"tool_name": "graph_shell_open", "parameters": {"container_id": "abc-123"}}'
-        ]
+        examples=['{"tool_name": "graph_shell_open", "parameters": {"container_id": "abc-123"}}'],
     ),
     Tool(
         name="graph_shell_exec",
@@ -290,24 +277,18 @@ SHELL_TOOLS: List[Tool] = [
             "properties": {
                 "container_id": {
                     "type": "string",
-                    "description": "UUID of the container to execute in"
+                    "description": "UUID of the container to execute in",
                 },
-                "command": {
-                    "type": "string",
-                    "description": "Command to execute"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds (default: 120)"
-                }
+                "command": {"type": "string", "description": "Command to execute"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (default: 120)"},
             },
-            "required": ["container_id", "command"]
+            "required": ["container_id", "command"],
         },
         executor=graph_shell_exec_executor,
         examples=[
             '{"tool_name": "graph_shell_exec", "parameters": {"container_id": "abc-123", "command": "npm install"}}',
-            '{"tool_name": "graph_shell_exec", "parameters": {"container_id": "abc-123", "command": "npm run build", "timeout": 300}}'
-        ]
+            '{"tool_name": "graph_shell_exec", "parameters": {"container_id": "abc-123", "command": "npm run build", "timeout": 300}}',
+        ],
     ),
     Tool(
         name="graph_shell_close",
@@ -316,16 +297,13 @@ SHELL_TOOLS: List[Tool] = [
         parameters={
             "type": "object",
             "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "Session ID from graph_shell_open"
-                }
+                "session_id": {"type": "string", "description": "Session ID from graph_shell_open"}
             },
-            "required": ["session_id"]
+            "required": ["session_id"],
         },
         executor=graph_shell_close_executor,
         examples=[
             '{"tool_name": "graph_shell_close", "parameters": {"session_id": "sess-abc-123"}}'
-        ]
+        ],
     ),
 ]

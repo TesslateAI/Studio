@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Check, X, Pencil, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getAuthHeaders } from '../lib/api';
+import api from '../lib/api';
 
 export interface Tool {
   name: string;
@@ -40,17 +40,8 @@ export function ToolManagement({ selectedTools, toolConfigs, onToolsChange }: To
 
   const loadAvailableTools = async () => {
     try {
-      const response = await fetch('/api/agents/tools/available', {
-        credentials: 'include',
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load available tools');
-      }
-
-      const tools = await response.json();
-      setAvailableTools(tools);
+      const response = await api.get('/api/agents/tools/available');
+      setAvailableTools(response.data);
     } catch (error) {
       console.error('Error loading tools:', error);
       toast.error('Failed to load available tools');

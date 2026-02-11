@@ -125,8 +125,8 @@ def login_or_register(result: TestResult) -> str:
         return None
 
 
-def create_project(result: TestResult, token: str) -> dict:
-    """Create a new blank project (template mode)."""
+def create_project(result: TestResult, token: str, base_id: str) -> dict:
+    """Create a new project from a marketplace base. Returns project dict with container auto-created."""
 
     project_name = f"test-e2e-{uuid.uuid4().hex[:6]}"
 
@@ -137,7 +137,8 @@ def create_project(result: TestResult, token: str) -> dict:
         json={
             "name": project_name,
             "description": "E2E Test Project",
-            "source_type": "template"  # Blank template project
+            "source_type": "base",
+            "base_id": base_id,
         },
         headers={
             "Authorization": f"Bearer {token}",
@@ -157,7 +158,7 @@ def create_project(result: TestResult, token: str) -> dict:
         # Wait for project setup task to complete
         if task_id:
             print(f"Waiting for project setup task {task_id}...")
-            if wait_for_task(token, task_id, timeout=60):
+            if wait_for_task(token, task_id, timeout=120):
                 result.log("Project Setup", True, "Project setup completed")
             else:
                 result.log("Project Setup", False, "Project setup timed out or failed")
@@ -230,58 +231,36 @@ def get_nextjs_marketplace_base(token: str) -> dict:
     return nextjs_base
 
 
-def add_nextjs_container(result: TestResult, token: str) -> dict:
-    """Add a Next.js container to the project (simulates drag to grid)."""
-
-    # First get the marketplace base
-    nextjs_base = get_nextjs_marketplace_base(token)
-    if not nextjs_base:
-        result.log("Get Base", False, "Could not find Next.js marketplace base")
-        return None
-
-    result.log("Get Base", True, f"Found base: {nextjs_base.get('name')}")
-
-    print(f"\n--- Adding Next.js container to project ---")
-
+def add_base_to_library(token: str, base_id: str) -> bool:
+    """Add a marketplace base to the user's library (purchase/add free)."""
+    print(f"\n--- Adding base {base_id} to library ---")
     response = requests.post(
-        f"{API_BASE_URL}/api/projects/{result.project_slug}/containers",
-        json={
-            "name": nextjs_base.get("name", "Next.js 15"),
-            "project_id": result.project_id,
-            "base_id": nextjs_base.get("id"),  # Use actual marketplace base ID
-            "directory": nextjs_base.get("slug", "next-js-15"),
-            "container_type": "base",
-            "internal_port": 3000,
-            "position_x": 100,
-            "position_y": 100
-        },
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
+        f"{API_BASE_URL}/api/marketplace/bases/{base_id}/purchase",
+        headers={"Authorization": f"Bearer {token}"},
     )
-
     if response.status_code in [200, 201]:
-        data = response.json()
-        container = data.get("container", data)
-        task_id = data.get("task_id")
-
-        container_id = container.get("id")
-        result.log("Add Container", True, f"Added Next.js container: {container_id}")
-
-        # Wait for container initialization task
-        if task_id:
-            print(f"Waiting for container init task {task_id}...")
-            if wait_for_task(token, task_id, timeout=60):
-                result.log("Container Init", True, "Container initialized")
-            else:
-                result.log("Container Init", False, "Container init timed out or failed")
-                return None
-
-        return container
+        print(f"  Base added to library")
+        return True
     else:
-        result.log("Add Container", False, f"Failed: {response.status_code} - {response.text}")
-        return None
+        print(f"  Failed: {response.status_code} - {response.text}")
+        return False
+
+
+def get_project_container(result: TestResult, token: str) -> dict:
+    """Get the auto-created container from a project created with source_type='base'."""
+    print(f"\n--- Getting project container ---")
+    response = requests.get(
+        f"{API_BASE_URL}/api/projects/{result.project_slug}/containers",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if response.status_code == 200:
+        containers = response.json()
+        if containers:
+            container = containers[0]
+            result.log("Get Container", True, f"Found container: {container.get('id')}")
+            return container
+    result.log("Get Container", False, f"No containers found for project")
+    return None
 
 
 def start_container(result: TestResult, token: str, container_id: str) -> bool:
@@ -482,16 +461,31 @@ def run_test():
 
         result.token = token
 
-        # Step 2: Create blank project
-        project = create_project(result, token)
+        # Step 2: Get marketplace base and add to library
+        nextjs_base = get_nextjs_marketplace_base(token)
+        if not nextjs_base:
+            result.log("Get Base", False, "Could not find Next.js marketplace base")
+            print("\n[FAIL] TEST FAILED: No Next.js base found")
+            return False
+        result.log("Get Base", True, f"Found base: {nextjs_base.get('name')}")
+
+        base_id = nextjs_base.get("id")
+        if not add_base_to_library(token, base_id):
+            result.log("Add to Library", False, "Could not add base to library")
+            print("\n[FAIL] TEST FAILED: Could not add base to library")
+            return False
+        result.log("Add to Library", True, "Base added to library")
+
+        # Step 3: Create project from base (container auto-created)
+        project = create_project(result, token, base_id)
         if not project:
             print("\n[FAIL] TEST FAILED: Could not create project")
             return False
 
-        # Step 3: Add Next.js container (drag to grid)
-        container = add_nextjs_container(result, token)
+        # Step 3b: Get the auto-created container
+        container = get_project_container(result, token)
         if not container:
-            print("\n[FAIL] TEST FAILED: Could not add container")
+            print("\n[FAIL] TEST FAILED: No container found after project creation")
             delete_project(result, token)
             return False
 

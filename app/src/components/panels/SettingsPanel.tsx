@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Monitor, Check, Layers, Package } from 'lucide-react';
+import { Settings, Monitor, Check, Layers, Package, Download } from 'lucide-react';
 import { ChatCentered } from '@phosphor-icons/react';
 import { projectsApi } from '../../lib/api';
 import { useChatPosition, type ChatPosition } from '../../contexts/ChatPositionContext';
@@ -19,10 +19,12 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false);
   const [savingChatPos, setSavingChatPos] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [downloadingTesslate, setDownloadingTesslate] = useState(false);
   const { chatPosition, setChatPosition } = useChatPosition();
 
   useEffect(() => {
     loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSlug]);
 
   const loadSettings = async () => {
@@ -49,6 +51,31 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
       toast.error(axiosError.response?.data?.detail || 'Failed to update settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDownloadTesslate = async () => {
+    setDownloadingTesslate(true);
+    try {
+      const blob = await projectsApi.downloadTesslateFolder(projectSlug);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${projectSlug}-tesslate.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      toast.success('Downloaded .tesslate folder');
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { status?: number } };
+      if (axiosError.response?.status === 404) {
+        toast.error('No .tesslate data found yet. Run the agent first.');
+      } else {
+        toast.error('Failed to download .tesslate folder');
+      }
+    } finally {
+      setDownloadingTesslate(false);
     }
   };
 
@@ -304,6 +331,53 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
                   <span className="font-medium text-[var(--text)]">Export as Template</span>
                   <p className="text-xs text-[var(--text)]/60 mt-1">
                     Package your project files into a shareable template archive
+                  </p>
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-[var(--text)]/10 my-6" />
+
+        {/* Project Data */}
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Download size={18} className="text-[var(--text)]/60" />
+              <h3 className="text-sm font-medium text-[var(--text)]">Project Data</h3>
+            </div>
+            <p className="text-xs text-[var(--text)]/60 mb-4">
+              Download agent trajectory logs and plan files
+            </p>
+
+            <button
+              onClick={handleDownloadTesslate}
+              disabled={downloadingTesslate}
+              className={`
+                w-full p-4 rounded-lg border-2 transition-all text-left
+                border-[var(--text)]/15 bg-white/5 hover:border-[var(--text)]/20
+                ${downloadingTesslate ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+              `}
+            >
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-white/10">
+                  <Download
+                    size={20}
+                    className={
+                      downloadingTesslate
+                        ? 'text-orange-400 animate-pulse'
+                        : 'text-[var(--text)]/60'
+                    }
+                  />
+                </div>
+                <div className="flex-1">
+                  <span className="font-medium text-[var(--text)]">
+                    {downloadingTesslate ? 'Downloading...' : 'Download .tesslate Folder'}
+                  </span>
+                  <p className="text-xs text-[var(--text)]/60 mt-1">
+                    ATIF trajectory logs, subagent sessions, and plan files
                   </p>
                 </div>
               </div>

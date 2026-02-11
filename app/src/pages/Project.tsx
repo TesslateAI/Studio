@@ -505,10 +505,21 @@ export default function Project() {
         // Check if container is already running before starting
         try {
           const status = await projectsApi.getContainersStatus(slug);
-          const containerDir =
-            foundContainer.directory ||
-            foundContainer.name?.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-          const containerStatus = status?.containers?.[containerDir];
+          // Match the backend's _sanitize_service_name(container.name) which is used
+          // as the key in docker compose status. directory="." means root project dir,
+          // not a valid service name — so fall through to container name.
+          const rawDir = foundContainer.directory;
+          const serviceKey = (rawDir && rawDir !== '.' ? rawDir : foundContainer.name)
+            ?.toLowerCase()
+            .replace(/[\s_.]/g, '-')
+            .replace(/[^a-z0-9-]/g, '')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+          const containerStatus = status?.containers?.[serviceKey];
+
+          console.log('[loadContainer] status response:', JSON.stringify(status));
+          console.log('[loadContainer] rawDir:', rawDir, 'serviceKey:', serviceKey);
+          console.log('[loadContainer] containerStatus:', JSON.stringify(containerStatus));
 
           // Check for hibernation - only explicit hibernated status, not just stopped
           if (
@@ -524,17 +535,20 @@ export default function Project() {
 
           if (containerStatus?.running && containerStatus?.url) {
             // Container already running - just set the URL without starting
+            console.log('[loadContainer] FAST PATH: container running at', containerStatus.url);
             setDevServerUrl(containerStatus.url);
             setDevServerUrlWithAuth(containerStatus.url);
             setCurrentPreviewUrl(containerStatus.url);
             return;
           }
+          console.log('[loadContainer] SLOW PATH: container not detected as running');
         } catch (statusError) {
           // Status check failed, proceed with start anyway
           console.warn('Failed to check container status, will attempt start:', statusError);
         }
 
         // Container not running - use the startup hook to start it with real-time logs
+        console.log('[loadContainer] Starting container via startup hook');
         const containerIdToStart = foundContainer.id as string;
         currentContainerIdRef.current = containerIdToStart;
         setNeedsContainerStart(true);

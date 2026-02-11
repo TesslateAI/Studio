@@ -20,7 +20,7 @@ export const projectsApi = {
   create: async (
     name: string,
     description?: string,
-    sourceType?: 'template' | 'github' | 'gitlab' | 'bitbucket' | 'base',
+    sourceType?: 'base' | 'github' | 'gitlab' | 'bitbucket',
     repoUrl?: string,
     branch?: string,
     baseId?: string
@@ -37,7 +37,7 @@ export const projectsApi = {
     } = {
       name,
       description,
-      source_type: sourceType || 'template'
+      source_type: sourceType || 'base'
     };
 
     if (sourceType === 'github') {
@@ -93,11 +93,10 @@ export const projectsApi = {
 
 | Source Type | Description | Required Fields |
 |-------------|-------------|-----------------|
-| `template` | Default starter template | None |
+| `base` | Use marketplace base (default) | `base_id` |
 | `github` | Clone from GitHub | `github_repo_url`, `github_branch` |
 | `gitlab` | Clone from GitLab | `git_repo_url`, `git_branch` |
 | `bitbucket` | Clone from Bitbucket | `git_repo_url`, `git_branch` |
-| `base` | Use marketplace base | `base_id` |
 
 ### File Operations
 

@@ -4,11 +4,11 @@ Agent System Prompts
 System prompts that teach ANY language model how to use tools.
 """
 
-from typing import Optional, Dict, Any
-from uuid import UUID
 from datetime import datetime
-from .tools.registry import ToolRegistry
-from ..utils.resource_naming import get_project_path, get_container_name
+from typing import Any
+from uuid import UUID
+
+from ..utils.resource_naming import get_container_name, get_project_path
 
 
 async def get_environment_context(user_id: UUID, project_id: str) -> str:
@@ -29,11 +29,10 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
         Formatted environment context string
     """
     from datetime import datetime
-    from ..services.orchestration import is_kubernetes_mode, get_deployment_mode
 
-    context_parts = [
-        "\n=== ENVIRONMENT CONTEXT ===\n"
-    ]
+    from ..services.orchestration import get_deployment_mode, is_kubernetes_mode
+
+    context_parts = ["\n=== ENVIRONMENT CONTEXT ===\n"]
 
     # Time
     now = datetime.now()
@@ -49,11 +48,11 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
         namespace = "tesslate-user-environments"
         context_parts.append(f"Pod: {pod_name}")
         context_parts.append(f"Namespace: {namespace}")
-        context_parts.append(f"Current Working Directory: /app")
+        context_parts.append("Current Working Directory: /app")
     else:
         container_name = get_container_name(user_id, project_id, mode="docker")
         context_parts.append(f"Container: {container_name}")
-        context_parts.append(f"Current Working Directory: /app")
+        context_parts.append("Current Working Directory: /app")
 
     # Project path context
     context_parts.append(f"Project Path: users/{user_id}/{project_id}/")
@@ -61,7 +60,9 @@ async def get_environment_context(user_id: UUID, project_id: str) -> str:
     return "\n".join(context_parts)
 
 
-async def get_file_listing_context(user_id: UUID, project_id: str, max_lines: int = 50) -> Optional[str]:
+async def get_file_listing_context(
+    user_id: UUID, project_id: str, max_lines: int = 50
+) -> str | None:
     """
     Get file listing context for the project directory.
 
@@ -73,8 +74,9 @@ async def get_file_listing_context(user_id: UUID, project_id: str, max_lines: in
     Returns:
         Formatted file listing or None if unable to retrieve
     """
-    from ..services.orchestration import is_kubernetes_mode
     import asyncio
+
+    from ..services.orchestration import is_kubernetes_mode
 
     try:
         if is_kubernetes_mode():
@@ -84,39 +86,37 @@ async def get_file_listing_context(user_id: UUID, project_id: str, max_lines: in
 
             cmd = f"kubectl exec -n {namespace} {pod_name} -- ls -lah /app"
             proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await proc.communicate()
 
             if proc.returncode == 0:
-                output = stdout.decode('utf-8')
-                lines = output.split('\n')[:max_lines]
+                output = stdout.decode("utf-8")
+                lines = output.split("\n")[:max_lines]
                 return "\n=== FILE LISTING (CWD: /app) ===\n\n" + "\n".join(lines)
         else:
             # Docker: List local directory
             import os
+
             project_dir = get_project_path(user_id, project_id)
 
             if os.path.exists(project_dir):
                 cmd = f"ls -lah {project_dir}"
                 proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
                 stdout, stderr = await proc.communicate()
 
                 if proc.returncode == 0:
-                    output = stdout.decode('utf-8')
-                    lines = output.split('\n')[:max_lines]
-                    return f"\n=== FILE LISTING (CWD: /app) ===\n\n" + "\n".join(lines)
+                    output = stdout.decode("utf-8")
+                    lines = output.split("\n")[:max_lines]
+                    return "\n=== FILE LISTING (CWD: /app) ===\n\n" + "\n".join(lines)
 
         return None
 
     except Exception as e:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to get file listing: {e}")
         return None
@@ -124,9 +124,9 @@ async def get_file_listing_context(user_id: UUID, project_id: str, max_lines: in
 
 async def get_user_message_wrapper(
     user_request: str,
-    project_context: Optional[dict] = None,
+    project_context: dict | None = None,
     include_environment: bool = True,
-    include_file_listing: bool = True
+    include_file_listing: bool = True,
 ) -> str:
     """
     Wrap the user's request with helpful context.
@@ -187,7 +187,7 @@ def get_mode_instructions(mode: str) -> str:
     Returns:
         Instructions text for the given mode
     """
-    if mode == 'plan':
+    if mode == "plan":
         return """
 [PLAN MODE ACTIVE]
 You are in read-only planning mode. You MUST NOT execute any file modifications or shell commands.
@@ -195,7 +195,7 @@ Instead, create a detailed markdown plan explaining what changes you would make.
 All read operations (read_file, get_project_info, etc.) are allowed and encouraged for gathering context.
 Format your plan clearly with headings, bullet points, and code examples where helpful.
 """
-    elif mode == 'ask':
+    elif mode == "ask":
         return """
 [ASK BEFORE EDIT MODE]
 You can propose file modifications and shell commands, but they require user approval.
@@ -211,9 +211,7 @@ Execute changes directly as needed to accomplish the user's goals.
 
 
 def substitute_markers(
-    system_prompt: str,
-    context: Dict[str, Any],
-    tool_names: Optional[list] = None
+    system_prompt: str, context: dict[str, Any], tool_names: list | None = None
 ) -> str:
     """
     Substitute {marker} placeholders in system prompts with actual runtime values.
@@ -247,29 +245,27 @@ def substitute_markers(
         You are in plan mode. [PLAN MODE ACTIVE]... Project: MyApp
     """
     # Extract values from context
-    edit_mode = context.get('edit_mode', 'allow')
-    project_context = context.get('project_context', {})
+    edit_mode = context.get("edit_mode", "allow")
+    project_context = context.get("project_context", {})
 
     # Build marker replacement map
     markers = {
-        'mode': edit_mode,
-        'mode_instructions': get_mode_instructions(edit_mode),
-        'project_name': project_context.get('project_name', 'Unknown Project'),
-        'project_description': project_context.get('project_description', ''),
-        'timestamp': datetime.now().isoformat(),
-        'user_name': context.get('user_name', ''),
-        'project_path': f"/app",  # Standard container path
-        'git_branch': project_context.get('git_context', {}).get('branch', ''),
-        'tool_list': ', '.join(tool_names) if tool_names else '',
+        "mode": edit_mode,
+        "mode_instructions": get_mode_instructions(edit_mode),
+        "project_name": project_context.get("project_name", "Unknown Project"),
+        "project_description": project_context.get("project_description", ""),
+        "timestamp": datetime.now().isoformat(),
+        "user_name": context.get("user_name", ""),
+        "project_path": "/app",  # Standard container path
+        "git_branch": project_context.get("git_context", {}).get("branch", ""),
+        "tool_list": ", ".join(tool_names) if tool_names else "",
     }
 
     # Replace each {marker} with its value
     result = system_prompt
     for marker, value in markers.items():
-        placeholder = f'{{{marker}}}'
+        placeholder = f"{{{marker}}}"
         if placeholder in result:
             result = result.replace(placeholder, str(value))
 
     return result
-
-

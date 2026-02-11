@@ -59,8 +59,8 @@ Creates a new project with a unique slug. Project setup happens in the backgroun
 {
   "name": "My New App",
   "description": "Optional description",
-  "source_type": "template|github|gitlab|bitbucket|base",
-  "base_id": "uuid-or-builtin",          // For source_type="base"
+  "source_type": "base|github|gitlab|bitbucket",
+  "base_id": "uuid-or-builtin",          // For source_type="base" (default)
   "github_repo_url": "https://...",      // For source_type="github" (legacy)
   "github_branch": "main",               // For source_type="github" (legacy)
   "git_repo_url": "https://...",         // For any Git provider (unified)
@@ -90,11 +90,10 @@ The `_perform_project_setup()` function runs in the background:
    - K8s: Directory creation deferred to container startup
 
 2. **Handle Source Type**:
-   - **Template** (10-90%): Copy default Next.js template
+   - **Base** (10-90%): Clone marketplace base from cache or Git (default)
    - **Git Provider** (10-90%): Clone repository
      - K8s: Create namespace + PVC + file-manager pod, clone directly to PVC
      - Docker: Clone to filesystem
-   - **Base** (10-90%): Clone marketplace base from cache or Git
 
 3. **Complete** (100%): Update project status in database
 

@@ -6,12 +6,12 @@ These tools are only available when the user is viewing the graph.
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import Any
 
-from .base import AbstractToolProvider
-from ..view_context import ViewContext
-from ..registry import Tool
 from ..graph_ops import get_all_graph_tools
+from ..registry import Tool
+from ..view_context import ViewContext
+from .base import AbstractToolProvider
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,11 @@ class GraphToolProvider(AbstractToolProvider):
         """Return GRAPH view context."""
         return ViewContext.GRAPH
 
-    def get_tools(self) -> List[Tool]:
+    def get_tools(self) -> list[Tool]:
         """Return all graph-specific tools."""
         return get_all_graph_tools()
 
-    def get_tool_configs(self) -> Dict[str, Dict[str, Any]]:
+    def get_tool_configs(self) -> dict[str, dict[str, Any]]:
         """
         Return custom configurations for graph tools.
 
@@ -50,10 +50,10 @@ class GraphToolProvider(AbstractToolProvider):
             },
             "graph_container_status": {
                 "system_prompt": "Call this first to see all containers and their IDs before performing operations."
-            }
+            },
         }
 
-    def validate_context(self, context: Dict[str, Any]) -> bool:
+    def validate_context(self, context: dict[str, Any]) -> bool:
         """
         Validate that we have project context for graph operations.
 
@@ -61,16 +61,9 @@ class GraphToolProvider(AbstractToolProvider):
         - project_id: UUID of the project
         - db: Database session
         """
-        return (
-            context.get("project_id") is not None and
-            context.get("db") is not None
-        )
+        return context.get("project_id") is not None and context.get("db") is not None
 
-    def is_tool_available(
-        self,
-        tool_name: str,
-        context: Dict[str, Any]
-    ) -> bool:
+    def is_tool_available(self, tool_name: str, context: dict[str, Any]) -> bool:
         """
         Check if a specific tool is available.
 

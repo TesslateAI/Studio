@@ -59,7 +59,7 @@ class ProjectBase(BaseModel):
 
 
 class ProjectCreate(ProjectBase):
-    source_type: str = "template"  # "template", "github", "gitlab", "bitbucket", or "base"
+    source_type: str = "base"  # "base", "github", "gitlab", or "bitbucket"
     # Legacy field for backward compatibility
     github_repo_url: str | None = None
     github_branch: str | None = "main"

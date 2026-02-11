@@ -136,6 +136,7 @@ export function useContainerStartup(
         // Don't fail on transient poll errors, just continue
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [cleanup, onError]
   );
 
@@ -279,6 +280,11 @@ export function useContainerStartup(
         const taskId = data.task_id;
         taskIdRef.current = taskId;
 
+        if (!taskId) {
+          // No task and not already_running -- unexpected, treat as error
+          throw new Error('No task_id returned from start endpoint');
+        }
+
         // Start polling task status
         pollIntervalRef.current = setInterval(() => {
           pollTaskStatus(taskId);
@@ -297,7 +303,7 @@ export function useContainerStartup(
         onError?.(errorMsg);
       }
     },
-    [projectSlug, containerId, cleanup, pollTaskStatus, onError]
+    [projectSlug, containerId, cleanup, pollTaskStatus, onError, startHealthChecking]
   );
 
   // Retry function

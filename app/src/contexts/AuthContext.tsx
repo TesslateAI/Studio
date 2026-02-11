@@ -211,9 +211,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
           statusCode: authError.statusCode,
         });
 
-        // Clear invalid token if session expired
+        // Clear invalid token and stale httpOnly cookies if session expired
         if (shouldLogoutOnError(authError.toAuthError())) {
           localStorage.removeItem('token');
+          // Clear stale httpOnly cookies by calling server logout (non-blocking)
+          Promise.allSettled([
+            axios.post(`${API_URL}/api/auth/jwt/logout`, {}, { withCredentials: true }),
+            axios.post(`${API_URL}/api/auth/cookie/logout`, {}, { withCredentials: true }),
+          ]).catch(() => {});
         }
 
         if (mountedRef.current) {
@@ -243,6 +248,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       formData.append('password', password);
 
       try {
+        // Login without withCredentials to avoid sending stale cookies
+        // that could conflict with the fresh credentials
         const response = await axios.post(`${API_URL}/api/auth/jwt/login`, formData, {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           signal: abortControllerRef.current.signal,

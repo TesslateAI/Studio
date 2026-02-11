@@ -476,6 +476,65 @@ GET /api/marketplace/my-created-bases
 }
 ```
 
+## Subagent Endpoints
+
+Subagents are specialized child agents that the main agent can spawn for focused tasks. Each marketplace agent can have its own set of configured subagents.
+
+### List Subagents
+
+```
+GET /api/marketplace/agents/{agent_id}/subagents
+```
+
+Returns all subagents configured for a specific agent.
+
+**Response**:
+```json
+{
+  "subagents": [
+    {
+      "id": "uuid",
+      "name": "Code Reviewer",
+      "system_prompt": "You review code for...",
+      "tools": ["read_file", "bash_exec"]
+    }
+  ]
+}
+```
+
+### Create Subagent
+
+```
+POST /api/marketplace/agents/{agent_id}/subagents
+```
+
+Add a new subagent to an agent (creator only).
+
+**Request Body**:
+```json
+{
+  "name": "Test Writer",
+  "system_prompt": "You write tests for...",
+  "tools": ["read_file", "write_file", "bash_exec"]
+}
+```
+
+### Update Subagent
+
+```
+PATCH /api/marketplace/agents/{agent_id}/subagents/{subagent_id}
+```
+
+Update an existing subagent configuration (creator only).
+
+### Delete Subagent
+
+```
+DELETE /api/marketplace/agents/{agent_id}/subagents/{subagent_id}
+```
+
+Remove a subagent from an agent (creator only).
+
 ## Creator Endpoints
 
 Creators can publish their own agents and bases to the marketplace. The creator profile (`/api/creators/{user_id}/profile`) aggregates both published agents and public user-submitted bases, including combined download and review statistics.

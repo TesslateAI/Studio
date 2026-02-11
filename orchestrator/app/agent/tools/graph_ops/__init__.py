@@ -9,15 +9,13 @@ viewing the graph/architecture canvas. These tools enable agents to:
 - Execute commands in specific containers
 """
 
-from typing import List
 from ..registry import Tool, ToolRegistry
-
 from .containers import CONTAINER_TOOLS
 from .grid import GRID_TOOLS
 from .shell import SHELL_TOOLS
 
 
-def get_all_graph_tools() -> List[Tool]:
+def get_all_graph_tools() -> list[Tool]:
     """
     Get all graph-view-specific tools.
 

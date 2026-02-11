@@ -6,18 +6,18 @@ Use bash_exec for file listings instead of stale DB cache.
 """
 
 import logging
-from typing import Dict, Any
-from uuid import UUID
+from typing import Any
+
 from sqlalchemy import select
 
-from ..registry import Tool, ToolCategory
 from ....models import Project
-from ..output_formatter import success_output, error_output
+from ..output_formatter import error_output, success_output
+from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
 
 
-async def get_project_info_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+async def get_project_info_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
     Get project metadata and information.
 
@@ -31,16 +31,14 @@ async def get_project_info_tool(params: Dict[str, Any], context: Dict[str, Any])
     project_id = context["project_id"]
     db = context["db"]
 
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
+    result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
 
     if not project:
         return error_output(
             message=f"Project {project_id} not found",
             suggestion="Check if the project exists or you have access to it",
-            exists=False
+            exists=False,
         )
 
     return success_output(
@@ -51,27 +49,23 @@ async def get_project_info_tool(params: Dict[str, Any], context: Dict[str, Any])
         details={
             "owner_id": project.owner_id,
             "created_at": project.created_at.isoformat() if project.created_at else None,
-            "updated_at": project.updated_at.isoformat() if project.updated_at else None
-        }
+            "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        },
     )
 
 
 def register_project_tools(registry):
     """Register project operation tools."""
 
-    registry.register(Tool(
-        name="get_project_info",
-        description="Get metadata about the current project (name, description, dates, owner, etc.). Use bash_exec with 'find' or 'ls -R' for file listings.",
-        parameters={
-            "type": "object",
-            "properties": {},
-            "required": []
-        },
-        executor=get_project_info_tool,
-        category=ToolCategory.PROJECT,
-        examples=[
-            '{"tool_name": "get_project_info", "parameters": {}}'
-        ]
-    ))
+    registry.register(
+        Tool(
+            name="get_project_info",
+            description="Get metadata about the current project (name, description, dates, owner, etc.). Use bash_exec with 'find' or 'ls -R' for file listings.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            executor=get_project_info_tool,
+            category=ToolCategory.PROJECT,
+            examples=['{"tool_name": "get_project_info", "parameters": {}}'],
+        )
+    )
 
     logger.info("Registered 1 project operation tool")

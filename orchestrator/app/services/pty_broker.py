@@ -1,4 +1,3 @@
-from uuid import UUID
 """
 PTY Broker Service
 
@@ -7,11 +6,12 @@ Buffers output for asynchronous agent reads.
 """
 
 import asyncio
-import uuid
+import contextlib
 import logging
-from typing import Optional, Dict, Any
-from datetime import datetime
+import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class PTYSession:
         # Will be set by concrete implementations
         self.socket = None  # PTY socket
         self.exec_id = None  # Docker exec ID or K8s stream
-        self.reader_task: Optional[asyncio.Task] = None
+        self.reader_task: asyncio.Task | None = None
         self.is_closed = False
 
     async def append_output(self, data: bytes) -> None:
@@ -75,7 +75,7 @@ class PTYSession:
                 # No new data
                 return b"", self.is_eof
 
-            new_data = bytes(self.output_buffer[self.read_offset:])
+            new_data = bytes(self.output_buffer[self.read_offset :])
             self.read_offset = len(self.output_buffer)
             return new_data, self.is_eof
 
@@ -117,8 +117,9 @@ class DockerPTYBroker(BasePTYBroker):
 
     def __init__(self):
         import docker
+
         self.client = docker.from_env()
-        self.sessions: Dict[str, PTYSession] = {}
+        self.sessions: dict[str, PTYSession] = {}
 
     async def create_session(
         self,
@@ -129,51 +130,65 @@ class DockerPTYBroker(BasePTYBroker):
         rows: int = 24,
         cols: int = 80,
     ) -> PTYSession:
-        """Create Docker exec with PTY and start output buffering."""
+        """Create Docker exec with PTY and start output buffering.
+
+        All synchronous Docker SDK calls are wrapped in run_in_executor()
+        to avoid blocking the asyncio event loop (exec_start alone takes ~10s).
+        """
 
         session_id = str(uuid.uuid4())
+        loop = asyncio.get_event_loop()
 
         # Get the container's working directory from its config
         # This respects the working_dir set in docker-compose
         try:
-            container = self.client.containers.get(container_name)
-            container_workdir = container.attrs.get('Config', {}).get('WorkingDir', '/app')
+            container = await loop.run_in_executor(None, self.client.containers.get, container_name)
+            container_workdir = container.attrs.get("Config", {}).get("WorkingDir", "/app")
             if not container_workdir:
-                container_workdir = '/app'
+                container_workdir = "/app"
             logger.info(f"Container {container_name} working directory: {container_workdir}")
         except Exception as e:
             logger.warning(f"Could not get container working dir, using /app: {e}")
-            container_workdir = '/app'
+            container_workdir = "/app"
 
         full_command = ["/bin/sh", "-c", command]
 
         # Create exec instance with PTY, using container's working directory
-        exec_id = self.client.api.exec_create(
-            container_name,
-            cmd=full_command,
-            tty=True,
-            stdin=True,
-            stdout=True,
-            stderr=True,
-            workdir=container_workdir,  # Use container's configured working directory
-            environment={
-                "TERM": "xterm-256color",
-                "COLORTERM": "truecolor",
-            },
-        )["Id"]
+        exec_id_result = await loop.run_in_executor(
+            None,
+            lambda: self.client.api.exec_create(
+                container_name,
+                cmd=full_command,
+                tty=True,
+                stdin=True,
+                stdout=True,
+                stderr=True,
+                workdir=container_workdir,
+                environment={
+                    "TERM": "xterm-256color",
+                    "COLORTERM": "truecolor",
+                },
+            ),
+        )
+        exec_id = exec_id_result["Id"]
 
         # Resize terminal BEFORE starting (prevents "cannot resize stopped container" error)
         try:
-            self.client.api.exec_resize(exec_id, height=rows, width=cols)
+            await loop.run_in_executor(
+                None, lambda: self.client.api.exec_resize(exec_id, height=rows, width=cols)
+            )
         except Exception as e:
             logger.warning(f"Failed to resize exec before start (non-fatal): {e}")
 
-        # Start exec and get socket
-        sock = self.client.api.exec_start(
-            exec_id,
-            stream=True,
-            socket=True,
-            demux=False,  # Don't separate stdout/stderr with PTY
+        # Start exec and get socket — this is the ~10s blocker, now non-blocking
+        sock = await loop.run_in_executor(
+            None,
+            lambda: self.client.api.exec_start(
+                exec_id,
+                stream=True,
+                socket=True,
+                demux=False,
+            ),
         )
 
         # Create session object with container's actual working directory
@@ -193,9 +208,7 @@ class DockerPTYBroker(BasePTYBroker):
         self.sessions[session_id] = session
 
         # Start background output reader
-        session.reader_task = asyncio.create_task(
-            self._output_reader(session_id)
-        )
+        session.reader_task = asyncio.create_task(self._output_reader(session_id))
 
         logger.info(f"Created Docker PTY session {session_id}")
         return session
@@ -265,10 +278,8 @@ class DockerPTYBroker(BasePTYBroker):
 
         if session.reader_task:
             session.reader_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await session.reader_task
-            except asyncio.CancelledError:
-                pass
 
         del self.sessions[session_id]
         logger.info(f"Closed Docker PTY session {session_id}")
@@ -279,6 +290,7 @@ class KubernetesPTYBroker(BasePTYBroker):
 
     def __init__(self):
         from kubernetes import client, config
+
         try:
             # Try in-cluster config first (for production)
             config.load_incluster_config()
@@ -293,7 +305,7 @@ class KubernetesPTYBroker(BasePTYBroker):
                 raise RuntimeError("Cannot load Kubernetes configuration") from e
 
         self.core_v1 = client.CoreV1Api()
-        self.sessions: Dict[str, PTYSession] = {}
+        self.sessions: dict[str, PTYSession] = {}
 
     def _get_stream_client(self):
         """
@@ -309,6 +321,7 @@ class KubernetesPTYBroker(BasePTYBroker):
         WebSocket patching and prevent it from affecting other concurrent calls.
         """
         from kubernetes import client
+
         return client.CoreV1Api()
 
     def _get_namespace_for_project(self, project_id: str) -> str:
@@ -322,6 +335,7 @@ class KubernetesPTYBroker(BasePTYBroker):
             Namespace name
         """
         from ..config import get_settings
+
         settings = get_settings()
 
         if settings.k8s_namespace_per_project:
@@ -359,12 +373,15 @@ class KubernetesPTYBroker(BasePTYBroker):
             PTYSession object
         """
         from kubernetes.stream import stream
-        from kubernetes.client.rest import ApiException
 
         session_id = str(uuid.uuid4())
-        deployment_name = container_name  # container_name is actually deployment name like "dev-next-js-15"
+        deployment_name = (
+            container_name  # container_name is actually deployment name like "dev-next-js-15"
+        )
 
-        logger.info(f"[K8S-PTY] create_session called: project_id={project_id}, container_name={container_name}")
+        logger.info(
+            f"[K8S-PTY] create_session called: project_id={project_id}, container_name={container_name}"
+        )
 
         # Determine namespace if not provided
         if not namespace:
@@ -377,11 +394,13 @@ class KubernetesPTYBroker(BasePTYBroker):
         try:
             if deployment_name:
                 # Look up pod by app label (matches deployment name)
-                logger.info(f"[K8S-PTY] Looking up pod by label app={deployment_name} in namespace {namespace}...")
+                logger.info(
+                    f"[K8S-PTY] Looking up pod by label app={deployment_name} in namespace {namespace}..."
+                )
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,
                     namespace=namespace,
-                    label_selector=f"app={deployment_name}"
+                    label_selector=f"app={deployment_name}",
                 )
                 logger.info(f"[K8S-PTY] Found {len(pods.items)} pods matching label")
                 if pods.items:
@@ -400,7 +419,7 @@ class KubernetesPTYBroker(BasePTYBroker):
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,
                     namespace=namespace,
-                    label_selector="tesslate.io/component=dev-container"
+                    label_selector="tesslate.io/component=dev-container",
                 )
 
                 if not pods.items:
@@ -420,7 +439,9 @@ class KubernetesPTYBroker(BasePTYBroker):
         # Use a fresh client for stream operations to avoid concurrency issues
         # The stream() function patches api_client.request to use WebSocket,
         # which would break concurrent regular API calls if using shared client
-        logger.info(f"[K8S-PTY] Creating WebSocket stream to pod {pod_name} in namespace {namespace}...")
+        logger.info(
+            f"[K8S-PTY] Creating WebSocket stream to pod {pod_name} in namespace {namespace}..."
+        )
         stream_client = self._get_stream_client()
 
         try:
@@ -438,11 +459,14 @@ class KubernetesPTYBroker(BasePTYBroker):
             )
             logger.info(f"[K8S-PTY] WebSocket stream created successfully for pod {pod_name}")
         except Exception as e:
-            logger.error(f"[K8S-PTY] Failed to create WebSocket stream to pod {pod_name}: {e}", exc_info=True)
+            logger.error(
+                f"[K8S-PTY] Failed to create WebSocket stream to pod {pod_name}: {e}", exc_info=True
+            )
             raise
 
         # Get configured project path (differs between Docker and K8s)
         from ..config import get_settings
+
         project_path = get_settings().container_project_path
 
         # Create session object
@@ -463,9 +487,7 @@ class KubernetesPTYBroker(BasePTYBroker):
 
         # Start background output reader
         logger.info(f"[K8S-PTY] Starting output reader task for session {session_id}...")
-        session.reader_task = asyncio.create_task(
-            self._output_reader(session_id)
-        )
+        session.reader_task = asyncio.create_task(self._output_reader(session_id))
 
         logger.info(f"[K8S-PTY] Session {session_id} fully created and ready")
         return session
@@ -496,14 +518,14 @@ class KubernetesPTYBroker(BasePTYBroker):
                     # Read stdout
                     data = await loop.run_in_executor(None, socket.read_stdout, 0.1)
                     if data:
-                        data_bytes = data.encode('utf-8')
+                        data_bytes = data.encode("utf-8")
                         await session.append_output(data_bytes)
                         session.last_activity = datetime.utcnow()
 
                     # Also check stderr
                     err_data = await loop.run_in_executor(None, socket.read_stderr, 0.1)
                     if err_data:
-                        err_bytes = err_data.encode('utf-8')
+                        err_bytes = err_data.encode("utf-8")
                         await session.append_output(err_bytes)
                         session.last_activity = datetime.utcnow()
 
@@ -518,7 +540,9 @@ class KubernetesPTYBroker(BasePTYBroker):
         except asyncio.CancelledError:
             logger.info(f"K8s PTY output reader cancelled for session {session_id}")
         except Exception as e:
-            logger.error(f"K8s PTY output reader error for session {session_id}: {e}", exc_info=True)
+            logger.error(
+                f"K8s PTY output reader error for session {session_id}: {e}", exc_info=True
+            )
 
     async def write_to_pty(self, session_id: str, data: bytes) -> None:
         """Write data to K8s PTY."""
@@ -528,7 +552,7 @@ class KubernetesPTYBroker(BasePTYBroker):
 
         # K8s WebSocket channel 0 is stdin
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, session.socket.write_stdin, data.decode('utf-8'))
+        await loop.run_in_executor(None, session.socket.write_stdin, data.decode("utf-8"))
         session.bytes_written += len(data)
         session.last_activity = datetime.utcnow()
 
@@ -548,10 +572,8 @@ class KubernetesPTYBroker(BasePTYBroker):
 
         if session.reader_task:
             session.reader_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await session.reader_task
-            except asyncio.CancelledError:
-                pass
 
         del self.sessions[session_id]
         logger.info(f"Closed K8s PTY session {session_id}")

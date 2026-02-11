@@ -7,7 +7,6 @@ views, making them unavailable when the user navigates to other views.
 """
 
 from enum import Enum
-from typing import Optional
 
 
 class ViewContext(Enum):
@@ -24,6 +23,7 @@ class ViewContext(Enum):
         KANBAN: Kanban board view
         UNIVERSAL: Available in all views (base tools)
     """
+
     GRAPH = "graph"
     BUILDER = "builder"
     TERMINAL = "terminal"
@@ -31,7 +31,7 @@ class ViewContext(Enum):
     UNIVERSAL = "universal"
 
     @classmethod
-    def from_string(cls, value: Optional[str]) -> "ViewContext":
+    def from_string(cls, value: str | None) -> "ViewContext":
         """
         Convert a string to ViewContext, defaulting to BUILDER.
 

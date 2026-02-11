@@ -2265,6 +2265,92 @@ async def export_project_as_template(
     }
 
 
+@router.get("/{project_slug}/download-tesslate")
+async def download_tesslate_folder(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download the .tesslate/ folder as a ZIP archive.
+
+    Contains trajectory logs, subagent trajectories, and mirrored plans.
+    Uses the orchestrator abstraction for platform-agnostic file access.
+    """
+    import io
+    import zipfile
+
+    from fastapi.responses import StreamingResponse
+
+    from ..services.orchestration import get_orchestrator
+
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    orchestrator = get_orchestrator()
+
+    # Get the first container for file access
+    container_result = await db.execute(
+        select(Container).where(Container.project_id == project.id).limit(1)
+    )
+    container = container_result.scalar_one_or_none()
+    container_name = None
+    container_directory = None
+    if container:
+        container_name = (
+            container.directory if container.directory and container.directory != "." else None
+        )
+        if container.directory and container.directory != ".":
+            container_directory = container.directory
+
+    # List .tesslate directory contents via execute_command (recursive find)
+    try:
+        result = await orchestrator.execute_command(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=container_name,
+            command="find .tesslate -type f 2>/dev/null || true",
+            project_slug=project.slug,
+        )
+        stdout = ""
+        if isinstance(result, dict):
+            stdout = result.get("stdout", "") or result.get("output", "")
+        elif isinstance(result, str):
+            stdout = result
+
+        file_paths = [p.strip() for p in stdout.strip().split("\n") if p.strip()]
+    except Exception as e:
+        logger.warning(f"[DOWNLOAD-TESSLATE] Failed to list .tesslate: {e}")
+        file_paths = []
+
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="No .tesslate/ data found for this project")
+
+    # Build ZIP in memory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fp in file_paths:
+            try:
+                content = await orchestrator.read_file(
+                    user_id=current_user.id,
+                    project_id=project.id,
+                    container_name=container_name,
+                    file_path=fp,
+                    project_slug=project.slug,
+                    subdir=container_directory,
+                )
+                if content is not None:
+                    zf.writestr(fp, content)
+            except Exception as e:
+                logger.debug(f"[DOWNLOAD-TESSLATE] Skipping {fp}: {e}")
+
+    buf.seek(0)
+    filename = f"{project.slug}-tesslate.zip"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/{project_id}/fork", response_model=ProjectSchema)
 async def fork_project(
     project_id: str,

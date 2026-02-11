@@ -253,6 +253,38 @@ class ModelAdapter(ABC):
         """
         pass
 
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        tool_choice: str = "auto",
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Stream chat completion with native function calling support.
+
+        This method uses the OpenAI tools API for structured tool calling,
+        unlike chat() which only streams text. Used by TesslateAgent for
+        reliable tool call parsing.
+
+        Args:
+            messages: List of message dicts (supports role: system/user/assistant/tool)
+            tools: List of tool definitions in OpenAI format
+            tool_choice: "auto", "none", or {"type": "function", "function": {"name": "..."}}
+
+        Yields:
+            Dicts with types:
+            - {"type": "text_delta", "content": "..."}     - Text being generated
+            - {"type": "tool_calls_complete", "tool_calls": [...]} - Accumulated tool calls
+            - {"type": "done", "finish_reason": "...", "usage": {...}} - Stream complete
+        """
+        # Default implementation raises NotImplementedError
+        # Subclasses should override this
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support chat_with_tools(). "
+            f"Use an adapter that supports native function calling (e.g., OpenAIAdapter)."
+        )
+        yield {}  # Make it a generator
+
     @abstractmethod
     def get_model_name(self) -> str:
         """Get the model name/identifier."""
@@ -344,6 +376,123 @@ class OpenAIAdapter(ModelAdapter):
 
         except Exception as e:
             logger.error(f"OpenAI API streaming error: {e}", exc_info=True)
+            raise RuntimeError(f"Model API error: {str(e)}") from e
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        tool_choice: str = "auto",
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Stream chat completion with native OpenAI function calling.
+
+        Accumulates tool call deltas from the stream and yields structured events.
+        Follows the exact message format required by the OpenAI API.
+        """
+        # Strip openrouter/ prefix if present
+        model_id = (
+            self.model_name.removeprefix("openrouter/") if self.is_openrouter else self.model_name
+        )
+
+        request_params = {
+            "model": model_id,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "stream": True,
+        }
+
+        if self.max_tokens:
+            request_params["max_tokens"] = self.max_tokens
+
+        # Enable parallel tool calls if supported
+        request_params["parallel_tool_calls"] = True
+
+        if self.is_openrouter:
+            request_params["extra_headers"] = {
+                "HTTP-Referer": "https://tesslate.com",
+                "X-Title": "Tesslate Studio",
+            }
+
+        try:
+            logger.debug(
+                f"chat_with_tools: {self.model_name}, {len(messages)} messages, {len(tools)} tools"
+            )
+
+            stream = await self.client.chat.completions.create(**request_params)
+
+            # Accumulate tool calls indexed by position
+            tool_calls_data: dict[int, dict] = {}
+            content_text = ""
+            finish_reason = None
+            usage_data = None
+
+            async for chunk in stream:
+                if not chunk.choices:
+                    # Check for usage in final chunk
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        usage_data = {
+                            "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
+                            "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
+                        }
+                    continue
+
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                # Track finish reason
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+                # Accumulate text content
+                if delta.content:
+                    content_text += delta.content
+                    yield {"type": "text_delta", "content": delta.content}
+
+                # Accumulate tool calls
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+
+                        if idx not in tool_calls_data:
+                            tool_calls_data[idx] = {
+                                "id": "",
+                                "function": {"name": "", "arguments": ""},
+                            }
+
+                        if tc_delta.id:
+                            tool_calls_data[idx]["id"] = tc_delta.id
+
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                tool_calls_data[idx]["function"]["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                tool_calls_data[idx]["function"]["arguments"] += (
+                                    tc_delta.function.arguments
+                                )
+
+            # Yield accumulated tool calls if any
+            if tool_calls_data:
+                # Sort by index and convert to list
+                sorted_calls = [tool_calls_data[idx] for idx in sorted(tool_calls_data.keys())]
+                yield {"type": "tool_calls_complete", "tool_calls": sorted_calls}
+
+            # Yield done event
+            yield {
+                "type": "done",
+                "finish_reason": finish_reason or ("tool_calls" if tool_calls_data else "stop"),
+                "usage": usage_data,
+            }
+
+            logger.debug(
+                f"chat_with_tools complete: "
+                f"{len(content_text)} chars text, "
+                f"{len(tool_calls_data)} tool calls"
+            )
+
+        except Exception as e:
+            logger.error(f"chat_with_tools error: {e}", exc_info=True)
             raise RuntimeError(f"Model API error: {str(e)}") from e
 
     def get_model_name(self) -> str:
