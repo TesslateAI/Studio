@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 
 class UserBase(BaseModel):
@@ -78,6 +78,13 @@ class ProjectCreate(ProjectBase):
         if v not in valid_types:
             raise ValueError(f"source_type must be one of: {', '.join(valid_types)}")
         return v
+
+    @model_validator(mode="after")
+    def set_source_type_from_base_id(self):
+        """Automatically set source_type to 'base' when base_id is provided."""
+        if self.base_id is not None and self.source_type == "template":
+            self.source_type = "base"
+        return self
 
     @field_validator("github_repo_url")
     @classmethod

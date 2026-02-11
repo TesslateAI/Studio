@@ -112,6 +112,11 @@ test-workspace/*.log
 coverage/
 *.lcov
 
+# Playwright E2E
+app/tests/e2e/.auth/
+app/playwright-report/
+app/test-results/
+
 # Service-specific paths to ignore
 # Orchestrator backend nested structure (temporary until cleaned up)
 orchestrator/backend/.venv/

@@ -1,0 +1,26 @@
+services:
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: tesslate-postgres-test
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: tesslate_test
+      POSTGRES_USER: tesslate_test
+      POSTGRES_PASSWORD: testpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tesslate_test -d tesslate_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - test-db-data:/var/lib/postgresql/data
+    networks:
+      - test-network
+
+volumes:
+  test-db-data:
+
+networks:
+  test-network:
+    driver: bridge
