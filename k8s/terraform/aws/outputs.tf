@@ -100,6 +100,26 @@ output "ecr_registry_url" {
   value       = split("/", aws_ecr_repository.backend.repository_url)[0]
 }
 
+output "image_tag" {
+  description = "Image tag used for ECR images"
+  value       = local.image_tag
+}
+
+output "backend_image" {
+  description = "Full backend image reference (repo:tag)"
+  value       = "${aws_ecr_repository.backend.repository_url}:${local.image_tag}"
+}
+
+output "frontend_image" {
+  description = "Full frontend image reference (repo:tag)"
+  value       = "${aws_ecr_repository.frontend.repository_url}:${local.image_tag}"
+}
+
+output "devserver_image" {
+  description = "Full devserver image reference (repo:tag)"
+  value       = "${aws_ecr_repository.devserver.repository_url}:${local.image_tag}"
+}
+
 # -----------------------------------------------------------------------------
 # IAM Outputs
 # -----------------------------------------------------------------------------
@@ -153,16 +173,16 @@ output "build_and_push_commands" {
   description = "Commands to build and push Docker images"
   value = <<-EOT
     # Backend
-    docker build -t ${aws_ecr_repository.backend.repository_url}:latest -f orchestrator/Dockerfile orchestrator/
-    docker push ${aws_ecr_repository.backend.repository_url}:latest
+    docker build -t ${aws_ecr_repository.backend.repository_url}:${local.image_tag} -f orchestrator/Dockerfile orchestrator/
+    docker push ${aws_ecr_repository.backend.repository_url}:${local.image_tag}
 
     # Frontend
-    docker build -t ${aws_ecr_repository.frontend.repository_url}:latest -f app/Dockerfile.prod app/
-    docker push ${aws_ecr_repository.frontend.repository_url}:latest
+    docker build -t ${aws_ecr_repository.frontend.repository_url}:${local.image_tag} -f app/Dockerfile.prod app/
+    docker push ${aws_ecr_repository.frontend.repository_url}:${local.image_tag}
 
     # Devserver
-    docker build -t ${aws_ecr_repository.devserver.repository_url}:latest -f orchestrator/Dockerfile.devserver orchestrator/
-    docker push ${aws_ecr_repository.devserver.repository_url}:latest
+    docker build -t ${aws_ecr_repository.devserver.repository_url}:${local.image_tag} -f orchestrator/Dockerfile.devserver orchestrator/
+    docker push ${aws_ecr_repository.devserver.repository_url}:${local.image_tag}
   EOT
 }
 

@@ -7,9 +7,11 @@ kind: Kustomization
 
 namespace: tesslate
 
-commonLabels:
-  app.kubernetes.io/name: tesslate-studio
-  app.kubernetes.io/managed-by: kustomize
+labels:
+  - pairs:
+      app.kubernetes.io/name: tesslate-studio
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: true
 
 resources:
   # Namespaces
@@ -32,9 +34,6 @@ resources:
   - security/network-policies.yaml
   - security/rbac.yaml
   - security/resource-quotas.yaml
-
-  # Ingress
-  - ingress/main-ingress.yaml
 
 # Images that can be overridden by overlays
 images:

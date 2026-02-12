@@ -1,4 +1,8 @@
-# AWS EKS Backend Deployment Patch for your-domain.com
+# AWS EKS Backend Deployment Patch (Shared)
+# Domain-specific and ECR values are sourced from terraform-managed secrets.
+# Static values that are the same across all AWS environments use literal values.
+# Note: secretKeyRef is used instead of configMapKeyRef to avoid kustomize
+# configMapGenerator hash suffix transformations on the name.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -72,17 +76,32 @@ spec:
               value: "HS256"
             - name: ACCESS_TOKEN_EXPIRE_MINUTES
               value: "30"
-            # Domain - AWS specific
+            # Domain (from terraform-managed secrets)
             - name: APP_DOMAIN
-              value: "your-domain.com"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: APP_DOMAIN
             - name: APP_BASE_URL
-              value: "https://your-domain.com"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: APP_BASE_URL
             - name: DEV_SERVER_BASE_URL
-              value: "https://*.your-domain.com"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: DEV_SERVER_BASE_URL
             - name: CORS_ORIGINS
-              value: "https://your-domain.com,https://*.your-domain.com"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: CORS_ORIGINS
             - name: ALLOWED_HOSTS
-              value: "your-domain.com,*.your-domain.com"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: ALLOWED_HOSTS
             # Kubernetes settings
             - name: K8S_NAMESPACE_PER_PROJECT
               value: "true"
@@ -95,11 +114,20 @@ spec:
             - name: K8S_INGRESS_CLASS
               value: "nginx"
             - name: K8S_INGRESS_DOMAIN
-              value: "your-domain.com"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: APP_DOMAIN
             - name: K8S_DEVSERVER_IMAGE
-              value: "<ECR_REGISTRY>/tesslate-devserver:latest"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: K8S_DEVSERVER_IMAGE
             - name: K8S_REGISTRY_URL
-              value: "<ECR_REGISTRY>"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: K8S_REGISTRY_URL
             - name: K8S_IMAGE_PULL_SECRET
               value: ""
             - name: K8S_IMAGE_PULL_POLICY
@@ -110,9 +138,15 @@ spec:
             - name: S3_ENDPOINT_URL
               value: ""
             - name: S3_BUCKET_NAME
-              value: "tesslate-projects-production-7761157a"
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: S3_BUCKET_NAME
             - name: S3_REGION
-              value: "us-east-1"
+              valueFrom:
+                secretKeyRef:
+                  name: s3-credentials
+                  key: S3_REGION
             # Pod Affinity
             - name: K8S_ENABLE_POD_AFFINITY
               value: "true"
@@ -168,7 +202,10 @@ spec:
             - name: COOKIE_SAMESITE
               value: "lax"
             - name: COOKIE_DOMAIN
-              value: ".your-domain.com"
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: COOKIE_DOMAIN
           resources:
             requests:
               memory: "512Mi"

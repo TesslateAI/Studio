@@ -24,6 +24,15 @@ variable "aws_region" {
 }
 
 # -----------------------------------------------------------------------------
+# Image Configuration
+# -----------------------------------------------------------------------------
+variable "image_tag" {
+  description = "Docker image tag for ECR images (defaults to environment name if empty)"
+  type        = string
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
 # Domain Configuration
 # -----------------------------------------------------------------------------
 variable "domain_name" {
@@ -110,6 +119,18 @@ variable "eks_node_disk_size" {
   description = "Disk size in GB for EKS nodes"
   type        = number
   default     = 50
+}
+
+variable "eks_spot_desired_size" {
+  description = "Desired number of spot nodes (set 0 to disable spot node group)"
+  type        = number
+  default     = 1
+}
+
+variable "eks_spot_max_size" {
+  description = "Maximum number of spot nodes"
+  type        = number
+  default     = 10
 }
 
 # -----------------------------------------------------------------------------

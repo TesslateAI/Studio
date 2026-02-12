@@ -160,8 +160,13 @@ k8s/.env.*
 !k8s/.env.example
 
 # Terraform
+# Ignore all .tfvars files (contain secrets)
 k8s/terraform/**/*.tfvars
+# Except template files (safe to commit)
 !k8s/terraform/**/*.tfvars.example
+!k8s/terraform/**/*.tfvars.template
+# Backend config files (.hcl) are safe to commit (no secrets)
+# Ignore state files
 k8s/terraform/**/*.tfstate
 k8s/terraform/**/*.tfstate.*
 k8s/terraform/**/tfplan

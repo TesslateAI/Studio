@@ -570,6 +570,57 @@ kubectl get pvc -n proj-<project-uuid>
 - **EBS Storage**: gp3 volumes with VolumeSnapshot support for project persistence
 - **AWS User**: Always use `<AWS_IAM_USER>` credentials for deployments
 
+### Terraform Deployment & Configuration
+
+Terraform manages AWS infrastructure with environment-specific state files and variables.
+
+**Backend Configuration (Multi-Environment Support):**
+```bash
+# Production and beta use SEPARATE state files in same S3 bucket:
+# - production: s3://<TERRAFORM_STATE_BUCKET>/production/terraform.tfstate
+# - beta:       s3://<TERRAFORM_STATE_BUCKET>/beta/terraform.tfstate
+
+# Use aws-deploy.sh helper script for all terraform operations:
+./scripts/aws-deploy.sh init production     # Initialize with production backend
+./scripts/aws-deploy.sh plan production     # Plan changes
+./scripts/aws-deploy.sh apply production    # Apply changes (requires confirmation)
+./scripts/aws-deploy.sh destroy production  # Destroy infrastructure (requires typing "destroy production")
+
+# For beta environment:
+./scripts/aws-deploy.sh init beta
+./scripts/aws-deploy.sh plan beta
+./scripts/aws-deploy.sh apply beta
+```
+
+**Terraform Secrets Management:**
+
+Terraform variables (API keys, passwords, etc.) are stored in **AWS Secrets Manager** instead of git. This enables secure team collaboration.
+
+```bash
+cd scripts/terraform
+
+# Pull latest secrets from AWS (creates terraform.{env}.tfvars)
+./sync_tfvars.sh pull production
+./sync_tfvars.sh pull beta
+
+# Update secrets in AWS (after editing local .tfvars file)
+./sync_tfvars.sh push production
+
+# Initial setup (first time storing secrets in AWS)
+./sync_tfvars.sh init production
+```
+
+**AWS Secrets Manager Structure:**
+- `tesslate/terraform/production` - Production environment secrets
+- `tesslate/terraform/beta` - Beta environment secrets
+
+**Required IAM Permissions:**
+- `secretsmanager:GetSecretValue`
+- `secretsmanager:PutSecretValue`
+- `secretsmanager:CreateSecret`
+
+See [scripts/terraform/README.md](scripts/terraform/README.md) for full documentation.
+
 ### Initial Setup / Login
 
 ```powershell
@@ -648,8 +699,9 @@ kubectl rollout status deployment/tesslate-frontend -n tesslate --timeout=120s
 kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
 
-# Apply all manifests (if changed)
-kubectl apply -k k8s/overlays/aws
+# Apply all manifests with images from terraform (recommended)
+./scripts/aws-deploy.sh deploy-k8s beta        # for beta
+./scripts/aws-deploy.sh deploy-k8s production  # for production
 ```
 
 ### Debugging Commands
@@ -711,16 +763,15 @@ kubectl create secret generic tesslate-secrets -n tesslate \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### AWS EKS Config Settings (k8s/overlays/aws/backend-patch.yaml)
+### AWS EKS Config Settings (k8s/overlays/aws-base/backend-patch.yaml)
 
-| Setting | Value |
-|---------|-------|
-| `K8S_DEVSERVER_IMAGE` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
-| `K8S_IMAGE_PULL_SECRET` | `ecr-credentials` |
-| `K8S_SNAPSHOT_CLASS` | `tesslate-ebs-snapshots` |
-| `K8S_SNAPSHOT_RETENTION_DAYS` | `30` |
-| `COOKIE_DOMAIN` | `.your-domain.com` |
-| `replicas` | `1` (single replica - tasks stored in-memory) |
+| Setting | Beta | Production |
+|---------|------|------------|
+| `K8S_DEVSERVER_IMAGE` | `...tesslate-devserver:beta` | `...tesslate-devserver:production` |
+| `K8S_IMAGE_PULL_SECRET` | `""` | `""` |
+| `APP_DOMAIN` | `your-domain.com` | `tesslate.com` |
+| `COOKIE_DOMAIN` | `.your-domain.com` | `.tesslate.com` |
+| `replicas` | `1` (single replica - tasks stored in-memory) | `1` |
 
 ### Common AWS Issues & Fixes
 

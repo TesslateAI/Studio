@@ -57,7 +57,7 @@ module "eks" {
   eks_managed_node_groups = {
     # Primary node group for Tesslate workloads
     primary = {
-      name            = "tess-primary"
+      name            = "tess-${var.environment}-primary"
       use_name_prefix = false
 
       instance_types = var.eks_node_instance_types
@@ -72,8 +72,8 @@ module "eks" {
       # Use latest Amazon Linux 2023 AMI
       ami_type = "AL2023_x86_64_STANDARD"
 
-      # Shorter IAM role name
-      iam_role_name            = "tess-primary-node"
+      # IAM role name scoped per environment
+      iam_role_name            = "tess-${var.environment}-primary-node"
       iam_role_use_name_prefix = false
 
       labels = {
@@ -89,22 +89,22 @@ module "eks" {
 
     # Optional: Spot instance node group for dev containers (cost savings)
     spot = {
-      name            = "tess-spot"
+      name            = "tess-${var.environment}-spot"
       use_name_prefix = false
 
       instance_types = ["t3.large", "t3.xlarge", "t3a.large", "t3a.xlarge"]
       capacity_type  = "SPOT"
 
       min_size     = 0
-      max_size     = 10
-      desired_size = 1
+      max_size     = var.eks_spot_max_size
+      desired_size = var.eks_spot_desired_size
 
       disk_size = var.eks_node_disk_size
 
       ami_type = "AL2023_x86_64_STANDARD"
 
-      # Shorter IAM role name
-      iam_role_name            = "tess-spot-node"
+      # IAM role name scoped per environment
+      iam_role_name            = "tess-${var.environment}-spot-node"
       iam_role_use_name_prefix = false
 
       labels = {

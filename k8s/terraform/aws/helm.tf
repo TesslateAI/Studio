@@ -206,6 +206,22 @@ resource "kubectl_manifest" "letsencrypt_issuer" {
   ]
 }
 
+# Cloudflare Zone ID secret for cert-manager (needed when token has access to multiple zones)
+resource "kubernetes_secret" "cloudflare_zone_id" {
+  count = var.enable_cert_manager && var.cloudflare_zone_id != "" ? 1 : 0
+
+  metadata {
+    name      = "cloudflare-zone-id"
+    namespace = "cert-manager"
+  }
+
+  data = {
+    zone-id = var.cloudflare_zone_id
+  }
+
+  depends_on = [helm_release.cert_manager]
+}
+
 # Staging issuer for testing
 resource "kubectl_manifest" "letsencrypt_staging_issuer" {
   count = var.enable_cert_manager ? 1 : 0

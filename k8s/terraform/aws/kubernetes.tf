@@ -106,11 +106,16 @@ resource "kubernetes_secret" "app_secrets" {
     LITELLM_INITIAL_BUDGET = "10.0"
 
     # CORS & Domain
-    CORS_ORIGINS      = "https://${var.domain_name},https://*.${var.domain_name}"
-    ALLOWED_HOSTS     = "${var.domain_name},*.${var.domain_name}"
-    APP_DOMAIN        = var.domain_name
-    APP_BASE_URL      = "https://${var.domain_name}"
+    CORS_ORIGINS        = "https://${var.domain_name},https://*.${var.domain_name}"
+    ALLOWED_HOSTS       = "${var.domain_name},*.${var.domain_name}"
+    APP_DOMAIN          = var.domain_name
+    APP_BASE_URL        = "https://${var.domain_name}"
     DEV_SERVER_BASE_URL = "https://*.${var.domain_name}"
+    COOKIE_DOMAIN       = ".${var.domain_name}"
+
+    # K8s config (in secrets to avoid kustomize configMapGenerator hash conflicts)
+    K8S_DEVSERVER_IMAGE = "${aws_ecr_repository.devserver.repository_url}:${local.image_tag}"
+    K8S_REGISTRY_URL    = split("/", aws_ecr_repository.backend.repository_url)[0]
 
     # OAuth - Google
     GOOGLE_CLIENT_ID           = var.google_client_id
@@ -152,7 +157,10 @@ resource "kubernetes_config_map" "tesslate_config" {
     DEPLOYMENT_MODE              = "kubernetes"
     K8S_NAMESPACE_PER_PROJECT    = "true"
     K8S_ENABLE_NETWORK_POLICIES  = "true"
-    devserver_image              = "${aws_ecr_repository.devserver.repository_url}:latest"
+    K8S_INGRESS_DOMAIN           = var.domain_name
+    K8S_STORAGE_CLASS            = "tesslate-block-storage"
+    K8S_INGRESS_CLASS            = "nginx"
+    devserver_image              = "${aws_ecr_repository.devserver.repository_url}:${local.image_tag}"
     registry_url                 = split("/", aws_ecr_repository.backend.repository_url)[0]
     aws_region                   = var.aws_region
     s3_bucket_name               = aws_s3_bucket.tesslate_projects.id
@@ -189,6 +197,103 @@ resource "kubectl_manifest" "wildcard_certificate" {
   depends_on = [
     kubernetes_namespace.tesslate,
     kubectl_manifest.letsencrypt_issuer
+  ]
+}
+
+# -----------------------------------------------------------------------------
+# Main Application Ingress
+# -----------------------------------------------------------------------------
+# Creates the main ingress for the Tesslate application using the domain
+# from tfvars. This replaces per-environment ingress-patch.yaml files.
+# User project ingresses are still created dynamically by the backend.
+# -----------------------------------------------------------------------------
+resource "kubectl_manifest" "tesslate_ingress" {
+  yaml_body = yamlencode({
+    apiVersion = "networking.k8s.io/v1"
+    kind       = "Ingress"
+    metadata = {
+      name      = "tesslate-ingress"
+      namespace = "tesslate"
+      annotations = {
+        "kubernetes.io/ingress.class"                       = "nginx"
+        "cert-manager.io/cluster-issuer"                    = "letsencrypt-prod"
+        "nginx.ingress.kubernetes.io/ssl-redirect"          = "true"
+        "nginx.ingress.kubernetes.io/force-ssl-redirect"    = "true"
+        "nginx.ingress.kubernetes.io/proxy-http-version"    = "1.1"
+        "nginx.ingress.kubernetes.io/proxy-read-timeout"    = "3600"
+        "nginx.ingress.kubernetes.io/proxy-send-timeout"    = "3600"
+        "nginx.ingress.kubernetes.io/proxy-connect-timeout" = "3600"
+        "nginx.ingress.kubernetes.io/proxy-body-size"       = "100m"
+        "nginx.ingress.kubernetes.io/use-regex"             = "true"
+        "nginx.ingress.kubernetes.io/enable-cors"           = "true"
+        "nginx.ingress.kubernetes.io/cors-allow-origin"     = "https://${var.domain_name}, https://*.${var.domain_name}"
+        "nginx.ingress.kubernetes.io/cors-allow-methods"    = "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+        "nginx.ingress.kubernetes.io/cors-allow-credentials" = "true"
+        "nginx.ingress.kubernetes.io/proxy-hide-header"     = "X-Powered-By"
+      }
+    }
+    spec = {
+      ingressClassName = "nginx"
+      tls = [{
+        hosts = [
+          var.domain_name,
+          "*.${var.domain_name}"
+        ]
+        secretName = "tesslate-wildcard-tls"
+      }]
+      rules = [{
+        host = var.domain_name
+        http = {
+          paths = [
+            {
+              path     = "/api"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-backend-service"
+                  port = { number = 8000 }
+                }
+              }
+            },
+            {
+              path     = "/ws"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-backend-service"
+                  port = { number = 8000 }
+                }
+              }
+            },
+            {
+              path     = "/health"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-backend-service"
+                  port = { number = 8000 }
+                }
+              }
+            },
+            {
+              path     = "/"
+              pathType = "Prefix"
+              backend = {
+                service = {
+                  name = "tesslate-frontend-service"
+                  port = { number = 80 }
+                }
+              }
+            }
+          ]
+        }
+      }]
+    }
+  })
+
+  depends_on = [
+    kubernetes_namespace.tesslate,
+    kubectl_manifest.wildcard_certificate
   ]
 }
 

@@ -42,13 +42,10 @@ terraform {
     }
   }
 
-  backend "s3" {
-    bucket         = "<TERRAFORM_STATE_BUCKET>"
-    key            = "eks/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "<AWS_IAM_USER>-locks"
-  }
+  # Backend configuration is provided via -backend-config flag at init time
+  # Production: terraform init -backend-config=backend-production.hcl
+  # Beta:       terraform init -backend-config=backend-beta.hcl
+  backend "s3" {}
 }
 
 # -----------------------------------------------------------------------------
@@ -144,6 +141,9 @@ resource "random_id" "suffix" {
 # -----------------------------------------------------------------------------
 locals {
   cluster_name = "${var.project_name}-${var.environment}-eks"
+
+  # Image tag defaults to environment name (e.g., "beta", "production")
+  image_tag = var.image_tag != "" ? var.image_tag : var.environment
 
   common_tags = {
     Project     = var.project_name
