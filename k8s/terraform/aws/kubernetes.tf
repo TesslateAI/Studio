@@ -114,18 +114,20 @@ resource "kubernetes_secret" "app_secrets" {
     COOKIE_DOMAIN       = ".${var.domain_name}"
 
     # K8s config (in secrets to avoid kustomize configMapGenerator hash conflicts)
-    K8S_DEVSERVER_IMAGE = "${aws_ecr_repository.devserver.repository_url}:${local.image_tag}"
-    K8S_REGISTRY_URL    = split("/", aws_ecr_repository.backend.repository_url)[0]
+    K8S_DEVSERVER_IMAGE = "${local.ecr_devserver_url}:${local.image_tag}"
+    K8S_REGISTRY_URL    = local.ecr_registry_url
 
     # OAuth - Google
     GOOGLE_CLIENT_ID           = var.google_client_id
     GOOGLE_CLIENT_SECRET       = var.google_client_secret
     GOOGLE_OAUTH_REDIRECT_URI  = "https://${var.domain_name}/api/auth/google/callback"
+    GOOGLE_OAUTH_ENABLED       = tostring(var.google_oauth_enabled)
 
     # OAuth - GitHub
     GITHUB_CLIENT_ID           = var.github_client_id
     GITHUB_CLIENT_SECRET       = var.github_client_secret
     GITHUB_OAUTH_REDIRECT_URI  = "https://${var.domain_name}/api/auth/github/callback"
+    GITHUB_OAUTH_ENABLED       = tostring(var.github_oauth_enabled)
 
     # Stripe
     STRIPE_SECRET_KEY    = var.stripe_secret_key
@@ -160,8 +162,8 @@ resource "kubernetes_config_map" "tesslate_config" {
     K8S_INGRESS_DOMAIN           = var.domain_name
     K8S_STORAGE_CLASS            = "tesslate-block-storage"
     K8S_INGRESS_CLASS            = "nginx"
-    devserver_image              = "${aws_ecr_repository.devserver.repository_url}:${local.image_tag}"
-    registry_url                 = split("/", aws_ecr_repository.backend.repository_url)[0]
+    devserver_image              = "${local.ecr_devserver_url}:${local.image_tag}"
+    registry_url                 = local.ecr_registry_url
     aws_region                   = var.aws_region
     s3_bucket_name               = aws_s3_bucket.tesslate_projects.id
   }

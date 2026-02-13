@@ -254,12 +254,14 @@ tesslate-devserver:latest
 
 ### AWS EKS
 
-**Registry**: ECR in us-east-1
+**Registry**: ECR in us-east-1 (shared across all environments)
 ```
-<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
+<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:{env}
+<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:{env}
+<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:{env}
 ```
+
+**ECR Management**: ECR repos are managed by the **shared Terraform stack** (`k8s/terraform/shared/`), not by environment stacks. Environments reference them via computed URL locals. See `docs/infrastructure/terraform/ecr.md`.
 
 **Pull Policy**: `Always` (always check for new image)
 

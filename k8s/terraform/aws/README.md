@@ -99,11 +99,25 @@ This Terraform configuration supports **separate production and beta environment
   - Beta: `s3://<TERRAFORM_STATE_BUCKET>/beta/terraform.tfstate`
 
 - **Environment-specific tfvars**: Variables are stored in AWS Secrets Manager
-  - Pull with: `./sync_tfvars.sh pull production` or `./sync_tfvars.sh pull beta`
+  - Download with: `./scripts/terraform/secrets.sh production` or `./scripts/terraform/secrets.sh beta`
 
-- **Helper script**: `deploy.sh` manages initialization and deployment
+- **Helper script**: `scripts/aws-deploy.sh` manages initialization and deployment
   - Ensures correct backend config is used for each environment
   - Prevents accidental cross-environment changes
+
+### Shared Resources (ECR)
+
+ECR repositories (`tesslate-backend`, `tesslate-frontend`, `tesslate-devserver`) are **shared across environments** — both push different image tags (`:beta`, `:production`) to the same repos.
+
+ECR is managed by a **dedicated shared stack** (`k8s/terraform/shared/`) with its own state file:
+
+```bash
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
+```
+
+Per-environment stacks reference ECR via computed URL locals (`local.ecr_*_url` in `aws/ecr.tf`) — no cross-state dependencies needed.
 
 ## Deployment Steps
 

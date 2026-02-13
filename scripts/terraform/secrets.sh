@@ -57,7 +57,7 @@ fi
 
 # Show usage if no arguments
 if [ -z "$ENVIRONMENT" ]; then
-  echo "Usage: $0 [command] {production|beta}"
+  echo "Usage: $0 [command] {production|beta|shared}"
   echo ""
   echo "Commands:"
   echo "  download  - Download tfvars from AWS to local file (default)"
@@ -69,20 +69,25 @@ if [ -z "$ENVIRONMENT" ]; then
   echo "  $0 download production        # Download (explicit)"
   echo "  $0 upload production          # Upload local file to AWS"
   echo "  $0 view production            # View content in AWS"
+  echo "  $0 shared                     # Download shared stack tfvars"
   exit 1
 fi
 
 # Validate environment
 case "$ENVIRONMENT" in
-  production|beta) ;;
+  production|beta|shared) ;;
   *)
-    error "Invalid environment: $ENVIRONMENT. Use 'production' or 'beta'"
+    error "Invalid environment: $ENVIRONMENT. Use 'production', 'beta', or 'shared'"
     ;;
 esac
 
-# Set paths and names
+# Set paths and names based on environment
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TFVARS_FILE="$SCRIPT_DIR/../../k8s/terraform/aws/terraform.${ENVIRONMENT}.tfvars"
+if [ "$ENVIRONMENT" = "shared" ]; then
+  TFVARS_FILE="$SCRIPT_DIR/../../k8s/terraform/shared/terraform.shared.tfvars"
+else
+  TFVARS_FILE="$SCRIPT_DIR/../../k8s/terraform/aws/terraform.${ENVIRONMENT}.tfvars"
+fi
 SECRET_NAME="tesslate/terraform/${ENVIRONMENT}"
 
 # Check dependencies

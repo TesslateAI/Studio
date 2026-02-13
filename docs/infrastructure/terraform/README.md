@@ -198,7 +198,7 @@ See [eks.md](eks.md) for detailed documentation.
 
 See [ecr.md](ecr.md) for detailed documentation.
 
-**Repositories**:
+**Repositories** (shared across all environments):
 1. `tesslate-backend`
 2. `tesslate-frontend`
 3. `tesslate-devserver`
@@ -207,6 +207,7 @@ See [ecr.md](ecr.md) for detailed documentation.
 - Image scanning on push
 - AES256 encryption
 - Lifecycle policies (keep 30 tagged, 10 any, delete old untagged)
+- Managed by shared stack (`k8s/terraform/shared/`), referenced by env stacks via computed locals
 
 ### S3 Bucket (s3.tf)
 
@@ -286,23 +287,35 @@ terraform apply
 
 ## State Management
 
-**Backend**: Local (terraform.tfstate file)
+**Backend**: S3 with per-environment state files
+
+Each environment has its own Terraform state file to prevent cross-environment conflicts:
+
+| Environment | State File |
+|-------------|------------|
+| Production | `s3://<TERRAFORM_STATE_BUCKET>/production/terraform.tfstate` |
+| Beta | `s3://<TERRAFORM_STATE_BUCKET>/beta/terraform.tfstate` |
+
+Backend config is selected at init time via `-backend-config`:
+```bash
+./scripts/aws-deploy.sh init production  # Uses backend-production.hcl
+./scripts/aws-deploy.sh init beta        # Uses backend-beta.hcl
+```
 
 **Warning**: .tfstate contains sensitive data, never commit to git!
 
-**Future**: Use remote backend for team collaboration:
-```hcl
-# main.tf
-terraform {
-  backend "s3" {
-    bucket = "<TERRAFORM_STATE_BUCKET>"
-    key    = "aws/terraform.tfstate"
-    region = "us-east-1"
-    encrypt = true
-    dynamodb_table = "<AWS_IAM_USER>-locks"
-  }
-}
+### Shared Resources (ECR)
+
+ECR repositories are shared across environments. They are managed by a **dedicated shared stack** (`k8s/terraform/shared/`) with its own state file (`shared/terraform.tfstate`).
+
+```bash
+# Manage shared ECR resources
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
 ```
+
+Per-environment stacks (`production`, `beta`) reference ECR via computed URL locals — no cross-state dependencies. See [ecr.md](ecr.md) for details.
 
 ## Outputs
 

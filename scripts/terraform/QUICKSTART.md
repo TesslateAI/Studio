@@ -50,6 +50,8 @@
 ./scripts/aws-deploy.sh plan production
 ```
 
+**Note:** ECR repositories are managed separately by the shared stack (`k8s/terraform/shared/`). Run `./scripts/aws-deploy.sh plan shared` to manage ECR. See `docs/infrastructure/terraform/ecr.md`.
+
 ## For Admins (Initial Upload)
 
 ### Upload Existing tfvars to AWS

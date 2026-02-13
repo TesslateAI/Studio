@@ -2,7 +2,48 @@
 
 Amazon ECR repositories for Tesslate Studio images.
 
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/k8s/terraform/aws/ecr.tf`
+**File**: `k8s/terraform/aws/ecr.tf`
+
+## Multi-Environment ECR Management
+
+ECR repositories are **shared across environments** (beta and production push different image tags to the same repos). To prevent Terraform state conflicts, ECR is managed by a **dedicated shared stack** (`k8s/terraform/shared/`), separate from the per-environment stacks.
+
+### Architecture
+
+```
+k8s/terraform/
+├── shared/          # ECR repos, lifecycle policies, pull-through cache
+│   ├── ecr.tf       # ECR resource definitions
+│   ├── main.tf      # AWS provider (no Environment tag)
+│   ├── backend.hcl  # State: s3://<TERRAFORM_STATE_BUCKET>/shared/terraform.tfstate
+│   └── terraform.tfvars.example  # Template (download via secrets.sh shared)
+│
+└── aws/             # Per-environment infra (EKS, VPC, S3, IAM, K8s resources)
+    ├── ecr.tf       # Computed locals only (no resources) — references via URL
+    ├── backend-production.hcl
+    └── backend-beta.hcl
+```
+
+| Stack | State File | Manages |
+|-------|-----------|---------|
+| `shared` | `shared/terraform.tfstate` | ECR repos, lifecycle policies, pull-through cache |
+| `production` | `production/terraform.tfstate` | EKS, VPC, S3, IAM, K8s (production) |
+| `beta` | `beta/terraform.tfstate` | EKS, VPC, S3, IAM, K8s (beta) |
+
+### Usage
+
+```bash
+# Manage shared ECR resources
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
+
+# Environment stacks reference ECR via computed locals (no conflict)
+./scripts/aws-deploy.sh plan production
+./scripts/aws-deploy.sh plan beta
+```
+
+Per-environment stacks compute ECR URLs deterministically via `local.ecr_*_url` (from AWS account ID + region). No cross-stack data sources needed.
 
 ## Repositories
 

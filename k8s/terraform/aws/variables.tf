@@ -247,6 +247,18 @@ variable "github_client_secret" {
   default     = ""
 }
 
+variable "google_oauth_enabled" {
+  description = "Enable Google OAuth login"
+  type        = bool
+  default     = false
+}
+
+variable "github_oauth_enabled" {
+  description = "Enable GitHub OAuth login"
+  type        = bool
+  default     = false
+}
+
 variable "stripe_secret_key" {
   description = "Stripe secret key"
   type        = string

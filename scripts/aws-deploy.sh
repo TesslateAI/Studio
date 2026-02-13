@@ -18,9 +18,6 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TF_DIR="$PROJECT_ROOT/k8s/terraform/aws"
-
-cd "$TF_DIR"
 
 # Colors for output
 RED='\033[0;31m'
@@ -56,26 +53,35 @@ case "$COMMAND" in
     init|plan|apply|destroy|output|state|all|deploy-k8s)
         ;;
     *)
-        error "Invalid command: $COMMAND\n\nUsage: ./scripts/aws-deploy.sh {init|plan|apply|all|destroy|output|state|deploy-k8s} {production|beta}"
+        error "Invalid command: $COMMAND\n\nUsage: ./scripts/aws-deploy.sh {init|plan|apply|all|destroy|output|state|deploy-k8s} {production|beta|shared}"
         ;;
 esac
 
 # Validate environment
 if [ -z "$ENVIRONMENT" ]; then
-    error "Environment not specified.\n\nUsage: ./scripts/aws-deploy.sh $COMMAND {production|beta}"
+    error "Environment not specified.\n\nUsage: ./scripts/aws-deploy.sh $COMMAND {production|beta|shared}"
 fi
 
 case "$ENVIRONMENT" in
-    production|beta)
+    production|beta|shared)
         ;;
     *)
-        error "Invalid environment: $ENVIRONMENT. Use 'production' or 'beta'"
+        error "Invalid environment: $ENVIRONMENT. Use 'production', 'beta', or 'shared'"
         ;;
 esac
 
-# Set environment-specific files
-BACKEND_CONFIG="backend-${ENVIRONMENT}.hcl"
-TFVARS_FILE="terraform.${ENVIRONMENT}.tfvars"
+# Set directory and files based on environment
+if [ "$ENVIRONMENT" = "shared" ]; then
+    TF_DIR="$PROJECT_ROOT/k8s/terraform/shared"
+    BACKEND_CONFIG="backend.hcl"
+    TFVARS_FILE="terraform.shared.tfvars"
+else
+    TF_DIR="$PROJECT_ROOT/k8s/terraform/aws"
+    BACKEND_CONFIG="backend-${ENVIRONMENT}.hcl"
+    TFVARS_FILE="terraform.${ENVIRONMENT}.tfvars"
+fi
+
+cd "$TF_DIR"
 
 # Skip terraform file checks for commands that don't use terraform
 if [ "$COMMAND" != "deploy-k8s" ]; then

@@ -592,6 +592,17 @@ Terraform manages AWS infrastructure with environment-specific state files and v
 ./scripts/aws-deploy.sh apply beta
 ```
 
+**Shared ECR Stack:**
+
+ECR repositories (`tesslate-backend`, `tesslate-frontend`, `tesslate-devserver`) are shared across environments — both push different image tags (`:beta`, `:production`) to the same repos. To prevent state conflicts, ECR is managed by a **dedicated shared stack** (`k8s/terraform/shared/`) with its own state file. Environment stacks reference ECR via computed URL locals.
+
+```bash
+# Manage shared ECR resources
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
+```
+
 **Terraform Secrets Management:**
 
 Terraform tfvars files are stored in **AWS Secrets Manager** (as raw content) and must be downloaded manually before running Terraform. This enables secure team collaboration.
