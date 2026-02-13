@@ -193,6 +193,22 @@ case "$COMMAND" in
             error "Kustomize overlay not found: $KUSTOMIZE_DIR"
         fi
 
+        # Auto-switch kubectl context to the correct EKS cluster
+        CLUSTER_NAME="tesslate-${ENVIRONMENT}-eks"
+        CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || echo "")
+
+        if [[ "$CURRENT_CONTEXT" != *"$CLUSTER_NAME"* ]]; then
+            info "Switching kubectl context to $CLUSTER_NAME..."
+            aws eks update-kubeconfig --region us-east-1 --name "$CLUSTER_NAME" 2>/dev/null \
+                || error "Failed to update kubeconfig for $CLUSTER_NAME. Check AWS credentials."
+            success "✓ kubectl context set to $CLUSTER_NAME"
+        fi
+
+        # Verify cluster is reachable
+        if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+            error "Cannot reach cluster $CLUSTER_NAME. Check AWS credentials and VPN."
+        fi
+
         info "Deploying kustomize manifests from aws-${ENVIRONMENT}..."
         kubectl apply -k "$KUSTOMIZE_DIR"
 

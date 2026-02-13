@@ -61,6 +61,12 @@ variable "cloudflare_zone_id" {
   default     = ""
 }
 
+variable "cloudflare_zone_name" {
+  description = "Cloudflare zone name (e.g., tesslate.com). Must match the actual Cloudflare zone, not a subdomain. Used by cert-manager for DNS01 challenge zone discovery."
+  type        = string
+  default     = ""
+}
+
 # -----------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------

@@ -192,7 +192,7 @@ resource "kubectl_manifest" "letsencrypt_issuer" {
               }
             }
             selector = {
-              dnsZones = [var.domain_name]
+              dnsZones = [local.cloudflare_zone_name]
             }
           }
         ]
@@ -251,7 +251,7 @@ resource "kubectl_manifest" "letsencrypt_staging_issuer" {
               }
             }
             selector = {
-              dnsZones = [var.domain_name]
+              dnsZones = [local.cloudflare_zone_name]
             }
           }
         ]
@@ -299,7 +299,9 @@ resource "helm_release" "external_dns" {
         }
       ]
 
-      domainFilters = [var.domain_name]
+      domainFilters = [local.cloudflare_zone_name]
+
+      zoneIDFilters = var.cloudflare_zone_id != "" ? [var.cloudflare_zone_id] : []
 
       policy = "sync"  # sync will delete records when ingress is deleted
 
