@@ -1,68 +1,189 @@
-# Terraform Variables Sync
+# Terraform Secrets Management
 
 Manages environment-specific Terraform variables stored in AWS Secrets Manager.
 
-## Why AWS Secrets Manager?
+## Overview
 
-- **Security**: Sensitive values (API keys, passwords) never committed to git
-- **Team Collaboration**: Team members pull latest values without manual sharing
-- **Version Control**: Track changes to infrastructure secrets
-- **Environment Isolation**: Separate secrets for production and beta
+Terraform tfvars files are stored in **AWS Secrets Manager** and downloaded locally before running Terraform commands.
+
+**Key Benefits:**
+- **Centralized storage**: Team members download from AWS instead of manual sharing
+- **No secrets in git**: tfvars files are in `.gitignore` and never committed
+- **Environment support**: Separate secrets for production and beta
+- **Simple workflow**: Download once, use with standard Terraform commands
+
+## Quick Start
+
+### For Team Members
+
+```bash
+# 1. Download tfvars from AWS (one time per environment)
+./scripts/terraform/secrets.sh production
+
+# 2. Run terraform commands - they use the downloaded file
+./scripts/aws-deploy.sh plan production
+./scripts/aws-deploy.sh apply production
+```
+
+Download tfvars manually before running terraform commands.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `sync_tfvars.sh` | Shell wrapper with convenience commands |
-| `sync_tfvars.py` | Python script that interfaces with AWS Secrets Manager |
-
-## Usage
-
-### Pull Secrets from AWS
-
-```bash
-# Pull production secrets
-./sync_tfvars.sh pull production
-
-# Pull beta secrets
-./sync_tfvars.sh pull beta
-```
-
-This creates `k8s/terraform/aws/terraform.{environment}.tfvars` with values from AWS Secrets Manager.
-
-### Update Secrets in AWS
-
-```bash
-# Edit local tfvars file first
-vim ../../k8s/terraform/aws/terraform.production.tfvars
-
-# Push changes to AWS
-./sync_tfvars.sh push production
-```
-
-**WARNING**: This overwrites secrets in AWS. Confirm before proceeding.
-
-### Initial Setup (First Time)
-
-```bash
-# Create local tfvars file with all values
-cp ../../k8s/terraform/aws/terraform.tfvars.example ../../k8s/terraform/aws/terraform.production.tfvars
-vim ../../k8s/terraform/aws/terraform.production.tfvars  # Fill in values
-
-# Upload to AWS Secrets Manager
-./sync_tfvars.sh init production
-```
+| `secrets.sh` | Manage tfvars: download (default), upload, and view |
 
 ## AWS Secrets Manager Structure
 
+Secrets are stored as **raw tfvars file content** in AWS Secrets Manager:
+
 | Secret Name | Environment | Content |
 |-------------|-------------|---------|
-| `tesslate/terraform/production` | Production | Full terraform.production.tfvars content |
-| `tesslate/terraform/beta` | Beta | Full terraform.beta.tfvars content |
+| `tesslate/terraform/production` | Production | Raw content of terraform.production.tfvars |
+| `tesslate/terraform/beta` | Beta | Raw content of terraform.beta.tfvars |
+
+## Basic Usage
+
+### Download tfvars from AWS
+
+```bash
+# Download production tfvars
+./scripts/terraform/secrets.sh production
+
+# Download beta tfvars
+./scripts/terraform/secrets.sh beta
+
+# This creates: k8s/terraform/aws/terraform.{env}.tfvars
+```
+
+### Run Terraform
+
+```bash
+# After downloading, run terraform commands
+./scripts/aws-deploy.sh plan production
+./scripts/aws-deploy.sh apply production
+```
+
+## Managing Secrets
+
+### Upload Local tfvars to AWS
+
+```bash
+# Upload your local file to AWS
+./scripts/terraform/secrets.sh upload production
+
+# Now team members can download it
+```
+
+### Download from AWS
+
+```bash
+# Download and save to local file
+./scripts/terraform/secrets.sh download production
+
+# Or use the shorter command
+./scripts/terraform/secrets.sh production
+```
+
+### View Content in AWS
+
+```bash
+# View tfvars content from AWS without downloading
+./scripts/terraform/secrets.sh view production
+```
+
+## Updating Secrets
+
+### Option 1: Edit Local File and Upload
+
+```bash
+# 1. Download latest version first (to avoid conflicts)
+./scripts/terraform/secrets.sh production
+
+# 2. Edit local file
+vim k8s/terraform/aws/terraform.production.tfvars
+
+# 3. Upload back to AWS
+./scripts/terraform/secrets.sh upload production
+
+# 4. Notify team to download latest
+```
+
+### Option 2: Edit in AWS Console
+
+1. Go to AWS Secrets Manager console
+2. Find secret: `tesslate/terraform/{environment}`
+3. Click "Retrieve secret value"
+4. Click "Edit"
+5. Modify the tfvars content
+6. Click "Save"
+
+Changes take effect immediately - team members just need to download latest.
+
+## Initial Setup (First Time)
+
+### If You Have Existing tfvars Files
+
+```bash
+# Upload to AWS Secrets Manager
+./scripts/terraform/secrets.sh upload production
+./scripts/terraform/secrets.sh upload beta
+
+# Test downloading
+./scripts/terraform/secrets.sh production
+
+# Test terraform
+./scripts/aws-deploy.sh plan production
+```
+
+### If Starting Fresh
+
+1. Create tfvars file locally:
+   ```bash
+   vim k8s/terraform/aws/terraform.production.tfvars
+   # Add all your variables: environment, domain_name, passwords, API keys, etc.
+   ```
+
+2. Upload to AWS:
+   ```bash
+   ./scripts/terraform/secrets.sh upload production
+   ```
+
+3. Team members can now download:
+   ```bash
+   ./scripts/terraform/secrets.sh production
+   ```
+
+## Workflow
+
+### For Admin (Managing Secrets)
+
+```bash
+# Make changes locally
+vim k8s/terraform/aws/terraform.production.tfvars
+
+# Upload to AWS
+./scripts/terraform/secrets.sh upload production
+
+# Notify team in Slack/email:
+# "Updated production secrets, please re-download:
+#  ./scripts/terraform/secrets.sh production"
+```
+
+### For Team Members
+
+```bash
+# Download latest secrets
+./scripts/terraform/secrets.sh production
+
+# Use terraform normally
+./scripts/aws-deploy.sh plan production
+./scripts/aws-deploy.sh apply production
+```
 
 ## Required IAM Permissions
 
-The AWS user/role running these scripts needs:
+The AWS user/role needs:
 
 ```json
 {
@@ -73,7 +194,8 @@ The AWS user/role running these scripts needs:
       "Action": [
         "secretsmanager:GetSecretValue",
         "secretsmanager:PutSecretValue",
-        "secretsmanager:CreateSecret"
+        "secretsmanager:CreateSecret",
+        "secretsmanager:DescribeSecret"
       ],
       "Resource": "arn:aws:secretsmanager:us-east-1:*:secret:tesslate/terraform/*"
     }
@@ -81,71 +203,33 @@ The AWS user/role running these scripts needs:
 }
 ```
 
-## Workflow
-
-### Team Member Setup
-
-```bash
-# 1. Clone repo
-git clone <repo-url>
-cd tesslate-studio/scripts/terraform
-
-# 2. Configure AWS credentials
-aws configure  # Or use environment variables
-
-# 3. Pull secrets for environment you're working on
-./sync_tfvars.sh pull production
-
-# 4. Use terraform with pulled vars
-cd ../../k8s/terraform/aws
-./deploy.sh init production
-./deploy.sh plan production
-```
-
-### Updating Secrets
-
-```bash
-# 1. Pull latest to avoid conflicts
-./sync_tfvars.sh pull production
-
-# 2. Edit local file
-vim ../../k8s/terraform/aws/terraform.production.tfvars
-
-# 3. Test terraform plan to ensure syntax is correct
-cd ../../k8s/terraform/aws
-./deploy.sh plan production
-
-# 4. Push updated secrets to AWS
-cd ../../../scripts/terraform
-./sync_tfvars.sh push production
-```
+The `<AWS_IAM_USER>` IAM user has these permissions.
 
 ## Security Best Practices
 
 1. **Never commit .tfvars files to git**
    - Already in `.gitignore`: `k8s/terraform/**/*.tfvars`
-   - Only `.tfvars.example` and `.tfvars.template` are tracked
 
-2. **Rotate sensitive values regularly**
-   - Update in local file
-   - Push to AWS
-   - Apply terraform changes
+2. **Download fresh copy before editing**
+   - Prevents overwriting other team members' changes
 
-3. **Use least-privilege IAM roles**
+3. **Notify team after uploading changes**
+   - So they download the latest version
+
+4. **Rotate sensitive values regularly**
+   - Update locally, upload to AWS, team downloads latest
+
+5. **Use least-privilege IAM roles**
    - Grant secretsmanager access only to terraform users
-   - Restrict by resource ARN
 
-4. **Audit secret access**
-   - Enable CloudTrail for Secrets Manager API calls
-   - Review who accessed secrets and when
+6. **Enable CloudTrail**
+   - Audit who accessed/modified secrets and when
 
 ## Troubleshooting
 
-### boto3 not installed
+### AWS CLI not installed
 
-```bash
-pip3 install boto3
-```
+Install from: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
 
 ### AWS credentials not configured
 
@@ -159,17 +243,60 @@ export AWS_REGION="us-east-1"
 
 ### Secret not found in AWS
 
-Run `init` command to create it:
-
 ```bash
-./sync_tfvars.sh init production
+# Upload it first
+./scripts/terraform/secrets.sh upload production
 ```
 
 ### Permission denied
 
 Verify your AWS user has the required IAM permissions (see above).
 
+### Terraform can't find tfvars file
+
+```bash
+# Download it from AWS
+./scripts/terraform/secrets.sh production
+
+# Or use aws-deploy.sh which downloads automatically
+./scripts/aws-deploy.sh plan production
+```
+
+## How It Works
+
+### Download and Use Workflow
+
+1. **Download tfvars** from AWS Secrets Manager:
+   ```bash
+   ./scripts/terraform/secrets.sh production
+   ```
+
+2. **File is saved** to: `k8s/terraform/aws/terraform.production.tfvars`
+
+3. **Run terraform** with the downloaded file:
+   ```bash
+   ./scripts/aws-deploy.sh plan production
+   # Terraform uses: -var-file="terraform.production.tfvars"
+   ```
+
+4. **Local file persists** - use it for multiple terraform commands until secrets change
+
+5. **Re-download** when secrets are updated by team members
+
+## Commands Reference
+
+| Command | Purpose |
+|---------|---------|
+| `./scripts/terraform/secrets.sh {env}` | Download tfvars from AWS (default command) |
+| `./scripts/terraform/secrets.sh download {env}` | Download tfvars from AWS (explicit) |
+| `./scripts/terraform/secrets.sh upload {env}` | Upload local tfvars to AWS |
+| `./scripts/terraform/secrets.sh view {env}` | View tfvars content in AWS |
+| `./scripts/aws-deploy.sh plan {env}` | Plan changes (requires downloaded tfvars) |
+| `./scripts/aws-deploy.sh apply {env}` | Apply changes (requires downloaded tfvars) |
+
 ## Related Documentation
 
 - [k8s/terraform/aws/README.md](../../k8s/terraform/aws/README.md) - Terraform deployment guide
-- [CLAUDE.md](../../CLAUDE.md) - Project documentation (see "Terraform Deployment & Configuration" section)
+- [CLAUDE.md](../../CLAUDE.md) - Project documentation (see "Terraform Deployment & Configuration")
+- [scripts/aws-deploy.sh](../aws-deploy.sh) - Main deployment script
+- [QUICKSTART.md](QUICKSTART.md) - Quick reference guide

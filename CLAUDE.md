@@ -594,30 +594,71 @@ Terraform manages AWS infrastructure with environment-specific state files and v
 
 **Terraform Secrets Management:**
 
-Terraform variables (API keys, passwords, etc.) are stored in **AWS Secrets Manager** instead of git. This enables secure team collaboration.
+Terraform tfvars files are stored in **AWS Secrets Manager** (as raw content) and must be downloaded manually before running Terraform. This enables secure team collaboration.
 
+**Key Features:**
+- Manual tfvars management - download when needed
+- No secrets in git (tfvars files are in `.gitignore`)
+- Centralized storage - team downloads from AWS instead of manual sharing
+- Simple workflow - download once, use with standard terraform `-var-file`
+
+**Download tfvars** (required before first terraform run):
 ```bash
-cd scripts/terraform
+# Download tfvars from AWS to local file
+./scripts/terraform/secrets.sh production
+# or explicit: ./scripts/terraform/secrets.sh download production
 
-# Pull latest secrets from AWS (creates terraform.{env}.tfvars)
-./sync_tfvars.sh pull production
-./sync_tfvars.sh pull beta
+# This creates: k8s/terraform/aws/terraform.production.tfvars
+```
 
-# Update secrets in AWS (after editing local .tfvars file)
-./sync_tfvars.sh push production
+**Run terraform** (after downloading):
+```bash
+# Now terraform commands work
+./scripts/aws-deploy.sh plan production
+./scripts/aws-deploy.sh apply production
+```
 
-# Initial setup (first time storing secrets in AWS)
-./sync_tfvars.sh init production
+**Initial upload** (one-time setup):
+```bash
+# Upload existing terraform.{env}.tfvars to AWS
+./scripts/terraform/secrets.sh upload production
+./scripts/terraform/secrets.sh upload beta
+
+# Test downloading
+./scripts/terraform/secrets.sh production
+
+# Team members can now download and use
+```
+
+**Updating secrets**:
+```bash
+# 1. Download latest (to avoid conflicts)
+./scripts/terraform/secrets.sh production
+
+# 2. Edit local file
+vim k8s/terraform/aws/terraform.production.tfvars
+
+# 3. Upload to AWS
+./scripts/terraform/secrets.sh upload production
+
+# 4. Notify team to re-download: ./scripts/terraform/secrets.sh production
+```
+
+**View secrets in AWS**:
+```bash
+# View tfvars content from AWS without downloading
+./scripts/terraform/secrets.sh view production
 ```
 
 **AWS Secrets Manager Structure:**
-- `tesslate/terraform/production` - Production environment secrets
-- `tesslate/terraform/beta` - Beta environment secrets
+- `tesslate/terraform/production` - Raw content of terraform.production.tfvars
+- `tesslate/terraform/beta` - Raw content of terraform.beta.tfvars
 
 **Required IAM Permissions:**
 - `secretsmanager:GetSecretValue`
 - `secretsmanager:PutSecretValue`
 - `secretsmanager:CreateSecret`
+- `secretsmanager:DescribeSecret`
 
 See [scripts/terraform/README.md](scripts/terraform/README.md) for full documentation.
 

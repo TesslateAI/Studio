@@ -89,8 +89,8 @@ fi
 if [ "$COMMAND" != "state" ] && [ "$COMMAND" != "output" ] && [ "$COMMAND" != "deploy-k8s" ]; then
     if [ ! -f "$TFVARS_FILE" ]; then
         warning "tfvars file not found: $TFVARS_FILE"
-        info "Pull from AWS Secrets Manager with:"
-        info "  ./scripts/terraform/sync_tfvars.sh pull $ENVIRONMENT"
+        info "Download from AWS Secrets Manager with:"
+        info "  ./scripts/terraform/secrets.sh download $ENVIRONMENT"
         error "Missing tfvars file"
     fi
 fi
