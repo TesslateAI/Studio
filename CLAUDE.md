@@ -684,55 +684,20 @@ kubectl get nodes
 kubectl get pods -n tesslate
 ```
 
-### Quick Deploy (Recommended)
+### Build & Deploy Images (Recommended)
 
-**IMPORTANT**: Always use `--no-cache` when building to ensure your code changes are included. Then delete the pod to force K8s to pull the new image.
+Use `aws-deploy.sh build` to build, push to ECR, and restart pods in one command.
 
-```powershell
-# 1. Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+```bash
+# Build all images (backend, frontend, devserver)
+./scripts/aws-deploy.sh build beta
+./scripts/aws-deploy.sh build production
 
-# 2. Build with --no-cache, tag, and push (pick which image you changed)
+# Build specific image(s)
+./scripts/aws-deploy.sh build production backend
+./scripts/aws-deploy.sh build beta frontend backend
 
-# Frontend changes:
-docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/ && docker tag tesslate-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest && docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-
-# Backend changes:
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/ && docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest && docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-
-# 3. Delete pod to force pull new image (imagePullPolicy is Always)
-kubectl delete pod -n tesslate -l app=tesslate-frontend   # for frontend
-kubectl delete pod -n tesslate -l app=tesslate-backend    # for backend
-
-# 4. Verify new pod is running with correct image
-kubectl get pods -n tesslate
-MSYS_NO_PATHCONV=1 kubectl exec -n tesslate deployment/tesslate-frontend -- ls -la /usr/share/nginx/html/assets/ | grep index
-```
-
-### Full Build & Push (All Images)
-
-```powershell
-# Login to ECR (required before push)
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-
-# Build, tag, and push backend
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
-docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-
-# Build, tag, and push frontend
-docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
-docker tag tesslate-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-
-# Build, tag, and push devserver (user project containers)
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
-docker tag tesslate-devserver:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-
-# Delete all pods to pull new images
-kubectl delete pod -n tesslate -l app=tesslate-frontend
-kubectl delete pod -n tesslate -l app=tesslate-backend
+# What it does: ECR login → docker build --no-cache → push → delete pod → wait for rollout → verify
 ```
 
 ### Deploy / Restart Pods
