@@ -1004,8 +1004,16 @@ async def create_project(
     - Project files will be populated from the repository
     """
     try:
+        # Validate base_id is provided for base source type
+        if project.source_type == "base" and not project.base_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A template must be selected to create a project. Please select a template and try again.",
+            )
+
         logger.info(
-            f"[CREATE] Creating project for user {current_user.id}: {project.name} (source: {project.source_type})"
+            f"[CREATE] Creating project for user {current_user.id}: {project.name} "
+            f"(source: {project.source_type}, base_id: {project.base_id})"
         )
 
         # Check project limits based on subscription tier

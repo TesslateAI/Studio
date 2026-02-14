@@ -747,7 +747,7 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  purchaseBase: async (baseId: number) => {
+  purchaseBase: async (baseId: string) => {
     const response = await api.post(`/api/marketplace/bases/${baseId}/purchase`);
     return response.data;
   },
