@@ -19,12 +19,12 @@ Usage:
 
 # Re-export orchestration module for convenience
 from .orchestration import (
+    BaseOrchestrator,
+    DeploymentMode,
+    get_deployment_mode,
     get_orchestrator,
     is_docker_mode,
     is_kubernetes_mode,
-    get_deployment_mode,
-    DeploymentMode,
-    BaseOrchestrator,
 )
 
 __all__ = [

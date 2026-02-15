@@ -5,11 +5,10 @@ This module provides a unified interface for deploying to different providers
 (Cloudflare Workers, Vercel, Netlify, etc.) using a factory pattern.
 """
 
-from typing import Dict, List, Optional, Type
-from .base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
+from .base import BaseDeploymentProvider, DeploymentConfig, DeploymentResult
 from .providers.cloudflare import CloudflareWorkersProvider
-from .providers.vercel import VercelProvider
 from .providers.netlify import NetlifyProvider
+from .providers.vercel import VercelProvider
 
 
 class DeploymentManager:
@@ -21,7 +20,7 @@ class DeploymentManager:
     """
 
     # Registry of available providers
-    _providers: Dict[str, Type[BaseDeploymentProvider]] = {
+    _providers: dict[str, type[BaseDeploymentProvider]] = {
         "cloudflare": CloudflareWorkersProvider,
         "vercel": VercelProvider,
         "netlify": NetlifyProvider,
@@ -29,9 +28,7 @@ class DeploymentManager:
 
     @classmethod
     def get_provider(
-        cls,
-        provider_name: str,
-        credentials: Dict[str, str]
+        cls, provider_name: str, credentials: dict[str, str]
     ) -> BaseDeploymentProvider:
         """
         Get a provider instance by name.
@@ -50,10 +47,7 @@ class DeploymentManager:
 
         if provider_name_lower not in cls._providers:
             available = ", ".join(cls._providers.keys())
-            raise ValueError(
-                f"Unknown provider: {provider_name}. "
-                f"Available providers: {available}"
-            )
+            raise ValueError(f"Unknown provider: {provider_name}. Available providers: {available}")
 
         provider_class = cls._providers[provider_name_lower]
         return provider_class(credentials)
@@ -63,9 +57,9 @@ class DeploymentManager:
         cls,
         project_path: str,
         provider_name: str,
-        credentials: Dict[str, str],
+        credentials: dict[str, str],
         config: DeploymentConfig,
-        build_output_dir: str = "dist"
+        build_output_dir: str = "dist",
     ) -> DeploymentResult:
         """
         Deploy a project to the specified provider.
@@ -93,10 +87,7 @@ class DeploymentManager:
         provider = cls.get_provider(provider_name, credentials)
 
         # Collect files from build output
-        files = await provider.collect_files_from_container(
-            project_path,
-            build_output_dir
-        )
+        files = await provider.collect_files_from_container(project_path, build_output_dir)
 
         # Deploy using provider
         result = await provider.deploy(files, config)
@@ -104,7 +95,7 @@ class DeploymentManager:
         return result
 
     @classmethod
-    def list_available_providers(cls) -> List[Dict[str, str]]:
+    def list_available_providers(cls) -> list[dict[str, str]]:
         """
         List all available deployment providers.
 
@@ -118,7 +109,7 @@ class DeploymentManager:
                 "description": "Deploy to Cloudflare Workers with static assets",
                 "auth_type": "api_token",
                 "required_credentials": ["account_id", "api_token"],
-                "optional_credentials": ["dispatch_namespace"]
+                "optional_credentials": ["dispatch_namespace"],
             },
             {
                 "name": "vercel",
@@ -126,7 +117,7 @@ class DeploymentManager:
                 "description": "Deploy to Vercel with automatic builds",
                 "auth_type": "oauth",
                 "required_credentials": ["token"],
-                "optional_credentials": ["team_id"]
+                "optional_credentials": ["team_id"],
             },
             {
                 "name": "netlify",
@@ -134,17 +125,13 @@ class DeploymentManager:
                 "description": "Deploy to Netlify with optimized file uploads",
                 "auth_type": "oauth",
                 "required_credentials": ["token"],
-                "optional_credentials": []
-            }
+                "optional_credentials": [],
+            },
         ]
         return providers
 
     @classmethod
-    def register_provider(
-        cls,
-        name: str,
-        provider_class: Type[BaseDeploymentProvider]
-    ) -> None:
+    def register_provider(cls, name: str, provider_class: type[BaseDeploymentProvider]) -> None:
         """
         Register a new deployment provider.
 
@@ -155,9 +142,7 @@ class DeploymentManager:
             provider_class: Provider class that inherits from BaseDeploymentProvider
         """
         if not issubclass(provider_class, BaseDeploymentProvider):
-            raise ValueError(
-                f"Provider class must inherit from BaseDeploymentProvider"
-            )
+            raise ValueError("Provider class must inherit from BaseDeploymentProvider")
 
         cls._providers[name.lower()] = provider_class
 

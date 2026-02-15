@@ -4,12 +4,14 @@ GitHub OAuth Service.
 Handles OAuth2 authentication flow with GitHub.
 Refactored from the original github_oauth.py.
 """
-import secrets
-import httpx
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
-from urllib.parse import urlencode
+
 import logging
+import secrets
+from datetime import datetime, timedelta
+from typing import Any
+from urllib.parse import urlencode
+
+import httpx
 
 from ....config import get_settings
 
@@ -55,12 +57,12 @@ class GitHubOAuthService:
             "redirect_uri": self.redirect_uri,
             "scope": scope or self.DEFAULT_SCOPES,
             "state": state,
-            "allow_signup": "true"
+            "allow_signup": "true",
         }
 
         return f"{self.OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
-    async def exchange_code_for_token(self, code: str) -> Dict[str, Any]:
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
         """
         Exchange authorization code for access token.
 
@@ -81,12 +83,10 @@ class GitHubOAuthService:
                         "client_id": self.client_id,
                         "client_secret": self.client_secret,
                         "code": code,
-                        "redirect_uri": self.redirect_uri
+                        "redirect_uri": self.redirect_uri,
                     },
-                    headers={
-                        "Accept": "application/json"
-                    },
-                    timeout=30.0
+                    headers={"Accept": "application/json"},
+                    timeout=30.0,
                 )
 
                 response.raise_for_status()
@@ -111,7 +111,7 @@ class GitHubOAuthService:
                 logger.error(f"[GITHUB OAuth] Failed to exchange code for token: {e}")
                 raise
 
-    async def get_user_info(self, access_token: str) -> Dict[str, Any]:
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
         """
         Get GitHub user information using access token.
 
@@ -126,9 +126,9 @@ class GitHubOAuthService:
                 f"{self.API_BASE_URL}/user",
                 headers={
                     "Authorization": f"Bearer {access_token}",
-                    "Accept": "application/vnd.github.v3+json"
+                    "Accept": "application/vnd.github.v3+json",
                 },
-                timeout=30.0
+                timeout=30.0,
             )
             response.raise_for_status()
             return response.json()
@@ -149,9 +149,9 @@ class GitHubOAuthService:
                     f"{self.API_BASE_URL}/user/emails",
                     headers={
                         "Authorization": f"Bearer {access_token}",
-                        "Accept": "application/vnd.github.v3+json"
+                        "Accept": "application/vnd.github.v3+json",
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
                 response.raise_for_status()
                 return response.json()
@@ -176,7 +176,7 @@ class GitHubOAuthService:
                     f"https://api.github.com/applications/{self.client_id}/token",
                     auth=(self.client_id, self.client_secret),
                     json={"access_token": access_token},
-                    timeout=30.0
+                    timeout=30.0,
                 )
                 return response.status_code == 204
             except Exception as e:
@@ -198,7 +198,7 @@ class GitHubOAuthService:
 
 
 # Singleton instance
-_github_oauth_service: Optional[GitHubOAuthService] = None
+_github_oauth_service: GitHubOAuthService | None = None
 
 
 def get_github_oauth_service() -> GitHubOAuthService:

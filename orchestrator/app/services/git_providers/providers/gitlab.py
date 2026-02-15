@@ -3,16 +3,18 @@ GitLab provider implementation.
 
 Supports both gitlab.com and self-hosted GitLab instances.
 """
+
+import contextlib
 import re
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 from urllib.parse import quote_plus
 
 from ..base import (
     BaseGitProvider,
     GitProviderType,
-    NormalizedRepository,
     NormalizedBranch,
+    NormalizedRepository,
     NormalizedUser,
 )
 
@@ -33,7 +35,7 @@ class GitLabProvider(BaseGitProvider):
     OAUTH_TOKEN_URL = "https://gitlab.com/oauth/token"
     API_BASE_URL = "https://gitlab.com/api/v4"
 
-    def __init__(self, access_token: str, api_base_url: Optional[str] = None):
+    def __init__(self, access_token: str, api_base_url: str | None = None):
         """
         Initialize the GitLab provider.
 
@@ -48,12 +50,9 @@ class GitLabProvider(BaseGitProvider):
 
         super().__init__(access_token)
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Build GitLab-specific HTTP headers."""
-        return {
-            "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
-        }
+        return {"Authorization": f"Bearer {self.access_token}", "Content-Type": "application/json"}
 
     async def get_user_info(self) -> NormalizedUser:
         """Get authenticated user information from GitLab."""
@@ -64,10 +63,10 @@ class GitLabProvider(BaseGitProvider):
             username=data["username"],
             email=data.get("email"),
             display_name=data.get("name"),
-            avatar_url=data.get("avatar_url")
+            avatar_url=data.get("avatar_url"),
         )
 
-    async def get_user_emails(self) -> List[str]:
+    async def get_user_emails(self) -> list[str]:
         """Get user email addresses from GitLab."""
         try:
             # GitLab returns emails via /user/emails endpoint
@@ -84,28 +83,22 @@ class GitLabProvider(BaseGitProvider):
             return []
 
     async def list_repositories(
-        self,
-        visibility: str = "all",
-        sort: str = "updated"
-    ) -> List[NormalizedRepository]:
+        self, visibility: str = "all", sort: str = "updated"
+    ) -> list[NormalizedRepository]:
         """
         List repositories (projects) for the authenticated GitLab user.
 
         GitLab uses "projects" terminology instead of "repositories".
         """
         # Map sort parameter to GitLab's order_by
-        order_by_map = {
-            "updated": "updated_at",
-            "created": "created_at",
-            "name": "name"
-        }
+        order_by_map = {"updated": "updated_at", "created": "created_at", "name": "name"}
         order_by = order_by_map.get(sort, "updated_at")
 
         params = {
             "membership": "true",  # Only projects user is a member of
             "order_by": order_by,
             "sort": "desc",
-            "per_page": 100
+            "per_page": 100,
         }
 
         # Add visibility filter if not "all"
@@ -114,16 +107,9 @@ class GitLabProvider(BaseGitProvider):
 
         projects_data = await self._request("GET", "/projects", params=params)
 
-        return [
-            self._normalize_repository(project)
-            for project in projects_data
-        ]
+        return [self._normalize_repository(project) for project in projects_data]
 
-    async def get_repository(
-        self,
-        owner: str,
-        repo: str
-    ) -> NormalizedRepository:
+    async def get_repository(self, owner: str, repo: str) -> NormalizedRepository:
         """
         Get information about a specific GitLab project.
 
@@ -134,19 +120,13 @@ class GitLabProvider(BaseGitProvider):
         data = await self._request("GET", f"/projects/{project_path}")
         return self._normalize_repository(data)
 
-    async def list_branches(
-        self,
-        owner: str,
-        repo: str
-    ) -> List[NormalizedBranch]:
+    async def list_branches(self, owner: str, repo: str) -> list[NormalizedBranch]:
         """List branches for a GitLab project."""
         project_path = quote_plus(f"{owner}/{repo}")
 
         # Get branches
         branches_data = await self._request(
-            "GET",
-            f"/projects/{project_path}/repository/branches",
-            params={"per_page": 100}
+            "GET", f"/projects/{project_path}/repository/branches", params={"per_page": 100}
         )
 
         # Get project info for default branch
@@ -158,22 +138,18 @@ class GitLabProvider(BaseGitProvider):
                 name=branch["name"],
                 is_default=(branch["name"] == default_branch),
                 commit_sha=branch["commit"]["id"],
-                protected=branch.get("protected", False)
+                protected=branch.get("protected", False),
             )
             for branch in branches_data
         ]
 
-    async def get_default_branch(
-        self,
-        owner: str,
-        repo: str
-    ) -> str:
+    async def get_default_branch(self, owner: str, repo: str) -> str:
         """Get the default branch name for a GitLab project."""
         project_path = quote_plus(f"{owner}/{repo}")
         project_info = await self._request("GET", f"/projects/{project_path}")
         return project_info.get("default_branch", "main")
 
-    def _normalize_repository(self, data: Dict[str, Any]) -> NormalizedRepository:
+    def _normalize_repository(self, data: dict[str, Any]) -> NormalizedRepository:
         """Convert GitLab API response to normalized repository format."""
         # GitLab uses path_with_namespace which is namespace/project_name
         full_name = data.get("path_with_namespace", "")
@@ -181,10 +157,8 @@ class GitLabProvider(BaseGitProvider):
 
         updated_at = None
         if data.get("last_activity_at"):
-            try:
+            with contextlib.suppress(ValueError, AttributeError):
                 updated_at = datetime.fromisoformat(data["last_activity_at"].replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                pass
 
         # GitLab visibility mapping
         private = data.get("visibility", "private") == "private"
@@ -205,11 +179,11 @@ class GitLabProvider(BaseGitProvider):
             language=None,  # GitLab doesn't return this in project listing
             size=0,  # GitLab returns this differently
             stars_count=data.get("star_count", 0),
-            forks_count=data.get("forks_count", 0)
+            forks_count=data.get("forks_count", 0),
         )
 
     @staticmethod
-    def parse_repo_url(repo_url: str) -> Optional[Dict[str, str]]:
+    def parse_repo_url(repo_url: str) -> dict[str, str] | None:
         """
         Parse a GitLab repository URL to extract owner and repo name.
 
@@ -248,10 +222,7 @@ class GitLabProvider(BaseGitProvider):
 
     @staticmethod
     def format_clone_url(
-        owner: str,
-        repo: str,
-        access_token: Optional[str] = None,
-        base_url: str = "https://gitlab.com"
+        owner: str, repo: str, access_token: str | None = None, base_url: str = "https://gitlab.com"
     ) -> str:
         """
         Format a GitLab clone URL with optional authentication.

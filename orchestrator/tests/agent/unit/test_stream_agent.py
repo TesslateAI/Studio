@@ -4,6 +4,8 @@ Unit tests for StreamAgent.
 Tests streaming agent functionality including code block extraction and file saving.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from app.agent.stream_agent import StreamAgent
@@ -176,37 +178,158 @@ const y = 2;
         blocks = stream_agent._extract_code_blocks(content)
         assert len(blocks) == 0
 
-    @pytest.mark.skip(reason="Complex integration test - better tested at integration level")
     @pytest.mark.asyncio
     async def test_save_file_success(self, stream_agent, mock_user, mock_project, mock_db):
         """Test successful file saving."""
-        pass
+        # Mock db.execute to return no existing file
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
-    @pytest.mark.skip(reason="Complex integration test - better tested at integration level")
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.write_file = AsyncMock(return_value=True)
+
+        with (
+            patch(
+                "app.services.orchestration.get_orchestrator",
+                return_value=mock_orchestrator,
+            ),
+            patch("app.services.orchestration.is_kubernetes_mode", return_value=False),
+            patch("aiofiles.open", side_effect=OSError("skip filesystem write")),
+        ):
+            result = await stream_agent._save_file(
+                file_path="src/App.jsx",
+                code="export default function App() {}",
+                project_id=mock_project.id,
+                user_id=mock_user.id,
+                db=mock_db,
+            )
+
+        assert result is True
+        mock_db.commit.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_save_file_database_error_continues(
         self, stream_agent, mock_user, mock_project, mock_db
     ):
         """Test that database errors don't prevent file writing."""
-        pass
+        mock_db.execute = AsyncMock(side_effect=RuntimeError("DB connection lost"))
 
-    @pytest.mark.skip(reason="Complex integration test - better tested at integration level")
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.write_file = AsyncMock(return_value=True)
+
+        with (
+            patch(
+                "app.services.orchestration.get_orchestrator",
+                return_value=mock_orchestrator,
+            ),
+            patch("app.services.orchestration.is_kubernetes_mode", return_value=False),
+            patch("aiofiles.open", side_effect=OSError("skip filesystem write")),
+        ):
+            result = await stream_agent._save_file(
+                file_path="src/App.jsx",
+                code="export default function App() {}",
+                project_id=mock_project.id,
+                user_id=mock_user.id,
+                db=mock_db,
+            )
+
+        # Should still succeed — DB error is non-blocking
+        assert result is True
+        mock_db.rollback.assert_called_once()
+        # Container write should still have been attempted
+        mock_orchestrator.write_file.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_run_streams_response_chunks(self, stream_agent, test_context):
         """Test that agent streams response chunks."""
-        pass
+        # Create mock streaming chunks
+        chunks = []
+        for text in ["Hello ", "world", "!"]:
+            chunk = MagicMock()
+            chunk.choices = [MagicMock()]
+            chunk.choices[0].delta.content = text
+            chunks.append(chunk)
 
-    @pytest.mark.skip(reason="Complex integration test - better tested at integration level")
+        async def mock_stream():
+            for c in chunks:
+                yield c
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
+
+        with patch("app.agent.models.get_llm_client", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_client
+
+            events = []
+            async for event in stream_agent.run("Say hello", test_context):
+                events.append(event)
+
+        stream_events = [e for e in events if e["type"] == "stream"]
+        assert len(stream_events) == 3
+        assert stream_events[0]["content"] == "Hello "
+        assert stream_events[1]["content"] == "world"
+        assert stream_events[2]["content"] == "!"
+
+        # Should end with complete event
+        assert events[-1]["type"] == "complete"
+
     @pytest.mark.asyncio
     async def test_run_handles_client_error(self, stream_agent, test_context):
         """Test that agent handles client creation errors."""
-        pass
+        with patch("app.agent.models.get_llm_client", new_callable=AsyncMock) as mock_get:
+            mock_get.side_effect = ValueError("Invalid API key")
 
-    @pytest.mark.skip(reason="Complex integration test - better tested at integration level")
+            events = []
+            async for event in stream_agent.run("Say hello", test_context):
+                events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["type"] == "error"
+        assert "Invalid API key" in events[0]["content"]
+
     @pytest.mark.asyncio
     async def test_run_extracts_and_saves_files(self, stream_agent, test_context):
         """Test that agent extracts and saves files from response."""
-        pass
+        response_text = (
+            "Here's the file:\n\n"
+            "```javascript\n"
+            "// File: src/App.jsx\n"
+            "export default function App() { return <div>Hello</div>; }\n"
+            "```\n"
+        )
+
+        # Create a single chunk with the full response
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta.content = response_text
+
+        async def mock_stream():
+            yield chunk
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
+
+        with (
+            patch("app.agent.models.get_llm_client", new_callable=AsyncMock) as mock_get,
+            patch.object(stream_agent, "_save_file", new_callable=AsyncMock) as mock_save,
+        ):
+            mock_get.return_value = mock_client
+            mock_save.return_value = True
+
+            events = []
+            async for event in stream_agent.run("Create an App component", test_context):
+                events.append(event)
+
+        # _save_file should have been called for the extracted file
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args
+        assert call_kwargs[1]["file_path"] == "src/App.jsx"
+
+        # Should have a file_ready event
+        file_events = [e for e in events if e["type"] == "file_ready"]
+        assert len(file_events) == 1
+        assert file_events[0]["file_path"] == "src/App.jsx"
 
 
 @pytest.mark.unit

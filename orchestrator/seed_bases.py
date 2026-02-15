@@ -3,9 +3,11 @@ Seed initial marketplace bases - Docker compatible version
 """
 
 import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
 from app.config import get_settings
 from app.models import MarketplaceBase
 
@@ -30,16 +32,32 @@ async def seed_bases():
                 default_branch="main",
                 category="fullstack",
                 icon="⚡",
-                tags=["nextjs", "react", "typescript", "tailwind", "fullstack", "api-routes", "turbopack"],
+                tags=[
+                    "nextjs",
+                    "react",
+                    "typescript",
+                    "tailwind",
+                    "fullstack",
+                    "api-routes",
+                    "turbopack",
+                ],
                 pricing_type="free",
                 price=0,
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["App Router", "API Routes", "Turbopack", "React 19", "TypeScript", "Tailwind CSS v4", "Instant Startup"],
+                features=[
+                    "App Router",
+                    "API Routes",
+                    "Turbopack",
+                    "React 19",
+                    "TypeScript",
+                    "Tailwind CSS v4",
+                    "Instant Startup",
+                ],
                 tech_stack=["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4", "Turbopack"],
                 is_featured=True,
-                is_active=True
+                is_active=True,
             ),
             MarketplaceBase(
                 name="Next.js 15",
@@ -56,10 +74,17 @@ async def seed_bases():
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["App Router", "API Routes", "React Server Components", "TypeScript", "Tailwind CSS", "Hot Reload"],
+                features=[
+                    "App Router",
+                    "API Routes",
+                    "React Server Components",
+                    "TypeScript",
+                    "Tailwind CSS",
+                    "Hot Reload",
+                ],
                 tech_stack=["Next.js 15", "React 19", "TypeScript", "Tailwind CSS"],
                 is_featured=False,
-                is_active=True
+                is_active=True,
             ),
             MarketplaceBase(
                 name="Vite + React + FastAPI",
@@ -76,10 +101,17 @@ async def seed_bases():
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["Vite Frontend", "FastAPI Backend", "Dual Hot Reload", "CORS Configured", "PostgreSQL Ready", "Example CRUD API"],
+                features=[
+                    "Vite Frontend",
+                    "FastAPI Backend",
+                    "Dual Hot Reload",
+                    "CORS Configured",
+                    "PostgreSQL Ready",
+                    "Example CRUD API",
+                ],
                 tech_stack=["Vite", "React", "FastAPI", "Python", "PostgreSQL"],
                 is_featured=True,
-                is_active=True
+                is_active=True,
             ),
             MarketplaceBase(
                 name="Vite + React + Go",
@@ -96,10 +128,18 @@ async def seed_bases():
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["Vite Frontend", "Go Backend", "Air Hot Reload", "Chi Router", "CORS Middleware", "WebSocket Support", "REST API"],
+                features=[
+                    "Vite Frontend",
+                    "Go Backend",
+                    "Air Hot Reload",
+                    "Chi Router",
+                    "CORS Middleware",
+                    "WebSocket Support",
+                    "REST API",
+                ],
                 tech_stack=["Vite", "React", "Go", "Chi Router", "Air"],
                 is_featured=True,
-                is_active=True
+                is_active=True,
             ),
             # === Standalone Frontend Bases ===
             MarketplaceBase(
@@ -117,10 +157,16 @@ async def seed_bases():
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["App Router", "Turbopack", "TypeScript", "Tailwind CSS v4", "Instant Startup"],
+                features=[
+                    "App Router",
+                    "Turbopack",
+                    "TypeScript",
+                    "Tailwind CSS v4",
+                    "Instant Startup",
+                ],
                 tech_stack=["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4"],
                 is_featured=False,
-                is_active=True
+                is_active=True,
             ),
             MarketplaceBase(
                 name="React + Vite",
@@ -137,10 +183,16 @@ async def seed_bases():
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["Vite Build", "React 19", "TypeScript", "Tailwind CSS", "Hot Module Replacement"],
+                features=[
+                    "Vite Build",
+                    "React 19",
+                    "TypeScript",
+                    "Tailwind CSS",
+                    "Hot Module Replacement",
+                ],
                 tech_stack=["Vite", "React 19", "TypeScript", "Tailwind CSS"],
                 is_featured=False,
-                is_active=True
+                is_active=True,
             ),
             # === Standalone Backend Bases ===
             MarketplaceBase(
@@ -158,10 +210,16 @@ async def seed_bases():
                 downloads=0,
                 rating=5.0,
                 reviews_count=0,
-                features=["OpenAPI Docs", "Async Support", "Pydantic Validation", "Hot Reload", "Health Checks"],
+                features=[
+                    "OpenAPI Docs",
+                    "Async Support",
+                    "Pydantic Validation",
+                    "Hot Reload",
+                    "Health Checks",
+                ],
                 tech_stack=["FastAPI", "Python", "Uvicorn", "Pydantic"],
                 is_featured=False,
-                is_active=True
+                is_active=True,
             ),
         ]
 

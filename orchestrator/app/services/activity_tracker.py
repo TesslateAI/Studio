@@ -7,11 +7,12 @@ Tracks: agent messages, file operations, terminal activity.
 This replaces in-memory tracking to support horizontal scaling of the backend.
 """
 
-from datetime import datetime, timezone
-from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update
 import logging
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Project
 
@@ -19,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 async def track_project_activity(
-    db: AsyncSession,
-    project_id: UUID,
-    activity_type: str = "general"
+    db: AsyncSession, project_id: UUID, activity_type: str = "general"
 ) -> None:
     """
     Update project's last_activity timestamp.
@@ -41,8 +40,8 @@ async def track_project_activity(
             update(Project)
             .where(Project.id == project_id)
             .values(
-                last_activity=datetime.now(timezone.utc),
-                environment_status='active'  # Ensure status is active
+                last_activity=datetime.now(UTC),
+                environment_status="active",  # Ensure status is active
             )
         )
         await db.commit()
@@ -52,10 +51,7 @@ async def track_project_activity(
         # Don't raise - activity tracking failure shouldn't break the request
 
 
-async def mark_project_environment_active(
-    db: AsyncSession,
-    project_id: UUID
-) -> None:
+async def mark_project_environment_active(db: AsyncSession, project_id: UUID) -> None:
     """
     Mark project environment as active (K8s resources running).
     Called when project environment is started/opened.
@@ -65,9 +61,7 @@ async def mark_project_environment_active(
             update(Project)
             .where(Project.id == project_id)
             .values(
-                environment_status='active',
-                last_activity=datetime.now(timezone.utc),
-                hibernated_at=None
+                environment_status="active", last_activity=datetime.now(UTC), hibernated_at=None
             )
         )
         await db.commit()
@@ -76,10 +70,7 @@ async def mark_project_environment_active(
         logger.error(f"[ACTIVITY] Failed to mark project active: {e}")
 
 
-async def mark_project_environment_hibernated(
-    db: AsyncSession,
-    project_id: UUID
-) -> None:
+async def mark_project_environment_hibernated(db: AsyncSession, project_id: UUID) -> None:
     """
     Mark project environment as hibernated (K8s resources deleted, files in S3).
     Called after successful hibernation.
@@ -88,10 +79,7 @@ async def mark_project_environment_hibernated(
         await db.execute(
             update(Project)
             .where(Project.id == project_id)
-            .values(
-                environment_status='hibernated',
-                hibernated_at=datetime.now(timezone.utc)
-            )
+            .values(environment_status="hibernated", hibernated_at=datetime.now(UTC))
         )
         await db.commit()
         logger.info(f"[ACTIVITY] Project {project_id} environment marked hibernated")

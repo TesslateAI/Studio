@@ -2,16 +2,16 @@
 GitHub OAuth Service
 Handles OAuth2 authentication flow with GitHub
 """
-import secrets
-import httpx
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
-from urllib.parse import urlencode
+
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
+import secrets
+from datetime import datetime, timedelta
+from typing import Any
+from urllib.parse import urlencode
+
+import httpx
 
 from ..config import get_settings
-from .credential_manager import get_credential_manager
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +49,12 @@ class GitHubOAuthService:
             "redirect_uri": self.redirect_uri,
             "scope": scope,
             "state": state,
-            "allow_signup": "true"
+            "allow_signup": "true",
         }
 
         return f"{self.GITHUB_OAUTH_URL}?{urlencode(params)}"
 
-    async def exchange_code_for_token(self, code: str, state: str) -> Dict[str, Any]:
+    async def exchange_code_for_token(self, code: str, state: str) -> dict[str, Any]:
         """
         Exchange authorization code for access token.
 
@@ -76,19 +76,21 @@ class GitHubOAuthService:
                         "client_id": self.client_id,
                         "client_secret": self.client_secret,
                         "code": code,
-                        "redirect_uri": self.redirect_uri
+                        "redirect_uri": self.redirect_uri,
                     },
-                    headers={
-                        "Accept": "application/json"
-                    }
+                    headers={"Accept": "application/json"},
                 )
 
                 response.raise_for_status()
                 token_data = response.json()
 
                 if "error" in token_data:
-                    logger.error(f"GitHub OAuth error: {token_data.get('error_description', token_data['error'])}")
-                    raise ValueError(f"OAuth error: {token_data.get('error_description', 'Unknown error')}")
+                    logger.error(
+                        f"GitHub OAuth error: {token_data.get('error_description', token_data['error'])}"
+                    )
+                    raise ValueError(
+                        f"OAuth error: {token_data.get('error_description', 'Unknown error')}"
+                    )
 
                 # GitHub doesn't provide expires_in by default, but we'll set a reasonable expiry
                 # Access tokens don't expire unless revoked, but we'll set a long expiry for safety
@@ -103,7 +105,7 @@ class GitHubOAuthService:
                 logger.error(f"Failed to exchange code for token: {e}")
                 raise
 
-    async def get_user_info(self, access_token: str) -> Dict[str, Any]:
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
         """
         Get GitHub user information using access token.
 
@@ -119,8 +121,8 @@ class GitHubOAuthService:
                     f"{self.GITHUB_API_BASE}/user",
                     headers={
                         "Authorization": f"Bearer {access_token}",
-                        "Accept": "application/vnd.github.v3+json"
-                    }
+                        "Accept": "application/vnd.github.v3+json",
+                    },
                 )
 
                 response.raise_for_status()
@@ -146,8 +148,8 @@ class GitHubOAuthService:
                     f"{self.GITHUB_API_BASE}/user/emails",
                     headers={
                         "Authorization": f"Bearer {access_token}",
-                        "Accept": "application/vnd.github.v3+json"
-                    }
+                        "Accept": "application/vnd.github.v3+json",
+                    },
                 )
 
                 response.raise_for_status()
@@ -159,7 +161,7 @@ class GitHubOAuthService:
                     return []  # User might not have granted email scope
                 raise
 
-    async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
+    async def refresh_token(self, refresh_token: str) -> dict[str, Any]:
         """
         Refresh an expired access token.
 
@@ -174,7 +176,9 @@ class GitHubOAuthService:
         """
         # GitHub doesn't currently support refresh tokens for OAuth Apps
         # This is a placeholder for future compatibility
-        logger.warning("GitHub OAuth doesn't support refresh tokens. Token will need to be re-authorized.")
+        logger.warning(
+            "GitHub OAuth doesn't support refresh tokens. Token will need to be re-authorized."
+        )
         raise NotImplementedError("GitHub OAuth doesn't support refresh tokens")
 
     async def revoke_token(self, access_token: str) -> bool:
@@ -193,7 +197,7 @@ class GitHubOAuthService:
                 response = await client.delete(
                     f"https://api.github.com/applications/{self.client_id}/token",
                     auth=(self.client_id, self.client_secret),
-                    json={"access_token": access_token}
+                    json={"access_token": access_token},
                 )
 
                 return response.status_code == 204
@@ -217,7 +221,7 @@ class GitHubOAuthService:
 
 
 # Singleton instance
-_oauth_service: Optional[GitHubOAuthService] = None
+_oauth_service: GitHubOAuthService | None = None
 
 
 def get_github_oauth_service() -> GitHubOAuthService:

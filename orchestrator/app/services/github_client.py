@@ -1,9 +1,10 @@
 """
 GitHub API Client for repository and user operations.
 """
+
+from typing import Any
+
 import httpx
-from typing import Optional, List, Dict, Any
-from datetime import datetime
 
 
 class GitHubClient:
@@ -21,16 +22,12 @@ class GitHubClient:
         self.headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/vnd.github.v3+json",
-            "X-GitHub-Api-Version": "2022-11-28"
+            "X-GitHub-Api-Version": "2022-11-28",
         }
 
     async def _request(
-        self,
-        method: str,
-        endpoint: str,
-        json: Optional[Dict] = None,
-        params: Optional[Dict] = None
-    ) -> Dict[str, Any]:
+        self, method: str, endpoint: str, json: dict | None = None, params: dict | None = None
+    ) -> dict[str, Any]:
         """
         Make an authenticated request to the GitHub API.
 
@@ -50,17 +47,12 @@ class GitHubClient:
 
         async with httpx.AsyncClient() as client:
             response = await client.request(
-                method=method,
-                url=url,
-                headers=self.headers,
-                json=json,
-                params=params,
-                timeout=30.0
+                method=method, url=url, headers=self.headers, json=json, params=params, timeout=30.0
             )
             response.raise_for_status()
             return response.json()
 
-    async def get_user_info(self) -> Dict[str, Any]:
+    async def get_user_info(self) -> dict[str, Any]:
         """
         Get authenticated user information.
 
@@ -69,7 +61,7 @@ class GitHubClient:
         """
         return await self._request("GET", "/user")
 
-    async def get_user_emails(self) -> List[Dict[str, Any]]:
+    async def get_user_emails(self) -> list[dict[str, Any]]:
         """
         Get authenticated user's email addresses.
 
@@ -79,11 +71,8 @@ class GitHubClient:
         return await self._request("GET", "/user/emails")
 
     async def list_user_repositories(
-        self,
-        visibility: str = "all",
-        sort: str = "updated",
-        per_page: int = 100
-    ) -> List[Dict[str, Any]]:
+        self, visibility: str = "all", sort: str = "updated", per_page: int = 100
+    ) -> list[dict[str, Any]]:
         """
         List repositories for the authenticated user.
 
@@ -95,20 +84,16 @@ class GitHubClient:
         Returns:
             List of repository dictionaries
         """
-        params = {
-            "visibility": visibility,
-            "sort": sort,
-            "per_page": per_page
-        }
+        params = {"visibility": visibility, "sort": sort, "per_page": per_page}
         return await self._request("GET", "/user/repos", params=params)
 
     async def create_repository(
         self,
         name: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         private: bool = True,
-        auto_init: bool = False
-    ) -> Dict[str, Any]:
+        auto_init: bool = False,
+    ) -> dict[str, Any]:
         """
         Create a new repository for the authenticated user.
 
@@ -125,15 +110,11 @@ class GitHubClient:
             "name": name,
             "description": description,
             "private": private,
-            "auto_init": auto_init
+            "auto_init": auto_init,
         }
         return await self._request("POST", "/user/repos", json=payload)
 
-    async def get_repository_info(
-        self,
-        owner: str,
-        repo: str
-    ) -> Dict[str, Any]:
+    async def get_repository_info(self, owner: str, repo: str) -> dict[str, Any]:
         """
         Get information about a specific repository.
 
@@ -147,11 +128,8 @@ class GitHubClient:
         return await self._request("GET", f"/repos/{owner}/{repo}")
 
     async def list_branches(
-        self,
-        owner: str,
-        repo: str,
-        per_page: int = 100
-    ) -> List[Dict[str, Any]]:
+        self, owner: str, repo: str, per_page: int = 100
+    ) -> list[dict[str, Any]]:
         """
         List branches for a repository.
 
@@ -166,11 +144,7 @@ class GitHubClient:
         params = {"per_page": per_page}
         return await self._request("GET", f"/repos/{owner}/{repo}/branches", params=params)
 
-    async def get_default_branch(
-        self,
-        owner: str,
-        repo: str
-    ) -> str:
+    async def get_default_branch(self, owner: str, repo: str) -> str:
         """
         Get the default branch name for a repository.
 
@@ -185,12 +159,8 @@ class GitHubClient:
         return repo_info.get("default_branch", "main")
 
     async def list_commits(
-        self,
-        owner: str,
-        repo: str,
-        sha: Optional[str] = None,
-        per_page: int = 30
-    ) -> List[Dict[str, Any]]:
+        self, owner: str, repo: str, sha: str | None = None, per_page: int = 30
+    ) -> list[dict[str, Any]]:
         """
         List commits for a repository.
 
@@ -209,7 +179,7 @@ class GitHubClient:
 
         return await self._request("GET", f"/repos/{owner}/{repo}/commits", params=params)
 
-    async def get_rate_limit(self) -> Dict[str, Any]:
+    async def get_rate_limit(self) -> dict[str, Any]:
         """
         Get rate limit status for the authenticated user.
 
@@ -232,7 +202,7 @@ class GitHubClient:
             return False
 
     @staticmethod
-    def parse_repo_url(repo_url: str) -> Optional[Dict[str, str]]:
+    def parse_repo_url(repo_url: str) -> dict[str, str] | None:
         """
         Parse a GitHub repository URL to extract owner and repo name.
 

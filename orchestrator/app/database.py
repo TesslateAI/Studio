@@ -1,5 +1,6 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
+
 from .config import get_settings
 
 settings = get_settings()
@@ -9,21 +10,22 @@ engine = create_async_engine(
     echo=False,  # Disable SQL query logging to reduce noise
     future=True,
     pool_pre_ping=True,  # Validate connections before use
-    pool_recycle=3600,   # Recycle connections every hour
+    pool_recycle=3600,  # Recycle connections every hour
     connect_args={
         "ssl": False,  # Disable SSL for internal cluster connections
         "command_timeout": 60,  # 60 second command timeout
         "server_settings": {
             "jit": "off"  # Disable JIT for better connection stability
-        }
-    } if settings.database_url.startswith("postgresql") else {}
+        },
+    }
+    if settings.database_url.startswith("postgresql")
+    else {},
 )
 
-AsyncSessionLocal = async_sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False
-)
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
+
 
 async def get_db():
     async with AsyncSessionLocal() as session:

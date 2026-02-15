@@ -2,9 +2,13 @@
 Tests for file operation tools.
 
 Tests read_file, write_file, patch_file, and multi_edit tools.
+
+All tools use the unified orchestrator interface (get_orchestrator()),
+so tests mock app.services.orchestration.get_orchestrator to return
+an in-memory mock orchestrator.
 """
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -12,50 +16,64 @@ from app.agent.tools.file_ops.edit import multi_edit_tool, patch_file_tool
 from app.agent.tools.file_ops.read_write import read_file_tool, write_file_tool
 
 
+@pytest.fixture
+def mock_orchestrator():
+    """
+    Create a mock orchestrator with in-memory file storage.
+
+    Simulates the unified orchestrator interface used by file tools.
+    Files are stored in a dict keyed by file_path for easy assertions.
+    """
+    orchestrator = Mock()
+    files: dict[str, str] = {}
+
+    async def mock_read_file(**kwargs):
+        file_path = kwargs.get("file_path")
+        if file_path in files:
+            return files[file_path]
+        return None
+
+    async def mock_write_file(**kwargs):
+        file_path = kwargs.get("file_path")
+        content = kwargs.get("content")
+        files[file_path] = content
+        return True
+
+    orchestrator.read_file = mock_read_file
+    orchestrator.write_file = mock_write_file
+    orchestrator._files = files  # Expose for assertions
+
+    return orchestrator
+
+
+@pytest.fixture
+def patched_orchestrator(mock_orchestrator):
+    """Patch get_orchestrator to return our mock for all tool imports."""
+    with patch(
+        "app.services.orchestration.get_orchestrator",
+        return_value=mock_orchestrator,
+    ):
+        yield mock_orchestrator
+
+
 @pytest.mark.unit
 class TestReadFileTool:
     """Test suite for read_file tool."""
 
     @pytest.mark.asyncio
-    async def test_read_file_success_docker(self, test_context, temp_project_dir, monkeypatch):
+    async def test_read_file_success_docker(self, test_context, patched_orchestrator):
         """Test reading a file in Docker mode."""
-        # Mock settings to use Docker mode
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-
-        # Mock get_project_path to return our temp directory
-        def mock_get_project_path(user_id, project_id):
-            return f"{temp_project_dir}/../../.."
-
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
-        # Create test file
-        test_file = temp_project_dir / "test.txt"
-        test_content = "Hello World"
-        test_file.write_text(test_content)
+        # Seed a file in the mock orchestrator
+        patched_orchestrator._files["test.txt"] = "Hello World"
 
         result = await read_file_tool({"file_path": "test.txt"}, test_context)
 
         assert "content" in result
-        assert result["content"] == test_content
+        assert result["content"] == "Hello World"
 
     @pytest.mark.asyncio
-    async def test_read_file_not_found_docker(self, test_context, temp_project_dir, monkeypatch):
-        """Test reading a non-existent file in Docker mode."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
+    async def test_read_file_not_found_docker(self, test_context, patched_orchestrator):
+        """Test reading a non-existent file."""
         result = await read_file_tool({"file_path": "nonexistent.txt"}, test_context)
 
         assert result.get("exists") is False
@@ -68,27 +86,14 @@ class TestReadFileTool:
             await read_file_tool({}, test_context)
 
     @pytest.mark.asyncio
-    async def test_read_file_kubernetes_mode(self, test_context, monkeypatch):
-        """Test reading a file in Kubernetes mode."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "kubernetes")
-
-        # Mock the orchestrator
-        mock_orchestrator = Mock()
-        mock_orchestrator.read_file = AsyncMock(return_value="File content from pod")
-
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_orchestrator", lambda: mock_orchestrator
-        )
-        monkeypatch.setattr("app.agent.tools.file_ops.read_write.is_kubernetes_mode", lambda: True)
+    async def test_read_file_kubernetes_mode(self, test_context, patched_orchestrator):
+        """Test reading a file via orchestrator (same interface for K8s and Docker)."""
+        patched_orchestrator._files["src/App.jsx"] = "File content from pod"
 
         result = await read_file_tool({"file_path": "src/App.jsx"}, test_context)
 
         assert "content" in result
         assert result["content"] == "File content from pod"
-        mock_orchestrator.read_file.assert_called_once()
 
 
 @pytest.mark.unit
@@ -96,17 +101,8 @@ class TestWriteFileTool:
     """Test suite for write_file tool."""
 
     @pytest.mark.asyncio
-    async def test_write_file_success_docker(self, test_context, temp_project_dir, monkeypatch):
-        """Test writing a file in Docker mode."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
+    async def test_write_file_success_docker(self, test_context, patched_orchestrator):
+        """Test writing a file via orchestrator."""
         content = "New file content"
         result = await write_file_tool(
             {"file_path": "new_file.txt", "content": content}, test_context
@@ -115,58 +111,30 @@ class TestWriteFileTool:
         assert "preview" in result
         assert "line_count" in result["details"]
 
-        # Verify file was created
-        file_path = temp_project_dir / "new_file.txt"
-        assert file_path.exists()
-        assert file_path.read_text() == content
+        # Verify file was stored in mock orchestrator
+        assert patched_orchestrator._files["new_file.txt"] == content
 
     @pytest.mark.asyncio
-    async def test_write_file_creates_directories(
-        self, test_context, temp_project_dir, monkeypatch
-    ):
-        """Test that write_file creates parent directories."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
+    async def test_write_file_creates_directories(self, test_context, patched_orchestrator):
+        """Test that write_file handles nested paths."""
         result = await write_file_tool(
             {"file_path": "nested/dir/file.txt", "content": "Content"}, test_context
         )
 
         assert "preview" in result
 
-        # Verify nested directories and file created
-        file_path = temp_project_dir / "nested" / "dir" / "file.txt"
-        assert file_path.exists()
+        # Verify nested file was stored
+        assert patched_orchestrator._files["nested/dir/file.txt"] == "Content"
 
     @pytest.mark.asyncio
-    async def test_write_file_kubernetes_mode(self, test_context, monkeypatch):
-        """Test writing a file in Kubernetes mode."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "kubernetes")
-
-        # Mock the orchestrator
-        mock_orchestrator = Mock()
-        mock_orchestrator.write_file = AsyncMock(return_value=True)
-
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_orchestrator", lambda: mock_orchestrator
-        )
-        monkeypatch.setattr("app.agent.tools.file_ops.read_write.is_kubernetes_mode", lambda: True)
-
+    async def test_write_file_kubernetes_mode(self, test_context, patched_orchestrator):
+        """Test writing a file via orchestrator (same interface for K8s and Docker)."""
         result = await write_file_tool(
             {"file_path": "src/NewComponent.jsx", "content": "Component code"}, test_context
         )
 
         assert "preview" in result
-        mock_orchestrator.write_file.assert_called_once()
+        assert patched_orchestrator._files["src/NewComponent.jsx"] == "Component code"
 
     @pytest.mark.asyncio
     async def test_write_file_missing_parameters(self, test_context):
@@ -183,19 +151,8 @@ class TestPatchFileTool:
     """Test suite for patch_file tool."""
 
     @pytest.mark.asyncio
-    async def test_patch_file_success_docker(self, test_context, temp_project_dir, monkeypatch):
-        """Test successfully patching a file in Docker mode."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.edit.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
-        # Create a file to patch
-        test_file = temp_project_dir / "App.jsx"
+    async def test_patch_file_success_docker(self, test_context, patched_orchestrator):
+        """Test successfully patching a file."""
         original_content = """function App() {
   return (
     <div className="bg-blue-500">
@@ -203,7 +160,7 @@ class TestPatchFileTool:
     </div>
   );
 }"""
-        test_file.write_text(original_content)
+        patched_orchestrator._files["App.jsx"] = original_content
 
         result = await patch_file_tool(
             {
@@ -217,25 +174,15 @@ class TestPatchFileTool:
         assert "diff" in result
         assert "match_method" in result["details"]
 
-        # Verify patch was applied
-        patched_content = test_file.read_text()
+        # Verify patch was applied via orchestrator
+        patched_content = patched_orchestrator._files["App.jsx"]
         assert "bg-green-500" in patched_content
         assert "bg-blue-500" not in patched_content
 
     @pytest.mark.asyncio
-    async def test_patch_file_search_not_found(self, test_context, temp_project_dir, monkeypatch):
+    async def test_patch_file_search_not_found(self, test_context, patched_orchestrator):
         """Test patch_file when search block is not found."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.edit.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
-        test_file = temp_project_dir / "App.jsx"
-        test_file.write_text("function App() { return <div>Test</div>; }")
+        patched_orchestrator._files["App.jsx"] = "function App() { return <div>Test</div>; }"
 
         result = await patch_file_tool(
             {"file_path": "App.jsx", "search": "nonexistent code", "replace": "new code"},
@@ -246,17 +193,8 @@ class TestPatchFileTool:
         assert "suggestion" in result
 
     @pytest.mark.asyncio
-    async def test_patch_file_not_found(self, test_context, temp_project_dir, monkeypatch):
+    async def test_patch_file_not_found(self, test_context, patched_orchestrator):
         """Test patch_file on non-existent file."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.edit.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
         result = await patch_file_tool(
             {"file_path": "nonexistent.jsx", "search": "old", "replace": "new"}, test_context
         )
@@ -269,22 +207,12 @@ class TestMultiEditTool:
     """Test suite for multi_edit tool."""
 
     @pytest.mark.asyncio
-    async def test_multi_edit_success(self, test_context, temp_project_dir, monkeypatch):
+    async def test_multi_edit_success(self, test_context, patched_orchestrator):
         """Test applying multiple edits successfully."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.edit.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
-        test_file = temp_project_dir / "config.js"
         original_content = """const API_URL = 'http://localhost:3000';
 const APP_NAME = 'My App';
 const VERSION = '1.0.0';"""
-        test_file.write_text(original_content)
+        patched_orchestrator._files["config.js"] = original_content
 
         result = await multi_edit_tool(
             {
@@ -303,25 +231,15 @@ const VERSION = '1.0.0';"""
         assert len(result["details"]["applied_edits"]) == 3
 
         # Verify all edits were applied
-        new_content = test_file.read_text()
+        new_content = patched_orchestrator._files["config.js"]
         assert "https://api.example.com" in new_content
         assert "Tesslate Studio" in new_content
         assert "2.0.0" in new_content
 
     @pytest.mark.asyncio
-    async def test_multi_edit_partial_failure(self, test_context, temp_project_dir, monkeypatch):
+    async def test_multi_edit_partial_failure(self, test_context, patched_orchestrator):
         """Test multi_edit when one edit fails."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.edit.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
-        test_file = temp_project_dir / "config.js"
-        test_file.write_text("const API_URL = 'localhost';")
+        patched_orchestrator._files["config.js"] = "const API_URL = 'localhost';"
 
         result = await multi_edit_tool(
             {
@@ -344,8 +262,10 @@ const VERSION = '1.0.0';"""
             await multi_edit_tool({"file_path": "test.js", "edits": []}, test_context)
 
     @pytest.mark.asyncio
-    async def test_multi_edit_invalid_edit_format(self, test_context):
+    async def test_multi_edit_invalid_edit_format(self, test_context, patched_orchestrator):
         """Test multi_edit with invalid edit format."""
+        patched_orchestrator._files["test.js"] = "some content"
+
         result = await multi_edit_tool(
             {
                 "file_path": "test.js",
@@ -359,22 +279,119 @@ const VERSION = '1.0.0';"""
         assert "missing 'search' or 'replace'" in result["message"]
 
 
+@pytest.mark.unit
+class TestPatchFileFuzzyMatching:
+    """Test fuzzy whitespace matching through the patch_file tool.
+
+    These tests verify that the tool-level patch_file correctly delegates
+    to the fuzzy matching in code_patching, handling real-world scenarios
+    where AI-generated search blocks don't exactly match file content.
+    """
+
+    @pytest.mark.asyncio
+    async def test_patch_file_fuzzy_indentation_mismatch(self, test_context, patched_orchestrator):
+        """Test patch_file when AI search has different indentation than file."""
+        original = """  function greet(name) {
+    return `Hello, ${name}!`;
+  }"""
+        patched_orchestrator._files["utils.js"] = original
+
+        # AI provides search with different indentation (no leading spaces)
+        result = await patch_file_tool(
+            {
+                "file_path": "utils.js",
+                "search": "function greet(name) {\n  return `Hello, ${name}!`;\n}",
+                "replace": "function greet(name) {\n  return `Hi, ${name}! Welcome!`;\n}",
+            },
+            test_context,
+        )
+
+        assert "diff" in result
+        assert "match_method" in result["details"]
+        patched = patched_orchestrator._files["utils.js"]
+        assert "Welcome!" in patched
+        assert "Hello" not in patched
+
+    @pytest.mark.asyncio
+    async def test_patch_file_fuzzy_extra_whitespace(self, test_context, patched_orchestrator):
+        """Test patch_file when file has extra trailing whitespace."""
+        original = "const  data  =  {\n  name:    'John',\n    age:     30\n};"
+        patched_orchestrator._files["data.js"] = original
+
+        # AI provides normalized whitespace search
+        result = await patch_file_tool(
+            {
+                "file_path": "data.js",
+                "search": "const data = {\n  name: 'John',\n  age: 30\n};",
+                "replace": "const data = {\n  name: 'Jane',\n  age: 25\n};",
+            },
+            test_context,
+        )
+
+        assert "diff" in result
+        patched = patched_orchestrator._files["data.js"]
+        assert "Jane" in patched
+
+    @pytest.mark.asyncio
+    async def test_patch_file_fuzzy_blank_line_differences(
+        self, test_context, patched_orchestrator
+    ):
+        """Test patch_file when AI search has extra blank lines vs file."""
+        original = "function test() {\n  console.log('hello');\n  return true;\n}"
+        patched_orchestrator._files["test.js"] = original
+
+        # AI provides search with extra blank lines
+        result = await patch_file_tool(
+            {
+                "file_path": "test.js",
+                "search": "function test() {\n\n  console.log('hello');\n\n  return true;\n}",
+                "replace": "function test() {\n  console.log('updated');\n  return true;\n}",
+            },
+            test_context,
+        )
+
+        assert "diff" in result
+        patched = patched_orchestrator._files["test.js"]
+        assert "updated" in patched
+
+    @pytest.mark.asyncio
+    async def test_multi_edit_with_fuzzy_matching(self, test_context, patched_orchestrator):
+        """Test multi_edit tool uses fuzzy matching for each edit."""
+        original = """  const API_URL = 'http://localhost:3000';
+  const APP_NAME = 'My App';"""
+        patched_orchestrator._files["config.js"] = original
+
+        # AI searches without leading indentation
+        result = await multi_edit_tool(
+            {
+                "file_path": "config.js",
+                "edits": [
+                    {
+                        "search": "const API_URL = 'http://localhost:3000';",
+                        "replace": "const API_URL = 'https://api.example.com';",
+                    },
+                    {
+                        "search": "const APP_NAME = 'My App';",
+                        "replace": "const APP_NAME = 'Tesslate Studio';",
+                    },
+                ],
+            },
+            test_context,
+        )
+
+        assert "diff" in result
+        patched = patched_orchestrator._files["config.js"]
+        assert "https://api.example.com" in patched
+        assert "Tesslate Studio" in patched
+
+
 @pytest.mark.integration
 class TestFileOpsIntegration:
     """Integration tests for file operation tools."""
 
     @pytest.mark.asyncio
-    async def test_write_then_read_workflow(self, test_context, temp_project_dir, monkeypatch):
+    async def test_write_then_read_workflow(self, test_context, patched_orchestrator):
         """Test writing a file and then reading it back."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_project_path",
-            lambda u, p: str(temp_project_dir.parent.parent),
-        )
-
         content = "Test content"
 
         # Write file
@@ -390,21 +407,8 @@ class TestFileOpsIntegration:
         assert read_result["content"] == content
 
     @pytest.mark.asyncio
-    async def test_write_patch_read_workflow(self, test_context, temp_project_dir, monkeypatch):
+    async def test_write_patch_read_workflow(self, test_context, patched_orchestrator):
         """Test writing, patching, and reading a file."""
-        from app.config import get_settings
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "deployment_mode", "docker")
-
-        def mock_get_project_path(u, p):
-            return str(temp_project_dir.parent.parent)
-
-        monkeypatch.setattr(
-            "app.agent.tools.file_ops.read_write.get_project_path", mock_get_project_path
-        )
-        monkeypatch.setattr("app.agent.tools.file_ops.edit.get_project_path", mock_get_project_path)
-
         # Write initial file
         await write_file_tool(
             {

@@ -2,10 +2,10 @@
 Discord webhook service for sending notifications.
 """
 
-import aiohttp
 import logging
-from typing import Optional
 from datetime import datetime
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -16,17 +16,11 @@ class DiscordWebhookService:
     def __init__(self, webhook_url: str):
         self.webhook_url = webhook_url
 
-    async def send_signup_notification(
-        self,
-        username: str,
-        email: str,
-        name: str,
-        user_id: str
-    ):
+    async def send_signup_notification(self, username: str, email: str, name: str, user_id: str):
         """Send notification when a new user signs up."""
         embed = {
             "title": "🎉 New User Signup",
-            "color": 0x00ff00,  # Green
+            "color": 0x00FF00,  # Green
             "fields": [
                 {"name": "Name", "value": name, "inline": True},
                 {"name": "Username", "value": username, "inline": True},
@@ -34,16 +28,13 @@ class DiscordWebhookService:
                 {"name": "User ID", "value": str(user_id), "inline": False},
             ],
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"}
+            "footer": {"text": "Tesslate Studio"},
         }
 
         await self._send_webhook(embeds=[embed])
 
     async def send_login_notification(
-        self,
-        username: str,
-        email: Optional[str] = None,
-        user_id: Optional[str] = None
+        self, username: str, email: str | None = None, user_id: str | None = None
     ):
         """Send notification when a user logs in."""
         fields = [
@@ -58,19 +49,15 @@ class DiscordWebhookService:
 
         embed = {
             "title": "🔐 User Login",
-            "color": 0x0099ff,  # Blue
+            "color": 0x0099FF,  # Blue
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"}
+            "footer": {"text": "Tesslate Studio"},
         }
 
         await self._send_webhook(embeds=[embed])
 
-    async def send_referral_landing_notification(
-        self,
-        referred_by: str,
-        ip_address: str = None
-    ):
+    async def send_referral_landing_notification(self, referred_by: str, ip_address: str = None):
         """Send notification when someone lands on site via referral link."""
         fields = [
             {"name": "Referred By", "value": referred_by, "inline": True},
@@ -81,10 +68,10 @@ class DiscordWebhookService:
 
         embed = {
             "title": "👀 Referral Landing",
-            "color": 0x00ff00,  # Green
+            "color": 0x00FF00,  # Green
             "fields": fields,
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"}
+            "footer": {"text": "Tesslate Studio"},
         }
 
         await self._send_webhook(embeds=[embed])
@@ -95,12 +82,12 @@ class DiscordWebhookService:
         new_user_name: str,
         new_user_username: str,
         new_user_email: str,
-        user_id: str
+        user_id: str,
     ):
         """Send notification when a user signs up via referral."""
         embed = {
             "title": "🎁 Referral Signup",
-            "color": 0x00ff00,  # Green
+            "color": 0x00FF00,  # Green
             "fields": [
                 {"name": "Referred By", "value": referred_by, "inline": True},
                 {"name": "New User", "value": new_user_name, "inline": True},
@@ -109,7 +96,7 @@ class DiscordWebhookService:
                 {"name": "User ID", "value": str(user_id), "inline": False},
             ],
             "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": "Tesslate Studio"}
+            "footer": {"text": "Tesslate Studio"},
         }
 
         await self._send_webhook(embeds=[embed])
@@ -123,13 +110,15 @@ class DiscordWebhookService:
         payload = {"embeds": embeds}
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.webhook_url, json=payload) as resp:
-                    if resp.status not in (200, 204):
-                        error_text = await resp.text()
-                        logger.error(f"Discord webhook failed: {resp.status} - {error_text}")
-                    else:
-                        logger.info("Discord notification sent successfully")
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(self.webhook_url, json=payload) as resp,
+            ):
+                if resp.status not in (200, 204):
+                    error_text = await resp.text()
+                    logger.error(f"Discord webhook failed: {resp.status} - {error_text}")
+                else:
+                    logger.info("Discord notification sent successfully")
         except Exception as e:
             logger.error(f"Failed to send Discord webhook: {e}")
 

@@ -5,10 +5,11 @@ Uses Fernet symmetric encryption for token storage.
 This service provides encryption/decryption functionality for deployment provider credentials
 (Cloudflare, Vercel, Netlify, etc.) with comprehensive error handling and debug logging.
 """
-import logging
+
 import base64
 import hashlib
-from typing import Optional
+import logging
+
 from cryptography.fernet import Fernet, InvalidToken
 
 from ..config import get_settings
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 class DeploymentEncryptionError(Exception):
     """Base exception for deployment encryption errors."""
+
     pass
 
 
@@ -29,7 +31,7 @@ class DeploymentEncryptionService:
     and access keys for various deployment providers.
     """
 
-    def __init__(self, encryption_key: Optional[str] = None):
+    def __init__(self, encryption_key: str | None = None):
         """
         Initialize the deployment encryption service.
 
@@ -90,7 +92,9 @@ class DeploymentEncryptionService:
             logger.debug(f"Encrypting credential (length: {len(plaintext)} chars)")
             encrypted = self.cipher_suite.encrypt(plaintext.encode())
             result = encrypted.decode()
-            logger.debug(f"Successfully encrypted credential (encrypted length: {len(result)} chars)")
+            logger.debug(
+                f"Successfully encrypted credential (encrypted length: {len(result)} chars)"
+            )
             return result
 
         except Exception as e:
@@ -118,7 +122,9 @@ class DeploymentEncryptionService:
             logger.debug(f"Decrypting credential (encrypted length: {len(encrypted_text)} chars)")
             decrypted = self.cipher_suite.decrypt(encrypted_text.encode())
             result = decrypted.decode()
-            logger.debug(f"Successfully decrypted credential (plaintext length: {len(result)} chars)")
+            logger.debug(
+                f"Successfully decrypted credential (plaintext length: {len(result)} chars)"
+            )
             return result
 
         except InvalidToken as e:
@@ -177,10 +183,12 @@ class DeploymentEncryptionService:
 
 
 # Global singleton instance
-_deployment_encryption_service: Optional[DeploymentEncryptionService] = None
+_deployment_encryption_service: DeploymentEncryptionService | None = None
 
 
-def get_deployment_encryption_service(encryption_key: Optional[str] = None) -> DeploymentEncryptionService:
+def get_deployment_encryption_service(
+    encryption_key: str | None = None,
+) -> DeploymentEncryptionService:
     """
     Get or create the global deployment encryption service instance.
 

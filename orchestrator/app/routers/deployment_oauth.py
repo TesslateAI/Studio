@@ -7,19 +7,20 @@ This module provides OAuth 2.0 authentication endpoints for deployment providers
 
 import logging
 import secrets
-from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-import httpx
 
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..config import get_settings
 from ..database import get_db
 from ..models import DeploymentCredential, User
-from ..auth import get_current_user
-from ..services.deployment_encryption import get_deployment_encryption_service, DeploymentEncryptionError
-from ..config import get_settings
+from ..services.deployment_encryption import (
+    get_deployment_encryption_service,
+)
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ _oauth_states = {}
 # Helper Functions
 # ============================================================================
 
+
 def generate_state_token(user_id: UUID) -> str:
     """Generate a secure random state token for CSRF protection."""
     state = secrets.token_urlsafe(32)
@@ -43,7 +45,7 @@ def generate_state_token(user_id: UUID) -> str:
     return state
 
 
-def verify_state_token(state: str) -> Optional[str]:
+def verify_state_token(state: str) -> str | None:
     """Verify and consume a state token, returning the user_id if valid."""
     user_id = _oauth_states.pop(state, None)
     if user_id:
@@ -57,10 +59,13 @@ def verify_state_token(state: str) -> Optional[str]:
 # Vercel OAuth Endpoints
 # ============================================================================
 
+
 @router.get("/vercel/authorize")
 async def vercel_authorize(
-    project_id: Optional[UUID] = Query(None, description="Optional project ID for project-specific credential"),
-    current_user: User = Depends(current_active_user)
+    project_id: UUID | None = Query(
+        None, description="Optional project ID for project-specific credential"
+    ),
+    current_user: User = Depends(current_active_user),
 ):
     """
     Initiate Vercel OAuth flow.
@@ -82,7 +87,7 @@ async def vercel_authorize(
         logger.error("Vercel OAuth not configured")
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Vercel OAuth is not configured on this server"
+            detail="Vercel OAuth is not configured on this server",
         )
 
     # Generate state token for CSRF protection
@@ -108,11 +113,11 @@ async def vercel_authorize(
 @router.get("/vercel/callback")
 async def vercel_callback(
     code: str = Query(..., description="Authorization code from Vercel"),
-    state: Optional[str] = Query(None, description="State token for CSRF protection"),
-    configurationId: Optional[str] = Query(None, description="Vercel configuration ID"),
-    teamId: Optional[str] = Query(None, description="Vercel team ID"),
+    state: str | None = Query(None, description="State token for CSRF protection"),
+    configurationId: str | None = Query(None, description="Vercel configuration ID"),
+    teamId: str | None = Query(None, description="Vercel team ID"),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(current_active_user)
+    current_user: User | None = Depends(current_active_user),
 ):
     """
     Vercel OAuth callback endpoint.
@@ -156,8 +161,7 @@ async def vercel_callback(
             user_id_str = verify_state_token(state)
             if not user_id_str:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid or expired state token"
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired state token"
                 )
             user_id = UUID(user_id_str)
         elif current_user:
@@ -168,7 +172,7 @@ async def vercel_callback(
             # No state and no current user - can't proceed
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing authentication: no state token or current user"
+                detail="Missing authentication: no state token or current user",
             )
 
         # Exchange code for access token
@@ -179,8 +183,8 @@ async def vercel_callback(
                     "client_id": settings.vercel_client_id,
                     "client_secret": settings.vercel_client_secret,
                     "code": code,
-                    "redirect_uri": settings.vercel_oauth_redirect_uri
-                }
+                    "redirect_uri": settings.vercel_oauth_redirect_uri,
+                },
             )
             response.raise_for_status()
             token_data = response.json()
@@ -189,7 +193,7 @@ async def vercel_callback(
         if not access_token:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to obtain access token from Vercel"
+                detail="Failed to obtain access token from Vercel",
             )
 
         # Optionally fetch team information and store configuration ID
@@ -205,7 +209,7 @@ async def vercel_callback(
                 async with httpx.AsyncClient() as client:
                     team_response = await client.get(
                         f"https://api.vercel.com/v2/teams/{team_id}",
-                        headers={"Authorization": f"Bearer {access_token}"}
+                        headers={"Authorization": f"Bearer {access_token}"},
                     )
                     if team_response.status_code == 200:
                         team_data = team_response.json()
@@ -219,12 +223,13 @@ async def vercel_callback(
 
         # Check for existing credential (upsert)
         from sqlalchemy import and_
+
         existing_result = await db.execute(
             select(DeploymentCredential).where(
                 and_(
                     DeploymentCredential.user_id == user_id,
                     DeploymentCredential.provider == "vercel",
-                    DeploymentCredential.project_id == project_id
+                    DeploymentCredential.project_id == project_id,
                 )
             )
         )
@@ -241,14 +246,18 @@ async def vercel_callback(
                 project_id=project_id,
                 provider="vercel",
                 access_token_encrypted=encrypted_token,
-                metadata=metadata
+                metadata=metadata,
             )
             db.add(credential)
             await db.commit()
             logger.info(f"Created Vercel credential for user {user_id}")
 
         # Redirect to frontend settings page with success message
-        frontend_url = settings.cors_origins.split(",")[0] if settings.cors_origins else "http://localhost:5173"
+        frontend_url = (
+            settings.cors_origins.split(",")[0]
+            if settings.cors_origins
+            else "http://localhost:5173"
+        )
         redirect_url = f"{frontend_url}/settings?tab=deployments&success=vercel"
 
         return RedirectResponse(url=redirect_url)
@@ -259,7 +268,11 @@ async def vercel_callback(
         logger.error(f"Vercel OAuth callback failed: {e}", exc_info=True)
 
         # Redirect to frontend with error
-        frontend_url = settings.cors_origins.split(",")[0] if settings.cors_origins else "http://localhost:5173"
+        frontend_url = (
+            settings.cors_origins.split(",")[0]
+            if settings.cors_origins
+            else "http://localhost:5173"
+        )
         redirect_url = f"{frontend_url}/settings?tab=deployments&error=vercel"
 
         return RedirectResponse(url=redirect_url)
@@ -269,10 +282,13 @@ async def vercel_callback(
 # Netlify OAuth Endpoints
 # ============================================================================
 
+
 @router.get("/netlify/authorize")
 async def netlify_authorize(
-    project_id: Optional[UUID] = Query(None, description="Optional project ID for project-specific credential"),
-    current_user: User = Depends(current_active_user)
+    project_id: UUID | None = Query(
+        None, description="Optional project ID for project-specific credential"
+    ),
+    current_user: User = Depends(current_active_user),
 ):
     """
     Initiate Netlify OAuth flow.
@@ -294,7 +310,7 @@ async def netlify_authorize(
         logger.error("Netlify OAuth not configured")
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Netlify OAuth is not configured on this server"
+            detail="Netlify OAuth is not configured on this server",
         )
 
     # Generate state token for CSRF protection
@@ -321,7 +337,7 @@ async def netlify_authorize(
 async def netlify_callback(
     code: str = Query(..., description="Authorization code from Netlify"),
     state: str = Query(..., description="State token for CSRF protection"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Netlify OAuth callback endpoint.
@@ -353,8 +369,7 @@ async def netlify_callback(
         user_id_str = verify_state_token(state)
         if not user_id_str:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired state token"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired state token"
             )
 
         user_id = UUID(user_id_str)
@@ -368,8 +383,8 @@ async def netlify_callback(
                     "code": code,
                     "client_id": settings.netlify_client_id,
                     "client_secret": settings.netlify_client_secret,
-                    "redirect_uri": settings.netlify_oauth_redirect_uri
-                }
+                    "redirect_uri": settings.netlify_oauth_redirect_uri,
+                },
             )
             response.raise_for_status()
             token_data = response.json()
@@ -378,7 +393,7 @@ async def netlify_callback(
         if not access_token:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to obtain access token from Netlify"
+                detail="Failed to obtain access token from Netlify",
             )
 
         # Optionally fetch account information
@@ -387,7 +402,7 @@ async def netlify_callback(
             async with httpx.AsyncClient() as client:
                 user_response = await client.get(
                     "https://api.netlify.com/api/v1/user",
-                    headers={"Authorization": f"Bearer {access_token}"}
+                    headers={"Authorization": f"Bearer {access_token}"},
                 )
                 if user_response.status_code == 200:
                     user_data = user_response.json()
@@ -401,12 +416,13 @@ async def netlify_callback(
 
         # Check for existing credential (upsert)
         from sqlalchemy import and_
+
         existing_result = await db.execute(
             select(DeploymentCredential).where(
                 and_(
                     DeploymentCredential.user_id == user_id,
                     DeploymentCredential.provider == "netlify",
-                    DeploymentCredential.project_id == project_id
+                    DeploymentCredential.project_id == project_id,
                 )
             )
         )
@@ -423,14 +439,18 @@ async def netlify_callback(
                 project_id=project_id,
                 provider="netlify",
                 access_token_encrypted=encrypted_token,
-                metadata=metadata
+                metadata=metadata,
             )
             db.add(credential)
             await db.commit()
             logger.info(f"Created Netlify credential for user {user_id}")
 
         # Redirect to frontend settings page with success message
-        frontend_url = settings.cors_origins.split(",")[0] if settings.cors_origins else "http://localhost:5173"
+        frontend_url = (
+            settings.cors_origins.split(",")[0]
+            if settings.cors_origins
+            else "http://localhost:5173"
+        )
         redirect_url = f"{frontend_url}/settings?tab=deployments&success=netlify"
 
         return RedirectResponse(url=redirect_url)
@@ -441,7 +461,11 @@ async def netlify_callback(
         logger.error(f"Netlify OAuth callback failed: {e}", exc_info=True)
 
         # Redirect to frontend with error
-        frontend_url = settings.cors_origins.split(",")[0] if settings.cors_origins else "http://localhost:5173"
+        frontend_url = (
+            settings.cors_origins.split(",")[0]
+            if settings.cors_origins
+            else "http://localhost:5173"
+        )
         redirect_url = f"{frontend_url}/settings?tab=deployments&error=netlify"
 
         return RedirectResponse(url=redirect_url)

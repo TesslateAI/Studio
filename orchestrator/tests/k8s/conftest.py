@@ -7,10 +7,11 @@ These fixtures provide:
 - Timing observer instances
 - Cleanup utilities
 """
+
 import os
-import pytest
+
 import httpx
-from typing import Optional
+import pytest
 
 
 def pytest_configure(config):
@@ -67,7 +68,7 @@ async def http_client():
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(60.0, connect=10.0),
         follow_redirects=True,
-        verify=True  # Verify SSL for production
+        verify=True,  # Verify SSL for production
     ) as client:
         yield client
 
@@ -76,6 +77,7 @@ async def http_client():
 def timing_observer():
     """Create a timing observer for test measurements."""
     from .timing_observer import StartupTimingObserver
+
     return StartupTimingObserver()
 
 
@@ -84,7 +86,7 @@ def pytest_collection_modifyitems(config, items):
     skip_missing_env = pytest.mark.skip(reason="Required environment variables not set")
 
     for item in items:
-        if "kubernetes" in item.keywords or "e2e" in item.keywords:
-            # Check if required env vars are set
-            if not os.environ.get("TEST_USER_PASSWORD"):
-                item.add_marker(skip_missing_env)
+        if ("kubernetes" in item.keywords or "e2e" in item.keywords) and not os.environ.get(
+            "TEST_USER_PASSWORD"
+        ):
+            item.add_marker(skip_missing_env)

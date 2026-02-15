@@ -5,18 +5,17 @@ Pre-installs marketplace bases with dependencies on startup.
 Solves WSL slowness by installing in Linux, then copying to user projects.
 """
 
-import os
 import asyncio
 import logging
 import shutil
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING
+
 from sqlalchemy import select
 
-from ..models import MarketplaceBase
-from ..database import AsyncSessionLocal
 from ..config import get_settings
+from ..database import AsyncSessionLocal
+from ..models import MarketplaceBase
 
 if TYPE_CHECKING:
     import docker
@@ -32,7 +31,7 @@ class BaseCacheManager:
         # Use Docker volume name for mounting to dev containers
         self.cache_volume_name = "tesslate-base-cache"
         self._initialized = False
-        self._docker_client: Optional["docker.DockerClient"] = None
+        self._docker_client: docker.DockerClient | None = None
         self.dev_server_image = "tesslate-devserver:latest"
 
     @property
@@ -40,6 +39,7 @@ class BaseCacheManager:
         """Lazy-initialize Docker client only when needed (Docker mode only)."""
         if self._docker_client is None:
             import docker
+
             self._docker_client = docker.from_env()
         return self._docker_client
 
@@ -72,9 +72,7 @@ class BaseCacheManager:
 
         async with AsyncSessionLocal() as db:
             # Get all active marketplace bases
-            result = await db.execute(
-                select(MarketplaceBase).where(MarketplaceBase.is_active == True)
-            )
+            result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.is_active))
             bases = result.scalars().all()
 
             if not bases:
@@ -119,11 +117,7 @@ class BaseCacheManager:
 
         try:
             # Clone repository
-            await self._clone_repository(
-                base.git_repo_url,
-                base.default_branch,
-                base_path
-            )
+            await self._clone_repository(base.git_repo_url, base.default_branch, base_path)
 
             # Install dependencies
             await self._install_dependencies(base_path, base.name)
@@ -136,12 +130,7 @@ class BaseCacheManager:
             if base_path.exists():
                 shutil.rmtree(base_path, ignore_errors=True)
 
-    async def _clone_repository(
-        self,
-        repo_url: str,
-        branch: str,
-        destination: Path
-    ) -> None:
+    async def _clone_repository(self, repo_url: str, branch: str, destination: Path) -> None:
         """
         Clone a git repository.
 
@@ -154,14 +143,17 @@ class BaseCacheManager:
 
         # Use git clone with depth=1 for faster cloning
         process = await asyncio.create_subprocess_exec(
-            'git', 'clone',
-            '--depth', '1',
-            '--branch', branch,
-            '--single-branch',
+            "git",
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            branch,
+            "--single-branch",
             repo_url,
             str(destination),
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
 
         stdout, stderr = await process.communicate()
@@ -170,7 +162,7 @@ class BaseCacheManager:
             error_msg = stderr.decode() if stderr else "Unknown error"
             raise RuntimeError(f"Git clone failed: {error_msg}")
 
-        logger.info(f"[BASE-CACHE]   ✓ Clone complete")
+        logger.info("[BASE-CACHE]   ✓ Clone complete")
 
     async def _install_dependencies(self, base_path: Path, base_name: str) -> None:
         """
@@ -183,15 +175,15 @@ class BaseCacheManager:
         logger.info(f"[BASE-CACHE]   Installing dependencies for {base_name}...")
 
         # Check for multi-container structure (frontend/backend)
-        has_frontend = (base_path / 'frontend').exists()
-        has_backend = (base_path / 'backend').exists()
+        has_frontend = (base_path / "frontend").exists()
+        has_backend = (base_path / "backend").exists()
 
         if has_frontend or has_backend:
             # Multi-container base
             if has_frontend:
-                await self._install_in_directory(base_path / 'frontend', 'Frontend')
+                await self._install_in_directory(base_path / "frontend", "Frontend")
             if has_backend:
-                await self._install_in_directory(base_path / 'backend', 'Backend')
+                await self._install_in_directory(base_path / "backend", "Backend")
         else:
             # Single-container base
             await self._install_in_directory(base_path, base_name)
@@ -205,9 +197,9 @@ class BaseCacheManager:
             label: Label for logging
         """
         # Detect which package managers are needed
-        has_nodejs = (directory / 'package.json').exists()
-        has_python = (directory / 'requirements.txt').exists()
-        has_go = (directory / 'go.mod').exists()
+        has_nodejs = (directory / "package.json").exists()
+        has_python = (directory / "requirements.txt").exists()
+        has_go = (directory / "go.mod").exists()
 
         if not (has_nodejs or has_python or has_go):
             logger.info(f"[BASE-CACHE]     No dependencies to install ({label})")
@@ -222,11 +214,13 @@ class BaseCacheManager:
 
         if has_python:
             logger.info(f"[BASE-CACHE]     Installing Python deps ({label})...")
-            commands.extend([
-                "python3 -m venv .venv",
-                ".venv/bin/pip install --upgrade pip",
-                ".venv/bin/pip install -r requirements.txt"
-            ])
+            commands.extend(
+                [
+                    "python3 -m venv .venv",
+                    ".venv/bin/pip install --upgrade pip",
+                    ".venv/bin/pip install -r requirements.txt",
+                ]
+            )
 
         if has_go:
             logger.info(f"[BASE-CACHE]     Downloading Go modules ({label})...")
@@ -235,12 +229,7 @@ class BaseCacheManager:
         # Run installs in a temporary dev server container
         await self._run_in_container(directory, commands, label)
 
-    async def _run_in_container(
-        self,
-        directory: Path,
-        commands: List[str],
-        label: str
-    ) -> None:
+    async def _run_in_container(self, directory: Path, commands: list[str], label: str) -> None:
         """
         Run commands in a temporary dev server container.
 
@@ -254,9 +243,10 @@ class BaseCacheManager:
             # directory is like /app/base-cache/nextjs-15
             # We want to mount just that subdirectory from the volume
             relative_path = directory.relative_to(self.cache_dir)
-            volume_subpath = f"{self.cache_volume_name}:/{relative_path}"
 
-            logger.info(f"[BASE-CACHE]     Mounting volume: {self.cache_volume_name}/{relative_path}")
+            logger.info(
+                f"[BASE-CACHE]     Mounting volume: {self.cache_volume_name}/{relative_path}"
+            )
 
             # Run container and wait for completion
             # Note: Must override USER directive in devserver image (USER 1000) to run as root
@@ -265,33 +255,28 @@ class BaseCacheManager:
                 self.docker_client.containers.run,
                 image=self.dev_server_image,
                 command=["sh", "-c", " && ".join(commands)],
-                volumes={
-                    self.cache_volume_name: {
-                        'bind': '/cache',
-                        'mode': 'rw'
-                    }
-                },
-                working_dir=f'/cache/{relative_path}',
-                user='root',  # Override USER 1000 from Dockerfile
+                volumes={self.cache_volume_name: {"bind": "/cache", "mode": "rw"}},
+                working_dir=f"/cache/{relative_path}",
+                user="root",  # Override USER 1000 from Dockerfile
                 detach=False,  # Wait for completion
-                remove=True,   # Auto-cleanup after completion
+                remove=True,  # Auto-cleanup after completion
                 stdout=True,
-                stderr=True
+                stderr=True,
             )
 
             # Result contains combined stdout/stderr
-            logs_str = result.decode('utf-8', errors='replace')
+            logs_str = result.decode("utf-8", errors="replace")
             logger.info(f"[BASE-CACHE]     ✓ Install complete ({label})")
             logger.debug(f"[BASE-CACHE]     Logs:\n{logs_str}")
 
         except docker.errors.ContainerError as e:
-            error_msg = e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)
+            error_msg = e.stderr.decode("utf-8", errors="replace") if e.stderr else str(e)
             logger.warning(f"[BASE-CACHE]     ⚠ Install failed ({label}): {error_msg[:500]}")
 
         except Exception as e:
             logger.error(f"[BASE-CACHE]     ❌ Container execution failed ({label}): {e}")
 
-    async def get_base_path(self, base_slug: str) -> Optional[Path]:
+    async def get_base_path(self, base_slug: str) -> Path | None:
         """
         Get the cached path for a marketplace base.
 
@@ -329,7 +314,7 @@ class BaseCacheManager:
 
 
 # Singleton instance
-_base_cache_manager: Optional[BaseCacheManager] = None
+_base_cache_manager: BaseCacheManager | None = None
 
 
 def get_base_cache_manager() -> BaseCacheManager:

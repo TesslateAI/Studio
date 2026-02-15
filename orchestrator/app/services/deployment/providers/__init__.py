@@ -1,8 +1,8 @@
 """Deployment provider implementations."""
 
 from .cloudflare import CloudflareWorkersProvider
-from .vercel import VercelProvider
 from .netlify import NetlifyProvider
+from .vercel import VercelProvider
 
 __all__ = [
     "CloudflareWorkersProvider",

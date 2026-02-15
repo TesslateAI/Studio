@@ -8,6 +8,8 @@ import io
 import os
 import sys
 
+import pytest
+
 # Fix Windows console encoding for emojis
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -20,6 +22,8 @@ from app.utils.code_patching import (
     extract_edits_by_file,
     is_search_replace_format,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_simulated_ai_edit_flow():

@@ -12,10 +12,9 @@ Architecture:
 
 import asyncio
 import logging
-import subprocess
-from typing import Optional, Dict, Any, List, Literal
-from datetime import datetime
 from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +53,10 @@ class NextJSStrategy(StartupCommandStrategy):
     """Strategy for Next.js 15 integrated fullstack apps."""
 
     def get_tmux_command(self, port: int, **kwargs) -> str:
-        install_cmd = kwargs.get('install_cmd', 'npm install --silent')
-        dev_cmd = kwargs.get('dev_cmd', 'npm run dev')
+        install_cmd = kwargs.get("install_cmd", "npm install --silent")
+        dev_cmd = kwargs.get("dev_cmd", "npm run dev")
 
-        return (
-            f"tmux new-session -d -s main -x 120 -y 30 "
-            f"'{install_cmd} && {dev_cmd}'"
-        )
+        return f"tmux new-session -d -s main -x 120 -y 30 '{install_cmd} && {dev_cmd}'"
 
     def get_session_name(self) -> str:
         return "main"
@@ -91,7 +87,7 @@ class ViteReactGoStrategy(StartupCommandStrategy):
     def get_tmux_command(self, port: int, **kwargs) -> str:
         # Multi-process: frontend on port, backend on port+1
         frontend_port = port
-        backend_port = port + 1
+        port + 1
 
         return (
             f"tmux new-session -d -s main -x 120 -y 30 -n 'frontend' "
@@ -121,13 +117,10 @@ class GenericStrategy(StartupCommandStrategy):
     """Fallback strategy for custom or unknown base types."""
 
     def get_tmux_command(self, port: int, **kwargs) -> str:
-        start_cmd = kwargs.get('start_cmd', 'npm run dev')
-        install_cmd = kwargs.get('install_cmd', 'npm install --silent')
+        start_cmd = kwargs.get("start_cmd", "npm run dev")
+        install_cmd = kwargs.get("install_cmd", "npm install --silent")
 
-        return (
-            f"tmux new-session -d -s main -x 120 -y 30 "
-            f"'{install_cmd} && {start_cmd}'"
-        )
+        return f"tmux new-session -d -s main -x 120 -y 30 '{install_cmd} && {start_cmd}'"
 
     def get_session_name(self) -> str:
         return "main"
@@ -148,15 +141,15 @@ class TmuxSessionManager:
     """
 
     # Strategy registry: maps base slugs to command strategies
-    STRATEGIES: Dict[str, StartupCommandStrategy] = {
-        'nextjs-15': NextJSStrategy(),
-        'vite-react-fastapi': ViteReactFastAPIStrategy(),
-        'vite-react-go': ViteReactGoStrategy(),
-        'expo-default': ExpoStrategy(),
-        'generic': GenericStrategy(),
+    STRATEGIES: dict[str, StartupCommandStrategy] = {
+        "nextjs-15": NextJSStrategy(),
+        "vite-react-fastapi": ViteReactFastAPIStrategy(),
+        "vite-react-go": ViteReactGoStrategy(),
+        "expo-default": ExpoStrategy(),
+        "generic": GenericStrategy(),
     }
 
-    def __init__(self, deployment_mode: Literal['docker', 'kubernetes'] = 'docker'):
+    def __init__(self, deployment_mode: Literal["docker", "kubernetes"] = "docker"):
         """
         Initialize tmux session manager.
 
@@ -173,14 +166,10 @@ class TmuxSessionManager:
         SOLID: Open/Closed Principle - New strategies can be added to registry
         without modifying this method.
         """
-        return self.STRATEGIES.get(base_slug, self.STRATEGIES['generic'])
+        return self.STRATEGIES.get(base_slug, self.STRATEGIES["generic"])
 
     def generate_startup_command(
-        self,
-        base_slug: str,
-        port: int,
-        custom_command: Optional[str] = None,
-        **kwargs
+        self, base_slug: str, port: int, custom_command: str | None = None, **kwargs
     ) -> str:
         """
         Generate tmux-wrapped startup command for a base type.
@@ -203,10 +192,7 @@ class TmuxSessionManager:
         if custom_command:
             # User provided custom command via TESSLATE.md
             logger.info(f"Using custom command from TESSLATE.md: {custom_command}")
-            return (
-                f"tmux new-session -d -s main -x 120 -y 30 "
-                f"'{custom_command}'"
-            )
+            return f"tmux new-session -d -s main -x 120 -y 30 '{custom_command}'"
 
         strategy = self.get_strategy(base_slug)
         command = strategy.get_tmux_command(port, **kwargs)
@@ -214,10 +200,7 @@ class TmuxSessionManager:
         return command
 
     async def exec_in_container(
-        self,
-        container_name: str,
-        command: str,
-        capture_output: bool = True
+        self, container_name: str, command: str, capture_output: bool = True
     ) -> tuple[int, str, str]:
         """
         Execute command in container (Docker or Kubernetes).
@@ -232,29 +215,27 @@ class TmuxSessionManager:
         Returns:
             Tuple of (return_code, stdout, stderr)
         """
-        if self.deployment_mode == 'docker':
-            exec_cmd = ['docker', 'exec', container_name, 'sh', '-c', command]
+        if self.deployment_mode == "docker":
+            exec_cmd = ["docker", "exec", container_name, "sh", "-c", command]
         else:  # kubernetes
-            exec_cmd = ['kubectl', 'exec', container_name, '--', 'sh', '-c', command]
+            exec_cmd = ["kubectl", "exec", container_name, "--", "sh", "-c", command]
 
         try:
             if capture_output:
                 result = await asyncio.create_subprocess_exec(
-                    *exec_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    *exec_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
                 stdout, stderr = await result.communicate()
-                return result.returncode or 0, stdout.decode('utf-8'), stderr.decode('utf-8')
+                return result.returncode or 0, stdout.decode("utf-8"), stderr.decode("utf-8")
             else:
                 result = await asyncio.create_subprocess_exec(*exec_cmd)
                 await result.wait()
-                return result.returncode or 0, '', ''
+                return result.returncode or 0, "", ""
         except Exception as e:
             logger.error(f"Failed to exec in container {container_name}: {e}")
-            return 1, '', str(e)
+            return 1, "", str(e)
 
-    async def is_session_active(self, container_name: str, session_name: str = 'main') -> bool:
+    async def is_session_active(self, container_name: str, session_name: str = "main") -> bool:
         """
         Check if a tmux session is active in the container.
 
@@ -267,16 +248,12 @@ class TmuxSessionManager:
         """
         returncode, stdout, stderr = await self.exec_in_container(
             container_name,
-            f"tmux has-session -t {session_name} 2>/dev/null && echo 'active' || echo 'inactive'"
+            f"tmux has-session -t {session_name} 2>/dev/null && echo 'active' || echo 'inactive'",
         )
 
-        return returncode == 0 and 'active' in stdout.lower()
+        return returncode == 0 and stdout.strip().lower() == "active"
 
-    async def create_session(
-        self,
-        container_name: str,
-        startup_command: str
-    ) -> Dict[str, Any]:
+    async def create_session(self, container_name: str, startup_command: str) -> dict[str, Any]:
         """
         Create a new tmux session in the container with the startup command.
 
@@ -293,19 +270,17 @@ class TmuxSessionManager:
             RuntimeError: If session creation fails
         """
         # Check if session already exists
-        if await self.is_session_active(container_name, 'main'):
+        if await self.is_session_active(container_name, "main"):
             logger.warning(f"Tmux session 'main' already exists in {container_name}")
             return {
-                'session_name': 'main',
-                'status': 'existing',
-                'created_at': datetime.utcnow().isoformat()
+                "session_name": "main",
+                "status": "existing",
+                "created_at": datetime.utcnow().isoformat(),
             }
 
         # Create the session
         returncode, stdout, stderr = await self.exec_in_container(
-            container_name,
-            startup_command,
-            capture_output=True
+            container_name, startup_command, capture_output=True
         )
 
         if returncode != 0:
@@ -314,21 +289,18 @@ class TmuxSessionManager:
             raise RuntimeError(f"Tmux session creation failed: {error_msg}")
 
         # Verify session was created
-        if not await self.is_session_active(container_name, 'main'):
+        if not await self.is_session_active(container_name, "main"):
             raise RuntimeError("Tmux session created but not active")
 
         logger.info(f"Created tmux session 'main' in {container_name}")
         return {
-            'session_name': 'main',
-            'status': 'created',
-            'created_at': datetime.utcnow().isoformat()
+            "session_name": "main",
+            "status": "created",
+            "created_at": datetime.utcnow().isoformat(),
         }
 
     async def attach_to_session(
-        self,
-        container_name: str,
-        session_name: str = 'main',
-        window_index: int = 0
+        self, container_name: str, session_name: str = "main", window_index: int = 0
     ) -> str:
         """
         Get the tmux pane identifier for attaching to a session.
@@ -354,8 +326,7 @@ class TmuxSessionManager:
 
         # Verify pane exists
         returncode, stdout, stderr = await self.exec_in_container(
-            container_name,
-            f"tmux list-panes -t {pane_id} 2>/dev/null"
+            container_name, f"tmux list-panes -t {pane_id} 2>/dev/null"
         )
 
         if returncode != 0:
@@ -365,11 +336,8 @@ class TmuxSessionManager:
         return pane_id
 
     async def create_new_window(
-        self,
-        container_name: str,
-        session_name: str = 'main',
-        window_name: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, container_name: str, session_name: str = "main", window_name: str | None = None
+    ) -> dict[str, Any]:
         """
         Create a new window (tab) within an existing tmux session.
 
@@ -396,9 +364,7 @@ class TmuxSessionManager:
         window_cmd += " -P -F '#{window_index}'"  # Print window index
 
         returncode, stdout, stderr = await self.exec_in_container(
-            container_name,
-            window_cmd,
-            capture_output=True
+            container_name, window_cmd, capture_output=True
         )
 
         if returncode != 0:
@@ -406,24 +372,25 @@ class TmuxSessionManager:
             logger.error(f"Failed to create tmux window: {error_msg}")
             raise RuntimeError(f"Window creation failed: {error_msg}")
 
-        window_index = stdout.strip()
+        window_index = int(stdout.strip())
         pane_id = f"{session_name}:{window_index}.0"
 
         logger.info(f"Created tmux window {window_index} in session {session_name}")
         return {
-            'session_name': session_name,
-            'window_index': window_index,
-            'pane_id': pane_id,
-            'window_name': window_name,
-            'created_at': datetime.utcnow().isoformat()
+            "session_name": session_name,
+            "window_index": window_index,
+            "pane_id": pane_id,
+            "window_name": window_name,
+            "created_at": datetime.utcnow().isoformat(),
         }
 
     async def send_keys(
         self,
         container_name: str,
         pane_id: str,
-        keys: str
-    ) -> None:
+        keys: str,
+        press_enter: bool = False,
+    ) -> bool:
         """
         Send keystrokes to a tmux pane.
 
@@ -433,6 +400,10 @@ class TmuxSessionManager:
             container_name: Name of container/pod
             pane_id: Tmux pane identifier (e.g., 'main:0.0')
             keys: Keystrokes to send
+            press_enter: If True, append Enter keystroke after the keys
+
+        Returns:
+            True if keys were sent successfully
 
         Raises:
             RuntimeError: If send fails
@@ -440,10 +411,12 @@ class TmuxSessionManager:
         # Escape single quotes in the keys
         escaped_keys = keys.replace("'", "'\\''")
 
+        cmd = f"tmux send-keys -t {pane_id} '{escaped_keys}'"
+        if press_enter:
+            cmd += " Enter"
+
         returncode, stdout, stderr = await self.exec_in_container(
-            container_name,
-            f"tmux send-keys -t {pane_id} '{escaped_keys}'",
-            capture_output=True
+            container_name, cmd, capture_output=True
         )
 
         if returncode != 0:
@@ -451,12 +424,10 @@ class TmuxSessionManager:
             logger.error(f"Failed to send keys to {pane_id}: {error_msg}")
             raise RuntimeError(f"Send keys failed: {error_msg}")
 
+        return True
+
     async def capture_pane(
-        self,
-        container_name: str,
-        pane_id: str,
-        start_line: int = -100,
-        end_line: int = -1
+        self, container_name: str, pane_id: str, start_line: int = -100, end_line: int = -1
     ) -> str:
         """
         Capture output from a tmux pane.
@@ -475,7 +446,7 @@ class TmuxSessionManager:
         returncode, stdout, stderr = await self.exec_in_container(
             container_name,
             f"tmux capture-pane -t {pane_id} -p -S {start_line} -E {end_line}",
-            capture_output=True
+            capture_output=True,
         )
 
         if returncode != 0:
@@ -485,10 +456,8 @@ class TmuxSessionManager:
         return stdout
 
     async def list_windows(
-        self,
-        container_name: str,
-        session_name: str = 'main'
-    ) -> List[Dict[str, Any]]:
+        self, container_name: str, session_name: str = "main"
+    ) -> list[dict[str, Any]]:
         """
         List all windows in a tmux session.
 
@@ -506,7 +475,7 @@ class TmuxSessionManager:
         returncode, stdout, stderr = await self.exec_in_container(
             container_name,
             f"tmux list-windows -t {session_name} -F '#{{window_index}}|#{{window_name}}|#{{window_active}}'",
-            capture_output=True
+            capture_output=True,
         )
 
         if returncode != 0:
@@ -514,25 +483,23 @@ class TmuxSessionManager:
             return []
 
         windows = []
-        for line in stdout.strip().split('\n'):
+        for line in stdout.strip().split("\n"):
             if not line:
                 continue
-            parts = line.split('|')
+            parts = line.split("|")
             if len(parts) == 3:
-                windows.append({
-                    'index': parts[0],
-                    'name': parts[1],
-                    'active': parts[2] == '1',
-                    'pane_id': f"{session_name}:{parts[0]}.0"
-                })
+                windows.append(
+                    {
+                        "index": parts[0],
+                        "name": parts[1],
+                        "active": parts[2] == "1",
+                        "pane_id": f"{session_name}:{parts[0]}.0",
+                    }
+                )
 
         return windows
 
-    async def close_window(
-        self,
-        container_name: str,
-        pane_id: str
-    ) -> None:
+    async def close_window(self, container_name: str, pane_id: str) -> None:
         """
         Close a tmux window.
 
@@ -544,9 +511,7 @@ class TmuxSessionManager:
             RuntimeError: If close fails
         """
         returncode, stdout, stderr = await self.exec_in_container(
-            container_name,
-            f"tmux kill-window -t {pane_id}",
-            capture_output=True
+            container_name, f"tmux kill-window -t {pane_id}", capture_output=True
         )
 
         if returncode != 0:
@@ -556,13 +521,7 @@ class TmuxSessionManager:
 
         logger.info(f"Closed tmux window {pane_id}")
 
-    async def resize_pane(
-        self,
-        container_name: str,
-        pane_id: str,
-        width: int,
-        height: int
-    ) -> None:
+    async def resize_pane(self, container_name: str, pane_id: str, width: int, height: int) -> None:
         """
         Resize a tmux pane.
 
@@ -577,7 +536,7 @@ class TmuxSessionManager:
         returncode, stdout, stderr = await self.exec_in_container(
             container_name,
             f"tmux resize-window -t {pane_id} -x {width} -y {height}",
-            capture_output=False
+            capture_output=False,
         )
 
         if returncode != 0:
@@ -585,11 +544,11 @@ class TmuxSessionManager:
 
 
 # Singleton instance
-_tmux_session_manager: Optional[TmuxSessionManager] = None
+_tmux_session_manager: TmuxSessionManager | None = None
 
 
 def get_tmux_session_manager(
-    deployment_mode: Optional[Literal['docker', 'kubernetes']] = None
+    deployment_mode: Literal["docker", "kubernetes"] | None = None,
 ) -> TmuxSessionManager:
     """
     Get singleton tmux session manager instance.
@@ -605,6 +564,7 @@ def get_tmux_session_manager(
     if _tmux_session_manager is None:
         if deployment_mode is None:
             from ..config import get_settings
+
             settings = get_settings()
             deployment_mode = settings.deployment_mode
 

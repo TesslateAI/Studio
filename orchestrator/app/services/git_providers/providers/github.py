@@ -3,15 +3,17 @@ GitHub provider implementation.
 
 Refactored from the original github_client.py to follow the unified provider pattern.
 """
+
+import contextlib
 import re
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from ..base import (
     BaseGitProvider,
     GitProviderType,
-    NormalizedRepository,
     NormalizedBranch,
+    NormalizedRepository,
     NormalizedUser,
 )
 
@@ -29,12 +31,12 @@ class GitHubProvider(BaseGitProvider):
     OAUTH_TOKEN_URL = "https://github.com/login/oauth/access_token"
     API_BASE_URL = "https://api.github.com"
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Build GitHub-specific HTTP headers."""
         return {
             "Authorization": f"Bearer {self.access_token}",
             "Accept": "application/vnd.github.v3+json",
-            "X-GitHub-Api-Version": "2022-11-28"
+            "X-GitHub-Api-Version": "2022-11-28",
         }
 
     async def get_user_info(self) -> NormalizedUser:
@@ -46,10 +48,10 @@ class GitHubProvider(BaseGitProvider):
             username=data["login"],
             email=data.get("email"),
             display_name=data.get("name"),
-            avatar_url=data.get("avatar_url")
+            avatar_url=data.get("avatar_url"),
         )
 
-    async def get_user_emails(self) -> List[str]:
+    async def get_user_emails(self) -> list[str]:
         """Get user email addresses from GitHub."""
         try:
             emails_data = await self._request("GET", "/user/emails")
@@ -65,43 +67,24 @@ class GitHubProvider(BaseGitProvider):
             return []
 
     async def list_repositories(
-        self,
-        visibility: str = "all",
-        sort: str = "updated"
-    ) -> List[NormalizedRepository]:
+        self, visibility: str = "all", sort: str = "updated"
+    ) -> list[NormalizedRepository]:
         """List repositories for the authenticated GitHub user."""
-        params = {
-            "visibility": visibility,
-            "sort": sort,
-            "per_page": 100
-        }
+        params = {"visibility": visibility, "sort": sort, "per_page": 100}
         repos_data = await self._request("GET", "/user/repos", params=params)
 
-        return [
-            self._normalize_repository(repo)
-            for repo in repos_data
-        ]
+        return [self._normalize_repository(repo) for repo in repos_data]
 
-    async def get_repository(
-        self,
-        owner: str,
-        repo: str
-    ) -> NormalizedRepository:
+    async def get_repository(self, owner: str, repo: str) -> NormalizedRepository:
         """Get information about a specific GitHub repository."""
         data = await self._request("GET", f"/repos/{owner}/{repo}")
         return self._normalize_repository(data)
 
-    async def list_branches(
-        self,
-        owner: str,
-        repo: str
-    ) -> List[NormalizedBranch]:
+    async def list_branches(self, owner: str, repo: str) -> list[NormalizedBranch]:
         """List branches for a GitHub repository."""
         # Get branches
         branches_data = await self._request(
-            "GET",
-            f"/repos/{owner}/{repo}/branches",
-            params={"per_page": 100}
+            "GET", f"/repos/{owner}/{repo}/branches", params={"per_page": 100}
         )
 
         # Get default branch name
@@ -113,30 +96,26 @@ class GitHubProvider(BaseGitProvider):
                 name=branch["name"],
                 is_default=(branch["name"] == default_branch),
                 commit_sha=branch["commit"]["sha"],
-                protected=branch.get("protected", False)
+                protected=branch.get("protected", False),
             )
             for branch in branches_data
         ]
 
-    async def get_default_branch(
-        self,
-        owner: str,
-        repo: str
-    ) -> str:
+    async def get_default_branch(self, owner: str, repo: str) -> str:
         """Get the default branch name for a GitHub repository."""
         repo_info = await self._request("GET", f"/repos/{owner}/{repo}")
         return repo_info.get("default_branch", "main")
 
-    def _normalize_repository(self, data: Dict[str, Any]) -> NormalizedRepository:
+    def _normalize_repository(self, data: dict[str, Any]) -> NormalizedRepository:
         """Convert GitHub API response to normalized repository format."""
-        owner = data["owner"]["login"] if isinstance(data.get("owner"), dict) else data.get("owner", "")
+        owner = (
+            data["owner"]["login"] if isinstance(data.get("owner"), dict) else data.get("owner", "")
+        )
 
         updated_at = None
         if data.get("updated_at"):
-            try:
+            with contextlib.suppress(ValueError, AttributeError):
                 updated_at = datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                pass
 
         return NormalizedRepository(
             id=str(data["id"]),
@@ -154,11 +133,11 @@ class GitHubProvider(BaseGitProvider):
             language=data.get("language"),
             size=data.get("size", 0),
             stars_count=data.get("stargazers_count", 0),
-            forks_count=data.get("forks_count", 0)
+            forks_count=data.get("forks_count", 0),
         )
 
     @staticmethod
-    def parse_repo_url(repo_url: str) -> Optional[Dict[str, str]]:
+    def parse_repo_url(repo_url: str) -> dict[str, str] | None:
         """
         Parse a GitHub repository URL to extract owner and repo name.
 
@@ -191,11 +170,7 @@ class GitHubProvider(BaseGitProvider):
         return None
 
     @staticmethod
-    def format_clone_url(
-        owner: str,
-        repo: str,
-        access_token: Optional[str] = None
-    ) -> str:
+    def format_clone_url(owner: str, repo: str, access_token: str | None = None) -> str:
         """
         Format a GitHub clone URL with optional authentication.
 
@@ -211,17 +186,13 @@ class GitHubProvider(BaseGitProvider):
             return f"https://{access_token}@github.com/{owner}/{repo}.git"
         return f"https://github.com/{owner}/{repo}.git"
 
-    async def get_rate_limit(self) -> Dict[str, Any]:
+    async def get_rate_limit(self) -> dict[str, Any]:
         """Get rate limit status for the authenticated user."""
         return await self._request("GET", "/rate_limit")
 
     async def list_commits(
-        self,
-        owner: str,
-        repo: str,
-        sha: Optional[str] = None,
-        per_page: int = 30
-    ) -> List[Dict[str, Any]]:
+        self, owner: str, repo: str, sha: str | None = None, per_page: int = 30
+    ) -> list[dict[str, Any]]:
         """List commits for a repository."""
         params = {"per_page": per_page}
         if sha:
@@ -232,15 +203,15 @@ class GitHubProvider(BaseGitProvider):
     async def create_repository(
         self,
         name: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         private: bool = True,
-        auto_init: bool = False
-    ) -> Dict[str, Any]:
+        auto_init: bool = False,
+    ) -> dict[str, Any]:
         """Create a new repository for the authenticated user."""
         payload = {
             "name": name,
             "description": description,
             "private": private,
-            "auto_init": auto_init
+            "auto_init": auto_init,
         }
         return await self._request("POST", "/user/repos", json=payload)

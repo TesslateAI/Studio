@@ -13,7 +13,7 @@ Features:
 """
 
 import re
-from typing import Optional
+
 from nanoid import generate
 
 
@@ -37,23 +37,23 @@ def slugify(text: str, max_length: int = 50) -> str:
     slug = text.lower()
 
     # Remove non-alphanumeric characters (except spaces and hyphens)
-    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
 
     # Replace spaces and multiple hyphens with single hyphen
-    slug = re.sub(r'[\s-]+', '-', slug)
+    slug = re.sub(r"[\s-]+", "-", slug)
 
     # Remove leading/trailing hyphens
-    slug = slug.strip('-')
+    slug = slug.strip("-")
 
     # Truncate to max length
     slug = slug[:max_length]
 
     # Ensure no trailing hyphen after truncation
-    slug = slug.rstrip('-')
+    slug = slug.rstrip("-")
 
     # Fallback if slug is empty
     if not slug:
-        slug = 'project'
+        slug = "project"
 
     return slug
 
@@ -74,7 +74,7 @@ def generate_short_hash(length: int = 6) -> str:
         - 6 chars: ~1% at 100k projects
         - 8 chars: ~1% at 6M projects
     """
-    alphabet = '0123456789abcdefghijklmnopqrstuvwxyz'
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
     return generate(alphabet, length)
 
 
@@ -102,9 +102,7 @@ def generate_project_slug(project_name: str, hash_length: int = 6) -> str:
 
 
 def generate_username_slug(
-    username: Optional[str] = None,
-    email: Optional[str] = None,
-    hash_length: int = 6
+    username: str | None = None, email: str | None = None, hash_length: int = 6
 ) -> str:
     """
     Generate unique username slug: "ernest-k3x8n2"
@@ -128,10 +126,10 @@ def generate_username_slug(
         base_slug = slugify(username, max_length=50)
     elif email:
         # Extract username part from email
-        email_prefix = email.split('@')[0]
+        email_prefix = email.split("@")[0]
         base_slug = slugify(email_prefix, max_length=50)
     else:
-        base_slug = 'user'
+        base_slug = "user"
 
     hash_suffix = generate_short_hash(hash_length)
     return f"{base_slug}-{hash_suffix}"
@@ -155,5 +153,5 @@ def is_valid_slug(slug: str) -> bool:
 
     # Must be lowercase alphanumeric + hyphens
     # Must start and end with alphanumeric
-    pattern = r'^[a-z0-9]+(-[a-z0-9]+)*$'
+    pattern = r"^[a-z0-9]+(-[a-z0-9]+)*$"
     return bool(re.match(pattern, slug))

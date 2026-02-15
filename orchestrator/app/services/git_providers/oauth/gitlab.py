@@ -4,12 +4,14 @@ GitLab OAuth Service.
 Handles OAuth2 authentication flow with GitLab.
 Supports both gitlab.com and self-hosted GitLab instances.
 """
-import secrets
-import httpx
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
-from urllib.parse import urlencode
+
 import logging
+import secrets
+from datetime import datetime, timedelta
+from typing import Any
+from urllib.parse import urlencode
+
+import httpx
 
 from ....config import get_settings
 
@@ -21,7 +23,7 @@ class GitLabOAuthService:
 
     DEFAULT_SCOPES = "read_user read_repository read_api"
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: str | None = None):
         """
         Initialize GitLab OAuth service.
 
@@ -34,7 +36,9 @@ class GitLabOAuthService:
         self.redirect_uri = self.settings.gitlab_oauth_redirect_uri
 
         # Support self-hosted GitLab
-        self.base_url = (base_url or self.settings.gitlab_api_base_url or "https://gitlab.com").rstrip("/")
+        self.base_url = (
+            base_url or self.settings.gitlab_api_base_url or "https://gitlab.com"
+        ).rstrip("/")
 
         self.oauth_authorize_url = f"{self.base_url}/oauth/authorize"
         self.oauth_token_url = f"{self.base_url}/oauth/token"
@@ -65,12 +69,12 @@ class GitLabOAuthService:
             "redirect_uri": self.redirect_uri,
             "response_type": "code",
             "state": state,
-            "scope": scope or self.DEFAULT_SCOPES
+            "scope": scope or self.DEFAULT_SCOPES,
         }
 
         return f"{self.oauth_authorize_url}?{urlencode(params)}"
 
-    async def exchange_code_for_token(self, code: str) -> Dict[str, Any]:
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
         """
         Exchange authorization code for access token.
 
@@ -92,12 +96,10 @@ class GitLabOAuthService:
                         "client_secret": self.client_secret,
                         "code": code,
                         "grant_type": "authorization_code",
-                        "redirect_uri": self.redirect_uri
+                        "redirect_uri": self.redirect_uri,
                     },
-                    headers={
-                        "Accept": "application/json"
-                    },
-                    timeout=30.0
+                    headers={"Accept": "application/json"},
+                    timeout=30.0,
                 )
 
                 response.raise_for_status()
@@ -121,7 +123,7 @@ class GitLabOAuthService:
                 logger.error(f"[GITLAB OAuth] Failed to exchange code for token: {e}")
                 raise
 
-    async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
+    async def refresh_token(self, refresh_token: str) -> dict[str, Any]:
         """
         Refresh an expired access token.
 
@@ -141,12 +143,10 @@ class GitLabOAuthService:
                         "client_id": self.client_id,
                         "client_secret": self.client_secret,
                         "refresh_token": refresh_token,
-                        "grant_type": "refresh_token"
+                        "grant_type": "refresh_token",
                     },
-                    headers={
-                        "Accept": "application/json"
-                    },
-                    timeout=30.0
+                    headers={"Accept": "application/json"},
+                    timeout=30.0,
                 )
 
                 response.raise_for_status()
@@ -165,7 +165,7 @@ class GitLabOAuthService:
                 logger.error(f"[GITLAB OAuth] Failed to refresh token: {e}")
                 raise
 
-    async def get_user_info(self, access_token: str) -> Dict[str, Any]:
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
         """
         Get GitLab user information using access token.
 
@@ -178,10 +178,8 @@ class GitLabOAuthService:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.api_base_url}/user",
-                headers={
-                    "Authorization": f"Bearer {access_token}"
-                },
-                timeout=30.0
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=30.0,
             )
             response.raise_for_status()
             return response.json()
@@ -200,10 +198,8 @@ class GitLabOAuthService:
             try:
                 response = await client.get(
                     f"{self.api_base_url}/user/emails",
-                    headers={
-                        "Authorization": f"Bearer {access_token}"
-                    },
-                    timeout=30.0
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=30.0,
                 )
                 response.raise_for_status()
                 return response.json()
@@ -234,9 +230,9 @@ class GitLabOAuthService:
                     data={
                         "client_id": self.client_id,
                         "client_secret": self.client_secret,
-                        "token": access_token
+                        "token": access_token,
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
                 return response.status_code == 200
             except Exception as e:
@@ -258,7 +254,7 @@ class GitLabOAuthService:
 
 
 # Singleton instance
-_gitlab_oauth_service: Optional[GitLabOAuthService] = None
+_gitlab_oauth_service: GitLabOAuthService | None = None
 
 
 def get_gitlab_oauth_service() -> GitLabOAuthService:

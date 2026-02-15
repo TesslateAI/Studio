@@ -11,24 +11,20 @@ For "People also like" queries:
 - Return top N sorted by co_install_count
 - O(1) lookup since we query by agent_id
 """
+
 import logging
 from uuid import UUID
-from typing import List, Optional
 
-from sqlalchemy import select, update, and_, or_
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import AgentCoInstall, MarketplaceAgent, UserPurchasedAgent
 
 logger = logging.getLogger(__name__)
 
 
-async def update_co_install_counts(
-    db: AsyncSession,
-    user_id: UUID,
-    new_agent_id: UUID
-) -> None:
+async def update_co_install_counts(db: AsyncSession, user_id: UUID, new_agent_id: UUID) -> None:
     """
     Update co-installation counts when a user installs a new agent.
 
@@ -46,7 +42,7 @@ async def update_co_install_counts(
             select(UserPurchasedAgent.agent_id).where(
                 UserPurchasedAgent.user_id == user_id,
                 UserPurchasedAgent.agent_id != new_agent_id,
-                UserPurchasedAgent.is_active == True
+                UserPurchasedAgent.is_active,
             )
         )
         existing_agent_ids = [row[0] for row in result.fetchall()]
@@ -64,39 +60,34 @@ async def update_co_install_counts(
             await _upsert_co_install(db, new_agent_id, existing_id)
 
         await db.commit()
-        logger.info(f"Updated co-install counts for agent {new_agent_id} with {len(existing_agent_ids)} related agents")
+        logger.info(
+            f"Updated co-install counts for agent {new_agent_id} with {len(existing_agent_ids)} related agents"
+        )
 
     except Exception as e:
         logger.error(f"Failed to update co-install counts: {e}")
         await db.rollback()
 
 
-async def _upsert_co_install(
-    db: AsyncSession,
-    agent_id: UUID,
-    related_agent_id: UUID
-) -> None:
+async def _upsert_co_install(db: AsyncSession, agent_id: UUID, related_agent_id: UUID) -> None:
     """
     Insert or update a co-install record.
     Uses PostgreSQL upsert (INSERT ... ON CONFLICT) for efficiency.
     """
-    stmt = insert(AgentCoInstall).values(
-        agent_id=agent_id,
-        related_agent_id=related_agent_id,
-        co_install_count=1
-    ).on_conflict_do_update(
-        constraint='uq_agent_co_install_pair',
-        set_={'co_install_count': AgentCoInstall.co_install_count + 1}
+    stmt = (
+        insert(AgentCoInstall)
+        .values(agent_id=agent_id, related_agent_id=related_agent_id, co_install_count=1)
+        .on_conflict_do_update(
+            constraint="uq_agent_co_install_pair",
+            set_={"co_install_count": AgentCoInstall.co_install_count + 1},
+        )
     )
     await db.execute(stmt)
 
 
 async def get_related_agents(
-    db: AsyncSession,
-    agent_slug: str,
-    limit: int = 6,
-    exclude_agent_ids: Optional[List[UUID]] = None
-) -> List[dict]:
+    db: AsyncSession, agent_slug: str, limit: int = 6, exclude_agent_ids: list[UUID] | None = None
+) -> list[dict]:
     """
     Get recommended agents based on co-installation patterns.
 
@@ -122,14 +113,12 @@ async def get_related_agents(
     exclude_ids.add(agent.id)  # Don't include the agent itself
 
     # Get related agents sorted by co-install count
-    query = select(
-        AgentCoInstall.related_agent_id,
-        AgentCoInstall.co_install_count
-    ).where(
-        AgentCoInstall.agent_id == agent.id
-    ).order_by(
-        AgentCoInstall.co_install_count.desc()
-    ).limit(limit * 2)  # Get more than needed to account for filtering
+    query = (
+        select(AgentCoInstall.related_agent_id, AgentCoInstall.co_install_count)
+        .where(AgentCoInstall.agent_id == agent.id)
+        .order_by(AgentCoInstall.co_install_count.desc())
+        .limit(limit * 2)
+    )  # Get more than needed to account for filtering
 
     result = await db.execute(query)
     co_installs = result.fetchall()
@@ -145,12 +134,15 @@ async def get_related_agents(
     # If we don't have enough co-install data, fall back to same category
     if len(related_ids) < limit:
         fallback_result = await db.execute(
-            select(MarketplaceAgent.id).where(
+            select(MarketplaceAgent.id)
+            .where(
                 MarketplaceAgent.category == agent.category,
-                MarketplaceAgent.is_published == True,
-                MarketplaceAgent.is_active == True,
-                ~MarketplaceAgent.id.in_(exclude_ids | set(related_ids))
-            ).order_by(MarketplaceAgent.downloads.desc()).limit(limit - len(related_ids))
+                MarketplaceAgent.is_published,
+                MarketplaceAgent.is_active,
+                ~MarketplaceAgent.id.in_(exclude_ids | set(related_ids)),
+            )
+            .order_by(MarketplaceAgent.downloads.desc())
+            .limit(limit - len(related_ids))
         )
         for row in fallback_result.fetchall():
             related_ids.append(row[0])
@@ -162,8 +154,8 @@ async def get_related_agents(
     agents_result = await db.execute(
         select(MarketplaceAgent).where(
             MarketplaceAgent.id.in_(related_ids),
-            MarketplaceAgent.is_published == True,
-            MarketplaceAgent.is_active == True
+            MarketplaceAgent.is_published,
+            MarketplaceAgent.is_active,
         )
     )
     agents = agents_result.scalars().all()
@@ -174,27 +166,29 @@ async def get_related_agents(
     for agent_id in related_ids:
         if agent_id in id_to_agent:
             a = id_to_agent[agent_id]
-            result_list.append({
-                "id": str(a.id),
-                "name": a.name,
-                "slug": a.slug,
-                "description": a.description,
-                "category": a.category,
-                "item_type": a.item_type or "agent",
-                "source_type": a.source_type or "closed",
-                "is_forkable": a.is_forkable,
-                "is_active": a.is_active,
-                "icon": a.icon,
-                "avatar_url": a.avatar_url,
-                "pricing_type": a.pricing_type,
-                "price": a.price,
-                "downloads": a.downloads or 0,
-                "rating": a.rating or 5.0,
-                "reviews_count": a.reviews_count or 0,
-                "usage_count": a.usage_count or 0,
-                "features": a.features or [],
-                "tags": a.tags or [],
-                "is_featured": a.is_featured
-            })
+            result_list.append(
+                {
+                    "id": str(a.id),
+                    "name": a.name,
+                    "slug": a.slug,
+                    "description": a.description,
+                    "category": a.category,
+                    "item_type": a.item_type or "agent",
+                    "source_type": a.source_type or "closed",
+                    "is_forkable": a.is_forkable,
+                    "is_active": a.is_active,
+                    "icon": a.icon,
+                    "avatar_url": a.avatar_url,
+                    "pricing_type": a.pricing_type,
+                    "price": a.price,
+                    "downloads": a.downloads or 0,
+                    "rating": a.rating or 5.0,
+                    "reviews_count": a.reviews_count or 0,
+                    "usage_count": a.usage_count or 0,
+                    "features": a.features or [],
+                    "tags": a.tags or [],
+                    "is_featured": a.is_featured,
+                }
+            )
 
     return result_list

@@ -27,11 +27,13 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ T = TypeVar("T")
 
 # Global Redis client (lazy initialized)
 _redis_client = None
-_redis_available: Optional[bool] = None  # None = not checked, True/False = checked
+_redis_available: bool | None = None  # None = not checked, True/False = checked
 
 
 async def get_redis_client():
@@ -102,10 +104,8 @@ async def close_redis_client():
     """Close Redis connection (call on app shutdown)."""
     global _redis_client, _redis_available
     if _redis_client:
-        try:
+        with contextlib.suppress(Exception):
             await _redis_client.close()
-        except Exception:
-            pass
         _redis_client = None
         _redis_available = None
 
@@ -123,7 +123,7 @@ _cache_metrics = {
 }
 
 
-def get_cache_metrics() -> Dict[str, Any]:
+def get_cache_metrics() -> dict[str, Any]:
     """Get cache hit/miss statistics."""
     total = _cache_metrics["hits"] + _cache_metrics["misses"]
     hit_rate = (_cache_metrics["hits"] / total * 100) if total > 0 else 0
@@ -161,13 +161,13 @@ class DistributedCache:
         self.namespace = namespace
         # In-memory fallback cache (per-process)
         # Stores (value, expires_at) tuples
-        self._local_cache: Dict[str, tuple[Any, float]] = {}
+        self._local_cache: dict[str, tuple[Any, float]] = {}
 
     def _make_key(self, key: str) -> str:
         """Create namespaced Redis key."""
         return f"{self.namespace}:{key}"
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """
         Get value from cache.
         Tries Redis first, falls back to local cache.
@@ -317,7 +317,7 @@ class DistributedCache:
         """
         # Clear local cache for this namespace
         prefix = f"{self.namespace}:"
-        local_keys = [k for k in self._local_cache.keys() if k.startswith(prefix)]
+        local_keys = [k for k in self._local_cache if k.startswith(prefix)]
         for k in local_keys:
             del self._local_cache[k]
 
@@ -389,7 +389,7 @@ def cached(key_prefix: str, ttl: int = 300):
 # =============================================================================
 
 
-async def get_cached_litellm_models() -> Optional[list]:
+async def get_cached_litellm_models() -> list | None:
     """
     Get LiteLLM models from cache.
     Used by marketplace router.

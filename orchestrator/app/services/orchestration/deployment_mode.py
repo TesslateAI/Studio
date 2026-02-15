@@ -5,10 +5,10 @@ Defines the supported deployment modes for container orchestration.
 This enum provides type-safe deployment mode handling throughout the codebase.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class DeploymentMode(str, Enum):
+class DeploymentMode(StrEnum):
     """
     Supported deployment modes for container orchestration.
 
@@ -39,9 +39,7 @@ class DeploymentMode(str, Enum):
             if mode.value == value_lower:
                 return mode
         valid_modes = ", ".join([m.value for m in cls])
-        raise ValueError(
-            f"Invalid deployment mode: '{value}'. Valid modes: {valid_modes}"
-        )
+        raise ValueError(f"Invalid deployment mode: '{value}'. Valid modes: {valid_modes}")
 
     @property
     def is_docker(self) -> bool:

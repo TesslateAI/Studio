@@ -21,18 +21,18 @@ These are used internally by KubernetesOrchestrator.
 
 from .client import KubernetesClient, get_k8s_client
 from .helpers import (
-    # Pod Affinity
-    create_pod_affinity_spec,
-    get_standard_labels,
-    # PVC and Deployment
-    create_pvc_manifest,
-    create_file_manager_deployment,
     create_container_deployment,
-    create_service_manifest,
+    create_file_manager_deployment,
     create_ingress_manifest,
     create_network_policy_manifest,
+    # Pod Affinity
+    create_pod_affinity_spec,
+    # PVC and Deployment
+    create_pvc_manifest,
+    create_service_manifest,
     # Script generation
     generate_git_clone_script,
+    get_standard_labels,
 )
 from .manager import KubernetesContainerManager, get_k8s_container_manager
 

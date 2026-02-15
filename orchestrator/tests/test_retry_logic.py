@@ -18,6 +18,8 @@ from app.agent.tools.retry_config import (
     tool_retry,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestRetryableExceptions:
     """Test which exceptions should trigger retries."""

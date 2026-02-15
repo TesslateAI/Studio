@@ -7,24 +7,25 @@ and deployment management.
 """
 
 import logging
-import json
-from typing import List, Optional, Dict
-from uuid import UUID
 from datetime import datetime
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
 from pydantic import BaseModel, Field
+from sqlalchemy import and_, desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import Deployment, DeploymentCredential, Project, User, Container
-from ..users import current_active_user
-from ..services.deployment_encryption import get_deployment_encryption_service, DeploymentEncryptionError
-from ..services.deployment.manager import DeploymentManager
+from ..models import Container, Deployment, DeploymentCredential, Project, User
 from ..services.deployment.base import DeploymentConfig
-from ..services.deployment.builder import get_deployment_builder, BuildError
+from ..services.deployment.builder import BuildError, get_deployment_builder
+from ..services.deployment.manager import DeploymentManager
+from ..services.deployment_encryption import (
+    DeploymentEncryptionError,
+    get_deployment_encryption_service,
+)
 from ..services.framework_detector import FrameworkDetector
+from ..users import current_active_user
 from ..utils.async_subprocess import run_async
 
 logger = logging.getLogger(__name__)
@@ -36,33 +37,38 @@ router = APIRouter(prefix="/api/deployments", tags=["deployments"])
 # Request/Response Models
 # ============================================================================
 
+
 class DeploymentRequest(BaseModel):
     """Request to deploy a project."""
+
     provider: str = Field(..., description="Deployment provider (cloudflare, vercel, netlify)")
-    deployment_mode: Optional[str] = Field(
+    deployment_mode: str | None = Field(
         None,
-        description="Deployment mode: 'source' (provider builds) or 'pre-built' (upload built files). Default varies by provider."
+        description="Deployment mode: 'source' (provider builds) or 'pre-built' (upload built files). Default varies by provider.",
     )
-    custom_domain: Optional[str] = Field(None, description="Custom domain")
-    env_vars: Dict[str, str] = Field(default_factory=dict, description="Environment variables")
-    build_command: Optional[str] = Field(None, description="Custom build command override")
-    framework: Optional[str] = Field(None, description="Framework override (auto-detected if not provided)")
+    custom_domain: str | None = Field(None, description="Custom domain")
+    env_vars: dict[str, str] = Field(default_factory=dict, description="Environment variables")
+    build_command: str | None = Field(None, description="Custom build command override")
+    framework: str | None = Field(
+        None, description="Framework override (auto-detected if not provided)"
+    )
 
 
 class DeploymentResponse(BaseModel):
     """Response containing deployment information."""
+
     id: UUID
     project_id: UUID
     user_id: UUID
     provider: str
-    deployment_id: Optional[str]
-    deployment_url: Optional[str]
+    deployment_id: str | None
+    deployment_url: str | None
     status: str
-    logs: Optional[List[str]]
-    error: Optional[str]
+    logs: list[str] | None
+    error: str | None
     created_at: str
     updated_at: str
-    completed_at: Optional[str]
+    completed_at: str | None
 
     class Config:
         from_attributes = True
@@ -70,9 +76,10 @@ class DeploymentResponse(BaseModel):
 
 class DeploymentStatusResponse(BaseModel):
     """Response for deployment status check."""
+
     status: str
-    deployment_url: Optional[str]
-    provider_status: Optional[Dict]
+    deployment_url: str | None
+    provider_status: dict | None
     updated_at: str
 
 
@@ -80,11 +87,9 @@ class DeploymentStatusResponse(BaseModel):
 # Helper Functions
 # ============================================================================
 
+
 async def get_credential_for_deployment(
-    db: AsyncSession,
-    user_id: UUID,
-    project_id: UUID,
-    provider: str
+    db: AsyncSession, user_id: UUID, project_id: UUID, provider: str
 ) -> DeploymentCredential:
     """
     Get deployment credential for a project, with support for project overrides.
@@ -109,7 +114,7 @@ async def get_credential_for_deployment(
             and_(
                 DeploymentCredential.user_id == user_id,
                 DeploymentCredential.provider == provider,
-                DeploymentCredential.project_id == project_id
+                DeploymentCredential.project_id == project_id,
             )
         )
     )
@@ -125,7 +130,7 @@ async def get_credential_for_deployment(
             and_(
                 DeploymentCredential.user_id == user_id,
                 DeploymentCredential.provider == provider,
-                DeploymentCredential.project_id.is_(None)
+                DeploymentCredential.project_id.is_(None),
             )
         )
     )
@@ -134,7 +139,7 @@ async def get_credential_for_deployment(
     if not credential:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No credentials found for {provider}. Please connect your account in settings."
+            detail=f"No credentials found for {provider}. Please connect your account in settings.",
         )
 
     logger.debug(f"Using default user credential for {provider}")
@@ -142,10 +147,8 @@ async def get_credential_for_deployment(
 
 
 def prepare_provider_credentials(
-    provider: str,
-    decrypted_token: str,
-    metadata: Optional[dict]
-) -> Dict[str, str]:
+    provider: str, decrypted_token: str, metadata: dict | None
+) -> dict[str, str]:
     """
     Prepare credentials dict for a provider.
 
@@ -185,12 +188,13 @@ def prepare_provider_credentials(
 # API Endpoints
 # ============================================================================
 
+
 @router.post("/{project_slug}/deploy", response_model=DeploymentResponse)
 async def deploy_project(
     project_slug: str,
     request: DeploymentRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Deploy a project to a provider.
@@ -218,19 +222,13 @@ async def deploy_project(
         # 1. Verify project ownership
         result = await db.execute(
             select(Project).where(
-                and_(
-                    Project.slug == project_slug,
-                    Project.owner_id == current_user.id
-                )
+                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
             )
         )
         project = result.scalar_one_or_none()
 
         if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
         # 2. Fetch credentials
         provider_lower = request.provider.lower()
@@ -242,9 +240,7 @@ async def deploy_project(
         encryption_service = get_deployment_encryption_service()
         decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
         provider_credentials = prepare_provider_credentials(
-            provider_lower,
-            decrypted_token,
-            credential.metadata
+            provider_lower, decrypted_token, credential.metadata
         )
 
         # 4. Create deployment record (status: building)
@@ -254,7 +250,7 @@ async def deploy_project(
             provider=provider_lower,
             status="building",
             logs=["Deployment started"],
-            metadata={}
+            metadata={},
         )
         db.add(deployment)
         await db.commit()
@@ -272,7 +268,6 @@ async def deploy_project(
 
         # Priority: request > cached > auto-detect
         framework = request.framework
-        framework_was_detected = False
 
         if not framework:
             # Try cached framework first
@@ -282,9 +277,10 @@ async def deploy_project(
             else:
                 # Fallback: Auto-detect from package.json
                 import os
+
                 package_json_path = os.path.join(project_path, "package.json")
                 if os.path.exists(package_json_path):
-                    with open(package_json_path, 'r') as f:
+                    with open(package_json_path) as f:
                         package_json_content = f.read()
                     framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
                     logger.info(f"Auto-detected framework: {framework}")
@@ -294,7 +290,6 @@ async def deploy_project(
 
                 # Cache the detected framework
                 project.settings["framework"] = framework
-                framework_was_detected = True
                 await db.commit()
 
         # 6. Determine deployment mode (source vs pre-built)
@@ -305,13 +300,11 @@ async def deploy_project(
         deployment_mode = request.deployment_mode
         if not deployment_mode:
             # Set sensible defaults per provider
-            default_modes = {
-                "vercel": "source",
-                "netlify": "pre-built",
-                "cloudflare": "pre-built"
-            }
+            default_modes = {"vercel": "source", "netlify": "pre-built", "cloudflare": "pre-built"}
             deployment_mode = default_modes.get(provider_lower, "pre-built")
-            deployment.logs.append(f"Using default deployment mode for {provider_lower}: {deployment_mode}")
+            deployment.logs.append(
+                f"Using default deployment mode for {provider_lower}: {deployment_mode}"
+            )
         else:
             deployment.logs.append(f"Using requested deployment mode: {deployment_mode}")
         await db.commit()
@@ -335,8 +328,12 @@ async def deploy_project(
             build_container_name = primary_container.container_name
             build_directory = primary_container.directory
 
-            deployment.logs.append(f"Multi-container project: building in container '{primary_container.name}' ({build_container_name})")
-            logger.info(f"Using container {build_container_name} for build (directory: {build_directory})")
+            deployment.logs.append(
+                f"Multi-container project: building in container '{primary_container.name}' ({build_container_name})"
+            )
+            logger.info(
+                f"Using container {build_container_name} for build (directory: {build_directory})"
+            )
         else:
             # Single-container project (legacy)
             deployment.logs.append("Single-container project")
@@ -354,7 +351,7 @@ async def deploy_project(
                 ["docker", "inspect", "--format", "{{.State.Running}}", build_container_name],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
             )
 
             is_running = result.stdout.strip() == "true"
@@ -365,10 +362,7 @@ async def deploy_project(
                 deployment.error = error_msg
                 deployment.completed_at = datetime.utcnow()
                 await db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=error_msg
-                )
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
             deployment.logs.append(f"Container {build_container_name} is running")
             await db.commit()
@@ -380,16 +374,15 @@ async def deploy_project(
             deployment.error = error_msg
             deployment.completed_at = datetime.utcnow()
             await db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
         # 8. Run build (skip if source mode - provider will build)
-        use_source_deployment = (deployment_mode == "source")
+        use_source_deployment = deployment_mode == "source"
 
         if use_source_deployment:
-            deployment.logs.append(f"Skipping local build - {provider_lower} will build remotely (framework: {framework})")
+            deployment.logs.append(
+                f"Skipping local build - {provider_lower} will build remotely (framework: {framework})"
+            )
             await db.commit()
         else:
             deployment.logs.append(f"Building project locally (framework: {framework})")
@@ -404,7 +397,7 @@ async def deploy_project(
                     custom_build_command=request.build_command,
                     project_settings=project.settings,
                     container_name=build_container_name,
-                    volume_name=project.slug  # Use project.slug for shared volume path
+                    volume_name=project.slug,  # Use project.slug for shared volume path
                 )
 
                 if not success:
@@ -419,9 +412,8 @@ async def deploy_project(
                 deployment.completed_at = datetime.utcnow()
                 await db.commit()
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Build failed: {str(e)}"
-                )
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Build failed: {str(e)}"
+                ) from e
 
         # 9. Collect files
         if use_source_deployment:
@@ -438,7 +430,7 @@ async def deploy_project(
             project_settings=project.settings,
             collect_source=use_source_deployment,
             container_directory=build_directory,
-            volume_name=project.slug  # Use project.slug for shared volume path
+            volume_name=project.slug,  # Use project.slug for shared volume path
         )
 
         deployment.logs.append(f"Collected {len(files)} files")
@@ -455,7 +447,7 @@ async def deploy_project(
             deployment_mode=deployment_mode,
             build_command=request.build_command,
             env_vars=request.env_vars,
-            custom_domain=request.custom_domain
+            custom_domain=request.custom_domain,
         )
 
         provider = DeploymentManager.get_provider(provider_lower, provider_credentials)
@@ -471,9 +463,7 @@ async def deploy_project(
             deployment.metadata = result.metadata
             deployment.completed_at = datetime.utcnow()
 
-            logger.info(
-                f"Deployment {deployment.id} succeeded: {result.deployment_url}"
-            )
+            logger.info(f"Deployment {deployment.id} succeeded: {result.deployment_url}")
         else:
             deployment.status = "failed"
             deployment.error = result.error
@@ -507,7 +497,7 @@ async def deploy_project(
             error=deployment.error,
             created_at=deployment.created_at.isoformat(),
             updated_at=deployment.updated_at.isoformat(),
-            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None
+            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None,
         )
 
     except HTTPException:
@@ -521,8 +511,8 @@ async def deploy_project(
             await db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to decrypt credentials"
-        )
+            detail="Failed to decrypt credentials",
+        ) from e
     except Exception as e:
         logger.error(f"Deployment failed: {e}", exc_info=True)
         if deployment:
@@ -531,20 +521,19 @@ async def deploy_project(
             deployment.completed_at = datetime.utcnow()
             await db.commit()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Deployment failed: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Deployment failed: {str(e)}"
+        ) from e
 
 
-@router.get("/{project_slug}/deployments", response_model=List[DeploymentResponse])
+@router.get("/{project_slug}/deployments", response_model=list[DeploymentResponse])
 async def list_project_deployments(
     project_slug: str,
-    provider: Optional[str] = None,
-    status_filter: Optional[str] = None,
+    provider: str | None = None,
+    status_filter: str | None = None,
     limit: int = 20,
     offset: int = 0,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     List deployments for a project.
@@ -565,19 +554,13 @@ async def list_project_deployments(
         # Verify project ownership
         result = await db.execute(
             select(Project).where(
-                and_(
-                    Project.slug == project_slug,
-                    Project.owner_id == current_user.id
-                )
+                and_(Project.slug == project_slug, Project.owner_id == current_user.id)
             )
         )
         project = result.scalar_one_or_none()
 
         if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
         # Build query
         query = select(Deployment).where(Deployment.project_id == project.id)
@@ -608,7 +591,7 @@ async def list_project_deployments(
                 error=d.error,
                 created_at=d.created_at.isoformat(),
                 updated_at=d.updated_at.isoformat(),
-                completed_at=d.completed_at.isoformat() if d.completed_at else None
+                completed_at=d.completed_at.isoformat() if d.completed_at else None,
             )
             for d in deployments
         ]
@@ -619,15 +602,15 @@ async def list_project_deployments(
         logger.error(f"Failed to list deployments: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve deployments"
-        )
+            detail="Failed to retrieve deployments",
+        ) from e
 
 
 @router.get("/deployment/{deployment_id}", response_model=DeploymentResponse)
 async def get_deployment(
     deployment_id: UUID,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get deployment details.
@@ -644,18 +627,14 @@ async def get_deployment(
         # Fetch and verify ownership
         result = await db.execute(
             select(Deployment).where(
-                and_(
-                    Deployment.id == deployment_id,
-                    Deployment.user_id == current_user.id
-                )
+                and_(Deployment.id == deployment_id, Deployment.user_id == current_user.id)
             )
         )
         deployment = result.scalar_one_or_none()
 
         if not deployment:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found"
             )
 
         return DeploymentResponse(
@@ -670,7 +649,7 @@ async def get_deployment(
             error=deployment.error,
             created_at=deployment.created_at.isoformat(),
             updated_at=deployment.updated_at.isoformat(),
-            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None
+            completed_at=deployment.completed_at.isoformat() if deployment.completed_at else None,
         )
 
     except HTTPException:
@@ -679,15 +658,15 @@ async def get_deployment(
         logger.error(f"Failed to get deployment: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve deployment"
-        )
+            detail="Failed to retrieve deployment",
+        ) from e
 
 
 @router.get("/deployment/{deployment_id}/status", response_model=DeploymentStatusResponse)
 async def get_deployment_status(
     deployment_id: UUID,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Check deployment status with live provider status.
@@ -707,18 +686,14 @@ async def get_deployment_status(
         # Fetch and verify ownership
         result = await db.execute(
             select(Deployment).where(
-                and_(
-                    Deployment.id == deployment_id,
-                    Deployment.user_id == current_user.id
-                )
+                and_(Deployment.id == deployment_id, Deployment.user_id == current_user.id)
             )
         )
         deployment = result.scalar_one_or_none()
 
         if not deployment:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found"
             )
 
         # If deployment doesn't have a provider deployment_id, return current status
@@ -727,7 +702,7 @@ async def get_deployment_status(
                 status=deployment.status,
                 deployment_url=deployment.deployment_url,
                 provider_status=None,
-                updated_at=deployment.updated_at.isoformat()
+                updated_at=deployment.updated_at.isoformat(),
             )
 
         # Fetch credentials and check provider status
@@ -738,9 +713,7 @@ async def get_deployment_status(
         encryption_service = get_deployment_encryption_service()
         decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
         provider_credentials = prepare_provider_credentials(
-            deployment.provider,
-            decrypted_token,
-            credential.metadata
+            deployment.provider, decrypted_token, credential.metadata
         )
 
         # Get provider and check status
@@ -756,7 +729,7 @@ async def get_deployment_status(
             status=deployment.status,
             deployment_url=deployment.deployment_url,
             provider_status=provider_status,
-            updated_at=deployment.updated_at.isoformat()
+            updated_at=deployment.updated_at.isoformat(),
         )
 
     except HTTPException:
@@ -765,15 +738,15 @@ async def get_deployment_status(
         logger.error(f"Failed to get deployment status: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to check deployment status"
-        )
+            detail="Failed to check deployment status",
+        ) from e
 
 
-@router.get("/deployment/{deployment_id}/logs", response_model=List[str])
+@router.get("/deployment/{deployment_id}/logs", response_model=list[str])
 async def get_deployment_logs(
     deployment_id: UUID,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get deployment logs.
@@ -792,18 +765,14 @@ async def get_deployment_logs(
         # Fetch and verify ownership
         result = await db.execute(
             select(Deployment).where(
-                and_(
-                    Deployment.id == deployment_id,
-                    Deployment.user_id == current_user.id
-                )
+                and_(Deployment.id == deployment_id, Deployment.user_id == current_user.id)
             )
         )
         deployment = result.scalar_one_or_none()
 
         if not deployment:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found"
             )
 
         # Start with stored logs
@@ -819,9 +788,7 @@ async def get_deployment_logs(
                 encryption_service = get_deployment_encryption_service()
                 decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
                 provider_credentials = prepare_provider_credentials(
-                    deployment.provider,
-                    decrypted_token,
-                    credential.metadata
+                    deployment.provider, decrypted_token, credential.metadata
                 )
 
                 provider = DeploymentManager.get_provider(deployment.provider, provider_credentials)
@@ -842,16 +809,15 @@ async def get_deployment_logs(
     except Exception as e:
         logger.error(f"Failed to get deployment logs: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve logs"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve logs"
+        ) from e
 
 
 @router.delete("/deployment/{deployment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_deployment(
     deployment_id: UUID,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Delete a deployment.
@@ -868,18 +834,14 @@ async def delete_deployment(
         # Fetch and verify ownership
         result = await db.execute(
             select(Deployment).where(
-                and_(
-                    Deployment.id == deployment_id,
-                    Deployment.user_id == current_user.id
-                )
+                and_(Deployment.id == deployment_id, Deployment.user_id == current_user.id)
             )
         )
         deployment = result.scalar_one_or_none()
 
         if not deployment:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Deployment not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found"
             )
 
         # Try to delete from provider
@@ -892,15 +854,15 @@ async def delete_deployment(
                 encryption_service = get_deployment_encryption_service()
                 decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
                 provider_credentials = prepare_provider_credentials(
-                    deployment.provider,
-                    decrypted_token,
-                    credential.metadata
+                    deployment.provider, decrypted_token, credential.metadata
                 )
 
                 provider = DeploymentManager.get_provider(deployment.provider, provider_credentials)
                 await provider.delete_deployment(deployment.deployment_id)
 
-                logger.info(f"Deleted deployment {deployment_id} from provider {deployment.provider}")
+                logger.info(
+                    f"Deleted deployment {deployment_id} from provider {deployment.provider}"
+                )
 
             except Exception as e:
                 logger.warning(f"Failed to delete from provider: {e}")
@@ -918,6 +880,5 @@ async def delete_deployment(
         logger.error(f"Failed to delete deployment: {e}", exc_info=True)
         await db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete deployment"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete deployment"
+        ) from e

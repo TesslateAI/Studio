@@ -9,11 +9,10 @@ Implements modern diff-based editing approaches:
 This allows AI agents to make surgical edits without rewriting entire files.
 """
 
+import logging
 import re
-from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -21,22 +20,24 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SearchReplaceEdit:
     """Represents a single search/replace edit operation."""
+
     file_path: str
     search_content: str
     replace_content: str
-    line_number: Optional[int] = None  # For error reporting
+    line_number: int | None = None  # For error reporting
 
 
 @dataclass
 class EditResult:
     """Result of applying an edit operation."""
+
     success: bool
-    content: Optional[str] = None  # The edited content if successful
-    error: Optional[str] = None
-    match_method: Optional[str] = None  # How the match was found (exact, trimmed, fuzzy, etc.)
+    content: str | None = None  # The edited content if successful
+    error: str | None = None
+    match_method: str | None = None  # How the match was found (exact, trimmed, fuzzy, etc.)
 
 
-def extract_search_replace_blocks(content: str) -> List[SearchReplaceEdit]:
+def extract_search_replace_blocks(content: str) -> list[SearchReplaceEdit]:
     """
     Extract search/replace edit blocks from AI response.
 
@@ -59,7 +60,7 @@ def extract_search_replace_blocks(content: str) -> List[SearchReplaceEdit]:
     # Supports multiple formats:
     # 1. File path on its own line before the block
     # 2. File path in a comment inside code fence
-    pattern = r'(?:```[^\n]*\n)?(?://|#)?\s*(?:File:\s*)?([^\n]+\.[\w]+)\s*\n?(```[^\n]*\n)?<<<<<<< SEARCH\n(.*?)\n=======\n(.*?)\n>>>>>>> REPLACE(?:\n```)?'
+    pattern = r"(?:```[^\n]*\n)?(?://|#)?\s*(?:File:\s*)?([^\n]+\.[\w]+)\s*\n?(```[^\n]*\n)?<<<<<<< SEARCH\n(.*?)\n=======\n(.*?)\n>>>>>>> REPLACE(?:\n```)?"
 
     matches = re.finditer(pattern, content, re.DOTALL | re.MULTILINE)
 
@@ -69,25 +70,24 @@ def extract_search_replace_blocks(content: str) -> List[SearchReplaceEdit]:
         replace_content = match.group(4).strip()
 
         # Clean up file path
-        file_path = re.sub(r'^(?://|#|<!--)\s*(?:File:\s*)?', '', file_path)
-        file_path = re.sub(r'\s*(?:-->)?\s*$', '', file_path).strip()
+        file_path = re.sub(r"^(?://|#|<!--)\s*(?:File:\s*)?", "", file_path)
+        file_path = re.sub(r"\s*(?:-->)?\s*$", "", file_path).strip()
 
         if file_path and search_content is not None:  # replace_content can be empty (deletion)
-            edits.append(SearchReplaceEdit(
-                file_path=file_path,
-                search_content=search_content,
-                replace_content=replace_content
-            ))
+            edits.append(
+                SearchReplaceEdit(
+                    file_path=file_path,
+                    search_content=search_content,
+                    replace_content=replace_content,
+                )
+            )
             logger.info(f"Extracted search/replace edit for {file_path}")
 
     return edits
 
 
 def apply_search_replace(
-    original_content: str,
-    search: str,
-    replace: str,
-    fuzzy: bool = True
+    original_content: str, search: str, replace: str, fuzzy: bool = True
 ) -> EditResult:
     """
     Apply a search/replace edit to content with progressive fuzzy matching.
@@ -111,19 +111,15 @@ def apply_search_replace(
     # Strategy 1: Exact match
     if search in original_content:
         new_content = original_content.replace(search, replace, 1)
-        return EditResult(
-            success=True,
-            content=new_content,
-            match_method="exact"
-        )
+        return EditResult(success=True, content=new_content, match_method="exact")
 
     # Strategy 2: Trimmed line endings
-    search_lines = search.split('\n')
-    original_lines = original_content.split('\n')
+    search_lines = search.split("\n")
+    original_lines = original_content.split("\n")
 
     # Try matching with trimmed line endings
-    trimmed_search = '\n'.join(line.rstrip() for line in search_lines)
-    trimmed_original = '\n'.join(line.rstrip() for line in original_lines)
+    trimmed_search = "\n".join(line.rstrip() for line in search_lines)
+    trimmed_original = "\n".join(line.rstrip() for line in original_lines)
 
     if trimmed_search in trimmed_original:
         # Find the match position in trimmed version
@@ -131,51 +127,43 @@ def apply_search_replace(
 
         # Reconstruct with original line endings preserved
         # Count lines before match
-        lines_before = trimmed_original[:start_idx].count('\n')
+        lines_before = trimmed_original[:start_idx].count("\n")
 
         # Apply replacement preserving structure
         result_lines = original_lines[:lines_before]
-        replace_lines = replace.split('\n')
+        replace_lines = replace.split("\n")
         result_lines.extend(replace_lines)
 
         # Add lines after the match
         search_line_count = len(search_lines)
-        result_lines.extend(original_lines[lines_before + search_line_count:])
+        result_lines.extend(original_lines[lines_before + search_line_count :])
 
-        new_content = '\n'.join(result_lines)
-        return EditResult(
-            success=True,
-            content=new_content,
-            match_method="trimmed"
-        )
+        new_content = "\n".join(result_lines)
+        return EditResult(success=True, content=new_content, match_method="trimmed")
 
     # Strategy 3: Whitespace-normalized matching
     def normalize_whitespace(text: str) -> str:
         """Normalize all whitespace for comparison."""
-        return re.sub(r'\s+', ' ', text.strip())
+        return re.sub(r"\s+", " ", text.strip())
 
     normalized_search = normalize_whitespace(search)
 
     # Find best match using normalized whitespace
-    best_match_idx = -1
-    best_match_len = 0
 
     for i in range(len(original_lines)):
         for j in range(i + 1, min(i + len(search_lines) + 10, len(original_lines) + 1)):
-            candidate = '\n'.join(original_lines[i:j])
+            candidate = "\n".join(original_lines[i:j])
             normalized_candidate = normalize_whitespace(candidate)
 
             if normalized_candidate == normalized_search:
                 # Found a match
                 result_lines = original_lines[:i]
-                result_lines.extend(replace.split('\n'))
+                result_lines.extend(replace.split("\n"))
                 result_lines.extend(original_lines[j:])
 
-                new_content = '\n'.join(result_lines)
+                new_content = "\n".join(result_lines)
                 return EditResult(
-                    success=True,
-                    content=new_content,
-                    match_method="whitespace_normalized"
+                    success=True, content=new_content, match_method="whitespace_normalized"
                 )
 
     # Strategy 4: Fuzzy matching (if enabled)
@@ -187,23 +175,20 @@ def apply_search_replace(
     # All strategies failed
     return EditResult(
         success=False,
-        error=f"Could not find search block in file. Tried exact, trimmed, normalized, and fuzzy matching.\n\nSearched for:\n{search[:200]}..."
+        error=f"Could not find search block in file. Tried exact, trimmed, normalized, and fuzzy matching.\n\nSearched for:\n{search[:200]}...",
     )
 
 
 def _fuzzy_search_replace(
-    original_content: str,
-    search: str,
-    replace: str,
-    threshold: float = 0.8
+    original_content: str, search: str, replace: str, threshold: float = 0.8
 ) -> EditResult:
     """
     Fuzzy matching using SequenceMatcher.
 
     Finds the best matching block in the original content and replaces it.
     """
-    search_lines = search.split('\n')
-    original_lines = original_content.split('\n')
+    search_lines = search.split("\n")
+    original_lines = original_content.split("\n")
 
     best_ratio = 0.0
     best_start = -1
@@ -215,8 +200,8 @@ def _fuzzy_search_replace(
             continue
 
         for i in range(len(original_lines) - window_size + 1):
-            candidate_lines = original_lines[i:i + window_size]
-            candidate = '\n'.join(candidate_lines)
+            candidate_lines = original_lines[i : i + window_size]
+            candidate = "\n".join(candidate_lines)
 
             # Calculate similarity
             ratio = SequenceMatcher(None, search, candidate).ratio()
@@ -229,29 +214,27 @@ def _fuzzy_search_replace(
     if best_ratio >= threshold:
         # Apply the replacement
         result_lines = original_lines[:best_start]
-        result_lines.extend(replace.split('\n'))
+        result_lines.extend(replace.split("\n"))
         result_lines.extend(original_lines[best_end:])
 
-        new_content = '\n'.join(result_lines)
+        new_content = "\n".join(result_lines)
 
         logger.info(f"Fuzzy match found with {best_ratio:.2%} similarity")
 
         return EditResult(
-            success=True,
-            content=new_content,
-            match_method=f"fuzzy ({best_ratio:.2%})"
+            success=True, content=new_content, match_method=f"fuzzy ({best_ratio:.2%})"
         )
 
     return EditResult(
         success=False,
-        error=f"Fuzzy matching failed. Best similarity was {best_ratio:.2%} (threshold: {threshold:.0%})"
+        error=f"Fuzzy matching failed. Best similarity was {best_ratio:.2%} (threshold: {threshold:.0%})",
     )
 
 
 def apply_multiple_edits(
     original_content: str,
-    edits: List[Tuple[str, str]],  # List of (search, replace) tuples
-    fuzzy: bool = True
+    edits: list[tuple[str, str]],  # List of (search, replace) tuples
+    fuzzy: bool = True,
 ) -> EditResult:
     """
     Apply multiple search/replace edits sequentially.
@@ -274,17 +257,14 @@ def apply_multiple_edits(
 
         if not result.success:
             return EditResult(
-                success=False,
-                error=f"Edit {i+1}/{len(edits)} failed: {result.error}"
+                success=False, error=f"Edit {i + 1}/{len(edits)} failed: {result.error}"
             )
 
         current_content = result.content
-        logger.info(f"Applied edit {i+1}/{len(edits)} using {result.match_method} matching")
+        logger.info(f"Applied edit {i + 1}/{len(edits)} using {result.match_method} matching")
 
     return EditResult(
-        success=True,
-        content=current_content,
-        match_method=f"multiple ({len(edits)} edits)"
+        success=True, content=current_content, match_method=f"multiple ({len(edits)} edits)"
     )
 
 
@@ -294,7 +274,7 @@ def is_search_replace_format(content: str) -> bool:
 
     Returns True if the content appears to use search/replace format.
     """
-    pattern = r'<<<<<<< SEARCH.*?=======.*?>>>>>>> REPLACE'
+    pattern = r"<<<<<<< SEARCH.*?=======.*?>>>>>>> REPLACE"
     return bool(re.search(pattern, content, re.DOTALL))
 
 
@@ -306,18 +286,14 @@ def is_full_file_format(content: str) -> bool:
     """
     # Check for typical full file markers
     patterns = [
-        r'```(?:\w+)?\s*\n(?://|#)\s*File:\s*[^\n]+\n',  # File: comment
-        r'```(?:\w+)?\s*\n[a-zA-Z0-9_/-]+\.[a-zA-Z0-9]+\n',  # Direct path
+        r"```(?:\w+)?\s*\n(?://|#)\s*File:\s*[^\n]+\n",  # File: comment
+        r"```(?:\w+)?\s*\n[a-zA-Z0-9_/-]+\.[a-zA-Z0-9]+\n",  # Direct path
     ]
 
-    for pattern in patterns:
-        if re.search(pattern, content):
-            return True
-
-    return False
+    return any(re.search(pattern, content) for pattern in patterns)
 
 
-def extract_edits_by_file(content: str) -> Dict[str, List[SearchReplaceEdit]]:
+def extract_edits_by_file(content: str) -> dict[str, list[SearchReplaceEdit]]:
     """
     Group search/replace edits by file path.
 
@@ -326,7 +302,7 @@ def extract_edits_by_file(content: str) -> Dict[str, List[SearchReplaceEdit]]:
     """
     edits = extract_search_replace_blocks(content)
 
-    by_file: Dict[str, List[SearchReplaceEdit]] = {}
+    by_file: dict[str, list[SearchReplaceEdit]] = {}
     for edit in edits:
         if edit.file_path not in by_file:
             by_file[edit.file_path] = []

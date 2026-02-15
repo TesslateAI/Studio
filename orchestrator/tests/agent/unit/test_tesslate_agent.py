@@ -1015,8 +1015,9 @@ class TestSubagentSystem:
             context=base_context,
         )
 
-        result = await mgr.invoke("Explore", "Find auth files")
-        assert "auth files" in result
+        result_text, agent_id = await mgr.invoke("Explore", "Find auth files")
+        assert "auth files" in result_text
+        assert isinstance(agent_id, str)
 
     def test_subagent_tool_added_to_openai_tools(self, mock_registry, base_context):
         """invoke_subagent tool appears in the OpenAI tools list."""
@@ -1028,7 +1029,13 @@ class TestSubagentSystem:
             enable_subagents=True,
         )
 
-        tools = agent._get_openai_tools(base_context)
+        subagent_mgr = SubagentManager(
+            model_adapter=adapter,
+            base_tool_registry=mock_registry,
+            context=base_context,
+        )
+
+        tools = agent._get_openai_tools(base_context, subagent_manager=subagent_mgr)
         tool_names = {t["function"]["name"] for t in tools}
         assert "invoke_subagent" in tool_names
 

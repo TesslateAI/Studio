@@ -9,44 +9,38 @@ Provides API endpoints for:
 All snapshot operations use Kubernetes VolumeSnapshots backed by AWS EBS CSI driver.
 """
 
+import logging
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
-from uuid import UUID
-import logging
 
-from ..database import get_db
-from ..models import User, Project
 from ..auth import get_current_user
+from ..config import get_settings
+from ..database import get_db
+from ..models import Project, User
 from ..schemas import (
+    RestoreSnapshotResponse,
     SnapshotCreate,
-    SnapshotResponse,
     SnapshotListResponse,
-    RestoreSnapshotResponse
+    SnapshotResponse,
 )
 from ..services.snapshot_manager import get_snapshot_manager
-from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects/{project_id}/snapshots", tags=["snapshots"])
 
 
-async def get_project_for_user(
-    project_id: UUID,
-    user: User,
-    db: AsyncSession
-) -> Project:
+async def get_project_for_user(project_id: UUID, user: User, db: AsyncSession) -> Project:
     """Get a project and verify the user has access to it."""
     project = await db.get(Project, project_id)
     if not project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project {project_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Project {project_id} not found"
         )
     if project.owner_id != user.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this project"
+            status_code=status.HTTP_403_FORBIDDEN, detail="You don't have access to this project"
         )
     return project
 
@@ -55,7 +49,7 @@ async def get_project_for_user(
 async def list_snapshots(
     project_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get all snapshots for a project (Timeline API).
@@ -66,7 +60,7 @@ async def list_snapshots(
     Used by the frontend Timeline panel to display project history
     and allow users to restore to previous states.
     """
-    project = await get_project_for_user(project_id, current_user, db)
+    await get_project_for_user(project_id, current_user, db)
 
     snapshot_manager = get_snapshot_manager()
     settings = get_settings()
@@ -84,12 +78,12 @@ async def list_snapshots(
                 label=s.label,
                 volume_size_bytes=s.volume_size_bytes,
                 created_at=s.created_at,
-                ready_at=s.ready_at
+                ready_at=s.ready_at,
             )
             for s in snapshots
         ],
         total_count=len(snapshots),
-        max_snapshots=settings.k8s_max_snapshots_per_project
+        max_snapshots=settings.k8s_max_snapshots_per_project,
     )
 
 
@@ -98,7 +92,7 @@ async def create_manual_snapshot(
     project_id: UUID,
     request: SnapshotCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Create a manual snapshot of the current project state.
@@ -114,11 +108,11 @@ async def create_manual_snapshot(
     """
     project = await get_project_for_user(project_id, current_user, db)
 
-    if project.environment_status != 'active':
+    if project.environment_status != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot create snapshot: project is {project.environment_status}. "
-                   "Project must be active (running) to create a snapshot."
+            "Project must be active (running) to create a snapshot.",
         )
 
     snapshot_manager = get_snapshot_manager()
@@ -128,14 +122,14 @@ async def create_manual_snapshot(
         user_id=current_user.id,
         db=db,
         snapshot_type="manual",
-        label=request.label or "Manual save"
+        label=request.label or "Manual save",
     )
 
     if error:
         logger.error(f"[SNAPSHOTS] Failed to create manual snapshot: {error}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create snapshot: {error}"
+            detail=f"Failed to create snapshot: {error}",
         )
 
     # Return immediately with pending status - non-blocking design
@@ -152,7 +146,7 @@ async def create_manual_snapshot(
         label=snapshot.label,
         volume_size_bytes=snapshot.volume_size_bytes,
         created_at=snapshot.created_at,
-        ready_at=snapshot.ready_at
+        ready_at=snapshot.ready_at,
     )
 
 
@@ -161,18 +155,19 @@ async def get_snapshot(
     project_id: UUID,
     snapshot_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Get details of a specific snapshot."""
-    project = await get_project_for_user(project_id, current_user, db)
+    await get_project_for_user(project_id, current_user, db)
 
     from ..models import ProjectSnapshot
+
     snapshot = await db.get(ProjectSnapshot, snapshot_id)
 
     if not snapshot or snapshot.project_id != project_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Snapshot {snapshot_id} not found for project {project_id}"
+            detail=f"Snapshot {snapshot_id} not found for project {project_id}",
         )
 
     return SnapshotResponse(
@@ -184,7 +179,7 @@ async def get_snapshot(
         label=snapshot.label,
         volume_size_bytes=snapshot.volume_size_bytes,
         created_at=snapshot.created_at,
-        ready_at=snapshot.ready_at
+        ready_at=snapshot.ready_at,
     )
 
 
@@ -193,7 +188,7 @@ async def restore_snapshot(
     project_id: UUID,
     snapshot_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Restore a project to a specific snapshot point in time.
@@ -209,38 +204,41 @@ async def restore_snapshot(
 
     # Verify snapshot exists and belongs to project
     from ..models import ProjectSnapshot
+
     snapshot = await db.get(ProjectSnapshot, snapshot_id)
 
     if not snapshot or snapshot.project_id != project_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Snapshot {snapshot_id} not found for project {project_id}"
+            detail=f"Snapshot {snapshot_id} not found for project {project_id}",
         )
 
-    if snapshot.status != 'ready':
+    if snapshot.status != "ready":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot restore from snapshot: status is {snapshot.status}. "
-                   "Only 'ready' snapshots can be restored."
+            "Only 'ready' snapshots can be restored.",
         )
 
     # Project must be hibernated to restore
-    if project.environment_status not in ['hibernated', 'stopped']:
+    if project.environment_status not in ["hibernated", "stopped"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot restore: project is {project.environment_status}. "
-                   "Stop the project first before restoring from a snapshot."
+            "Stop the project first before restoring from a snapshot.",
         )
 
     # Update project to point to this snapshot for next restore
     project.latest_snapshot_id = snapshot_id
     await db.commit()
 
-    logger.info(f"[SNAPSHOTS] Set project {project_id} to restore from snapshot {snapshot.snapshot_name}")
+    logger.info(
+        f"[SNAPSHOTS] Set project {project_id} to restore from snapshot {snapshot.snapshot_name}"
+    )
 
     return RestoreSnapshotResponse(
         success=True,
         message=f"Project will restore from '{snapshot.label or snapshot.snapshot_name}' on next start",
         snapshot_id=snapshot_id,
-        restored_from=snapshot.snapshot_name
+        restored_from=snapshot.snapshot_name,
     )

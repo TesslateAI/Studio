@@ -1,17 +1,19 @@
 """
 Base classes and normalized models for Git providers.
 """
+
 from abc import ABC, abstractmethod
 from datetime import datetime
-from enum import Enum
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from enum import StrEnum
+from typing import Any
+
 import httpx
-import re
+from pydantic import BaseModel
 
 
-class GitProviderType(str, Enum):
+class GitProviderType(StrEnum):
     """Supported Git provider types."""
+
     GITHUB = "github"
     GITLAB = "gitlab"
     BITBUCKET = "bitbucket"
@@ -19,28 +21,30 @@ class GitProviderType(str, Enum):
 
 class NormalizedUser(BaseModel):
     """Normalized user data across all providers."""
+
     id: str
     username: str
-    email: Optional[str] = None
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
+    email: str | None = None
+    display_name: str | None = None
+    avatar_url: str | None = None
 
 
 class NormalizedRepository(BaseModel):
     """Normalized repository data across all providers."""
+
     id: str
     name: str
     full_name: str  # owner/repo format
-    description: Optional[str] = None
+    description: str | None = None
     clone_url: str
-    ssh_url: Optional[str] = None
+    ssh_url: str | None = None
     web_url: str
     default_branch: str = "main"
     private: bool = False
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     owner: str
     provider: GitProviderType
-    language: Optional[str] = None
+    language: str | None = None
     size: int = 0
     stars_count: int = 0
     forks_count: int = 0
@@ -48,6 +52,7 @@ class NormalizedRepository(BaseModel):
 
 class NormalizedBranch(BaseModel):
     """Normalized branch data across all providers."""
+
     name: str
     is_default: bool = False
     commit_sha: str
@@ -78,7 +83,7 @@ class BaseGitProvider(ABC):
         self._headers = self._build_headers()
 
     @abstractmethod
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """
         Build provider-specific HTTP headers for API requests.
 
@@ -91,9 +96,9 @@ class BaseGitProvider(ABC):
         self,
         method: str,
         endpoint: str,
-        json: Optional[Dict] = None,
-        params: Optional[Dict] = None,
-        timeout: float = 30.0
+        json: dict | None = None,
+        params: dict | None = None,
+        timeout: float = 30.0,
     ) -> Any:
         """
         Make an authenticated request to the provider API.
@@ -120,7 +125,7 @@ class BaseGitProvider(ABC):
                 headers=self._headers,
                 json=json,
                 params=params,
-                timeout=timeout
+                timeout=timeout,
             )
             response.raise_for_status()
             return response.json()
@@ -136,7 +141,7 @@ class BaseGitProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_user_emails(self) -> List[str]:
+    async def get_user_emails(self) -> list[str]:
         """
         Get user email addresses.
 
@@ -147,10 +152,8 @@ class BaseGitProvider(ABC):
 
     @abstractmethod
     async def list_repositories(
-        self,
-        visibility: str = "all",
-        sort: str = "updated"
-    ) -> List[NormalizedRepository]:
+        self, visibility: str = "all", sort: str = "updated"
+    ) -> list[NormalizedRepository]:
         """
         List repositories accessible by the authenticated user.
 
@@ -164,11 +167,7 @@ class BaseGitProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_repository(
-        self,
-        owner: str,
-        repo: str
-    ) -> NormalizedRepository:
+    async def get_repository(self, owner: str, repo: str) -> NormalizedRepository:
         """
         Get information about a specific repository.
 
@@ -182,11 +181,7 @@ class BaseGitProvider(ABC):
         pass
 
     @abstractmethod
-    async def list_branches(
-        self,
-        owner: str,
-        repo: str
-    ) -> List[NormalizedBranch]:
+    async def list_branches(self, owner: str, repo: str) -> list[NormalizedBranch]:
         """
         List branches for a repository.
 
@@ -200,11 +195,7 @@ class BaseGitProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_default_branch(
-        self,
-        owner: str,
-        repo: str
-    ) -> str:
+    async def get_default_branch(self, owner: str, repo: str) -> str:
         """
         Get the default branch name for a repository.
 
@@ -232,7 +223,7 @@ class BaseGitProvider(ABC):
 
     @staticmethod
     @abstractmethod
-    def parse_repo_url(repo_url: str) -> Optional[Dict[str, str]]:
+    def parse_repo_url(repo_url: str) -> dict[str, str] | None:
         """
         Parse a repository URL to extract owner and repo name.
 
@@ -246,11 +237,7 @@ class BaseGitProvider(ABC):
 
     @staticmethod
     @abstractmethod
-    def format_clone_url(
-        owner: str,
-        repo: str,
-        access_token: Optional[str] = None
-    ) -> str:
+    def format_clone_url(owner: str, repo: str, access_token: str | None = None) -> str:
         """
         Format a clone URL with optional authentication.
 
@@ -265,7 +252,7 @@ class BaseGitProvider(ABC):
         pass
 
     @staticmethod
-    def detect_provider_from_url(repo_url: str) -> Optional[GitProviderType]:
+    def detect_provider_from_url(repo_url: str) -> GitProviderType | None:
         """
         Detect which provider a repository URL belongs to.
 

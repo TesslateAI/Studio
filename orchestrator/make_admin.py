@@ -8,16 +8,15 @@ Usage:
 Or inside Docker container:
     docker exec tesslate-orchestrator python /app/make_admin.py <email>
 """
+
 import asyncio
 import sys
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+# Import all models to ensure relationships are properly resolved
 from app.database import AsyncSessionLocal
 from app.models_auth import User
-# Import all models to ensure relationships are properly resolved
-import app.models
 
 
 async def make_admin(email: str):
@@ -30,9 +29,7 @@ async def make_admin(email: str):
     async with AsyncSessionLocal() as session:
         try:
             # Find user by email
-            result = await session.execute(
-                select(User).where(User.email == email)
-            )
+            result = await session.execute(select(User).where(User.email == email))
             user = result.scalar_one_or_none()
 
             if not user:
@@ -72,6 +69,7 @@ async def make_admin(email: str):
         except Exception as e:
             print(f"❌ Error making user admin: {e}")
             import traceback
+
             traceback.print_exc()
             sys.exit(1)
 
@@ -86,9 +84,7 @@ async def revoke_admin(email: str):
     async with AsyncSessionLocal() as session:
         try:
             # Find user by email
-            result = await session.execute(
-                select(User).where(User.email == email)
-            )
+            result = await session.execute(select(User).where(User.email == email))
             user = result.scalar_one_or_none()
 
             if not user:
@@ -112,6 +108,7 @@ async def revoke_admin(email: str):
         except Exception as e:
             print(f"❌ Error revoking admin: {e}")
             import traceback
+
             traceback.print_exc()
             sys.exit(1)
 
@@ -119,9 +116,7 @@ async def revoke_admin(email: str):
 async def list_admins():
     """List all admin users."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(User).where(User.is_superuser == True)
-        )
+        result = await session.execute(select(User).where(User.is_superuser.is_(True)))
         admins = result.scalars().all()
 
         if not admins:

@@ -1,14 +1,13 @@
-from uuid import UUID
 """
 LiteLLM Service for managing user virtual keys and tracking usage.
 """
 
-import aiohttp
-import uuid
 import logging
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-import os
+from typing import Any
+from uuid import UUID
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ class LiteLLMService:
     def __init__(self):
         # Import settings to get configuration
         from ..config import get_settings
+
         settings = get_settings()
 
         # Get configuration from settings (which reads from environment)
@@ -26,25 +26,30 @@ class LiteLLMService:
 
         # Management API is at root level (without /v1), chat API is at /v1
         # Strip /v1 from base_url for management endpoints (works whether user includes /v1 or not)
-        base_url_clean = self.base_url.rstrip('/')
-        if base_url_clean.endswith('/v1'):
+        base_url_clean = self.base_url.rstrip("/")
+        if base_url_clean.endswith("/v1"):
             self.management_base_url = base_url_clean[:-3]  # Remove /v1
         else:
             self.management_base_url = base_url_clean
 
         self.master_key = settings.litellm_master_key
-        self.default_models = settings.litellm_default_models.split(",") if settings.litellm_default_models else []
+        self.default_models = (
+            settings.litellm_default_models.split(",") if settings.litellm_default_models else []
+        )
         self.team_id = settings.litellm_team_id
         self.email_domain = settings.litellm_email_domain
         self.initial_budget = settings.litellm_initial_budget
 
         # Only set headers if we have a master key
-        self.headers = {
-            "Authorization": f"Bearer {self.master_key}",
-            "Content-Type": "application/json"
-        } if self.master_key else {}
+        self.headers = (
+            {"Authorization": f"Bearer {self.master_key}", "Content-Type": "application/json"}
+            if self.master_key
+            else {}
+        )
 
-    async def create_user_key(self, user_id: UUID, username: str, models: List[str] = None) -> Dict[str, Any]:
+    async def create_user_key(
+        self, user_id: UUID, username: str, models: list[str] = None
+    ) -> dict[str, Any]:
         """
         Create a virtual API key for a user in LiteLLM.
 
@@ -74,26 +79,26 @@ class LiteLLMService:
                     "metadata": {
                         "tesslate_user_id": str(user_id),
                         "username": username,
-                        "created_at": datetime.utcnow().isoformat()
-                    }
+                        "created_at": datetime.utcnow().isoformat(),
+                    },
                 }
 
                 async with session.post(
-                    f"{self.management_base_url}/user/new",
-                    headers=self.headers,
-                    json=user_data
+                    f"{self.management_base_url}/user/new", headers=self.headers, json=user_data
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
 
                         # If user already exists, that's OK - we'll just create a key for them
                         if "already exists" in error_text.lower():
-                            logger.info(f"LiteLLM user {litellm_user_id} already exists, creating key...")
+                            logger.info(
+                                f"LiteLLM user {litellm_user_id} already exists, creating key..."
+                            )
                         else:
                             logger.error(f"Failed to create LiteLLM user: {error_text}")
                             raise Exception(f"Failed to create LiteLLM user: {error_text}")
                     else:
-                        user_response = await resp.json()
+                        await resp.json()
                         logger.info(f"Created LiteLLM user {litellm_user_id}")
 
                 # Generate API key for the user
@@ -105,10 +110,7 @@ class LiteLLMService:
                     "team_id": self.team_id,  # Access group from configuration
                     "max_budget": self.initial_budget,  # Initial budget from configuration
                     "duration": "365d",  # Key valid for 1 year
-                    "metadata": {
-                        "tesslate_user_id": str(user_id),
-                        "username": username
-                    }
+                    "metadata": {"tesslate_user_id": str(user_id), "username": username},
                 }
 
                 # Only add models restriction if explicitly provided
@@ -117,9 +119,7 @@ class LiteLLMService:
                     key_data["models"] = models
 
                 async with session.post(
-                    f"{self.management_base_url}/key/generate",
-                    headers=self.headers,
-                    json=key_data
+                    f"{self.management_base_url}/key/generate", headers=self.headers, json=key_data
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -132,22 +132,21 @@ class LiteLLMService:
                 try:
                     member_data = {
                         "team_id": self.team_id,
-                        "member": {
-                            "user_id": litellm_user_id,
-                            "role": "user"
-                        }
+                        "member": {"user_id": litellm_user_id, "role": "user"},
                     }
 
                     async with session.post(
                         f"{self.management_base_url}/team/member_add",
                         headers=self.headers,
-                        json=member_data
+                        json=member_data,
                     ) as resp:
                         if resp.status == 200:
                             logger.info(f"Added {litellm_user_id} to team {self.team_id}")
                         else:
                             error_text = await resp.text()
-                            logger.warning(f"Could not add user to team {self.team_id}: {error_text}")
+                            logger.warning(
+                                f"Could not add user to team {self.team_id}: {error_text}"
+                            )
                             # Don't fail - the team_id in the key might be enough
 
                 except Exception as e:
@@ -158,14 +157,14 @@ class LiteLLMService:
                     "api_key": key_response.get("key"),
                     "litellm_user_id": litellm_user_id,
                     "models": models if models is not None else "inherited_from_team",
-                    "budget": key_data["max_budget"]
+                    "budget": key_data["max_budget"],
                 }
 
             except Exception as e:
                 logger.error(f"Error creating LiteLLM user key: {e}")
                 raise
 
-    async def update_user_models(self, api_key: str, models: List[str]) -> bool:
+    async def update_user_models(self, api_key: str, models: list[str]) -> bool:
         """
         Update the models available to a user.
 
@@ -178,15 +177,10 @@ class LiteLLMService:
         """
         async with aiohttp.ClientSession() as session:
             try:
-                update_data = {
-                    "key": api_key,
-                    "models": models
-                }
+                update_data = {"key": api_key, "models": models}
 
                 async with session.post(
-                    f"{self.management_base_url}/key/update",
-                    headers=self.headers,
-                    json=update_data
+                    f"{self.management_base_url}/key/update", headers=self.headers, json=update_data
                 ) as resp:
                     return resp.status == 200
 
@@ -194,7 +188,7 @@ class LiteLLMService:
                 logger.error(f"Error updating user models: {e}")
                 return False
 
-    async def update_user_team(self, api_key: str, team_id: str, models: List[str] = None) -> bool:
+    async def update_user_team(self, api_key: str, team_id: str, models: list[str] = None) -> bool:
         """
         Update the team/access group for a user's key.
 
@@ -208,18 +202,13 @@ class LiteLLMService:
         """
         async with aiohttp.ClientSession() as session:
             try:
-                update_data = {
-                    "key": api_key,
-                    "team_id": team_id
-                }
+                update_data = {"key": api_key, "team_id": team_id}
 
                 if models:
                     update_data["models"] = models
 
                 async with session.post(
-                    f"{self.management_base_url}/key/update",
-                    headers=self.headers,
-                    json=update_data
+                    f"{self.management_base_url}/key/update", headers=self.headers, json=update_data
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -246,13 +235,11 @@ class LiteLLMService:
                 update_data = {
                     "key": api_key,
                     "max_budget": amount,
-                    "budget_action": "add"  # Add to existing budget
+                    "budget_action": "add",  # Add to existing budget
                 }
 
                 async with session.post(
-                    f"{self.management_base_url}/key/update",
-                    headers=self.headers,
-                    json=update_data
+                    f"{self.management_base_url}/key/update", headers=self.headers, json=update_data
                 ) as resp:
                     return resp.status == 200
 
@@ -260,7 +247,7 @@ class LiteLLMService:
                 logger.error(f"Error adding user budget: {e}")
                 return False
 
-    async def get_user_usage(self, api_key: str, start_date: datetime = None) -> Dict[str, Any]:
+    async def get_user_usage(self, api_key: str, start_date: datetime = None) -> dict[str, Any]:
         """
         Get usage statistics for a user.
 
@@ -276,15 +263,10 @@ class LiteLLMService:
 
         async with aiohttp.ClientSession() as session:
             try:
-                params = {
-                    "api_key": api_key,
-                    "start_date": start_date.isoformat()
-                }
+                params = {"api_key": api_key, "start_date": start_date.isoformat()}
 
                 async with session.get(
-                    f"{self.management_base_url}/spend/key",
-                    headers=self.headers,
-                    params=params
+                    f"{self.management_base_url}/spend/key", headers=self.headers, params=params
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -297,7 +279,7 @@ class LiteLLMService:
                 logger.error(f"Error getting user usage: {e}")
                 return {}
 
-    async def get_all_users_usage(self, start_date: datetime = None) -> List[Dict[str, Any]]:
+    async def get_all_users_usage(self, start_date: datetime = None) -> list[dict[str, Any]]:
         """
         Get usage statistics for all users (admin only).
 
@@ -312,14 +294,10 @@ class LiteLLMService:
 
         async with aiohttp.ClientSession() as session:
             try:
-                params = {
-                    "start_date": start_date.isoformat()
-                }
+                params = {"start_date": start_date.isoformat()}
 
                 async with session.get(
-                    f"{self.management_base_url}/spend/users",
-                    headers=self.headers,
-                    params=params
+                    f"{self.management_base_url}/spend/users", headers=self.headers, params=params
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -332,7 +310,7 @@ class LiteLLMService:
                 logger.error(f"Error getting all users usage: {e}")
                 return []
 
-    async def get_global_stats(self) -> Dict[str, Any]:
+    async def get_global_stats(self) -> dict[str, Any]:
         """
         Get global statistics from LiteLLM (admin only).
 
@@ -342,8 +320,7 @@ class LiteLLMService:
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(
-                    f"{self.management_base_url}/global/spend",
-                    headers=self.headers
+                    f"{self.management_base_url}/global/spend", headers=self.headers
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -356,7 +333,7 @@ class LiteLLMService:
                 logger.error(f"Error getting global stats: {e}")
                 return {}
 
-    async def enable_user_passthrough(self, api_key: str, user_api_keys: Dict[str, str]) -> bool:
+    async def enable_user_passthrough(self, api_key: str, user_api_keys: dict[str, str]) -> bool:
         """
         Enable passthrough mode for a user with their own API keys.
 
@@ -371,16 +348,11 @@ class LiteLLMService:
             try:
                 update_data = {
                     "key": api_key,
-                    "metadata": {
-                        "passthrough_enabled": True,
-                        "user_api_keys": user_api_keys
-                    }
+                    "metadata": {"passthrough_enabled": True, "user_api_keys": user_api_keys},
                 }
 
                 async with session.post(
-                    f"{self.management_base_url}/key/update",
-                    headers=self.headers,
-                    json=update_data
+                    f"{self.management_base_url}/key/update", headers=self.headers, json=update_data
                 ) as resp:
                     return resp.status == 200
 
@@ -400,14 +372,10 @@ class LiteLLMService:
         """
         async with aiohttp.ClientSession() as session:
             try:
-                delete_data = {
-                    "keys": [api_key]
-                }
+                delete_data = {"keys": [api_key]}
 
                 async with session.post(
-                    f"{self.management_base_url}/key/delete",
-                    headers=self.headers,
-                    json=delete_data
+                    f"{self.management_base_url}/key/delete", headers=self.headers, json=delete_data
                 ) as resp:
                     return resp.status == 200
 
@@ -415,7 +383,7 @@ class LiteLLMService:
                 logger.error(f"Error revoking user key: {e}")
                 return False
 
-    async def get_available_models(self) -> List[Dict[str, Any]]:
+    async def get_available_models(self) -> list[dict[str, Any]]:
         """
         Get list of available models from LiteLLM.
 
@@ -425,8 +393,7 @@ class LiteLLMService:
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(
-                    f"{self.management_base_url}/models",
-                    headers=self.headers
+                    f"{self.management_base_url}/models", headers=self.headers
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -434,7 +401,7 @@ class LiteLLMService:
                         return []
 
                     data = await resp.json()
-                    return data.get('data', [])
+                    return data.get("data", [])
 
             except Exception as e:
                 logger.error(f"Error getting available models: {e}")

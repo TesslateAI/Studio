@@ -5,12 +5,13 @@ This provider implements deployment to Cloudflare Workers with static assets.
 It handles asset manifest creation, batch uploads, and worker script deployment.
 """
 
-from typing import List, Dict, Optional
-import httpx
-import hashlib
 import base64
+import hashlib
 import json
-from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentResult, DeploymentFile
+
+import httpx
+
+from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
 
 
 class CloudflareWorkersProvider(BaseDeploymentProvider):
@@ -31,9 +32,7 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
                 raise ValueError(f"Missing required Cloudflare credential: {key}")
 
     async def deploy(
-        self,
-        files: List[DeploymentFile],
-        config: DeploymentConfig
+        self, files: list[DeploymentFile], config: DeploymentConfig
     ) -> DeploymentResult:
         """
         Deploy to Cloudflare Workers with Assets.
@@ -67,33 +66,29 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
             session = await self._create_upload_session(script_name, manifest)
 
             # Step 3: Upload assets in batches
-            completion_token = session['jwt']
-            if session.get('buckets'):
-                logs.append(f"Uploading {len(files)} assets in {len(session['buckets'])} batches...")
+            completion_token = session["jwt"]
+            if session.get("buckets"):
+                logs.append(
+                    f"Uploading {len(files)} assets in {len(session['buckets'])} batches..."
+                )
                 completion_token = await self._upload_assets(
-                    session['jwt'],
-                    session['buckets'],
-                    files,
-                    manifest
+                    session["jwt"], session["buckets"], files, manifest
                 )
                 logs.append("Asset upload completed")
 
             # Step 4: Deploy worker script
             logs.append("Deploying worker script...")
             worker_content = self._generate_worker_script(config)
-            await self._deploy_worker(
-                script_name,
-                worker_content,
-                completion_token,
-                config
-            )
+            await self._deploy_worker(script_name, worker_content, completion_token, config)
 
             # Step 5: Generate deployment URL
             dispatch_namespace = self.credentials.get("dispatch_namespace")
             if dispatch_namespace:
                 deployment_url = f"https://{script_name}.{dispatch_namespace}.workers.dev"
             else:
-                deployment_url = f"https://{script_name}.{self.credentials['account_id']}.workers.dev"
+                deployment_url = (
+                    f"https://{script_name}.{self.credentials['account_id']}.workers.dev"
+                )
 
             logs.append(f"Deployment successful: {deployment_url}")
 
@@ -103,31 +98,23 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
                 deployment_url=deployment_url,
                 logs=logs,
                 metadata={
-                    "account_id": self.credentials['account_id'],
+                    "account_id": self.credentials["account_id"],
                     "script_name": script_name,
-                    "file_count": len(files)
-                }
+                    "file_count": len(files),
+                },
             )
 
         except httpx.HTTPStatusError as e:
             error_msg = f"Cloudflare API error: {e.response.status_code} - {e.response.text}"
             logs.append(error_msg)
-            return DeploymentResult(
-                success=False,
-                error=error_msg,
-                logs=logs
-            )
+            return DeploymentResult(success=False, error=error_msg, logs=logs)
 
         except Exception as e:
             error_msg = f"Deployment failed: {str(e)}"
             logs.append(error_msg)
-            return DeploymentResult(
-                success=False,
-                error=error_msg,
-                logs=logs
-            )
+            return DeploymentResult(success=False, error=error_msg, logs=logs)
 
-    def _create_asset_manifest(self, files: List[DeploymentFile]) -> Dict:
+    def _create_asset_manifest(self, files: list[DeploymentFile]) -> dict:
         """
         Create Cloudflare asset manifest with SHA256 hashes.
 
@@ -143,21 +130,14 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
             file_hash = hashlib.sha256(file.content).hexdigest()
 
             # Normalize path (use forward slashes)
-            normalized_path = file.path.replace('\\', '/')
-            if not normalized_path.startswith('/'):
-                normalized_path = '/' + normalized_path
+            normalized_path = file.path.replace("\\", "/")
+            if not normalized_path.startswith("/"):
+                normalized_path = "/" + normalized_path
 
-            manifest[normalized_path] = {
-                "hash": file_hash,
-                "size": len(file.content)
-            }
+            manifest[normalized_path] = {"hash": file_hash, "size": len(file.content)}
         return manifest
 
-    async def _create_upload_session(
-        self,
-        script_name: str,
-        manifest: Dict
-    ) -> Dict:
+    async def _create_upload_session(self, script_name: str, manifest: dict) -> dict:
         """
         Create asset upload session with Cloudflare.
 
@@ -174,21 +154,13 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
         )
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                url,
-                headers=self._get_headers(),
-                json=manifest
-            )
+            response = await client.post(url, headers=self._get_headers(), json=manifest)
             response.raise_for_status()
             data = response.json()
-            return data['result']
+            return data["result"]
 
     async def _upload_assets(
-        self,
-        jwt: str,
-        buckets: List[List[str]],
-        files: List[DeploymentFile],
-        manifest: Dict
+        self, jwt: str, buckets: list[list[str]], files: list[DeploymentFile], manifest: dict
     ) -> str:
         """
         Upload assets in batches to Cloudflare.
@@ -205,17 +177,17 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
         # Create hash -> content mapping for quick lookup
         hash_to_content = {}
         for file in files:
-            normalized_path = file.path.replace('\\', '/')
-            if not normalized_path.startswith('/'):
-                normalized_path = '/' + normalized_path
+            normalized_path = file.path.replace("\\", "/")
+            if not normalized_path.startswith("/"):
+                normalized_path = "/" + normalized_path
 
-            file_hash = manifest[normalized_path]['hash']
+            file_hash = manifest[normalized_path]["hash"]
             hash_to_content[file_hash] = file.content
 
         completion_token = jwt
 
         # Upload each bucket
-        for bucket_index, bucket in enumerate(buckets):
+        for _bucket_index, bucket in enumerate(buckets):
             # Prepare batch data
             batch_data = []
             for file_hash in bucket:
@@ -223,12 +195,14 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
                 if content is None:
                     continue
 
-                batch_data.append({
-                    "key": file_hash,
-                    "value": base64.b64encode(content).decode('utf-8'),
-                    "metadata": {},
-                    "base64": True
-                })
+                batch_data.append(
+                    {
+                        "key": file_hash,
+                        "value": base64.b64encode(content).decode("utf-8"),
+                        "metadata": {},
+                        "base64": True,
+                    }
+                )
 
             # Upload batch
             url = f"{self.API_BASE}/accounts/{self.credentials['account_id']}/workers/assets/upload"
@@ -236,28 +210,21 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     url,
-                    headers={
-                        **self._get_headers(),
-                        "Authorization": f"Bearer {jwt}"
-                    },
+                    headers={**self._get_headers(), "Authorization": f"Bearer {jwt}"},
                     params={"base64": "true"},
-                    json=batch_data
+                    json=batch_data,
                 )
                 response.raise_for_status()
-                result = response.json()['result']
+                result = response.json()["result"]
 
                 # Update completion token if provided
-                if result.get('jwt'):
-                    completion_token = result['jwt']
+                if result.get("jwt"):
+                    completion_token = result["jwt"]
 
         return completion_token
 
     async def _deploy_worker(
-        self,
-        script_name: str,
-        worker_content: str,
-        asset_jwt: str,
-        config: DeploymentConfig
+        self, script_name: str, worker_content: str, asset_jwt: str, config: DeploymentConfig
     ) -> None:
         """
         Deploy worker script with metadata and assets.
@@ -280,26 +247,24 @@ class CloudflareWorkersProvider(BaseDeploymentProvider):
                 "config": {
                     "not_found_handling": "single-page-application",
                     "run_worker_first": True,
-                    "binding": "ASSETS"
-                }
+                    "binding": "ASSETS",
+                },
             },
             "bindings": [],
-            "vars": config.env_vars
+            "vars": config.env_vars,
         }
 
         # Prepare multipart form data
         files_data = {
-            'metadata': (None, json.dumps(metadata), 'application/json'),
-            'index.js': (None, worker_content, 'application/javascript+module')
+            "metadata": (None, json.dumps(metadata), "application/json"),
+            "index.js": (None, worker_content, "application/javascript+module"),
         }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.put(
                 url,
-                headers={
-                    "Authorization": f"Bearer {self.credentials['api_token']}"
-                },
-                files=files_data
+                headers={"Authorization": f"Bearer {self.credentials['api_token']}"},
+                files=files_data,
             )
             response.raise_for_status()
 
@@ -341,14 +306,14 @@ export default {
 }
 """
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self) -> dict[str, str]:
         """Get headers for Cloudflare API requests."""
         return {
             "Authorization": f"Bearer {self.credentials['api_token']}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
-    async def test_credentials(self) -> Dict[str, any]:
+    async def test_credentials(self) -> dict[str, any]:
         """
         Test if credentials are valid by making a real API call to Cloudflare.
 
@@ -369,24 +334,24 @@ export default {
                 data = response.json()
                 return {
                     "valid": True,
-                    "account_id": self.credentials['account_id'],
-                    "script_count": len(data.get('result', []))
+                    "account_id": self.credentials["account_id"],
+                    "script_count": len(data.get("result", [])),
                 }
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                raise ValueError("Invalid API token")
+                raise ValueError("Invalid API token") from e
             elif e.response.status_code == 403:
-                raise ValueError("API token does not have required permissions")
+                raise ValueError("API token does not have required permissions") from e
             elif e.response.status_code == 404:
-                raise ValueError("Account ID not found")
+                raise ValueError("Account ID not found") from e
             else:
-                raise ValueError(f"Cloudflare API error: {e.response.status_code}")
-        except httpx.TimeoutException:
-            raise ValueError("Connection to Cloudflare API timed out")
+                raise ValueError(f"Cloudflare API error: {e.response.status_code}") from e
+        except httpx.TimeoutException as e:
+            raise ValueError("Connection to Cloudflare API timed out") from e
         except Exception as e:
-            raise ValueError(f"Failed to validate credentials: {str(e)}")
+            raise ValueError(f"Failed to validate credentials: {str(e)}") from e
 
-    async def get_deployment_status(self, deployment_id: str) -> Dict:
+    async def get_deployment_status(self, deployment_id: str) -> dict:
         """
         Get deployment status from Cloudflare.
 
@@ -402,10 +367,7 @@ export default {
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=self._get_headers())
                 if response.status_code == 200:
-                    return {
-                        "status": "deployed",
-                        "script": response.json()['result']
-                    }
+                    return {"status": "deployed", "script": response.json()["result"]}
                 return {"status": "not_found"}
         except Exception as e:
             return {"status": "error", "error": str(e)}
@@ -429,7 +391,7 @@ export default {
         except Exception:
             return False
 
-    async def get_deployment_logs(self, deployment_id: str) -> List[str]:
+    async def get_deployment_logs(self, deployment_id: str) -> list[str]:
         """
         Get deployment logs.
 

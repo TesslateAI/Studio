@@ -6,15 +6,14 @@ This eliminates the need for scattered if/else blocks checking deployment mode.
 """
 
 import logging
-from typing import Optional, Dict
 
-from .deployment_mode import DeploymentMode
 from .base import BaseOrchestrator
+from .deployment_mode import DeploymentMode
 
 logger = logging.getLogger(__name__)
 
 # Cached orchestrator instances (singleton pattern)
-_orchestrators: Dict[DeploymentMode, BaseOrchestrator] = {}
+_orchestrators: dict[DeploymentMode, BaseOrchestrator] = {}
 
 
 class OrchestratorFactory:
@@ -34,11 +33,12 @@ class OrchestratorFactory:
             DeploymentMode enum value
         """
         from ...config import get_settings
+
         settings = get_settings()
         return DeploymentMode.from_string(settings.deployment_mode)
 
     @staticmethod
-    def create_orchestrator(mode: Optional[DeploymentMode] = None) -> BaseOrchestrator:
+    def create_orchestrator(mode: DeploymentMode | None = None) -> BaseOrchestrator:
         """
         Create or get cached orchestrator for the specified deployment mode.
 
@@ -63,11 +63,13 @@ class OrchestratorFactory:
 
         if mode == DeploymentMode.DOCKER:
             from .docker import DockerOrchestrator
+
             orchestrator = DockerOrchestrator()
             logger.info("[ORCHESTRATOR] Created Docker orchestrator")
 
         elif mode == DeploymentMode.KUBERNETES:
             from .kubernetes_orchestrator import KubernetesOrchestrator
+
             orchestrator = KubernetesOrchestrator()
             logger.info("[ORCHESTRATOR] Created Kubernetes orchestrator")
 
@@ -97,7 +99,7 @@ class OrchestratorFactory:
         logger.info("[ORCHESTRATOR] Cleared orchestrator cache")
 
 
-def get_orchestrator(mode: Optional[DeploymentMode] = None) -> BaseOrchestrator:
+def get_orchestrator(mode: DeploymentMode | None = None) -> BaseOrchestrator:
     """
     Get an orchestrator instance.
 

@@ -6,8 +6,9 @@ This ensures feature parity between Docker and Kubernetes deployments.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional
+from typing import Any
 from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .deployment_mode import DeploymentMode
@@ -40,13 +41,8 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     async def start_project(
-        self,
-        project,
-        containers: List,
-        connections: List,
-        user_id: UUID,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
+    ) -> dict[str, Any]:
         """
         Start all containers for a project.
 
@@ -67,12 +63,7 @@ class BaseOrchestrator(ABC):
         pass
 
     @abstractmethod
-    async def stop_project(
-        self,
-        project_slug: str,
-        project_id: UUID,
-        user_id: UUID
-    ) -> None:
+    async def stop_project(self, project_slug: str, project_id: UUID, user_id: UUID) -> None:
         """
         Stop all containers for a project.
 
@@ -85,13 +76,8 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     async def restart_project(
-        self,
-        project,
-        containers: List,
-        connections: List,
-        user_id: UUID,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        self, project, containers: list, connections: list, user_id: UUID, db: AsyncSession
+    ) -> dict[str, Any]:
         """
         Restart all containers for a project.
 
@@ -108,11 +94,7 @@ class BaseOrchestrator(ABC):
         pass
 
     @abstractmethod
-    async def get_project_status(
-        self,
-        project_slug: str,
-        project_id: UUID
-    ) -> Dict[str, Any]:
+    async def get_project_status(self, project_slug: str, project_id: UUID) -> dict[str, Any]:
         """
         Get status of all containers in a project.
 
@@ -137,11 +119,11 @@ class BaseOrchestrator(ABC):
         self,
         project,
         container,
-        all_containers: List,
-        connections: List,
+        all_containers: list,
+        connections: list,
         user_id: UUID,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        db: AsyncSession,
+    ) -> dict[str, Any]:
         """
         Start a single container for a project.
 
@@ -163,11 +145,7 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     async def stop_container(
-        self,
-        project_slug: str,
-        project_id: UUID,
-        container_name: str,
-        user_id: UUID
+        self, project_slug: str, project_id: UUID, container_name: str, user_id: UUID
     ) -> None:
         """
         Stop a single container.
@@ -182,12 +160,8 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     async def get_container_status(
-        self,
-        project_slug: str,
-        project_id: UUID,
-        container_name: str,
-        user_id: UUID
-    ) -> Dict[str, Any]:
+        self, project_slug: str, project_id: UUID, container_name: str, user_id: UUID
+    ) -> dict[str, Any]:
         """
         Get status of a single container.
 
@@ -217,8 +191,8 @@ class BaseOrchestrator(ABC):
         container_name: str,
         file_path: str,
         project_slug: str = None,
-        subdir: str = None
-    ) -> Optional[str]:
+        subdir: str = None,
+    ) -> str | None:
         """
         Read a file from a container.
 
@@ -244,7 +218,7 @@ class BaseOrchestrator(ABC):
         file_path: str,
         content: str,
         project_slug: str = None,
-        subdir: str = None
+        subdir: str = None,
     ) -> bool:
         """
         Write a file to a container.
@@ -263,11 +237,7 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     async def delete_file(
-        self,
-        user_id: UUID,
-        project_id: UUID,
-        container_name: str,
-        file_path: str
+        self, user_id: UUID, project_id: UUID, container_name: str, file_path: str
     ) -> bool:
         """
         Delete a file from a container.
@@ -285,12 +255,8 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     async def list_files(
-        self,
-        user_id: UUID,
-        project_id: UUID,
-        container_name: str,
-        directory: str = "."
-    ) -> List[Dict[str, Any]]:
+        self, user_id: UUID, project_id: UUID, container_name: str, directory: str = "."
+    ) -> list[dict[str, Any]]:
         """
         List files in a directory.
 
@@ -315,9 +281,9 @@ class BaseOrchestrator(ABC):
         user_id: UUID,
         project_id: UUID,
         container_name: str,
-        command: List[str],
+        command: list[str],
         timeout: int = 120,
-        working_dir: Optional[str] = None
+        working_dir: str | None = None,
     ) -> str:
         """
         Execute a command in a container.
@@ -337,11 +303,8 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     async def is_container_ready(
-        self,
-        user_id: UUID,
-        project_id: UUID,
-        container_name: str
-    ) -> Dict[str, Any]:
+        self, user_id: UUID, project_id: UUID, container_name: str
+    ) -> dict[str, Any]:
         """
         Check if a container is ready for commands.
 
@@ -364,10 +327,7 @@ class BaseOrchestrator(ABC):
 
     @abstractmethod
     def track_activity(
-        self,
-        user_id: UUID,
-        project_id: str,
-        container_name: Optional[str] = None
+        self, user_id: UUID, project_id: str, container_name: str | None = None
     ) -> None:
         """
         Track activity for idle cleanup purposes.
@@ -384,10 +344,7 @@ class BaseOrchestrator(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def cleanup_idle_environments(
-        self,
-        idle_timeout_minutes: int = 30
-    ) -> List[str]:
+    async def cleanup_idle_environments(self, idle_timeout_minutes: int = 30) -> list[str]:
         """
         Cleanup idle environments based on deployment mode strategy.
 
@@ -406,11 +363,7 @@ class BaseOrchestrator(ABC):
     # UTILITY METHODS (default implementations)
     # =========================================================================
 
-    def get_container_url(
-        self,
-        project_slug: str,
-        container_name: str
-    ) -> str:
+    def get_container_url(self, project_slug: str, container_name: str) -> str:
         """
         Generate the access URL for a container.
 
@@ -424,11 +377,12 @@ class BaseOrchestrator(ABC):
             Access URL for the container
         """
         from ...config import get_settings
+
         settings = get_settings()
 
         # Sanitize container name for URL
-        safe_name = container_name.lower().replace(' ', '-').replace('_', '-')
-        safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '-')
+        safe_name = container_name.lower().replace(" ", "-").replace("_", "-")
+        safe_name = "".join(c for c in safe_name if c.isalnum() or c == "-")
 
         # Build hostname
         hostname = f"{project_slug}-{safe_name}.{settings.app_domain}"

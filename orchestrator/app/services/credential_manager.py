@@ -1,22 +1,23 @@
-from uuid import UUID
 """
 Credential Manager for securely storing and retrieving GitHub credentials.
 Uses Fernet symmetric encryption for token storage.
 """
-from cryptography.fernet import Fernet
+
 from datetime import datetime
-from typing import Optional
+from uuid import UUID
+
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import GitHubCredential
 from ..config import get_settings
+from ..models import GitHubCredential
 
 
 class CredentialManager:
     """Manages encryption/decryption of GitHub credentials."""
 
-    def __init__(self, encryption_key: Optional[str] = None):
+    def __init__(self, encryption_key: str | None = None):
         """
         Initialize the credential manager with an encryption key.
 
@@ -76,11 +77,11 @@ class CredentialManager:
         db: AsyncSession,
         user_id: UUID,
         access_token: str,
-        refresh_token: Optional[str] = None,
-        expires_at: Optional[datetime] = None,
-        github_username: Optional[str] = None,
-        github_email: Optional[str] = None,
-        github_user_id: Optional[str] = None
+        refresh_token: str | None = None,
+        expires_at: datetime | None = None,
+        github_username: str | None = None,
+        github_email: str | None = None,
+        github_user_id: str | None = None,
     ) -> GitHubCredential:
         """
         Store OAuth tokens for a user (encrypted).
@@ -126,7 +127,7 @@ class CredentialManager:
                 token_expires_at=expires_at,
                 github_username=github_username,
                 github_email=github_email,
-                github_user_id=github_user_id
+                github_user_id=github_user_id,
             )
             db.add(credential)
 
@@ -134,12 +135,7 @@ class CredentialManager:
         await db.refresh(credential)
         return credential
 
-
-    async def get_credentials(
-        self,
-        db: AsyncSession,
-        user_id: UUID
-    ) -> Optional[dict]:
+    async def get_credentials(self, db: AsyncSession, user_id: UUID) -> dict | None:
         """
         Get decrypted credentials for a user.
 
@@ -159,8 +155,12 @@ class CredentialManager:
             return None
 
         # Decrypt OAuth tokens only
-        access_token = self.decrypt_token(credential.access_token) if credential.access_token else None
-        refresh_token = self.decrypt_token(credential.refresh_token) if credential.refresh_token else None
+        access_token = (
+            self.decrypt_token(credential.access_token) if credential.access_token else None
+        )
+        refresh_token = (
+            self.decrypt_token(credential.refresh_token) if credential.refresh_token else None
+        )
 
         return {
             "access_token": access_token,
@@ -169,14 +169,10 @@ class CredentialManager:
             "github_username": credential.github_username,
             "github_email": credential.github_email,
             "github_user_id": credential.github_user_id,
-            "scope": credential.scope
+            "scope": credential.scope,
         }
 
-    async def get_access_token(
-        self,
-        db: AsyncSession,
-        user_id: UUID
-    ) -> Optional[str]:
+    async def get_access_token(self, db: AsyncSession, user_id: UUID) -> str | None:
         """
         Get the decrypted OAuth access token for a user.
 
@@ -194,11 +190,7 @@ class CredentialManager:
         # Return OAuth access token only
         return credentials.get("access_token")
 
-    async def delete_credentials(
-        self,
-        db: AsyncSession,
-        user_id: UUID
-    ) -> bool:
+    async def delete_credentials(self, db: AsyncSession, user_id: UUID) -> bool:
         """
         Delete credentials for a user.
 
@@ -221,11 +213,7 @@ class CredentialManager:
         await db.commit()
         return True
 
-    async def has_credentials(
-        self,
-        db: AsyncSession,
-        user_id: UUID
-    ) -> bool:
+    async def has_credentials(self, db: AsyncSession, user_id: UUID) -> bool:
         """
         Check if a user has stored credentials.
 
@@ -244,7 +232,7 @@ class CredentialManager:
 
 
 # Global instance
-_credential_manager: Optional[CredentialManager] = None
+_credential_manager: CredentialManager | None = None
 
 
 def get_credential_manager() -> CredentialManager:

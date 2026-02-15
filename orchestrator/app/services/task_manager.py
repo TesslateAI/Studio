@@ -2,18 +2,21 @@
 Background Task Manager
 Tracks status of long-running operations to prevent blocking the event loop.
 """
+
 import asyncio
 import uuid
-from uuid import UUID
-from datetime import datetime
-from typing import Dict, Optional, List, Callable, Any
-from enum import Enum
-from dataclasses import dataclass, field
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+from uuid import UUID
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """Task execution statuses"""
+
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -24,6 +27,7 @@ class TaskStatus(str, Enum):
 @dataclass
 class TaskProgress:
     """Represents progress of a task"""
+
     current: int = 0
     total: int = 100
     message: str = ""
@@ -38,18 +42,19 @@ class TaskProgress:
 @dataclass
 class Task:
     """Represents a background task"""
+
     id: str
     user_id: UUID  # Changed from int to UUID to match User model
     type: str  # e.g., "project_creation", "project_deletion", "container_startup"
     status: TaskStatus
     created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     progress: TaskProgress = field(default_factory=TaskProgress)
-    result: Optional[Any] = None
-    error: Optional[str] = None
-    logs: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    result: Any | None = None
+    error: str | None = None
+    logs: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def add_log(self, message: str):
         """Add a log message with timestamp"""
@@ -64,7 +69,7 @@ class Task:
             self.progress.message = message
             self.add_log(message)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert task to dictionary for API responses"""
         return {
             "id": self.id,
@@ -78,12 +83,12 @@ class Task:
                 "current": self.progress.current,
                 "total": self.progress.total,
                 "percentage": self.progress.percentage,
-                "message": self.progress.message
+                "message": self.progress.message,
             },
             "result": self.result,
             "error": self.error,
             "logs": self.logs[-50:],  # Return last 50 log entries
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -91,17 +96,14 @@ class TaskManager:
     """Manages background tasks with status tracking"""
 
     def __init__(self):
-        self._tasks: Dict[str, Task] = {}
-        self._user_tasks: Dict[UUID, List[str]] = defaultdict(list)  # Changed from int to UUID
-        self._background_tasks: Dict[str, asyncio.Task] = {}
-        self._callbacks: Dict[str, List[Callable]] = defaultdict(list)
+        self._tasks: dict[str, Task] = {}
+        self._user_tasks: dict[UUID, list[str]] = defaultdict(list)  # Changed from int to UUID
+        self._background_tasks: dict[str, asyncio.Task] = {}
+        self._callbacks: dict[str, list[Callable]] = defaultdict(list)
         self._lock = asyncio.Lock()
 
     def create_task(
-        self,
-        user_id: UUID,
-        task_type: str,
-        metadata: Optional[Dict[str, Any]] = None
+        self, user_id: UUID, task_type: str, metadata: dict[str, Any] | None = None
     ) -> Task:
         """Create a new task and return it"""
         task_id = str(uuid.uuid4())
@@ -111,7 +113,7 @@ class TaskManager:
             type=task_type,
             status=TaskStatus.QUEUED,
             created_at=datetime.utcnow(),
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
         self._tasks[task_id] = task
@@ -119,29 +121,22 @@ class TaskManager:
 
         return task
 
-    def get_task(self, task_id: str) -> Optional[Task]:
+    def get_task(self, task_id: str) -> Task | None:
         """Get a task by ID"""
         return self._tasks.get(task_id)
 
-    def get_user_tasks(self, user_id: UUID, active_only: bool = False) -> List[Task]:
+    def get_user_tasks(self, user_id: UUID, active_only: bool = False) -> list[Task]:
         """Get all tasks for a user"""
         task_ids = self._user_tasks.get(user_id, [])
         tasks = [self._tasks[tid] for tid in task_ids if tid in self._tasks]
 
         if active_only:
-            tasks = [
-                t for t in tasks
-                if t.status in (TaskStatus.QUEUED, TaskStatus.RUNNING)
-            ]
+            tasks = [t for t in tasks if t.status in (TaskStatus.QUEUED, TaskStatus.RUNNING)]
 
         return sorted(tasks, key=lambda t: t.created_at, reverse=True)
 
     async def update_task_status(
-        self,
-        task_id: str,
-        status: TaskStatus,
-        error: Optional[str] = None,
-        result: Optional[Any] = None
+        self, task_id: str, status: TaskStatus, error: str | None = None, result: Any | None = None
     ):
         """Update task status"""
         async with self._lock:
@@ -164,13 +159,7 @@ class TaskManager:
             # Notify callbacks
             await self._notify_callbacks(task_id, task)
 
-    async def run_task(
-        self,
-        task_id: str,
-        coro: Callable,
-        *args,
-        **kwargs
-    ):
+    async def run_task(self, task_id: str, coro: Callable, *args, **kwargs):
         """Run a coroutine as a background task with status tracking"""
         task = self.get_task(task_id)
         if not task:
@@ -183,41 +172,30 @@ class TaskManager:
             # Execute the coroutine
             result = await coro(*args, task=task, **kwargs)
 
-            await self.update_task_status(
-                task_id,
-                TaskStatus.COMPLETED,
-                result=result
-            )
+            await self.update_task_status(task_id, TaskStatus.COMPLETED, result=result)
             task.add_log(f"Completed {task.type}")
 
             return result
 
         except Exception as e:
             error_msg = str(e)
-            await self.update_task_status(
-                task_id,
-                TaskStatus.FAILED,
-                error=error_msg
-            )
+            await self.update_task_status(task_id, TaskStatus.FAILED, error=error_msg)
             task.add_log(f"Failed: {error_msg}")
             raise
 
-    def start_background_task(
-        self,
-        task_id: str,
-        coro: Callable,
-        *args,
-        **kwargs
-    ) -> asyncio.Task:
+    def start_background_task(self, task_id: str, coro: Callable, *args, **kwargs) -> asyncio.Task:
         """Start a task in the background and return immediately"""
         import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[TASK-MANAGER] Creating background task {task_id} for coroutine {coro.__name__}")
-        logger.info(f"[TASK-MANAGER] Args: {args[:3] if len(args) > 3 else args}")  # First 3 args only
 
-        async_task = asyncio.create_task(
-            self.run_task(task_id, coro, *args, **kwargs)
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"[TASK-MANAGER] Creating background task {task_id} for coroutine {coro.__name__}"
         )
+        logger.info(
+            f"[TASK-MANAGER] Args: {args[:3] if len(args) > 3 else args}"
+        )  # First 3 args only
+
+        async_task = asyncio.create_task(self.run_task(task_id, coro, *args, **kwargs))
         self._background_tasks[task_id] = async_task
 
         logger.info(f"[TASK-MANAGER] Background task {task_id} created and stored")
@@ -244,6 +222,7 @@ class TaskManager:
         async with self._lock:
             cutoff_time = datetime.utcnow()
             from datetime import timedelta
+
             cutoff_time = cutoff_time - timedelta(hours=max_age_hours)
 
             tasks_to_remove = []
@@ -265,7 +244,7 @@ class TaskManager:
 
 
 # Global task manager instance
-_task_manager: Optional[TaskManager] = None
+_task_manager: TaskManager | None = None
 
 
 def get_task_manager() -> TaskManager:

@@ -2,14 +2,15 @@
 Async file I/O utilities
 Wraps blocking file operations to prevent blocking the event loop.
 """
+
 import asyncio
+import contextlib
 import os
 import shutil
-from typing import Optional, List, Callable, Tuple
-from pathlib import Path
+from collections.abc import Callable
 
 
-async def rmtree_async(path: str, progress_callback: Optional[Callable] = None) -> None:
+async def rmtree_async(path: str, progress_callback: Callable | None = None) -> None:
     """
     Async version of shutil.rmtree with progress tracking
 
@@ -17,17 +18,18 @@ async def rmtree_async(path: str, progress_callback: Optional[Callable] = None) 
         path: Directory path to remove
         progress_callback: Optional callback(current, total, path) for progress updates
     """
+
     def _count_items(directory: str) -> int:
         """Count total files and directories"""
         count = 0
         try:
-            for root, dirs, files in os.walk(directory):
+            for _root, dirs, files in os.walk(directory):
                 count += len(files) + len(dirs)
         except Exception:
             pass
         return count
 
-    def _rmtree_with_progress(directory: str, callback: Optional[Callable] = None):
+    def _rmtree_with_progress(directory: str, callback: Callable | None = None):
         """Remove directory tree with progress tracking"""
         if not os.path.exists(directory):
             return
@@ -80,10 +82,8 @@ async def rmtree_async(path: str, progress_callback: Optional[Callable] = None) 
 
 
 async def walk_directory_async(
-    directory: str,
-    exclude_dirs: Optional[List[str]] = None,
-    max_depth: Optional[int] = None
-) -> List[Tuple[str, List[str], List[str]]]:
+    directory: str, exclude_dirs: list[str] | None = None, max_depth: int | None = None
+) -> list[tuple[str, list[str], list[str]]]:
     """
     Async version of os.walk
 
@@ -95,6 +95,7 @@ async def walk_directory_async(
     Returns:
         List of (root, dirs, files) tuples
     """
+
     def _walk():
         exclude = exclude_dirs or []
         results = []
@@ -102,7 +103,7 @@ async def walk_directory_async(
         for root, dirs, files in os.walk(directory):
             # Calculate depth
             if max_depth is not None:
-                depth = root[len(directory):].count(os.sep)
+                depth = root[len(directory) :].count(os.sep)
                 if depth >= max_depth:
                     dirs.clear()
                     continue
@@ -117,7 +118,7 @@ async def walk_directory_async(
     return await asyncio.to_thread(_walk)
 
 
-async def read_file_async(file_path: str, encoding: str = 'utf-8', errors: str = 'replace') -> str:
+async def read_file_async(file_path: str, encoding: str = "utf-8", errors: str = "replace") -> str:
     """
     Async file read
 
@@ -129,18 +130,16 @@ async def read_file_async(file_path: str, encoding: str = 'utf-8', errors: str =
     Returns:
         File contents as string
     """
+
     def _read():
-        with open(file_path, 'r', encoding=encoding, errors=errors) as f:
+        with open(file_path, encoding=encoding, errors=errors) as f:
             return f.read()
 
     return await asyncio.to_thread(_read)
 
 
 async def write_file_async(
-    file_path: str,
-    content: str,
-    encoding: str = 'utf-8',
-    mode: str = 'w'
+    file_path: str, content: str, encoding: str = "utf-8", mode: str = "w"
 ) -> None:
     """
     Async file write
@@ -151,6 +150,7 @@ async def write_file_async(
         encoding: Character encoding
         mode: Write mode ('w' or 'a')
     """
+
     def _write():
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, mode, encoding=encoding) as f:
@@ -170,11 +170,7 @@ async def copy_file_async(src: str, dst: str) -> None:
     await asyncio.to_thread(shutil.copy2, src, dst)
 
 
-async def copy_tree_async(
-    src: str,
-    dst: str,
-    progress_callback: Optional[Callable] = None
-) -> None:
+async def copy_tree_async(src: str, dst: str, progress_callback: Callable | None = None) -> None:
     """
     Async directory tree copy with progress
 
@@ -183,13 +179,14 @@ async def copy_tree_async(
         dst: Destination directory
         progress_callback: Optional callback(current, total, path)
     """
+
     def _count_files(directory: str) -> int:
         count = 0
         for _, _, files in os.walk(directory):
             count += len(files)
         return count
 
-    def _copy_tree_with_progress(source: str, destination: str, callback: Optional[Callable] = None):
+    def _copy_tree_with_progress(source: str, destination: str, callback: Callable | None = None):
         total_files = _count_files(source) if callback else 0
         current_file = 0
 
@@ -239,21 +236,20 @@ async def get_directory_size_async(directory: str) -> int:
     Returns:
         Size in bytes
     """
+
     def _get_size():
         total_size = 0
-        for root, dirs, files in os.walk(directory):
+        for root, _dirs, files in os.walk(directory):
             for file in files:
                 file_path = os.path.join(root, file)
-                try:
+                with contextlib.suppress(Exception):
                     total_size += os.path.getsize(file_path)
-                except Exception:
-                    pass
         return total_size
 
     return await asyncio.to_thread(_get_size)
 
 
-async def count_files_async(directory: str, exclude_dirs: Optional[List[str]] = None) -> int:
+async def count_files_async(directory: str, exclude_dirs: list[str] | None = None) -> int:
     """
     Count total files in directory
 
@@ -264,10 +260,11 @@ async def count_files_async(directory: str, exclude_dirs: Optional[List[str]] = 
     Returns:
         File count
     """
+
     def _count():
         exclude = exclude_dirs or []
         count = 0
-        for root, dirs, files in os.walk(directory):
+        for _root, dirs, files in os.walk(directory):
             dirs[:] = [d for d in dirs if d not in exclude]
             count += len(files)
         return count

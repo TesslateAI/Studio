@@ -4,9 +4,8 @@ Framework Detection and Configuration Service
 Detects project framework (Vite, Next.js, CRA, etc.) and provides
 framework-specific configuration for dev server startup.
 """
+
 import json
-from typing import Dict, Optional, Tuple
-from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,8 +20,8 @@ class FrameworkConfig:
         dev_command: str,
         port: int,
         config_file: str,
-        required_vite_config: Optional[str] = None,
-        required_next_config: Optional[str] = None
+        required_vite_config: str | None = None,
+        required_next_config: str | None = None,
     ):
         self.framework = framework
         self.dev_command = dev_command
@@ -62,7 +61,7 @@ export default defineConfig({
     include: ['react', 'react-dom']
   }
 })
-"""
+""",
     ),
     "nextjs": FrameworkConfig(
         framework="nextjs",
@@ -97,7 +96,7 @@ const nextConfig = {
 }
 
 module.exports = nextConfig
-"""
+""",
     ),
     "create-react-app": FrameworkConfig(
         framework="create-react-app",
@@ -118,7 +117,7 @@ class FrameworkDetector:
     """Detects project framework and provides configuration."""
 
     @staticmethod
-    def detect_from_package_json(package_json_content: str) -> Tuple[str, FrameworkConfig]:
+    def detect_from_package_json(package_json_content: str) -> tuple[str, FrameworkConfig]:
         """
         Detect framework from package.json content.
 
@@ -130,21 +129,21 @@ class FrameworkDetector:
         """
         try:
             pkg = json.loads(package_json_content)
-            deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
-            scripts = pkg.get('scripts', {})
+            deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+            pkg.get("scripts", {})
 
             # Detect Next.js
-            if 'next' in deps:
+            if "next" in deps:
                 logger.info("[FRAMEWORK] Detected Next.js project")
                 return ("nextjs", FRAMEWORK_CONFIGS["nextjs"])
 
             # Detect Vite
-            if 'vite' in deps:
+            if "vite" in deps:
                 logger.info("[FRAMEWORK] Detected Vite project")
                 return ("vite", FRAMEWORK_CONFIGS["vite"])
 
             # Detect Create React App
-            if 'react-scripts' in deps:
+            if "react-scripts" in deps:
                 logger.info("[FRAMEWORK] Detected Create React App project")
                 return ("create-react-app", FRAMEWORK_CONFIGS["create-react-app"])
 
@@ -157,7 +156,7 @@ class FrameworkDetector:
             return ("unknown", FRAMEWORK_CONFIGS["unknown"])
 
     @staticmethod
-    def get_dev_server_command(framework: str, port: Optional[int] = None) -> str:
+    def get_dev_server_command(framework: str, port: int | None = None) -> str:
         """
         Get the dev server startup command for a framework.
 
@@ -183,7 +182,7 @@ class FrameworkDetector:
             return config.dev_command
 
     @staticmethod
-    def get_required_config_content(framework: str) -> Optional[str]:
+    def get_required_config_content(framework: str) -> str | None:
         """
         Get the required configuration file content for a framework.
 
@@ -242,11 +241,11 @@ class FrameworkDetector:
         Returns:
             Human-readable compatibility message
         """
-        if framework == "vite":
-            return "Fully supported - Optimized for Tesslate Studio"
-        elif framework == "nextjs":
-            return "Experimental support - Some features may not work correctly"
-        elif framework == "create-react-app":
-            return "Experimental support - Consider migrating to Vite for better performance"
-        else:
-            return "Unknown framework - May require manual configuration"
+        compatibility_messages = {
+            "vite": "Fully supported - Optimized for Tesslate Studio",
+            "nextjs": "Experimental support - Some features may not work correctly",
+            "create-react-app": "Experimental support - Consider migrating to Vite for better performance",
+        }
+        return compatibility_messages.get(
+            framework, "Unknown framework - May require manual configuration"
+        )

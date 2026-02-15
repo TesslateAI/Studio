@@ -4,12 +4,11 @@ Project Configuration Patcher
 Automatically detects and patches imported GitHub projects to work with Tesslate Studio.
 Handles missing configurations, incompatible settings, and framework-specific requirements.
 """
+
 import json
-import os
-import re
-from typing import Dict, List, Optional, Tuple
-from pathlib import Path
 import logging
+from pathlib import Path
+
 from .framework_detector import FrameworkDetector
 
 logger = logging.getLogger(__name__)
@@ -69,10 +68,10 @@ export default defineConfig({
             project_path: Path to the project directory
         """
         self.project_path = Path(project_path)
-        self.patches_applied: List[str] = []
-        self.issues_detected: List[str] = []
+        self.patches_applied: list[str] = []
+        self.issues_detected: list[str] = []
 
-    async def detect_project_type(self) -> Tuple[str, str]:
+    async def detect_project_type(self) -> tuple[str, str]:
         """
         Detect the project type and framework.
 
@@ -86,7 +85,7 @@ export default defineConfig({
             return ("unknown", "unknown")
 
         try:
-            with open(package_json_path, 'r', encoding='utf-8') as f:
+            with open(package_json_path, encoding="utf-8") as f:
                 package_json_content = f.read()
 
             framework, config = FrameworkDetector.detect_from_package_json(package_json_content)
@@ -118,7 +117,7 @@ export default defineConfig({
         if existing_config:
             # Check if it already has required settings
             try:
-                with open(existing_config, 'r', encoding='utf-8') as f:
+                with open(existing_config, encoding="utf-8") as f:
                     content = f.read()
 
                 needs_patch = False
@@ -142,19 +141,19 @@ export default defineConfig({
                 if needs_patch:
                     logger.info(f"[PATCHER] Vite config needs patching: {', '.join(issues)}")
                     # Backup original
-                    backup_path = existing_config.with_suffix(existing_config.suffix + '.backup')
-                    with open(backup_path, 'w', encoding='utf-8') as f:
+                    backup_path = existing_config.with_suffix(existing_config.suffix + ".backup")
+                    with open(backup_path, "w", encoding="utf-8") as f:
                         f.write(content)
 
                     # Write patched config
-                    with open(existing_config, 'w', encoding='utf-8') as f:
+                    with open(existing_config, "w", encoding="utf-8") as f:
                         f.write(self.REQUIRED_VITE_CONFIG)
 
                     self.patches_applied.append(f"Patched {existing_config.name} (backup saved)")
                     logger.info(f"[PATCHER] ✅ Patched vite config (backup: {backup_path.name})")
                     return True
                 else:
-                    logger.info(f"[PATCHER] Vite config already compatible")
+                    logger.info("[PATCHER] Vite config already compatible")
                     return False
 
             except Exception as e:
@@ -163,11 +162,11 @@ export default defineConfig({
 
         # Create new vite.config.js if missing
         vite_config_js = self.project_path / "vite.config.js"
-        with open(vite_config_js, 'w', encoding='utf-8') as f:
+        with open(vite_config_js, "w", encoding="utf-8") as f:
             f.write(self.REQUIRED_VITE_CONFIG)
 
         self.patches_applied.append("Created vite.config.js")
-        logger.info(f"[PATCHER] ✅ Created vite.config.js")
+        logger.info("[PATCHER] ✅ Created vite.config.js")
         return True
 
     async def patch_package_json(self) -> bool:
@@ -180,39 +179,35 @@ export default defineConfig({
         package_json_path = self.project_path / "package.json"
 
         if not package_json_path.exists():
-            logger.warning(f"[PATCHER] No package.json found, cannot patch")
+            logger.warning("[PATCHER] No package.json found, cannot patch")
             self.issues_detected.append("Missing package.json")
             return False
 
         try:
-            with open(package_json_path, 'r', encoding='utf-8') as f:
+            with open(package_json_path, encoding="utf-8") as f:
                 package_json = json.load(f)
 
             modified = False
 
             # Ensure scripts exist
-            if 'scripts' not in package_json:
-                package_json['scripts'] = {}
+            if "scripts" not in package_json:
+                package_json["scripts"] = {}
 
             # Required scripts for Vite
-            required_scripts = {
-                'dev': 'vite',
-                'build': 'vite build',
-                'preview': 'vite preview'
-            }
+            required_scripts = {"dev": "vite", "build": "vite build", "preview": "vite preview"}
 
             for script_name, script_cmd in required_scripts.items():
-                if script_name not in package_json['scripts']:
-                    package_json['scripts'][script_name] = script_cmd
+                if script_name not in package_json["scripts"]:
+                    package_json["scripts"][script_name] = script_cmd
                     modified = True
                     logger.info(f"[PATCHER] Added script: {script_name}")
 
             if modified:
-                with open(package_json_path, 'w', encoding='utf-8') as f:
+                with open(package_json_path, "w", encoding="utf-8") as f:
                     json.dump(package_json, f, indent=2)
 
                 self.patches_applied.append("Updated package.json scripts")
-                logger.info(f"[PATCHER] ✅ Patched package.json")
+                logger.info("[PATCHER] ✅ Patched package.json")
                 return True
 
             return False
@@ -235,14 +230,14 @@ export default defineConfig({
             return False
 
         # Create minimal index.html
-        with open(index_html_path, 'w', encoding='utf-8') as f:
+        with open(index_html_path, "w", encoding="utf-8") as f:
             f.write(self.MINIMAL_INDEX_HTML)
 
         self.patches_applied.append("Created index.html")
-        logger.info(f"[PATCHER] ✅ Created index.html")
+        logger.info("[PATCHER] ✅ Created index.html")
         return True
 
-    async def validate_project_structure(self) -> Dict[str, any]:
+    async def validate_project_structure(self) -> dict[str, any]:
         """
         Validate the project structure and identify issues.
 
@@ -269,27 +264,26 @@ export default defineConfig({
             "src/App.tsx",
         ]
 
-        has_entry_point = any((self.project_path / entry).exists() for entry in possible_entry_points)
+        has_entry_point = any(
+            (self.project_path / entry).exists() for entry in possible_entry_points
+        )
         if not has_entry_point:
-            warnings.append("No standard React entry point found (src/main.jsx, src/index.jsx, etc.)")
+            warnings.append(
+                "No standard React entry point found (src/main.jsx, src/index.jsx, etc.)"
+            )
 
         # Check for index.html
         if not (self.project_path / "index.html").exists():
             warnings.append("Missing index.html")
 
         # Check for Vite config
-        has_vite_config = (
-            (self.project_path / "vite.config.js").exists() or
-            (self.project_path / "vite.config.ts").exists()
-        )
+        has_vite_config = (self.project_path / "vite.config.js").exists() or (
+            self.project_path / "vite.config.ts"
+        ).exists()
         if not has_vite_config:
             warnings.append("Missing vite.config.js")
 
-        return {
-            "valid": len(issues) == 0,
-            "issues": issues,
-            "warnings": warnings
-        }
+        return {"valid": len(issues) == 0, "issues": issues, "warnings": warnings}
 
     async def patch_nextjs_config(self) -> bool:
         """
@@ -305,22 +299,22 @@ export default defineConfig({
 
         if next_config_path.exists():
             # Backup existing config
-            backup_path = next_config_path.with_suffix('.backup.js')
-            with open(next_config_path, 'r', encoding='utf-8') as f:
+            backup_path = next_config_path.with_suffix(".backup.js")
+            with open(next_config_path, encoding="utf-8") as f:
                 original = f.read()
-            with open(backup_path, 'w', encoding='utf-8') as f:
+            with open(backup_path, "w", encoding="utf-8") as f:
                 f.write(original)
-            logger.info(f"[PATCHER] Backed up original next.config.js")
+            logger.info("[PATCHER] Backed up original next.config.js")
 
         # Write Tesslate-compatible config
-        with open(next_config_path, 'w', encoding='utf-8') as f:
+        with open(next_config_path, "w", encoding="utf-8") as f:
             f.write(required_config)
 
         self.patches_applied.append("Patched next.config.js for Tesslate compatibility")
-        logger.info(f"[PATCHER] ✅ Wrote Tesslate-compatible next.config.js")
+        logger.info("[PATCHER] ✅ Wrote Tesslate-compatible next.config.js")
         return True
 
-    async def auto_patch(self) -> Dict[str, any]:
+    async def auto_patch(self) -> dict[str, any]:
         """
         Automatically detect and patch the project to work with Tesslate Studio.
 
@@ -367,8 +361,8 @@ export default defineConfig({
             )
         else:
             self.issues_detected.append(
-                f"Unknown framework detected. Manual configuration may be required. "
-                f"Tesslate Studio is optimized for Vite projects."
+                "Unknown framework detected. Manual configuration may be required. "
+                "Tesslate Studio is optimized for Vite projects."
             )
 
         result = {
@@ -378,7 +372,7 @@ export default defineConfig({
             "patches_applied": self.patches_applied,
             "issues_detected": self.issues_detected + validation.get("issues", []),
             "warnings": validation.get("warnings", []),
-            "success": len(self.patches_applied) > 0 or len(self.issues_detected) == 0
+            "success": len(self.patches_applied) > 0 or len(self.issues_detected) == 0,
         }
 
         logger.info(f"[PATCHER] Auto-patch completed: {result}")
