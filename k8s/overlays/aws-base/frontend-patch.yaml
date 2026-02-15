@@ -1,5 +1,6 @@
 # Frontend deployment patch for AWS EKS
-# Sets imagePullPolicy to Always to ensure latest images are pulled
+# - Sets imagePullPolicy to Always to ensure latest images are pulled
+# - Injects runtime environment variables from ConfigMap (api-url, posthog-*)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,3 +12,20 @@ spec:
       containers:
       - name: frontend
         imagePullPolicy: Always
+        env:
+        - name: VITE_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-config
+              key: api-url
+        - name: VITE_PUBLIC_POSTHOG_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: POSTHOG_KEY
+              optional: true
+        - name: VITE_PUBLIC_POSTHOG_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-config
+              key: posthog-host

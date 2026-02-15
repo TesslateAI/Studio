@@ -31,8 +31,9 @@ import {
   AuthenticationError,
   shouldLogoutOnError,
 } from './auth/types';
+import { config } from '../config';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = config.API_URL;
 
 // =============================================================================
 // Initial State
@@ -135,145 +136,147 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Core Auth Check
   // ==========================================================================
 
-  const checkAuth = useCallback(async (options?: { force?: boolean }): Promise<boolean> => {
-    // Prevent concurrent checks unless forced
-    if (checkInProgressRef.current && !options?.force) {
-      return state.status === 'authenticated';
-    }
+  const checkAuth = useCallback(
+    async (options?: { force?: boolean }): Promise<boolean> => {
+      // Prevent concurrent checks unless forced
+      if (checkInProgressRef.current && !options?.force) {
+        return state.status === 'authenticated';
+      }
 
-    // Abort any in-flight request
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = new AbortController();
+      // Abort any in-flight request
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
 
-    checkInProgressRef.current = true;
-    dispatch({ type: 'AUTH_START' });
+      checkInProgressRef.current = true;
+      dispatch({ type: 'AUTH_START' });
 
-    try {
-      // Check token auth first (faster, synchronous check)
-      const token = localStorage.getItem('token');
+      try {
+        // Check token auth first (faster, synchronous check)
+        const token = localStorage.getItem('token');
 
-      if (token) {
+        if (token) {
+          const response = await axios.get(`${API_URL}/api/users/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: abortControllerRef.current.signal,
+          });
+
+          if (response.status === 200 && mountedRef.current) {
+            dispatch({
+              type: 'AUTH_SUCCESS',
+              payload: { user: response.data, method: 'token' },
+            });
+            return true;
+          }
+        }
+
+        // Fall through to cookie auth (OAuth users)
         const response = await axios.get(`${API_URL}/api/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
           signal: abortControllerRef.current.signal,
         });
 
         if (response.status === 200 && mountedRef.current) {
           dispatch({
             type: 'AUTH_SUCCESS',
-            payload: { user: response.data, method: 'token' },
+            payload: { user: response.data, method: 'cookie' },
           });
           return true;
         }
-      }
 
-      // Fall through to cookie auth (OAuth users)
-      const response = await axios.get(`${API_URL}/api/users/me`, {
-        withCredentials: true,
-        signal: abortControllerRef.current.signal,
-      });
-
-      if (response.status === 200 && mountedRef.current) {
-        dispatch({
-          type: 'AUTH_SUCCESS',
-          payload: { user: response.data, method: 'cookie' },
-        });
-        return true;
-      }
-
-      if (mountedRef.current) {
-        dispatch({
-          type: 'AUTH_FAILURE',
-          payload: {
-            code: 'UNAUTHORIZED',
-            message: 'Not authenticated',
-            timestamp: Date.now(),
-            recoverable: false,
-          },
-        });
-      }
-      return false;
-    } catch (error) {
-      // Handle abort (not an error)
-      if (axios.isCancel(error)) {
+        if (mountedRef.current) {
+          dispatch({
+            type: 'AUTH_FAILURE',
+            payload: {
+              code: 'UNAUTHORIZED',
+              message: 'Not authenticated',
+              timestamp: Date.now(),
+              recoverable: false,
+            },
+          });
+        }
         return false;
+      } catch (error) {
+        // Handle abort (not an error)
+        if (axios.isCancel(error)) {
+          return false;
+        }
+
+        // Classify the error
+        const authError = AuthenticationError.fromAxiosError(error);
+
+        // Log for observability (NEVER log tokens or passwords)
+        console.error('[Auth] Check failed:', {
+          code: authError.code,
+          recoverable: authError.recoverable,
+          statusCode: authError.statusCode,
+        });
+
+        // Clear invalid token if session expired
+        if (shouldLogoutOnError(authError.toAuthError())) {
+          localStorage.removeItem('token');
+        }
+
+        if (mountedRef.current) {
+          dispatch({ type: 'AUTH_FAILURE', payload: authError.toAuthError() });
+        }
+        return false;
+      } finally {
+        checkInProgressRef.current = false;
       }
-
-      // Classify the error
-      const authError = AuthenticationError.fromAxiosError(error);
-
-      // Log for observability (NEVER log tokens or passwords)
-      console.error('[Auth] Check failed:', {
-        code: authError.code,
-        recoverable: authError.recoverable,
-        statusCode: authError.statusCode,
-      });
-
-      // Clear invalid token if session expired
-      if (shouldLogoutOnError(authError.toAuthError())) {
-        localStorage.removeItem('token');
-      }
-
-      if (mountedRef.current) {
-        dispatch({ type: 'AUTH_FAILURE', payload: authError.toAuthError() });
-      }
-      return false;
-    } finally {
-      checkInProgressRef.current = false;
-    }
-  }, [state.status]);
+    },
+    [state.status]
+  );
 
   // ==========================================================================
   // Login
   // ==========================================================================
 
-  const login = useCallback(async (email: string, password: string) => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = new AbortController();
+  const login = useCallback(
+    async (email: string, password: string) => {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
 
-    dispatch({ type: 'AUTH_START' });
+      dispatch({ type: 'AUTH_START' });
 
-    const formData = new URLSearchParams();
-    formData.append('username', email);
-    formData.append('password', password);
+      const formData = new URLSearchParams();
+      formData.append('username', email);
+      formData.append('password', password);
 
-    try {
-      const response = await axios.post(
-        `${API_URL}/api/auth/jwt/login`,
-        formData,
-        {
+      try {
+        const response = await axios.post(`${API_URL}/api/auth/jwt/login`, formData, {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           signal: abortControllerRef.current.signal,
+        });
+
+        const { access_token } = response.data;
+        localStorage.setItem('token', access_token);
+
+        // Notify other tabs
+        window.dispatchEvent(
+          new StorageEvent('storage', {
+            key: 'token',
+            newValue: access_token,
+          })
+        );
+
+        // Fetch user data
+        await checkAuth({ force: true });
+      } catch (error) {
+        const authError = AuthenticationError.fromAxiosError(error);
+
+        console.error('[Auth] Login failed:', {
+          code: authError.code,
+          statusCode: authError.statusCode,
+        });
+
+        if (mountedRef.current) {
+          dispatch({ type: 'AUTH_FAILURE', payload: authError.toAuthError() });
         }
-      );
-
-      const { access_token } = response.data;
-      localStorage.setItem('token', access_token);
-
-      // Notify other tabs
-      window.dispatchEvent(
-        new StorageEvent('storage', {
-          key: 'token',
-          newValue: access_token,
-        })
-      );
-
-      // Fetch user data
-      await checkAuth({ force: true });
-    } catch (error) {
-      const authError = AuthenticationError.fromAxiosError(error);
-
-      console.error('[Auth] Login failed:', {
-        code: authError.code,
-        statusCode: authError.statusCode,
-      });
-
-      if (mountedRef.current) {
-        dispatch({ type: 'AUTH_FAILURE', payload: authError.toAuthError() });
+        throw authError;
       }
-      throw authError;
-    }
-  }, [checkAuth]);
+    },
+    [checkAuth]
+  );
 
   // ==========================================================================
   // Logout
@@ -415,6 +418,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
  * Hook to access auth context
  * Must be used within AuthProvider
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
   if (!context) {
@@ -427,9 +431,9 @@ export function useAuth(): AuthContextValue {
  * Quick check if user appears to be logged in (doesn't verify with server)
  * Useful for immediate UI decisions before full auth check completes
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useQuickAuthCheck(): boolean {
-  const hasToken =
-    typeof window !== 'undefined' && !!localStorage.getItem('token');
+  const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('token');
   return hasToken;
 }
 

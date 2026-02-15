@@ -220,11 +220,12 @@ services:
       - ./app/tailwind.config.ts:/app/tailwind.config.ts
       - ./app/package.json:/app/package.json
     environment:
-      - VITE_API_URL=${VITE_API_URL:-}
-      - VITE_BACKEND_URL=http://orchestrator:8000
-      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-localhost}}
+      # Frontend Runtime Config (used by Vite dev server)
+      # In dev mode, config.ts reads from import.meta.env.VITE_*
+      # In production (Docker/K8s), config.ts reads from window._env_
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
       - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY:-}
-      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-}
+      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-https://app.posthog.com}
       - APP_DOMAIN=${APP_DOMAIN:-localhost}
       - FRONTEND_PORT=${FRONTEND_PORT:-5173}
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-docker}

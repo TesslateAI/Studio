@@ -348,6 +348,22 @@ variable "enable_cert_manager" {
 }
 
 # -----------------------------------------------------------------------------
+# Frontend Configuration
+# -----------------------------------------------------------------------------
+variable "posthog_host" {
+  description = "PostHog analytics host URL"
+  type        = string
+  default     = "https://app.posthog.com"
+}
+
+variable "posthog_key" {
+  description = "PostHog project API key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
 # Advanced Settings
 # -----------------------------------------------------------------------------
 variable "eks_addon_versions" {

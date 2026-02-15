@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type { AgentChatRequest, AgentChatResponse, Agent, AgentCreate } from '../types/agent';
+import { config } from '../config';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = config.API_URL;
 
 const api = axios.create({
   baseURL: API_URL,

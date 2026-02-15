@@ -2,8 +2,9 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import axios from 'axios';
+import { config } from '../config';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = config.API_URL;
 
 export default function Logout() {
   const navigate = useNavigate();
@@ -13,9 +14,13 @@ export default function Logout() {
       // Clear the session cookie by calling the backend logout endpoint
       // This handles OAuth users who authenticated via cookie
       try {
-        await axios.post(`${API_URL}/api/auth/cookie/logout`, {}, {
-          withCredentials: true, // Send cookies with request
-        });
+        await axios.post(
+          `${API_URL}/api/auth/cookie/logout`,
+          {},
+          {
+            withCredentials: true, // Send cookies with request
+          }
+        );
       } catch {
         // Ignore errors - cookie may already be invalid or user used token auth
       }

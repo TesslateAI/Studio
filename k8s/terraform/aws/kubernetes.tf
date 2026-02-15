@@ -141,6 +141,9 @@ resource "kubernetes_secret" "app_secrets" {
     SMTP_USE_TLS      = tostring(var.smtp_use_tls)
     SMTP_SENDER_EMAIL = var.smtp_sender_email
     TWO_FA_ENABLED    = tostring(var.two_fa_enabled)
+
+    # PostHog (for frontend via secret)
+    POSTHOG_KEY = var.posthog_key
   }
 
   type = "Opaque"
@@ -166,6 +169,24 @@ resource "kubernetes_config_map" "tesslate_config" {
     registry_url                 = local.ecr_registry_url
     aws_region                   = var.aws_region
     s3_bucket_name               = aws_s3_bucket.tesslate_projects.id
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Frontend ConfigMap (Runtime Configuration)
+# -----------------------------------------------------------------------------
+resource "kubernetes_config_map" "frontend_config" {
+  metadata {
+    name      = "frontend-config"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    # API URL derived from domain variable
+    api-url = "https://${var.domain_name}/api"
+
+    # PostHog analytics configuration
+    posthog-host = var.posthog_host
   }
 }
 

@@ -1,21 +1,22 @@
-import posthog from 'posthog-js'
+import posthog from 'posthog-js';
+import { config } from '../config';
 
 // Singleton flags to prevent multiple initializations
-let isInitialized = false
-let initializationError: Error | null = null
+let isInitialized = false;
+let initializationError: Error | null = null;
 
 /**
  * Check if user has Do Not Track enabled
  */
 function isDoNotTrackEnabled(): boolean {
-  if (typeof navigator === 'undefined') return false
+  if (typeof navigator === 'undefined') return false;
 
   const dnt =
     navigator.doNotTrack === '1' ||
     (navigator as Navigator & { msDoNotTrack?: string }).msDoNotTrack === '1' ||
-    (window as Window & { doNotTrack?: string }).doNotTrack === '1'
+    (window as Window & { doNotTrack?: string }).doNotTrack === '1';
 
-  return dnt
+  return dnt;
 }
 
 /**
@@ -23,25 +24,25 @@ function isDoNotTrackEnabled(): boolean {
  */
 function shouldInitialize(): boolean {
   // Check for API key
-  const apiKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY
+  const apiKey = config.POSTHOG_KEY;
   if (!apiKey) {
-    console.debug('[PostHog] No API key configured, skipping initialization')
-    return false
+    console.debug('[PostHog] No API key configured, skipping initialization');
+    return false;
   }
 
   // Respect Do Not Track
   if (isDoNotTrackEnabled()) {
-    console.debug('[PostHog] Do Not Track enabled, skipping initialization')
-    return false
+    console.debug('[PostHog] Do Not Track enabled, skipping initialization');
+    return false;
   }
 
   // Check for development mode opt-out
   if (import.meta.env.DEV && import.meta.env.VITE_DISABLE_ANALYTICS === 'true') {
-    console.debug('[PostHog] Analytics disabled in development')
-    return false
+    console.debug('[PostHog] Analytics disabled in development');
+    return false;
   }
 
-  return true
+  return true;
 }
 
 /**
@@ -57,21 +58,21 @@ function shouldInitialize(): boolean {
 export function initPostHog(): typeof posthog | null {
   // Return early if already attempted initialization
   if (isInitialized) {
-    return initializationError ? null : posthog
+    return initializationError ? null : posthog;
   }
 
   // Check if should initialize
   if (!shouldInitialize()) {
-    isInitialized = true // Mark as "done" to prevent retry
-    return null
+    isInitialized = true; // Mark as "done" to prevent retry
+    return null;
   }
 
   try {
-    const apiKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY
-    const host = import.meta.env.VITE_PUBLIC_POSTHOG_HOST
+    const apiKey = config.POSTHOG_KEY;
+    const host = config.POSTHOG_HOST;
 
     posthog.init(apiKey, {
-      api_host: host || 'https://app.posthog.com',
+      api_host: host,
       autocapture: true,
       capture_pageview: true,
       capture_pageleave: true,
@@ -84,17 +85,17 @@ export function initPostHog(): typeof posthog | null {
       request_batching: true,
       // Handle initialization completion
       loaded: () => {
-        console.debug('[PostHog] Initialized successfully')
+        console.debug('[PostHog] Initialized successfully');
       },
-    })
+    });
 
-    isInitialized = true
-    return posthog
+    isInitialized = true;
+    return posthog;
   } catch (error) {
-    console.warn('[PostHog] Initialization failed (non-blocking):', error)
-    initializationError = error as Error
-    isInitialized = true // Prevent retry loops
-    return null
+    console.warn('[PostHog] Initialization failed (non-blocking):', error);
+    initializationError = error as Error;
+    isInitialized = true; // Prevent retry loops
+    return null;
   }
 }
 
@@ -103,23 +104,23 @@ export function initPostHog(): typeof posthog | null {
  */
 export function getPostHog(): typeof posthog | null {
   if (!isInitialized || initializationError) {
-    return null
+    return null;
   }
-  return posthog
+  return posthog;
 }
 
 /**
  * Check if PostHog is configured (API key present)
  */
 export function isPostHogConfigured(): boolean {
-  return !!import.meta.env.VITE_PUBLIC_POSTHOG_KEY
+  return !!config.POSTHOG_KEY;
 }
 
 /**
  * Check if PostHog is available (configured AND initialized without error)
  */
 export function isPostHogAvailable(): boolean {
-  return isInitialized && !initializationError
+  return isInitialized && !initializationError;
 }
 
 /**
@@ -127,10 +128,10 @@ export function isPostHogAvailable(): boolean {
  * Use this for fire-and-forget analytics events.
  */
 export function capture(event: string, properties?: Record<string, unknown>): void {
-  const ph = getPostHog()
+  const ph = getPostHog();
   if (ph) {
     try {
-      ph.capture(event, properties)
+      ph.capture(event, properties);
     } catch {
       // Silently fail - analytics should never break the app
     }
@@ -139,4 +140,4 @@ export function capture(event: string, properties?: Record<string, unknown>): vo
 
 // Export the raw posthog instance for advanced usage
 // but prefer using getPostHog() to ensure initialization
-export { posthog }
+export { posthog };

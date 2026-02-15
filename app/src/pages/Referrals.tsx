@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import { config } from '../config';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = config.API_URL;
 
 interface ReferralStat {
   referrer: string;
@@ -36,26 +37,30 @@ export default function Referrals() {
 
   if (loading) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--background)',
-        color: 'var(--text)',
-      }}>
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--background)',
+          color: 'var(--text)',
+        }}
+      >
         <div>Loading...</div>
       </div>
     );
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'var(--background)',
-      color: 'var(--text)',
-      padding: '20px',
-    }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'var(--background)',
+        color: 'var(--text)',
+        padding: '20px',
+      }}
+    >
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         <h1 style={{ fontSize: '2rem', marginBottom: '2rem', textAlign: 'center' }}>
           Referral Stats
@@ -66,11 +71,13 @@ export default function Referrals() {
             No referral data yet
           </div>
         ) : (
-          <div style={{
-            display: 'grid',
-            gap: '1rem',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))'
-          }}>
+          <div
+            style={{
+              display: 'grid',
+              gap: '1rem',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            }}
+          >
             {stats.map((stat) => (
               <div
                 key={stat.referrer}
@@ -102,11 +109,13 @@ export default function Referrals() {
                   </div>
 
                   {stat.latest_conversion && (
-                    <div style={{
-                      marginTop: '1rem',
-                      paddingTop: '1rem',
-                      borderTop: '1px solid rgba(255, 255, 255, 0.1)'
-                    }}>
+                    <div
+                      style={{
+                        marginTop: '1rem',
+                        paddingTop: '1rem',
+                        borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                      }}
+                    >
                       <div style={{ fontSize: '0.875rem', opacity: 0.7, marginBottom: '0.5rem' }}>
                         Latest Signup:
                       </div>

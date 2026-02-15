@@ -29,9 +29,6 @@ spec:
           # No TLS for local dev (use http:// instead of https://)
           - name: K8S_WILDCARD_TLS_SECRET
             value: ""
-          # 2FA disabled by default; set to "true" to enable (requires SMTP)
-          - name: TWO_FA_ENABLED
-            value: "false"
         resources:
           requests:
             memory: "256Mi"

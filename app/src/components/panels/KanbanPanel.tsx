@@ -9,7 +9,7 @@ import {
   Trash,
   ArrowsDownUp,
   Funnel,
-  ChatCircle
+  ChatCircle,
 } from '@phosphor-icons/react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import api from '../../lib/api';
@@ -79,20 +79,18 @@ interface Comment {
   updated_at: string;
 }
 
-const _API_BASE = import.meta.env.VITE_API_URL || '';
-
 const priorityColors = {
   low: 'text-blue-400',
   medium: 'text-yellow-400',
   high: 'text-[var(--primary)]',
-  critical: 'text-red-400'
+  critical: 'text-red-400',
 };
 
 const taskTypeIcons = {
   feature: '✨',
   bug: '🐛',
   task: '📋',
-  epic: '🎯'
+  epic: '🎯',
 };
 
 export function KanbanPanel({ projectId }: KanbanPanelProps) {
@@ -114,7 +112,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     priority: 'medium' as const,
     task_type: 'task' as const,
     tags: [] as string[],
-    estimate_hours: undefined as number | undefined
+    estimate_hours: undefined as number | undefined,
   });
 
   useEffect(() => {
@@ -148,13 +146,10 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!newTask.title.trim() || !newTaskColumnId) return;
 
     try {
-      await api.post(
-        `/api/kanban/projects/${projectId}/tasks`,
-        {
-          column_id: newTaskColumnId,
-          ...newTask
-        }
-      );
+      await api.post(`/api/kanban/projects/${projectId}/tasks`, {
+        column_id: newTaskColumnId,
+        ...newTask,
+      });
       toast.success('Task created successfully');
       setShowNewTaskModal(false);
       setNewTask({
@@ -163,7 +158,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
         priority: 'medium',
         task_type: 'task',
         tags: [],
-        estimate_hours: undefined
+        estimate_hours: undefined,
       });
       await loadBoard();
     } catch (error: unknown) {
@@ -174,10 +169,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
   const updateTask = async (taskId: string, updates: Partial<Task>) => {
     try {
-      await api.patch(
-        `/api/kanban/tasks/${taskId}`,
-        updates
-      );
+      await api.patch(`/api/kanban/tasks/${taskId}`, updates);
       toast.success('Task updated');
       await loadBoard();
       if (selectedTask?.id === taskId) {
@@ -205,10 +197,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     if (!selectedTask || !newComment.trim()) return;
 
     try {
-      await api.post(
-        `/api/kanban/tasks/${selectedTask.id}/comments`,
-        { content: newComment }
-      );
+      await api.post(`/api/kanban/tasks/${selectedTask.id}/comments`, { content: newComment });
       setNewComment('');
       await loadTaskDetails(selectedTask.id);
     } catch {
@@ -225,7 +214,7 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
     // Same column reorder
     if (source.droppableId === destination.droppableId) {
       const columnId = source.droppableId.replace('column-', '');
-      const column = board.columns.find(c => c.id === columnId);
+      const column = board.columns.find((c) => c.id === columnId);
       if (!column) return;
 
       const newTasks = Array.from(column.tasks);
@@ -235,19 +224,19 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       // Update local state optimistically
       setBoard({
         ...board,
-        columns: board.columns.map(col =>
+        columns: board.columns.map((col) =>
           col.id === columnId
             ? { ...col, tasks: newTasks.map((t, idx) => ({ ...t, position: idx })) }
             : col
-        )
+        ),
       });
     } else {
       // Move to different column
       const sourceColumnId = source.droppableId.replace('column-', '');
       const destColumnId = destination.droppableId.replace('column-', '');
 
-      const sourceColumn = board.columns.find(c => c.id === sourceColumnId);
-      const destColumn = board.columns.find(c => c.id === destColumnId);
+      const sourceColumn = board.columns.find((c) => c.id === sourceColumnId);
+      const destColumn = board.columns.find((c) => c.id === destColumnId);
       if (!sourceColumn || !destColumn) return;
 
       const sourceTasks = Array.from(sourceColumn.tasks);
@@ -258,43 +247,44 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
       // Update local state optimistically
       setBoard({
         ...board,
-        columns: board.columns.map(col => {
+        columns: board.columns.map((col) => {
           if (col.id === sourceColumnId) {
             return { ...col, tasks: sourceTasks.map((t, idx) => ({ ...t, position: idx })) };
           }
           if (col.id === destColumnId) {
-            return { ...col, tasks: destTasks.map((t, idx) => ({ ...t, position: idx, column_id: destColumnId })) };
+            return {
+              ...col,
+              tasks: destTasks.map((t, idx) => ({ ...t, position: idx, column_id: destColumnId })),
+            };
           }
           return col;
-        })
+        }),
       });
     }
 
     // Send to backend
     try {
-      await api.post(
-        `/api/kanban/tasks/${taskId}/move`,
-        {
-          column_id: destination.droppableId.replace('column-', ''),
-          position: destination.index
-        }
-      );
+      await api.post(`/api/kanban/tasks/${taskId}/move`, {
+        column_id: destination.droppableId.replace('column-', ''),
+        position: destination.index,
+      });
     } catch {
       toast.error('Failed to move task');
       await loadBoard(); // Reload on error
     }
   };
 
-  const filteredColumns = board?.columns.map(col => ({
+  const filteredColumns = board?.columns.map((col) => ({
     ...col,
-    tasks: col.tasks.filter(task => {
-      const matchesSearch = searchQuery === '' ||
+    tasks: col.tasks.filter((task) => {
+      const matchesSearch =
+        searchQuery === '' ||
         task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         task.description?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesPriority = !filterPriority || task.priority === filterPriority;
       const matchesType = !filterType || task.task_type === filterType;
       return matchesSearch && matchesPriority && matchesType;
-    })
+    }),
   }));
 
   if (loading) {
@@ -443,7 +433,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                               {/* Task Metadata */}
                               <div className="flex flex-wrap gap-2 items-center text-xs">
                                 {task.priority && (
-                                  <span className={`${priorityColors[task.priority]} flex items-center gap-1`}>
+                                  <span
+                                    className={`${priorityColors[task.priority]} flex items-center gap-1`}
+                                  >
                                     <ArrowsDownUp size={12} weight="bold" />
                                     {task.priority}
                                   </span>
@@ -459,7 +451,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                                       </span>
                                     ))}
                                     {task.tags.length > 2 && (
-                                      <span className="text-[var(--text)]/40">+{task.tags.length - 2}</span>
+                                      <span className="text-[var(--text)]/40">
+                                        +{task.tags.length - 2}
+                                      </span>
                                     )}
                                   </div>
                                 )}
@@ -516,7 +510,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-2">Description</label>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Description
+                </label>
                 <textarea
                   value={newTask.description}
                   onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
@@ -527,10 +523,17 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-[var(--text)] mb-2">Priority</label>
+                  <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                    Priority
+                  </label>
                   <select
                     value={newTask.priority}
-                    onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as 'low' | 'medium' | 'high' | 'critical' })}
+                    onChange={(e) =>
+                      setNewTask({
+                        ...newTask,
+                        priority: e.target.value as 'low' | 'medium' | 'high' | 'critical',
+                      })
+                    }
                     className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="low">Low</option>
@@ -543,7 +546,12 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">Type</label>
                   <select
                     value={newTask.task_type}
-                    onChange={(e) => setNewTask({ ...newTask, task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic' })}
+                    onChange={(e) =>
+                      setNewTask({
+                        ...newTask,
+                        task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic',
+                      })
+                    }
                     className="w-full px-4 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="task">Task</option>
@@ -603,7 +611,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
             <div className="p-6 space-y-6">
               {/* Description */}
               <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-2">Description</label>
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                  Description
+                </label>
                 <p className="text-[var(--text)]/80 whitespace-pre-wrap">
                   {selectedTask.description || 'No description'}
                 </p>
@@ -612,10 +622,16 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
               {/* Metadata Grid */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-[var(--text)] mb-2">Priority</label>
+                  <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                    Priority
+                  </label>
                   <select
                     value={selectedTask.priority || 'medium'}
-                    onChange={(e) => updateTask(selectedTask.id, { priority: e.target.value as 'low' | 'medium' | 'high' | 'critical' })}
+                    onChange={(e) =>
+                      updateTask(selectedTask.id, {
+                        priority: e.target.value as 'low' | 'medium' | 'high' | 'critical',
+                      })
+                    }
                     className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="low">Low</option>
@@ -628,7 +644,11 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                   <label className="block text-sm font-medium text-[var(--text)] mb-2">Type</label>
                   <select
                     value={selectedTask.task_type || 'task'}
-                    onChange={(e) => updateTask(selectedTask.id, { task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic' })}
+                    onChange={(e) =>
+                      updateTask(selectedTask.id, {
+                        task_type: e.target.value as 'feature' | 'bug' | 'task' | 'epic',
+                      })
+                    }
                     className="w-full px-3 py-2 bg-[var(--background)] border border-[var(--text)]/20 rounded-lg text-[var(--text)] text-sm focus:outline-none focus:border-[var(--primary)] [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
                   >
                     <option value="task">Task</option>
@@ -639,7 +659,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                 </div>
                 {selectedTask.estimate_hours !== undefined && (
                   <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Estimate</label>
+                    <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                      Estimate
+                    </label>
                     <div className="flex items-center gap-2 text-sm text-[var(--text)]/80">
                       <Clock size={16} weight="bold" />
                       {selectedTask.estimate_hours}h
@@ -648,7 +670,9 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
                 )}
                 {selectedTask.assignee && (
                   <div>
-                    <label className="block text-sm font-medium text-[var(--text)] mb-2">Assignee</label>
+                    <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                      Assignee
+                    </label>
                     <div className="flex items-center gap-2 text-sm text-[var(--text)]/80">
                       <User size={16} weight="bold" />
                       {selectedTask.assignee.name}
@@ -676,12 +700,19 @@ export function KanbanPanel({ projectId }: KanbanPanelProps) {
 
               {/* Comments */}
               <div>
-                <label className="block text-sm font-medium text-[var(--text)] mb-3">Comments</label>
+                <label className="block text-sm font-medium text-[var(--text)] mb-3">
+                  Comments
+                </label>
                 <div className="space-y-3 mb-4">
                   {selectedTask.comments.map((comment) => (
-                    <div key={comment.id} className="p-3 bg-[var(--background)] rounded-lg border border-[var(--text)]/20">
+                    <div
+                      key={comment.id}
+                      className="p-3 bg-[var(--background)] rounded-lg border border-[var(--text)]/20"
+                    >
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-sm font-medium text-[var(--text)]">{comment.user.name}</span>
+                        <span className="text-sm font-medium text-[var(--text)]">
+                          {comment.user.name}
+                        </span>
                         <span className="text-xs text-[var(--text)]/40">
                           {new Date(comment.created_at).toLocaleString()}
                         </span>
