@@ -183,7 +183,7 @@ resource "kubernetes_config_map" "frontend_config" {
 
   data = {
     # API URL derived from domain variable
-    api-url = "https://${var.domain_name}/api"
+    api-url = "https://${var.domain_name}"
 
     # PostHog analytics configuration
     posthog-host = var.posthog_host

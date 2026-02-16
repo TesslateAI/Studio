@@ -245,7 +245,7 @@ spec:
         - name: SMTP_HOST
           valueFrom:
             secretKeyRef:
-              name: tesslate-secrets
+              name: tesslate-app-secrets
               key: SMTP_HOST
               optional: true
         - name: SMTP_PORT
@@ -253,13 +253,13 @@ spec:
         - name: SMTP_USERNAME
           valueFrom:
             secretKeyRef:
-              name: tesslate-secrets
+              name: tesslate-app-secrets
               key: SMTP_USERNAME
               optional: true
         - name: SMTP_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: tesslate-secrets
+              name: tesslate-app-secrets
               key: SMTP_PASSWORD
               optional: true
         - name: SMTP_USE_TLS
@@ -267,13 +267,13 @@ spec:
         - name: SMTP_SENDER_EMAIL
           valueFrom:
             secretKeyRef:
-              name: tesslate-secrets
+              name: tesslate-app-secrets
               key: SMTP_SENDER_EMAIL
               optional: true
         - name: TWO_FA_ENABLED
           valueFrom:
             secretKeyRef:
-              name: tesslate-secrets
+              name: tesslate-app-secrets
               key: TWO_FA_ENABLED
               optional: true
 

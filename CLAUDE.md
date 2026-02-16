@@ -786,9 +786,25 @@ kubectl create secret generic tesslate-secrets -n tesslate \
 |---------|------|------------|
 | `K8S_DEVSERVER_IMAGE` | `...tesslate-devserver:beta` | `...tesslate-devserver:production` |
 | `K8S_IMAGE_PULL_SECRET` | `""` | `""` |
-| `APP_DOMAIN` | `your-domain.com` | `tesslate.com` |
-| `COOKIE_DOMAIN` | `.your-domain.com` | `.tesslate.com` |
+| `APP_DOMAIN` | `your-domain.com` | `your-domain.com` |
+| `COOKIE_DOMAIN` | `.your-domain.com` | `.your-domain.com` |
 | `replicas` | `1` (single replica - tasks stored in-memory) | `1` |
+
+### AWS Overlay: envFrom Auto-Sync Architecture
+
+The AWS backend overlay (`k8s/overlays/aws-base/backend-patch.yaml`) uses a two-part strategy:
+
+1. **`envFrom`** — auto-mounts ALL keys from 3 terraform-managed secrets (`tesslate-app-secrets`, `postgres-secret`, `s3-credentials`). Adding a new key in terraform's `kubernetes.tf` automatically makes it available in the pod — **no manual kustomize sync needed**.
+
+2. **`env` with `$patch: replace`** — replaces the base manifest's env array with ONLY static values (not in any secret) and 1 alias mapping (`K8S_INGRESS_DOMAIN` → `APP_DOMAIN`). The `$patch: replace` prevents stale base entries from merging in.
+
+**When adding new config:**
+- **Secret-based values** (domain, API keys, OAuth, etc.): Add to terraform `kubernetes.tf` secrets → automatically picked up via `envFrom`
+- **Static values** (feature flags, class names, etc.): Add to `backend-patch.yaml` env array
+
+### Frontend Config: API_URL Must NOT Include `/api`
+
+The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://your-domain.com`), NOT `https://your-domain.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.
 
 ### Common AWS Issues & Fixes
 

@@ -1,8 +1,9 @@
 # AWS EKS Backend Deployment Patch (Shared)
-# Domain-specific and ECR values are sourced from terraform-managed secrets.
-# Static values that are the same across all AWS environments use literal values.
-# Note: secretKeyRef is used instead of configMapKeyRef to avoid kustomize
-# configMapGenerator hash suffix transformations on the name.
+#
+# Secret-based env vars use envFrom to auto-mount ALL keys from each secret.
+# This eliminates manual sync — adding a key in terraform automatically
+# makes it available in the pod. Only static values and alias mappings
+# need explicit env entries.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,92 +17,32 @@ spec:
       containers:
         - name: backend
           imagePullPolicy: Always
+          # Mount ALL keys from secrets as env vars automatically.
+          # No manual sync needed — terraform adds a key, pod gets it.
+          envFrom:
+            - secretRef:
+                name: tesslate-app-secrets
+            - secretRef:
+                name: postgres-secret
+            - secretRef:
+                name: s3-credentials
           env:
-            # Replace all env vars with AWS-specific config
+            # Replace base env array entirely — envFrom handles all secrets,
+            # so we only need static values and alias mappings here.
             - $patch: replace
-            # Core settings
             - name: DEPLOYMENT_MODE
               value: "kubernetes"
             - name: KUBERNETES_NAMESPACE
               value: "tesslate"
-            # Database
             - name: POSTGRES_HOST
               value: "postgres"
             - name: POSTGRES_PORT
               value: "5432"
-            - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_DB
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_PASSWORD
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: DATABASE_URL
-            # Security
-            - name: SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: SECRET_KEY
-            # LiteLLM
-            - name: LITELLM_API_BASE
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: LITELLM_API_BASE
-            - name: LITELLM_MASTER_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: LITELLM_MASTER_KEY
-            - name: LITELLM_DEFAULT_MODELS
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: LITELLM_DEFAULT_MODELS
             # JWT
             - name: ALGORITHM
               value: "HS256"
             - name: ACCESS_TOKEN_EXPIRE_MINUTES
               value: "30"
-            # Domain (from terraform-managed secrets)
-            - name: APP_DOMAIN
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: APP_DOMAIN
-            - name: APP_BASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: APP_BASE_URL
-            - name: DEV_SERVER_BASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: DEV_SERVER_BASE_URL
-            - name: CORS_ORIGINS
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: CORS_ORIGINS
-            - name: ALLOWED_HOSTS
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: ALLOWED_HOSTS
             # Kubernetes settings
             - name: K8S_NAMESPACE_PER_PROJECT
               value: "true"
@@ -113,40 +54,21 @@ spec:
               value: "5Gi"
             - name: K8S_INGRESS_CLASS
               value: "nginx"
+            # Alias: K8S_INGRESS_DOMAIN reads APP_DOMAIN from secret
             - name: K8S_INGRESS_DOMAIN
               valueFrom:
                 secretKeyRef:
                   name: tesslate-app-secrets
                   key: APP_DOMAIN
-            - name: K8S_DEVSERVER_IMAGE
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: K8S_DEVSERVER_IMAGE
-            - name: K8S_REGISTRY_URL
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: K8S_REGISTRY_URL
             - name: K8S_IMAGE_PULL_SECRET
               value: ""
             - name: K8S_IMAGE_PULL_POLICY
               value: "Always"
             - name: K8S_WILDCARD_TLS_SECRET
               value: "tesslate-wildcard-tls"
-            # S3 - AWS native (IRSA handles auth)
+            # S3 - AWS native (IRSA handles auth, endpoint empty)
             - name: S3_ENDPOINT_URL
               value: ""
-            - name: S3_BUCKET_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: s3-credentials
-                  key: S3_BUCKET_NAME
-            - name: S3_REGION
-              valueFrom:
-                secretKeyRef:
-                  name: s3-credentials
-                  key: S3_REGION
             # Pod Affinity
             - name: K8S_ENABLE_POD_AFFINITY
               value: "true"
@@ -159,53 +81,11 @@ spec:
               value: "120"
             - name: K8S_DEHYDRATION_EXCLUDE_PATTERNS
               value: "node_modules,.git,__pycache__,venv,.venv"
-            # SMTP (Email / 2FA)
-            - name: SMTP_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: SMTP_HOST
-            - name: SMTP_PORT
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: SMTP_PORT
-            - name: SMTP_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: SMTP_USERNAME
-            - name: SMTP_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: SMTP_PASSWORD
-            - name: SMTP_USE_TLS
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: SMTP_USE_TLS
-            - name: SMTP_SENDER_EMAIL
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: SMTP_SENDER_EMAIL
-            - name: TWO_FA_ENABLED
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: TWO_FA_ENABLED
-                  optional: true
             # Cookies
             - name: COOKIE_SECURE
               value: "true"
             - name: COOKIE_SAMESITE
               value: "lax"
-            - name: COOKIE_DOMAIN
-              valueFrom:
-                secretKeyRef:
-                  name: tesslate-app-secrets
-                  key: COOKIE_DOMAIN
           resources:
             requests:
               memory: "512Mi"

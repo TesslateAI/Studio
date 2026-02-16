@@ -14,7 +14,6 @@ resources:
   - secrets/postgres-secret.yaml
   - secrets/s3-credentials.yaml
   - secrets/app-secrets.yaml
-  - secrets/smtp-secret.yaml
   - frontend-config.yaml
   # Storage class
   - storage-class.yaml
