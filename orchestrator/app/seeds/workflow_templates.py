@@ -439,6 +439,7 @@ async def seed_workflow_templates(db: AsyncSession = None) -> int:
 
     async def _seed(session: AsyncSession) -> int:
         created = 0
+        updated = 0
         for template_data in WORKFLOW_TEMPLATES:
             result = await session.execute(
                 select(WorkflowTemplate).where(WorkflowTemplate.slug == template_data["slug"])
@@ -446,36 +447,47 @@ async def seed_workflow_templates(db: AsyncSession = None) -> int:
             existing = result.scalar_one_or_none()
 
             if existing:
-                logger.info("Workflow '%s' already exists, skipping", template_data["slug"])
-                continue
+                existing.name = template_data["name"]
+                existing.description = template_data["description"]
+                existing.long_description = template_data.get("long_description")
+                existing.icon = template_data["icon"]
+                existing.category = template_data["category"]
+                existing.tags = template_data.get("tags")
+                existing.template_definition = template_data["template_definition"]
+                existing.required_credentials = template_data.get("required_credentials")
+                existing.pricing_type = template_data.get("pricing_type", "free")
+                existing.price = template_data.get("price", 0)
+                existing.is_featured = template_data.get("is_featured", False)
+                existing.is_active = True
+                updated += 1
+                logger.info("Updated workflow: %s", template_data["slug"])
+            else:
+                workflow = WorkflowTemplate(
+                    id=uuid.uuid4(),
+                    name=template_data["name"],
+                    slug=template_data["slug"],
+                    description=template_data["description"],
+                    long_description=template_data.get("long_description"),
+                    icon=template_data["icon"],
+                    category=template_data["category"],
+                    tags=template_data.get("tags"),
+                    template_definition=template_data["template_definition"],
+                    required_credentials=template_data.get("required_credentials"),
+                    pricing_type=template_data.get("pricing_type", "free"),
+                    price=template_data.get("price", 0),
+                    is_featured=template_data.get("is_featured", False),
+                    is_active=True,
+                )
+                session.add(workflow)
+                created += 1
+                logger.info("Created workflow: %s", template_data["name"])
 
-            workflow = WorkflowTemplate(
-                id=uuid.uuid4(),
-                name=template_data["name"],
-                slug=template_data["slug"],
-                description=template_data["description"],
-                long_description=template_data.get("long_description"),
-                icon=template_data["icon"],
-                category=template_data["category"],
-                tags=template_data.get("tags"),
-                template_definition=template_data["template_definition"],
-                required_credentials=template_data.get("required_credentials"),
-                pricing_type=template_data.get("pricing_type", "free"),
-                price=template_data.get("price", 0),
-                is_featured=template_data.get("is_featured", False),
-                is_active=True,
-            )
-            session.add(workflow)
-            created += 1
-            logger.info("Created workflow: %s", template_data["name"])
-
-        if created:
-            await session.commit()
+        await session.commit()
 
         logger.info(
-            "Workflow templates: %d created, %d already existed",
+            "Workflow templates: %d created, %d updated",
             created,
-            len(WORKFLOW_TEMPLATES) - created,
+            updated,
         )
         return created
 

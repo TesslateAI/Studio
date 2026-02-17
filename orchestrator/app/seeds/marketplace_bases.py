@@ -168,12 +168,13 @@ DEFAULT_BASES = [
 
 
 async def seed_marketplace_bases(db: AsyncSession) -> int:
-    """Seed marketplace bases. Per-slug idempotent.
+    """Seed marketplace bases. Upserts by slug.
 
     Returns:
         Number of newly created bases.
     """
     created = 0
+    updated = 0
 
     for base_data in DEFAULT_BASES:
         result = await db.execute(
@@ -182,18 +183,20 @@ async def seed_marketplace_bases(db: AsyncSession) -> int:
         existing = result.scalar_one_or_none()
 
         if existing:
-            logger.info("Base '%s' already exists, skipping", base_data["slug"])
-            continue
+            for key, value in base_data.items():
+                if key != "slug":
+                    setattr(existing, key, value)
+            updated += 1
+            logger.info("Updated base: %s", base_data["slug"])
+        else:
+            base = MarketplaceBase(**base_data)
+            db.add(base)
+            created += 1
+            logger.info("Created base: %s", base_data["name"])
 
-        base = MarketplaceBase(**base_data)
-        db.add(base)
-        created += 1
-        logger.info("Created base: %s", base_data["name"])
-
-    if created:
-        await db.commit()
+    await db.commit()
 
     logger.info(
-        "Marketplace bases: %d created, %d already existed", created, len(DEFAULT_BASES) - created
+        "Marketplace bases: %d created, %d updated", created, updated
     )
     return created

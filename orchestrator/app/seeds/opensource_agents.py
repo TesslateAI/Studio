@@ -256,13 +256,14 @@ Database design principles:
 
 
 async def seed_opensource_agents(db: AsyncSession) -> int:
-    """Seed open-source marketplace agents. Per-slug idempotent.
+    """Seed open-source marketplace agents. Upserts by slug.
 
     Returns:
         Number of newly created agents.
     """
     tesslate_user = await get_or_create_tesslate_account(db)
     created = 0
+    updated = 0
 
     for agent_data in OPENSOURCE_AGENTS:
         result = await db.execute(
@@ -271,24 +272,27 @@ async def seed_opensource_agents(db: AsyncSession) -> int:
         existing = result.scalar_one_or_none()
 
         if existing:
+            for key, value in agent_data.items():
+                if key != "slug":
+                    setattr(existing, key, value)
             if not existing.created_by_user_id:
                 existing.created_by_user_id = tesslate_user.id
-                await db.commit()
-            logger.info("Open-source agent '%s' already exists, skipping", agent_data["slug"])
+            updated += 1
+            logger.info("Updated open-source agent: %s", agent_data["slug"])
         else:
             agent = MarketplaceAgent(
                 **agent_data,
                 created_by_user_id=tesslate_user.id,
             )
             db.add(agent)
-            await db.commit()
-            await db.refresh(agent)
             created += 1
             logger.info("Created open-source agent: %s", agent_data["name"])
 
+    await db.commit()
+
     logger.info(
-        "Open-source agents: %d created, %d already existed",
+        "Open-source agents: %d created, %d updated",
         created,
-        len(OPENSOURCE_AGENTS) - created,
+        updated,
     )
     return created
