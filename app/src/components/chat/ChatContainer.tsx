@@ -11,6 +11,20 @@ import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
 import { type AgentMessageData, type DBMessage } from '../../types/agent';
 
+function formatAgentError(raw: string): string {
+  if (raw.includes('does not exist') || raw.includes('NotFoundError'))
+    return 'Model not available. Try selecting a different model.';
+  if (raw.includes('429') || raw.includes('rate limit'))
+    return 'Rate limited. Please wait a moment and try again.';
+  if (raw.includes('timeout') || raw.includes('timed out'))
+    return 'Request timed out. Please try again.';
+  if (raw.includes('401') || raw.includes('authentication') || raw.includes('api_key'))
+    return 'Authentication error. Check your API key configuration.';
+  if (raw.includes('Resource limit'))
+    return 'Resource limit exceeded for this session.';
+  return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
+}
+
 interface Agent {
   id: string;
   name: string;
@@ -716,33 +730,39 @@ export function ChatContainer({
             // Remove thinking message
             setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
 
-            // Add final response as part of AgentMessage (not a separate message)
-            const finalContent = event.data.final_response;
-            if (finalContent && finalContent.trim()) {
-              // Update the last agent message to include the final response
+            if (event.data.success === false) {
+              const errorDetail = event.data.error
+                ? formatAgentError(event.data.error as string)
+                : 'Agent could not complete the task';
+
+              // Add error message to chat so the user sees inline feedback
               setMessages((prev) => {
                 const lastMsg = prev[prev.length - 1];
+                const errorContent = `I encountered an error: ${errorDetail}`;
                 if (lastMsg && lastMsg.agentData) {
                   return [
                     ...prev.slice(0, -1),
                     {
                       ...lastMsg,
-                      content: finalContent,
+                      content: errorContent,
+                      agentData: {
+                        ...lastMsg.agentData,
+                        completion_reason: 'error',
+                      },
                     },
                   ];
                 }
-                // Fallback: if no agent message exists, create one
                 return [
                   ...prev,
                   {
-                    id: `msg-${Date.now()}-result`,
+                    id: `msg-${Date.now()}-error`,
                     type: 'ai',
-                    content: finalContent,
+                    content: errorContent,
                     agentData: {
                       steps: [],
-                      iterations: 0,
-                      tool_calls_made: 0,
-                      completion_reason: 'complete',
+                      iterations: (event.data.iterations as number) || 0,
+                      tool_calls_made: (event.data.tool_calls_made as number) || 0,
+                      completion_reason: 'error',
                     },
                     agentIcon: currentAgent.icon,
                     agentAvatarUrl: currentAgent.avatar_url,
@@ -750,9 +770,47 @@ export function ChatContainer({
                   },
                 ];
               });
-            }
 
-            toast.success('Task completed successfully');
+              toast.error(errorDetail, { duration: 5000 });
+            } else {
+              // Add final response as part of AgentMessage (not a separate message)
+              const finalContent = event.data.final_response;
+              if (finalContent && finalContent.trim()) {
+                // Update the last agent message to include the final response
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.agentData) {
+                    return [
+                      ...prev.slice(0, -1),
+                      {
+                        ...lastMsg,
+                        content: finalContent,
+                      },
+                    ];
+                  }
+                  // Fallback: if no agent message exists, create one
+                  return [
+                    ...prev,
+                    {
+                      id: `msg-${Date.now()}-result`,
+                      type: 'ai',
+                      content: finalContent,
+                      agentData: {
+                        steps: [],
+                        iterations: 0,
+                        tool_calls_made: 0,
+                        completion_reason: 'complete',
+                      },
+                      agentIcon: currentAgent.icon,
+                      agentAvatarUrl: currentAgent.avatar_url,
+                      agentType: currentAgent.name,
+                    },
+                  ];
+                });
+              }
+
+              toast.success('Task completed successfully');
+            }
           } else if (event.type === 'error') {
             const errorMsg =
               (event as { content?: string; data?: { message?: string } }).content ||
