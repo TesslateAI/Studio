@@ -166,7 +166,7 @@ variable "create_rds" {
 variable "rds_instance_class" {
   description = "RDS instance class"
   type        = string
-  default     = "db.t3.small"
+  default     = "db.t4g.small"
 }
 
 variable "rds_allocated_storage" {

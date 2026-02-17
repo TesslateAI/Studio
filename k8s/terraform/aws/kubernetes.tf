@@ -144,6 +144,9 @@ resource "kubernetes_secret" "app_secrets" {
 
     # PostHog (for frontend via secret)
     POSTHOG_KEY = var.posthog_key
+
+    # Database SSL (enabled when using RDS)
+    DATABASE_SSL = tostring(var.create_rds)
   }
 
   type = "Opaque"

@@ -156,6 +156,16 @@ output "rds_database_name" {
   value       = var.create_rds ? aws_db_instance.tesslate[0].db_name : "tesslate"
 }
 
+output "rds_port" {
+  description = "RDS port"
+  value       = var.create_rds ? aws_db_instance.tesslate[0].port : 5432
+}
+
+output "rds_security_group_id" {
+  description = "RDS security group ID"
+  value       = var.create_rds ? aws_security_group.rds[0].id : "N/A"
+}
+
 # -----------------------------------------------------------------------------
 # Useful Commands
 # -----------------------------------------------------------------------------

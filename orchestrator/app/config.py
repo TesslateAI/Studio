@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     # Database - PostgreSQL required
     database_url: str
+    database_ssl: bool = False  # Set to True for RDS connections
 
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""

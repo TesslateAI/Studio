@@ -12,7 +12,7 @@ engine = create_async_engine(
     pool_pre_ping=True,  # Validate connections before use
     pool_recycle=3600,  # Recycle connections every hour
     connect_args={
-        "ssl": False,  # Disable SSL for internal cluster connections
+        "ssl": "require" if settings.database_ssl else False,
         "command_timeout": 60,  # 60 second command timeout
         "server_settings": {
             "jit": "off"  # Disable JIT for better connection stability
