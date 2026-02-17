@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { authApi } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,9 +13,10 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { refreshUserTheme } = useTheme();
-  const auth = useAuth();
-  const { checkAuth } = auth;
+  const { checkAuth } = useAuth();
+  const redirectTo = (location.state as { from?: string })?.from || '/dashboard';
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -76,7 +77,7 @@ export default function Login() {
       refreshUserTheme();
       toast.success('Logged in successfully!');
       setLoading(false);
-      navigate('/dashboard');
+      navigate(redirectTo);
     } catch {
       toast.error('Invalid or expired code');
       setOtpCode(['', '', '', '', '', '']);
@@ -123,7 +124,7 @@ export default function Login() {
         localStorage.setItem('token', response.access_token);
         await checkAuth({ force: true });
         refreshUserTheme();
-        navigate('/dashboard');
+        navigate(redirectTo);
         return;
       }
 
@@ -165,6 +166,8 @@ export default function Login() {
   const handleGithubLogin = async () => {
     try {
       setLoading(true);
+      // Save intended destination so OAuth callback can redirect there
+      sessionStorage.setItem('oauth_redirect', redirectTo);
       // Fetch the GitHub OAuth authorization URL from backend
       const authUrl = await authApi.getGithubAuthUrl();
       // Redirect to GitHub OAuth
@@ -178,6 +181,8 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
+      // Save intended destination so OAuth callback can redirect there
+      sessionStorage.setItem('oauth_redirect', redirectTo);
       // Fetch the Google OAuth authorization URL from backend
       const authUrl = await authApi.getGoogleAuthUrl();
       // Redirect to Google OAuth
@@ -387,6 +392,7 @@ export default function Login() {
                   Don't have an account?{' '}
                   <Link
                     to="/register"
+                    state={{ from: redirectTo !== '/dashboard' ? redirectTo : undefined }}
                     className="text-black hover:text-gray-700 font-semibold transition-colors underline"
                   >
                     Sign up

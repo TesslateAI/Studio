@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom';
 import { authApi } from '../lib/api';
 import { PulsingGridSpinner } from '../components/PulsingGridSpinner';
 import { MiniAsteroids } from '../components/MiniAsteroids';
@@ -9,8 +9,14 @@ import toast from 'react-hot-toast';
 
 export default function Register() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { refreshUserTheme } = useTheme();
   const { checkAuth } = useAuth();
+  // Check state (from PrivateRoute/cross-links), then ?redirect= query param (from MarketplaceDetail), then default
+  const redirectTo = (location.state as { from?: string })?.from
+    || searchParams.get('redirect')
+    || '/dashboard';
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -73,7 +79,7 @@ export default function Register() {
       refreshUserTheme();
       toast.success('Logged in successfully!');
       setLoading(false);
-      navigate('/dashboard', { state: { fromLogin: true } });
+      navigate(redirectTo);
     } catch {
       toast.error('Invalid or expired code');
       setOtpCode(['', '', '', '', '', '']);
@@ -123,7 +129,7 @@ export default function Register() {
         localStorage.setItem('token', loginResponse.access_token);
         await checkAuth({ force: true });
         refreshUserTheme();
-        navigate('/dashboard');
+        navigate(redirectTo);
         return;
       }
 
@@ -158,6 +164,7 @@ export default function Register() {
   const handleGithubLogin = async () => {
     try {
       setLoading(true);
+      sessionStorage.setItem('oauth_redirect', redirectTo);
       // Fetch the GitHub OAuth authorization URL from backend
       const authUrl = await authApi.getGithubAuthUrl();
       // Redirect to GitHub OAuth
@@ -171,6 +178,7 @@ export default function Register() {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
+      sessionStorage.setItem('oauth_redirect', redirectTo);
       // Fetch the Google OAuth authorization URL from backend
       const authUrl = await authApi.getGoogleAuthUrl();
       // Redirect to Google OAuth
@@ -420,6 +428,7 @@ export default function Register() {
                   Already have an account?{' '}
                   <Link
                     to="/login"
+                    state={{ from: redirectTo !== '/dashboard' ? redirectTo : undefined }}
                     className="text-black hover:text-gray-700 font-semibold transition-colors underline"
                   >
                     Sign in
