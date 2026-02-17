@@ -83,6 +83,7 @@ export default function Project() {
   const [containers, setContainers] = useState<Array<Record<string, unknown>>>([]);
   const [agents, setAgents] = useState<UIAgent[]>([]);
   const [activeView, setActiveView] = useState<MainViewType>('preview');
+  const [kanbanMounted, setKanbanMounted] = useState(false);
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
@@ -431,6 +432,13 @@ export default function Project() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, slug, container]); // Include container to use correct filter
+
+  // Lazily mount KanbanPanel on first visit to preserve state across tab switches
+  useEffect(() => {
+    if (activeView === 'kanban' && !kanbanMounted) {
+      setKanbanMounted(true);
+    }
+  }, [activeView, kanbanMounted]);
 
   const loadProject = async () => {
     if (!slug) return;
@@ -1226,9 +1234,11 @@ export default function Project() {
                   </div>
 
                   {/* Kanban View */}
-                  <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-                    <KanbanPanel projectId={project?.id} />
-                  </div>
+                  {kanbanMounted && project?.id && (
+                    <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                      <KanbanPanel projectId={project.id as string} />
+                    </div>
+                  )}
 
                   {/* Assets View */}
                   <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
@@ -1368,9 +1378,11 @@ export default function Project() {
                 </div>
 
                 {/* Kanban View */}
-                <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-                  <KanbanPanel projectId={project?.id} />
-                </div>
+                {kanbanMounted && project?.id && (
+                  <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                    <KanbanPanel projectId={project.id as string} />
+                  </div>
+                )}
 
                 {/* Assets View */}
                 <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
@@ -1421,9 +1433,11 @@ export default function Project() {
             </div>
 
             {/* Kanban View */}
-            <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-              <KanbanPanel projectId={project?.id} />
-            </div>
+            {kanbanMounted && project?.id && (
+              <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                <KanbanPanel projectId={project.id as string} />
+              </div>
+            )}
 
             {/* Assets View */}
             <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>

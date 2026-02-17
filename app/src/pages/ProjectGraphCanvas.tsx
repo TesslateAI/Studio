@@ -114,6 +114,7 @@ export const ProjectGraphCanvas = () => {
   const appDomainRef = useRef<string>('localhost');
   const [isRunning, setIsRunning] = useState(false);
   const [activeView, setActiveView] = useState<MainViewType>('graph');
+  const [kanbanMounted, setKanbanMounted] = useState(false);
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
     const saved = localStorage.getItem('graphCanvasSidebarExpanded');
@@ -156,6 +157,13 @@ export const ProjectGraphCanvas = () => {
   useEffect(() => {
     isDraggingRef.current = isDragging;
   }, [isDragging]);
+
+  // Lazily mount KanbanPanel on first visit to preserve state across tab switches
+  useEffect(() => {
+    if (activeView === 'kanban' && !kanbanMounted) {
+      setKanbanMounted(true);
+    }
+  }, [activeView, kanbanMounted]);
 
   // Fetch app domain config on mount
   useEffect(() => {
@@ -1698,9 +1706,11 @@ export const ProjectGraphCanvas = () => {
           </div>
 
           {/* Kanban View */}
-          <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-            <KanbanPanel projectId={project?.id} />
-          </div>
+          {kanbanMounted && project?.id && (
+            <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+              <KanbanPanel projectId={project.id as string} />
+            </div>
+          )}
         </div>
       </div>
 

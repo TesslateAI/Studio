@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -141,26 +142,33 @@ async def get_board_with_auth(
     board = board_result.scalar_one_or_none()
 
     if not board and create_if_missing:
-        # Create board with default columns
-        board = KanbanBoard(project_id=project_id, name=f"{project.name} Board")
-        db.add(board)
-        await db.flush()  # Get board.id
+        try:
+            board = KanbanBoard(project_id=project_id, name=f"{project.name} Board")
+            db.add(board)
+            await db.flush()
 
-        # Create default columns
-        default_columns = [
-            {"name": "Backlog", "color": "gray", "icon": "📋", "is_backlog": True, "position": 0},
-            {"name": "To Do", "color": "blue", "icon": "📝", "position": 1},
-            {"name": "In Progress", "color": "orange", "icon": "🚧", "position": 2},
-            {"name": "Review", "color": "purple", "icon": "👀", "position": 3},
-            {"name": "Done", "color": "green", "icon": "✅", "is_completed": True, "position": 4},
-        ]
+            default_columns = [
+                {"name": "Backlog", "color": "gray", "icon": "📋", "is_backlog": True, "position": 0},
+                {"name": "To Do", "color": "blue", "icon": "📝", "position": 1},
+                {"name": "In Progress", "color": "orange", "icon": "🚧", "position": 2},
+                {"name": "Review", "color": "purple", "icon": "👀", "position": 3},
+                {"name": "Done", "color": "green", "icon": "✅", "is_completed": True, "position": 4},
+            ]
 
-        for col_data in default_columns:
-            column = KanbanColumn(board_id=board.id, **col_data)
-            db.add(column)
+            for col_data in default_columns:
+                column = KanbanColumn(board_id=board.id, **col_data)
+                db.add(column)
 
-        await db.commit()
-        await db.refresh(board)
+            await db.commit()
+            await db.refresh(board)
+        except IntegrityError:
+            await db.rollback()
+            board_result = await db.execute(
+                select(KanbanBoard)
+                .where(KanbanBoard.project_id == project_id)
+                .options(selectinload(KanbanBoard.columns).selectinload(KanbanColumn.tasks))
+            )
+            board = board_result.scalar_one_or_none()
 
     if not board:
         raise HTTPException(status_code=404, detail="Board not found")
@@ -311,7 +319,9 @@ async def update_column(
         raise HTTPException(status_code=404, detail="Column not found")
 
     # Verify ownership
-    await get_board_with_auth(column.board.project_id, db, current_user, create_if_missing=False)
+    board_result = await db.execute(select(KanbanBoard).where(KanbanBoard.id == column.board_id))
+    board = board_result.scalar_one()
+    await get_board_with_auth(board.project_id, db, current_user, create_if_missing=False)
 
     # Update fields
     for field, value in column_data.dict(exclude_unset=True).items():
@@ -699,7 +709,6 @@ async def get_notes(
 ):
     """Get project notes."""
     project_id = await get_project_id_from_slug_or_id(project_slug_or_id, db, current_user)
-    await get_board_with_auth(project_id, db, current_user, create_if_missing=False)
 
     result = await db.execute(select(ProjectNote).where(ProjectNote.project_id == project_id))
     notes = result.scalar_one_or_none()
@@ -732,7 +741,6 @@ async def update_notes(
 ):
     """Update project notes."""
     project_id = await get_project_id_from_slug_or_id(project_slug_or_id, db, current_user)
-    await get_board_with_auth(project_id, db, current_user, create_if_missing=False)
 
     result = await db.execute(select(ProjectNote).where(ProjectNote.project_id == project_id))
     notes = result.scalar_one_or_none()
