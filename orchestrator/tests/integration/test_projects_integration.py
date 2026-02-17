@@ -7,7 +7,10 @@ Tests:
 - Get project by slug
 - Delete project
 - Project isolation (user A can't see user B's projects)
+- Auto-add base to library on project creation
 """
+
+import time
 
 import pytest
 
@@ -97,7 +100,6 @@ def test_get_project_by_slug(authenticated_client, default_base_id, mock_orchest
 @pytest.mark.integration
 def test_delete_project(authenticated_client, default_base_id, mock_orchestrator):
     """Test deleting project removes it from database."""
-    import time
 
     client, user_data = authenticated_client
 
@@ -191,3 +193,93 @@ def test_project_isolation(authenticated_client, api_client, default_base_id, mo
 
     # Should return 404 (not 403, to avoid leaking project existence)
     assert response.status_code == 404
+
+
+# ============================================================================
+# Auto-add base to library on project creation
+# ============================================================================
+
+
+@pytest.fixture
+def raw_base_id(api_client_session, authenticated_client):
+    """
+    Get a marketplace base ID WITHOUT adding it to the user's library.
+
+    Unlike default_base_id, this does not call the purchase endpoint,
+    so the base is not in the user's library.
+    """
+    client, _ = authenticated_client
+
+    response = client.get("/api/marketplace/bases")
+    assert response.status_code == 200
+    data = response.json()
+
+    if data.get("bases") and len(data["bases"]) > 0:
+        return data["bases"][0]["id"]
+    return None
+
+
+@pytest.mark.integration
+def test_create_project_auto_adds_base_to_library(
+    authenticated_client, raw_base_id, mock_orchestrator
+):
+    """Test that creating a project with a base NOT in the user's library auto-adds it."""
+    client, user_data = authenticated_client
+
+    # Verify the base is NOT in the user's library yet
+    library_response = client.get("/api/marketplace/my-bases")
+    assert library_response.status_code == 200
+    library_ids = [b["id"] for b in library_response.json()]
+    assert raw_base_id not in library_ids, "Base should NOT be in library before project creation"
+
+    # Create a project using the base (should auto-add to library)
+    response = client.post(
+        "/api/projects/",
+        json={"name": "Auto Add Test Project", "base_id": raw_base_id},
+    )
+    assert response.status_code == 200, f"Project creation failed: {response.text}"
+    data = response.json()
+    assert "project" in data
+
+    # Wait for the background task to complete
+    task_id = data["task_id"]
+    max_wait = 10
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        status_response = client.get(f"/api/tasks/{task_id}/status")
+        if status_response.status_code == 200:
+            status_data = status_response.json()
+            if status_data.get("status") in ["completed", "failed"]:
+                break
+        time.sleep(0.2)
+
+    # Verify the base is now in the user's library
+    library_response = client.get("/api/marketplace/my-bases")
+    assert library_response.status_code == 200
+    library_ids = [b["id"] for b in library_response.json()]
+    assert raw_base_id in library_ids, "Base should be auto-added to library after project creation"
+
+
+@pytest.mark.integration
+def test_create_project_with_base_already_in_library(
+    authenticated_client, default_base_id, mock_orchestrator
+):
+    """Test that creating a project with a base already in the library still works."""
+    client, user_data = authenticated_client
+
+    # default_base_id fixture already adds the base to the library
+    # Verify it's there
+    library_response = client.get("/api/marketplace/my-bases")
+    assert library_response.status_code == 200
+    library_ids = [b["id"] for b in library_response.json()]
+    assert default_base_id in library_ids, "Base should be in library (added by fixture)"
+
+    # Create a project - should work fine with base already in library
+    response = client.post(
+        "/api/projects/",
+        json={"name": "Already In Library Project", "base_id": default_base_id},
+    )
+    assert response.status_code == 200, f"Project creation failed: {response.text}"
+    data = response.json()
+    assert data["project"]["name"] == "Already In Library Project"

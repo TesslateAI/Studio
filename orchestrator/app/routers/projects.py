@@ -707,15 +707,38 @@ async def _setup_base_project(
         select(UserPurchasedBase).where(
             UserPurchasedBase.user_id == user_id,
             UserPurchasedBase.base_id == project_data.base_id,
-            UserPurchasedBase.is_active,
         )
     )
 
-    if not purchase:
-        # User must add the base to their library first (via "+" button in CreateProjectModal)
-        raise ValueError(
-            f"Please add '{base_repo.name}' to your library first by clicking the + button."
+    if purchase and not purchase.is_active:
+        # Re-activate a previously deactivated purchase
+        if base_repo.pricing_type != "free":
+            raise ValueError(
+                f"'{base_repo.name}' requires purchase. Please buy it from the marketplace first."
+            )
+        from datetime import UTC, datetime
+
+        purchase.is_active = True
+        purchase.purchase_date = datetime.now(UTC)
+        base_repo.downloads += 1
+        await db.flush()
+        logger.info(f"[CREATE] Re-activated base '{base_repo.name}' for user {user_id}")
+    elif not purchase:
+        # Auto-add free bases to the user's library on project creation
+        if base_repo.pricing_type != "free":
+            raise ValueError(
+                f"'{base_repo.name}' requires purchase. Please buy it from the marketplace first."
+            )
+        purchase = UserPurchasedBase(
+            user_id=user_id,
+            base_id=project_data.base_id,
+            purchase_type="free",
+            is_active=True,
         )
+        db.add(purchase)
+        base_repo.downloads += 1
+        await db.flush()
+        logger.info(f"[CREATE] Auto-added base '{base_repo.name}' to user {user_id} library")
 
     # Note: MarketplaceBase doesn't have a metadata column - framework detection
     # happens via TESSLATE.md parsing during container startup
