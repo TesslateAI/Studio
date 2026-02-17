@@ -57,17 +57,10 @@ import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { type ChatAgent } from '../types/chat';
 
 type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
-
-interface UIAgent {
-  id: string;
-  name: string;
-  icon: string;
-  backendId: number;
-  mode: 'stream' | 'agent';
-}
 
 export default function Project() {
   const { slug } = useParams<{ slug: string }>();
@@ -81,7 +74,7 @@ export default function Project() {
   const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
   const [container, setContainer] = useState<Record<string, unknown> | null>(null);
   const [containers, setContainers] = useState<Array<Record<string, unknown>>>([]);
-  const [agents, setAgents] = useState<UIAgent[]>([]);
+  const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [activeView, setActiveView] = useState<MainViewType>('preview');
   const [kanbanMounted, setKanbanMounted] = useState(false);
   const [activePanel, setActivePanel] = useState<PanelType>(null);
@@ -584,6 +577,10 @@ export default function Project() {
         icon: (agent.icon as string) || '🤖',
         backendId: agent.id as string,
         mode: agent.mode as string,
+        model: agent.model as string | undefined,
+        selectedModel: agent.selected_model as string | null | undefined,
+        sourceType: agent.source_type as 'open' | 'closed' | undefined,
+        isCustom: agent.is_custom as boolean | undefined,
       }));
 
       setAgents(uiAgents);

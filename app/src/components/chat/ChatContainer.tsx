@@ -6,10 +6,11 @@ import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { type EditMode } from './EditModeStatus';
 import { ApprovalRequestCard } from './ApprovalRequestCard';
-import { createWebSocket, chatApi } from '../../lib/api';
+import { createWebSocket, chatApi, marketplaceApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import AgentMessage from '../AgentMessage';
 import { type AgentMessageData, type DBMessage } from '../../types/agent';
+import { type ChatAgent } from '../../types/chat';
 
 function formatAgentError(raw: string): string {
   if (raw.includes('does not exist') || raw.includes('NotFoundError'))
@@ -23,16 +24,6 @@ function formatAgentError(raw: string): string {
   if (raw.includes('Resource limit'))
     return 'Resource limit exceeded for this session.';
   return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
-}
-
-interface Agent {
-  id: string;
-  name: string;
-  icon: string; // Emoji string from backend
-  avatar_url?: string; // Uploaded logo URL
-  active?: boolean;
-  backendId?: number; // Link to backend agent ID
-  mode?: 'stream' | 'agent';
 }
 
 interface Message {
@@ -72,9 +63,9 @@ interface ChatContainerProps {
   projectId: number;
   containerId?: string; // Container ID for container-scoped agents
   viewContext?: 'graph' | 'builder' | 'terminal' | 'kanban'; // UI view context for scoped tools
-  agents: Agent[];
-  currentAgent: Agent;
-  onSelectAgent: (agent: Agent) => void;
+  agents: ChatAgent[];
+  currentAgent: ChatAgent;
+  onSelectAgent: (agent: ChatAgent) => void;
   onFileUpdate: (filePath: string, content: string) => void;
   projectFiles?: ProjectFile[];
   projectName?: string;
@@ -103,8 +94,8 @@ export function ChatContainer({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [agents, setAgents] = useState<Agent[]>(initialAgents);
-  const [currentAgent, setCurrentAgent] = useState<Agent>(initialCurrentAgent);
+  const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
+  const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
   const [editMode, setEditMode] = useState<EditMode>('ask');
   const [isStreaming, setIsStreaming] = useState(false);
   const [agentExecuting, setAgentExecuting] = useState(false);
@@ -570,9 +561,32 @@ export function ChatContainer({
     setIsExpanded(true);
   };
 
-  const handleAgentSelect = (agent: Agent) => {
+  const handleAgentSelect = (agent: ChatAgent) => {
     setCurrentAgent(agent);
     onSelectAgent(agent);
+  };
+
+  const handleModelChange = async (model: string) => {
+    // Read current values before optimistic update to enable revert
+    const agentBackendId = currentAgent.backendId;
+    const previousModel = currentAgent.selectedModel;
+
+    // Optimistic update
+    setCurrentAgent((prev) => ({ ...prev, selectedModel: model }));
+
+    try {
+      if (agentBackendId) {
+        await marketplaceApi.selectAgentModel(String(agentBackendId), model);
+      }
+      toast.success(`Model changed to ${model}`, { duration: 2000 });
+    } catch (error) {
+      console.error('Failed to change model:', error);
+      // Revert on failure — only if agent hasn't changed in the meantime
+      setCurrentAgent((prev) =>
+        prev.backendId === agentBackendId ? { ...prev, selectedModel: previousModel } : prev
+      );
+      toast.error('Failed to change model');
+    }
   };
 
   const sendStreamMessage = (message: string) => {
@@ -1350,6 +1364,7 @@ export function ChatContainer({
             agents={agents}
             currentAgent={currentAgent}
             onSelectAgent={handleAgentSelect}
+            onModelChange={handleModelChange}
             onSendMessage={handleSendMessage}
             projectFiles={projectFiles}
             projectName={projectName}

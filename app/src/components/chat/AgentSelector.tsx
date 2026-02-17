@@ -1,19 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-interface Agent {
-  id: string;
-  name: string;
-  icon: string; // Emoji string from backend
-  active?: boolean;
-  backendId?: number; // Link to backend agent ID
-  mode?: 'stream' | 'agent';
-}
+import { type ChatAgent } from '../../types/chat';
 
 interface AgentSelectorProps {
-  agents: Agent[];
-  currentAgent: Agent;
-  onSelectAgent: (agent: Agent) => void;
+  agents: ChatAgent[];
+  currentAgent: ChatAgent;
+  onSelectAgent: (agent: ChatAgent) => void;
   /** When true, only shows the agent icon without name */
   compact?: boolean;
 }
@@ -39,7 +31,7 @@ export function AgentSelector({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSelect = (agent: Agent) => {
+  const handleSelect = (agent: ChatAgent) => {
     onSelectAgent(agent);
     setIsOpen(false);
   };
