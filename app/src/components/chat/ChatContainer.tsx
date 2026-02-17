@@ -81,6 +81,7 @@ interface ChatContainerProps {
   className?: string;
   sidebarExpanded?: boolean;
   isDocked?: boolean; // When true, renders as docked panel instead of floating
+  isPointerOverPreviewRef?: React.RefObject<boolean>; // Tracks if mouse is over preview iframe
 }
 
 export function ChatContainer({
@@ -96,6 +97,7 @@ export function ChatContainer({
   className = '',
   sidebarExpanded = true,
   isDocked = false,
+  isPointerOverPreviewRef,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -538,11 +540,16 @@ export function ChatContainer({
     };
 
     const handleWindowBlur = () => {
-      // Close chat when clicking on iframe (preview window) - desktop only
-      // Use cached isDesktop state to avoid forced reflow from reading window.innerWidth
+      // Close chat when user clicks on iframe (preview window) - desktop only
+      // Only collapse if pointer is actually over the preview (user clicked it),
+      // not when a programmatic iframe.src refresh triggers window blur.
       if (isDesktop) {
         setTimeout(() => {
-          if (document.activeElement?.tagName === 'IFRAME' && isExpanded) {
+          if (
+            document.activeElement?.tagName === 'IFRAME' &&
+            isExpanded &&
+            isPointerOverPreviewRef?.current
+          ) {
             setIsExpanded(false);
           }
         }, 0);
@@ -557,7 +564,7 @@ export function ChatContainer({
         window.removeEventListener('blur', handleWindowBlur);
       };
     }
-  }, [isExpanded, isDocked, isDesktop]);
+  }, [isExpanded, isDocked, isDesktop, isPointerOverPreviewRef]);
 
   const handleInputFocus = () => {
     setIsExpanded(true);

@@ -107,6 +107,7 @@ export default function Project() {
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const isPointerOverPreviewRef = useRef(false);
 
   // Track if we need to start the container (for the startup hook)
   const [needsContainerStart, setNeedsContainerStart] = useState(false);
@@ -1132,6 +1133,7 @@ export default function Project() {
                         projectName={project?.name}
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
+                        isPointerOverPreviewRef={isPointerOverPreviewRef}
                       />
                     </Panel>
                     <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
@@ -1204,7 +1206,11 @@ export default function Project() {
                               <ArrowsClockwise size={16} />
                             </button>
                           </div>
-                          <div className="w-full h-[calc(100%-50px)] bg-white">
+                          <div
+                            className="w-full h-[calc(100%-50px)] bg-white"
+                            onMouseEnter={() => { isPointerOverPreviewRef.current = true; }}
+                            onMouseLeave={() => { isPointerOverPreviewRef.current = false; }}
+                          >
                             <iframe
                               ref={iframeRef}
                               id="preview-iframe"
@@ -1276,6 +1282,7 @@ export default function Project() {
                         projectName={project?.name}
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
+                        isPointerOverPreviewRef={isPointerOverPreviewRef}
                       />
                     </Panel>
                   </>
@@ -1348,7 +1355,11 @@ export default function Project() {
                             <ArrowsClockwise size={16} />
                           </button>
                         </div>
-                        <div className="w-full h-[calc(100%-50px)] bg-white">
+                        <div
+                          className="w-full h-[calc(100%-50px)] bg-white"
+                          onMouseEnter={() => { isPointerOverPreviewRef.current = true; }}
+                          onMouseLeave={() => { isPointerOverPreviewRef.current = false; }}
+                        >
                           <iframe
                             ref={iframeRef}
                             id="preview-iframe"
@@ -1495,6 +1506,7 @@ export default function Project() {
             projectFiles={files}
             projectName={project?.name}
             sidebarExpanded={isLeftSidebarExpanded}
+            isPointerOverPreviewRef={isPointerOverPreviewRef}
           />
         </div>
       )}
