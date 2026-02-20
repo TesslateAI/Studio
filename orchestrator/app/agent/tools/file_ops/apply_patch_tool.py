@@ -240,7 +240,7 @@ async def apply_patch_tool(params: dict[str, Any], context: dict[str, Any]) -> d
     if not hunks:
         return error_output(message="Patch contains no file operations")
 
-    from .....services.orchestration import get_orchestrator
+    from ....services.orchestration import get_orchestrator
 
     ctx = _PatchContext(
         user_id=context["user_id"],
