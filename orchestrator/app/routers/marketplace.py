@@ -2,6 +2,7 @@
 Marketplace API endpoints for browsing, purchasing, and managing agents.
 """
 
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -66,6 +67,45 @@ async def _get_cached_litellm_models() -> list[dict[str, Any]]:
     return models
 
 
+async def _get_cached_model_pricing() -> dict[str, dict[str, float]]:
+    """
+    Build a model-id → {input, output} pricing map from LiteLLM /model/info.
+
+    Prices are returned in USD per 1M tokens.  The proxy reports per-token
+    costs, so we multiply by 1_000_000 here.  Results are cached alongside
+    the model list.
+    """
+    cache_key = "litellm_model_pricing"
+
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    from ..services.litellm_service import litellm_service
+
+    info_list = await litellm_service.get_model_info()
+
+    pricing_map: dict[str, dict[str, float]] = {}
+    for entry in info_list:
+        model_info = entry.get("model_info") or {}
+        model_name = entry.get("model_name") or model_info.get("id")
+        if not model_name:
+            continue
+
+        input_cost = model_info.get("input_cost_per_token")
+        output_cost = model_info.get("output_cost_per_token")
+        if input_cost is not None or output_cost is not None:
+            pricing_map[model_name] = {
+                "input": round((input_cost or 0) * 1_000_000, 4),
+                "output": round((output_cost or 0) * 1_000_000, 4),
+            }
+
+    await cache.set(cache_key, pricing_map, ttl=_MODELS_CACHE_TTL)
+    logger.info(f"Refreshed model pricing cache ({len(pricing_map)} models with pricing)")
+
+    return pricing_map
+
+
 # ============================================================================
 # Models Configuration
 # ============================================================================
@@ -82,33 +122,10 @@ async def get_available_models(
     """
     from ..models import UserAPIKey, UserCustomModel
 
-    # Get models from LiteLLM (cached to avoid blocking on external calls)
-    litellm_models = await _get_cached_litellm_models()
-
-    # Model pricing database (approximate, in USD per 1M tokens)
-    # These are typical costs - actual costs may vary
-    model_pricing = {
-        # OpenAI
-        "gpt-4": {"input": 30.0, "output": 60.0},
-        "gpt-4-turbo": {"input": 10.0, "output": 30.0},
-        "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
-        # Anthropic
-        "claude-3-opus": {"input": 15.0, "output": 75.0},
-        "claude-3-sonnet": {"input": 3.0, "output": 15.0},
-        "claude-3-haiku": {"input": 0.25, "output": 1.25},
-        # Open source / self-hosted
-        "llama-3.3": {"input": 0.0, "output": 0.0},
-        "qwen": {"input": 0.0, "output": 0.0},
-        "default": {"input": 2.0, "output": 6.0},  # Default for unknown models
-    }
-
-    def get_model_pricing(model_id: str):
-        """Get pricing for a model based on ID"""
-        model_lower = model_id.lower()
-        for key, price in model_pricing.items():
-            if key in model_lower:
-                return price
-        return model_pricing["default"]
+    # Get models and pricing from LiteLLM in parallel (both cached independently)
+    litellm_models, pricing_map = await asyncio.gather(
+        _get_cached_litellm_models(), _get_cached_model_pricing()
+    )
 
     # Convert LiteLLM models to response format with pricing
     system_models = [
@@ -117,7 +134,7 @@ async def get_available_models(
             "name": model.get("id"),
             "source": "system",
             "provider": "internal",
-            "pricing": get_model_pricing(model.get("id", "")),
+            "pricing": pricing_map.get(model.get("id", ""), {"input": 0.0, "output": 0.0}),
             "available": True,
         }
         for model in litellm_models
@@ -176,7 +193,7 @@ async def get_available_models(
                 "name": m.strip(),
                 "source": "system",
                 "provider": "internal",
-                "pricing": get_model_pricing(m.strip()),
+                "pricing": pricing_map.get(m.strip(), {"input": 0.0, "output": 0.0}),
                 "available": True,
             }
             for m in models_str.split(",")

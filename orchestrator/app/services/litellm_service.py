@@ -407,6 +407,28 @@ class LiteLLMService:
                 logger.error(f"Error getting available models: {e}")
                 return []
 
+    async def get_model_info(self) -> list[dict[str, Any]]:
+        """
+        Get model info from LiteLLM's /model/info endpoint.
+
+        Returns per-model metadata including input_cost_per_token and
+        output_cost_per_token when the proxy has pricing data.
+        """
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(
+                    f"{self.management_base_url}/model/info", headers=self.headers
+                ) as resp:
+                    if resp.status != 200:
+                        return []
+
+                    data = await resp.json()
+                    return data.get("data", [])
+
+            except Exception as e:
+                logger.debug(f"Could not fetch /model/info: {e}")
+                return []
+
 
 # Singleton instance
 litellm_service = LiteLLMService()

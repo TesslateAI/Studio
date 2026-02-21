@@ -3,6 +3,11 @@ import { Cpu } from '@phosphor-icons/react';
 import { marketplaceApi } from '../../lib/api';
 import { type ChatAgent } from '../../types/chat';
 
+interface ModelInfo {
+  id: string;
+  pricing: { input: number; output: number } | null;
+}
+
 interface ModelSelectorProps {
   currentAgent: ChatAgent;
   onModelChange: (model: string) => void;
@@ -17,7 +22,7 @@ function displayModelName(model: string): string {
 
 export function ModelSelector({ currentAgent, onModelChange, compact = false }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -25,17 +30,24 @@ export function ModelSelector({ currentAgent, onModelChange, compact = false }: 
   const activeModel = currentAgent.selectedModel || currentAgent.model || '';
   const isReadOnly = currentAgent.sourceType === 'closed' && !currentAgent.isCustom;
 
-  // Close dropdown on click outside
+  // Close dropdown on click outside or window losing focus (e.g. iframe click)
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
+    const handleBlur = () => setIsOpen(false);
 
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [isOpen]);
 
   // Fetch models on first open
   const handleToggle = async () => {
@@ -53,10 +65,15 @@ export function ModelSelector({ currentAgent, onModelChange, compact = false }: 
       try {
         const data = await marketplaceApi.getAvailableModels();
         const raw: unknown[] = Array.isArray(data) ? data : data.models || [];
-        // API returns model objects ({ id, name, ... }) — extract the id string
-        const modelList: string[] = raw.map((m) =>
-          typeof m === 'string' ? m : (m as Record<string, unknown>).id as string
-        ).filter(Boolean);
+        const modelList: ModelInfo[] = raw
+          .map((m) => {
+            if (typeof m === 'string') return { id: m, pricing: null };
+            const obj = m as Record<string, unknown>;
+            const id = obj.id as string;
+            const pricing = (obj.pricing as { input: number; output: number }) || { input: 0, output: 0 };
+            return id ? { id, pricing } : null;
+          })
+          .filter((m): m is ModelInfo => m !== null);
         setModels(modelList);
         setHasFetched(true);
       } catch (error) {
@@ -76,8 +93,8 @@ export function ModelSelector({ currentAgent, onModelChange, compact = false }: 
   const displayModels = useMemo(() => {
     if (!hasFetched) return [];
     const list = [...models];
-    if (activeModel && !list.includes(activeModel)) {
-      list.unshift(activeModel);
+    if (activeModel && !list.some((m) => m.id === activeModel)) {
+      list.unshift({ id: activeModel, pricing: null });
     }
     return list;
   }, [hasFetched, models, activeModel]);
@@ -86,7 +103,7 @@ export function ModelSelector({ currentAgent, onModelChange, compact = false }: 
   if (!activeModel) return null;
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative" ref={dropdownRef} onFocus={(e) => e.stopPropagation()}>
       <button
         type="button"
         onClick={(e) => {
@@ -141,25 +158,37 @@ export function ModelSelector({ currentAgent, onModelChange, compact = false }: 
           ) : displayModels.length === 0 ? (
             <div className="px-4 py-3 text-sm text-gray-400">No models available</div>
           ) : (
-            displayModels.map((model) => (
-              <button
-                key={model}
-                type="button"
-                onClick={() => handleSelect(model)}
-                className={`
-                  w-full px-4 py-2.5 flex items-center gap-3
-                  text-sm text-white transition-colors
-                  hover:bg-white/8
-                  ${model === activeModel ? 'bg-[rgba(255,107,0,0.2)]' : ''}
-                `}
-              >
-                <Cpu size={14} className="flex-shrink-0 text-gray-400" />
-                <span className="flex-1 text-left truncate">{model}</span>
-                {model === activeModel && (
-                  <span className="text-xs text-green-400 flex-shrink-0">Active</span>
-                )}
-              </button>
-            ))
+            displayModels.map((model) => {
+              const isFree = model.pricing != null && model.pricing.input === 0 && model.pricing.output === 0;
+              return (
+                <button
+                  key={model.id}
+                  type="button"
+                  onClick={() => handleSelect(model.id)}
+                  className={`
+                    w-full px-4 py-2.5 flex items-center gap-3
+                    text-sm text-white transition-colors
+                    hover:bg-white/8
+                    ${model.id === activeModel ? 'bg-[rgba(255,107,0,0.2)]' : ''}
+                  `}
+                >
+                  <Cpu size={14} className="flex-shrink-0 text-gray-400 mt-0.5" />
+                  <div className="flex-1 text-left min-w-0">
+                    <span className="truncate block">{displayModelName(model.id)}</span>
+                    <span className="text-[11px] text-gray-500">
+                      {model.pricing == null ? null : isFree ? (
+                        <span className="text-green-400/80">Free</span>
+                      ) : (
+                        `$${model.pricing.input.toFixed(2)} / $${model.pricing.output.toFixed(2)} per 1M`
+                      )}
+                    </span>
+                  </div>
+                  {model.id === activeModel && (
+                    <span className="text-xs text-green-400 flex-shrink-0">Active</span>
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
       )}
