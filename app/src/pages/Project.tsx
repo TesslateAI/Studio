@@ -7,8 +7,6 @@ import {
   CaretRight,
   Monitor,
   Code,
-  Folder,
-  Cube,
   GitBranch,
   BookOpen,
   Image,
@@ -769,16 +767,6 @@ export default function Project() {
       title: 'Terminal',
       onClick: () => setActiveView('terminal'),
       active: activeView === 'terminal',
-    },
-    {
-      icon: <Folder size={18} />,
-      title: 'Files',
-      onClick: () => toast('File tree feature coming soon!', { icon: '📁' }),
-    },
-    {
-      icon: <Cube size={18} />,
-      title: 'Components',
-      onClick: () => toast('Components library coming soon!', { icon: '🧩' }),
     },
   ];
 
