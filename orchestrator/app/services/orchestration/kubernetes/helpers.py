@@ -311,8 +311,10 @@ def create_container_deployment(
         # Agent can: tmux send-keys -t main C-c (stop), tmux send-keys -t main 'npm run dev' Enter (start)
         # Dependencies are installed during file init (generate_git_clone_script)
         # No need to check/install here - just start the dev server
+        # rm -rf .next/dev/lock is a walkaround to avoid startup failure, 
+        # needs better solution
         args=[
-            f"cd {working_dir} && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"
+            f"cd {working_dir} && rm -rf .next/dev/lock && tmux new-session -d -s main '{startup_command}' && exec tail -f /dev/null"
         ],
         ports=[client.V1ContainerPort(container_port=port, name="http")],
         working_dir=working_dir,
