@@ -143,6 +143,17 @@ output "cert_manager_role_arn" {
   value       = module.cert_manager_irsa.iam_role_arn
 }
 
+output "github_actions_access_key_id" {
+  description = "AWS access key ID for GitHub Actions (add as GitHub secret: AWS_ACCESS_KEY_ID)"
+  value       = try(aws_iam_access_key.github_actions[0].id, "")
+}
+
+output "github_actions_secret_access_key" {
+  description = "AWS secret access key for GitHub Actions (add as GitHub secret: AWS_SECRET_ACCESS_KEY)"
+  value       = try(aws_iam_access_key.github_actions[0].secret, "")
+  sensitive   = true
+}
+
 # -----------------------------------------------------------------------------
 # Database Outputs (if RDS is enabled)
 # -----------------------------------------------------------------------------

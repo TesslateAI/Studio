@@ -463,6 +463,15 @@ variable "azure_api_version" {
   default     = "2024-12-01-preview"
 }
 
+# -----------------------------------------------------------------------------
+# GitHub Actions CI/CD
+# -----------------------------------------------------------------------------
+variable "create_github_actions_user" {
+  description = "Create an IAM user with access keys for GitHub Actions deploy workflows"
+  type        = bool
+  default     = false
+}
+
 variable "additional_node_groups" {
   description = "Additional node groups for specific workloads"
   type = map(object({

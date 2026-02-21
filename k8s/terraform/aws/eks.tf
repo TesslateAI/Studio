@@ -128,8 +128,40 @@ module "eks" {
     }
   }
 
-  # Allow cluster admin access
-  enable_cluster_creator_admin_permissions = true
+  # Managed via explicit access_entries below so access doesn't depend
+  # on which IAM identity runs terraform
+  enable_cluster_creator_admin_permissions = false
+
+  # Explicit access entries — ensures both the terraform user and CI user
+  # always have cluster access regardless of who runs terraform
+  access_entries = merge(
+    {
+      terraform_user = {
+        principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/<AWS_IAM_USER>"
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
+          }
+        }
+      }
+    },
+    var.create_github_actions_user ? {
+      github_actions = {
+        principal_arn = aws_iam_user.github_actions[0].arn
+        policy_associations = {
+          admin = {
+            policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = {
+              type = "cluster"
+            }
+          }
+        }
+      }
+    } : {}
+  )
 
   # Node security group additional rules
   # Note: EKS module v20+ includes some rules but we need explicit pod-to-pod

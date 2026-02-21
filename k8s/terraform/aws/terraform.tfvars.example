@@ -132,3 +132,13 @@ enable_cluster_autoscaler = true
 enable_metrics_server     = true
 enable_external_dns       = true
 enable_cert_manager       = true
+
+# -----------------------------------------------------------------------------
+# GitHub Actions CI/CD (Optional)
+# -----------------------------------------------------------------------------
+# Set true to create an IAM user with access keys for GitHub Actions.
+# After apply, get credentials via:
+#   terraform output github_actions_access_key_id
+#   terraform output -raw github_actions_secret_access_key
+# Then add as GitHub repo secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# create_github_actions_user = true
