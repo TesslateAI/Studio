@@ -76,6 +76,9 @@ class Project(Base):
     owner = relationship("User", back_populates="projects")
     files = relationship("ProjectFile", back_populates="project", cascade="all, delete-orphan")
     assets = relationship("ProjectAsset", back_populates="project", cascade="all, delete-orphan")
+    asset_directories = relationship(
+        "ProjectAssetDirectory", back_populates="project", cascade="all, delete-orphan"
+    )
     git_repository = relationship(
         "GitRepository", back_populates="project", uselist=False, cascade="all, delete-orphan"
     )
@@ -358,6 +361,26 @@ class ProjectAsset(Base):
 
     # Relationships
     project = relationship("Project", back_populates="assets")
+
+
+class ProjectAssetDirectory(Base):
+    """Track user-created asset directories for projects (persists in K8s mode)."""
+
+    __tablename__ = "project_asset_directories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    path = Column(String, nullable=False)  # e.g., "/public/images"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "path", name="uq_project_asset_directory"),
+    )
+
+    # Relationships
+    project = relationship("Project", back_populates="asset_directories")
 
 
 class Chat(Base):

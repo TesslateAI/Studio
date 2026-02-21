@@ -644,6 +644,73 @@ class KubernetesClient:
             logger.error(f"[K8S:COPY] Failed to copy from pod: {e}", exc_info=True)
             raise RuntimeError(f"Failed to copy file from pod: {str(e)}") from e
 
+    def _write_bytes_to_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        data: bytes,
+        pod_path: str,
+        timeout: int = 120,
+    ) -> bool:
+        """
+        Write raw bytes to a file in a pod using tar stream via stdin.
+
+        Handles binary data of any size without hitting command argument limits
+        (ARG_MAX). Uses the same tar streaming approach as _copy_to_pod but
+        accepts in-memory bytes instead of a local file path.
+        """
+        import io
+        import tarfile
+
+        try:
+            logger.info(f"[K8S:WRITE] Writing {len(data)} bytes to pod: {pod_path}")
+
+            stream_client = self._get_stream_client()
+
+            # Create tar archive in memory containing the file data
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+                info = tarfile.TarInfo(name=os.path.basename(pod_path))
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+            tar_stream.seek(0)
+            tar_data = tar_stream.read()
+
+            # Ensure directory exists
+            pod_dir = os.path.dirname(pod_path)
+            self._exec_in_pod(
+                pod_name, namespace, container_name,
+                ["mkdir", "-p", pod_dir], timeout=10,
+            )
+
+            # Stream tar data to pod via stdin
+            command = ["tar", "xf", "-", "-C", pod_dir]
+
+            resp = stream(
+                stream_client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container_name,
+                command=command,
+                stderr=True,
+                stdin=True,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+                _request_timeout=timeout,
+            )
+
+            resp.write_stdin(tar_data)
+            resp.close()
+
+            logger.info(f"[K8S:WRITE] ✅ Wrote to pod: {pod_path} ({len(data)} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"[K8S:WRITE] Failed to write to pod: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to write bytes to pod: {str(e)}") from e
+
     def _copy_to_pod(
         self,
         pod_name: str,
@@ -978,24 +1045,12 @@ class KubernetesClient:
             k8s_container = "dev-server"
             full_path = self._safe_pod_path(file_path, subdir)
 
-            # Ensure parent directory exists
-            dir_path = os.path.dirname(full_path)
-            if dir_path and dir_path != "/app":
-                mkdir_cmd = ["/bin/sh", "-c", f"mkdir -p {shlex.quote(dir_path)}"]
-                await asyncio.to_thread(
-                    self._exec_in_pod, pod_name, namespace, k8s_container, mkdir_cmd, timeout=10
-                )
-
-            # Write file using heredoc
-            marker = "EOF_MARKER_K8S_WRITE"
-            write_cmd = [
-                "/bin/sh",
-                "-c",
-                f"cat > {shlex.quote(full_path)} << '{marker}'\n{content}\n{marker}",
-            ]
-
+            # Use tar streaming to write file (heredoc/echo breaks for files >100KB)
+            data = content.encode("utf-8")
             await asyncio.to_thread(
-                self._exec_in_pod, pod_name, namespace, k8s_container, write_cmd, timeout=60
+                self._write_bytes_to_pod,
+                pod_name, namespace, k8s_container,
+                data, full_path, timeout=60,
             )
 
             logger.info(f"[K8S] Wrote {file_path} ({len(content)} bytes)")

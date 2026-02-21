@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import os
 import re
+import shlex
 import shutil
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -40,6 +41,7 @@ from ..models import (
     MarketplaceBase,
     Project,
     ProjectAsset,
+    ProjectAssetDirectory,
     ProjectFile,
     User,
     UserPurchasedBase,
@@ -63,7 +65,7 @@ from ..schemas import ProjectFile as ProjectFileSchema
 from ..services.secret_codec import decode_secret_map, encode_secret_map
 from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
 from ..services.task_manager import Task, get_task_manager
-from ..users import current_active_user, current_superuser
+from ..users import current_active_user, current_optional_user, current_superuser
 from ..utils.async_fileio import makedirs_async, read_file_async, walk_directory_async
 from ..utils.resource_naming import get_project_path
 from ..utils.slug_generator import generate_project_slug
@@ -2596,12 +2598,23 @@ async def list_asset_directories(
                         if not any(part.startswith(".") for part in rel_path.split("/")):
                             directories_set.add(rel_path)
         else:
-            # Kubernetes mode - directories are created via exec, so rely on DB + manual tracking
-            # For K8s, we could use kubectl exec to list directories, but for now use DB
+            # Kubernetes mode - no local filesystem to scan
             pass
 
     except Exception as e:
         logger.warning(f"Failed to scan filesystem for directories: {e}")
+
+    # Include persisted directory records from DB (works for both modes)
+    try:
+        dir_result = await db.execute(
+            select(ProjectAssetDirectory.path).where(
+                ProjectAssetDirectory.project_id == project_id
+            )
+        )
+        persisted_dirs = [row[0] for row in dir_result.all()]
+        directories_set.update(persisted_dirs)
+    except Exception:
+        pass  # Table may not exist yet during migration
 
     return {"directories": sorted(directories_set)}
 
@@ -2644,7 +2657,7 @@ async def create_asset_directory(
             orchestrator = get_orchestrator()
 
             # Use exec to create directory in container
-            command = ["/bin/sh", "-c", f"mkdir -p /app/{directory_path}"]
+            command = ["/bin/sh", "-c", f"mkdir -p {shlex.quote(f'/app/{directory_path}')}"]
             await orchestrator.execute_command(
                 user_id=current_user.id,
                 project_id=project_id,
@@ -2654,9 +2667,26 @@ async def create_asset_directory(
             )
             logger.info(f"[ASSETS] Created directory in container: {directory_path}")
 
+        # Persist directory record to DB (idempotent)
+        normalized_path = f"/{directory_path}"
+        existing_dir = await db.scalar(
+            select(ProjectAssetDirectory).where(
+                ProjectAssetDirectory.project_id == project_id,
+                ProjectAssetDirectory.path == normalized_path,
+            )
+        )
+        if not existing_dir:
+            db_dir = ProjectAssetDirectory(project_id=project_id, path=normalized_path)
+            db.add(db_dir)
+            await db.commit()
+            logger.info(f"[ASSETS] Persisted directory record: {normalized_path}")
+
         return {"message": "Directory created", "path": directory_path}
 
+    except HTTPException:
+        raise
     except Exception as e:
+        await db.rollback()
         logger.error(f"[ASSETS] Failed to create directory: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create directory: {str(e)}") from e
 
@@ -2768,26 +2798,13 @@ async def upload_asset(
 
             orchestrator = get_orchestrator()
 
-            # Ensure directory exists
-            await orchestrator.execute_command(
-                user_id=current_user.id,
+            # Write binary file to container using tar streaming
+            # (echo|base64 approach breaks for files >100KB due to ARG_MAX)
+            await orchestrator.write_binary_to_container(
                 project_id=project_id,
-                container_name=None,
-                command=["/bin/sh", "-c", f"mkdir -p /app/{directory}"],
-                timeout=30,
-            )
-
-            # Write file to container
-            success = await orchestrator.write_file(
-                user_id=current_user.id,
-                project_id=project_id,
-                container_name=None,
                 file_path=file_path_relative,
-                content=content.decode("latin-1"),  # Binary content
+                data=content,
             )
-
-            if not success:
-                raise RuntimeError("Failed to write file to container")
 
             logger.info(f"[ASSETS] Saved file to container: {file_path_relative}")
 
@@ -2884,23 +2901,30 @@ async def get_asset_file(
     project_slug: str,
     asset_id: UUID,
     auth_token: str | None = Query(None),
-    current_user: User | None = Depends(current_active_user),
+    current_user: User | None = Depends(current_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Serve the actual asset file.
-    Supports both Bearer token and query parameter token for image loading.
+    Supports both cookie/Bearer token and query parameter token for image loading.
     """
-    # If no current_user from Bearer, try auth_token query parameter
+    # If no current_user from cookie/Bearer, try auth_token query parameter
     if not current_user and auth_token:
-        from ..database import User as DBUser
-        from ..users import fastapi_users
-
         try:
-            user_payload = await fastapi_users.authenticator.decode_token(auth_token)
-            if user_payload:
-                user_id = user_payload.get("sub")
-                current_user = await db.get(DBUser, UUID(user_id))
+            from jose import jwt as jose_jwt
+
+            auth_settings = get_settings()
+            payload = jose_jwt.decode(
+                auth_token,
+                auth_settings.secret_key,
+                algorithms=[auth_settings.algorithm],
+                audience="fastapi-users:auth",
+            )
+            user_id = payload.get("sub")
+            if user_id:
+                token_user = await db.get(User, UUID(user_id))
+                if token_user and token_user.is_active:
+                    current_user = token_user
         except Exception:
             pass
 
@@ -2923,24 +2947,37 @@ async def get_asset_file(
 
         return FileResponse(file_path, media_type=asset.mime_type, filename=asset.filename)
     else:
-        # Kubernetes mode - read from container and return
+        # Kubernetes mode - read binary file from container using base64
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
 
-        content = await orchestrator.read_file(
-            user_id=current_user.id,
-            project_id=project.id,
-            container_name=None,
-            file_path=asset.file_path,
-        )
+        try:
+            import base64 as b64module
 
-        if not content:
+            result = await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["/bin/sh", "-c", f"base64 {shlex.quote(f'/app/{asset.file_path}')}"],
+                timeout=30,
+            )
+
+            if not result or not result.strip():
+                raise HTTPException(status_code=404, detail="Asset file not found in container")
+
+            # Remove all whitespace (base64 command outputs 76-char lines with newlines)
+            clean_b64 = "".join(result.split())
+            binary_content = b64module.b64decode(clean_b64)
+
+            from fastapi.responses import Response
+
+            return Response(content=binary_content, media_type=asset.mime_type)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[ASSETS] Failed to read asset from container: {e}")
             raise HTTPException(status_code=404, detail="Asset file not found in container")
-
-        from fastapi.responses import Response
-
-        return Response(content=content.encode("latin-1"), media_type=asset.mime_type)
 
 
 @router.delete("/{project_slug}/assets/{asset_id}")

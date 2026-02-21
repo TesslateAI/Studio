@@ -1244,30 +1244,16 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     subdir=subdir,
                 )
 
-            # Use base64 to handle special characters
-            import base64
-
-            encoded = base64.b64encode(content.encode()).decode()
-
-            # Ensure directory exists
-            dir_path = "/".join(full_path.split("/")[:-1])
+            # Use tar streaming to write file (echo|base64 breaks for files >100KB)
+            data = content.encode("latin-1")
             await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
+                self.k8s_client._write_bytes_to_pod,
                 pod_name,
                 namespace,
                 "file-manager",
-                ["mkdir", "-p", dir_path],
-                timeout=10,
-            )
-
-            # Write file
-            await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                ["sh", "-c", f"echo '{encoded}' | base64 -d > {full_path}"],
-                timeout=30,
+                data,
+                full_path,
+                timeout=60,
             )
 
             return True
@@ -1275,6 +1261,35 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         except Exception as e:
             logger.error(f"[K8S] Error writing file: {e}")
             return False
+
+    async def write_binary_to_container(
+        self,
+        project_id: UUID,
+        file_path: str,
+        data: bytes,
+    ) -> bool:
+        """Write binary data to a file in the project container using tar streaming.
+
+        Uses tar stdin streaming to avoid ARG_MAX limits that break the
+        echo|base64 approach for files larger than ~100KB.
+        """
+        namespace = self._get_namespace(str(project_id))
+
+        pod_name = await self.k8s_client.get_file_manager_pod(namespace)
+        container = "file-manager"
+
+        if not pod_name:
+            raise RuntimeError(f"No file-manager pod found in namespace {namespace}")
+
+        return await asyncio.to_thread(
+            self.k8s_client._write_bytes_to_pod,
+            pod_name,
+            namespace,
+            container,
+            data,
+            f"/app/{file_path}",
+            timeout=120,
+        )
 
     async def delete_file(
         self, user_id: UUID, project_id: UUID, container_name: str, file_path: str
