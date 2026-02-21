@@ -98,7 +98,7 @@ resource "kubernetes_secret" "app_secrets" {
     )
 
     # LiteLLM
-    LITELLM_API_BASE       = var.litellm_api_base
+    LITELLM_API_BASE       = "http://litellm-service.tesslate.svc.cluster.local:4000/v1"
     LITELLM_MASTER_KEY     = var.litellm_master_key
     LITELLM_DEFAULT_MODELS = var.litellm_default_models
     LITELLM_TEAM_ID        = "default"

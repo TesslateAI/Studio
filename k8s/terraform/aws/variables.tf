@@ -203,7 +203,7 @@ variable "app_secret_key" {
 }
 
 variable "litellm_api_base" {
-  description = "LiteLLM API base URL"
+  description = "DEPRECATED: LiteLLM is now self-hosted. This variable is kept for backward compatibility with existing tfvars and will be ignored."
   type        = string
   default     = ""
 }
@@ -218,7 +218,7 @@ variable "litellm_master_key" {
 variable "litellm_default_models" {
   description = "Default LiteLLM models (comma-separated)"
   type        = string
-  default     = "gpt-4o-mini"
+  default     = "claude-sonnet-4.6"
 }
 
 variable "google_client_id" {
@@ -370,6 +370,97 @@ variable "eks_addon_versions" {
   description = "Override versions for EKS addons"
   type        = map(string)
   default     = {}
+}
+
+# -----------------------------------------------------------------------------
+# LiteLLM Self-Hosted Deployment
+# -----------------------------------------------------------------------------
+variable "litellm_create_rds" {
+  description = "Use RDS for LiteLLM database (false = K8s-managed PostgreSQL)"
+  type        = bool
+  default     = false
+}
+
+variable "litellm_rds_instance_class" {
+  description = "RDS instance class for LiteLLM database (only when litellm_create_rds = true)"
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "litellm_rds_allocated_storage" {
+  description = "RDS allocated storage in GB for LiteLLM (only when litellm_create_rds = true)"
+  type        = number
+  default     = 20
+}
+
+variable "litellm_db_password" {
+  description = "PostgreSQL password for LiteLLM database"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "litellm_image_tag" {
+  description = "LiteLLM Docker image tag (from ghcr.io/berriai/litellm). Pin to a specific version for production stability. Requires >= v1.75.8 for Bedrock API key auth (boto3 >= 1.39.0)."
+  type        = string
+  default     = "main-v1.81.9-stable"
+}
+
+variable "litellm_public_access" {
+  description = "Expose LiteLLM publicly via ingress at litellm.{domain} (false = internal ClusterIP only)"
+  type        = bool
+  default     = false
+}
+
+variable "bedrock_api_key" {
+  description = "AWS Bedrock API key (bearer token) for LiteLLM proxy. Requires boto3 >= 1.39.0 in the LiteLLM image."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "bedrock_aws_region" {
+  description = "AWS region for Bedrock API (can differ from deployment region)"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "vertex_project" {
+  description = "GCP project ID for Vertex AI"
+  type        = string
+  default     = ""
+}
+
+variable "vertex_location" {
+  description = "GCP region for Vertex AI (e.g., us-central1)"
+  type        = string
+  default     = "us-central1"
+}
+
+variable "vertex_credentials" {
+  description = "GCP service account JSON (base64 encoded) for Vertex AI authentication"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "azure_api_key" {
+  description = "Azure OpenAI API key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "azure_api_base" {
+  description = "Azure OpenAI endpoint URL (e.g., https://your-resource.openai.azure.com)"
+  type        = string
+  default     = ""
+}
+
+variable "azure_api_version" {
+  description = "Azure OpenAI API version"
+  type        = string
+  default     = "2024-12-01-preview"
 }
 
 variable "additional_node_groups" {

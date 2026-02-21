@@ -167,6 +167,24 @@ output "rds_security_group_id" {
 }
 
 # -----------------------------------------------------------------------------
+# LiteLLM Outputs
+# -----------------------------------------------------------------------------
+output "litellm_rds_endpoint" {
+  description = "LiteLLM RDS endpoint"
+  value       = var.litellm_create_rds ? aws_db_instance.litellm[0].endpoint : "Using K8s-managed PostgreSQL"
+}
+
+output "litellm_internal_url" {
+  description = "LiteLLM internal service URL"
+  value       = "http://litellm-service.tesslate.svc.cluster.local:4000"
+}
+
+output "litellm_public_url" {
+  description = "LiteLLM public URL (if enabled)"
+  value       = var.litellm_public_access ? "https://litellm.${var.domain_name}" : "Not exposed publicly"
+}
+
+# -----------------------------------------------------------------------------
 # Useful Commands
 # -----------------------------------------------------------------------------
 output "configure_kubectl_command" {

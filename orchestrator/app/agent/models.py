@@ -223,7 +223,7 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
             default_headers=provider_config.get("default_headers", {}),
         )
     else:
-        # Use LiteLLM proxy for system models (no provider prefix)
+        # No prefix — use LiteLLM proxy for system models
         logger.info(f"Using LiteLLM proxy for model: {model_name}")
 
         if not user.litellm_api_key:
@@ -618,11 +618,11 @@ async def create_model_adapter(
 
     # Auto-detect provider if not specified
     if not provider:
-        if "claude" in model_lower or "anthropic" in model_lower:
-            # Only use native Anthropic adapter for non-OpenRouter Claude models
-            provider = "anthropic" if not model_name.startswith("openrouter/") else "openai"
+        if model_name.startswith("anthropic/"):
+            # Only use native Anthropic adapter for explicit anthropic/ prefix (BYOK)
+            provider = "anthropic"
         else:
-            # Default to OpenAI-compatible
+            # All other models (litellm/, openrouter/, unprefixed) use OpenAI-compatible API
             provider = "openai"
 
     if provider == "anthropic":

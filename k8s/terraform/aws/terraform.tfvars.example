@@ -79,9 +79,34 @@ app_secret_key = "your-app-secret-key"
 # -----------------------------------------------------------------------------
 # LiteLLM Configuration (REQUIRED for AI features)
 # -----------------------------------------------------------------------------
-litellm_api_base       = "https://your-litellm-instance.com/v1"
-litellm_master_key     = "your-litellm-master-key"
-litellm_default_models = "gpt-4o-mini"
+# Master key for LiteLLM admin API access
+# Generate with: openssl rand -hex 32
+litellm_master_key         = "your-litellm-master-key"
+litellm_default_models     = "claude-sonnet-4.6"
+
+# LiteLLM database: true = RDS (production), false = K8s-managed PostgreSQL (dev/beta)
+litellm_create_rds         = false
+litellm_rds_instance_class = "db.t4g.micro"  # Only used when litellm_create_rds = true
+# Generate with: openssl rand -hex 32
+litellm_db_password        = "your-litellm-db-password"
+
+# Set true to expose LiteLLM at litellm.{domain} (useful for testing/admin)
+litellm_public_access      = false
+
+# AWS Bedrock API key for LiteLLM AI model access
+# Model config is in k8s/litellm/config.yaml (committed in repo)
+bedrock_api_key            = "your-bedrock-api-key"
+bedrock_aws_region         = "us-east-1"
+
+# GCP Vertex AI (optional)
+vertex_project             = ""
+vertex_location            = "us-central1"
+vertex_credentials         = ""  # Base64-encoded service account JSON: cat sa-key.json | base64 -w0
+
+# Azure OpenAI (optional)
+azure_api_key              = ""
+azure_api_base             = ""  # https://your-resource.openai.azure.com
+azure_api_version          = "2024-12-01-preview"
 
 # -----------------------------------------------------------------------------
 # OAuth Configuration (Optional)
