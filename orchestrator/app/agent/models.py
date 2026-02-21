@@ -614,16 +614,10 @@ async def create_model_adapter(
         # Cerebras via LiteLLM
         adapter = await create_model_adapter("cerebras/llama3.1-8b", user_id=1, db=db)
     """
-    model_lower = model_name.lower()
-
     # Auto-detect provider if not specified
+    # anthropic/ prefix → native Anthropic adapter (BYOK); all others → OpenAI-compatible API
     if not provider:
-        if model_name.startswith("anthropic/"):
-            # Only use native Anthropic adapter for explicit anthropic/ prefix (BYOK)
-            provider = "anthropic"
-        else:
-            # All other models (litellm/, openrouter/, unprefixed) use OpenAI-compatible API
-            provider = "openai"
+        provider = "anthropic" if model_name.startswith("anthropic/") else "openai"
 
     if provider == "anthropic":
         # Native Anthropic API (not implemented for async client fetching yet)

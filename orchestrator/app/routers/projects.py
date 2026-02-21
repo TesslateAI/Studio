@@ -359,14 +359,18 @@ async def _setup_git_provider_project(
         try:
             pkg_content = await asyncio.to_thread(
                 orchestrator.k8s_client._exec_in_pod,
-                pod_name, namespace, "file-manager",
+                pod_name,
+                namespace,
+                "file-manager",
                 ["/bin/sh", "-c", "cat /app/package.json"],
                 timeout=10,
             )
             if pkg_content and pkg_content.strip():
                 framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
                 framework_port = fw_config.port
-                logger.info(f"[CREATE] K8s: Detected framework '{framework_name}' (port {framework_port})")
+                logger.info(
+                    f"[CREATE] K8s: Detected framework '{framework_name}' (port {framework_port})"
+                )
         except Exception as e:
             logger.warning(f"[CREATE] Could not detect framework in K8s: {e}")
 
@@ -414,7 +418,9 @@ async def _setup_git_provider_project(
                 pkg_content = await read_file_async(pkg_path)
                 framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
                 framework_port = fw_config.port
-                logger.info(f"[CREATE] Docker: Detected framework '{framework_name}' (port {framework_port})")
+                logger.info(
+                    f"[CREATE] Docker: Detected framework '{framework_name}' (port {framework_port})"
+                )
         except Exception as e:
             logger.warning(f"[CREATE] Could not detect framework: {e}")
 
@@ -457,7 +463,9 @@ async def _setup_git_provider_project(
     db.add(container)
     await db.commit()
     await db.refresh(container)
-    logger.info(f"[CREATE] Created container {container.id} for git import '{repo_name_slug}' ({framework_name}, port {framework_port})")
+    logger.info(
+        f"[CREATE] Created container {container.id} for git import '{repo_name_slug}' ({framework_name}, port {framework_port})"
+    )
 
     return str(container.id)
 
@@ -2746,9 +2754,7 @@ async def list_asset_directories(
     # Include persisted directory records from DB (works for both modes)
     try:
         dir_result = await db.execute(
-            select(ProjectAssetDirectory.path).where(
-                ProjectAssetDirectory.project_id == project_id
-            )
+            select(ProjectAssetDirectory.path).where(ProjectAssetDirectory.project_id == project_id)
         )
         persisted_dirs = [row[0] for row in dir_result.all()]
         directories_set.update(persisted_dirs)
@@ -3116,7 +3122,9 @@ async def get_asset_file(
             raise
         except Exception as e:
             logger.error(f"[ASSETS] Failed to read asset from container: {e}")
-            raise HTTPException(status_code=404, detail="Asset file not found in container")
+            raise HTTPException(
+                status_code=404, detail="Asset file not found in container"
+            ) from None
 
 
 @router.delete("/{project_slug}/assets/{asset_id}")

@@ -224,40 +224,59 @@ def test_create_project_auto_adds_base_to_library(
     authenticated_client, raw_base_id, mock_orchestrator
 ):
     """Test that creating a project with a base NOT in the user's library auto-adds it."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     client, user_data = authenticated_client
 
     # Verify the base is NOT in the user's library yet
     library_response = client.get("/api/marketplace/my-bases")
     assert library_response.status_code == 200
-    library_ids = [b["id"] for b in library_response.json()]
+    library_ids = [b["id"] for b in library_response.json().get("bases", [])]
     assert raw_base_id not in library_ids, "Base should NOT be in library before project creation"
 
-    # Create a project using the base (should auto-add to library)
-    response = client.post(
-        "/api/projects/",
-        json={"name": "Auto Add Test Project", "base_id": raw_base_id},
-    )
-    assert response.status_code == 200, f"Project creation failed: {response.text}"
-    data = response.json()
-    assert "project" in data
+    # Mock git clone and filesystem ops so the background task doesn't hit real repos/fs
+    mock_process = AsyncMock()
+    mock_process.returncode = 0
+    mock_process.communicate = AsyncMock(return_value=(b"", b""))
 
-    # Wait for the background task to complete
-    task_id = data["task_id"]
-    max_wait = 10
-    start_time = time.time()
+    mock_subprocess_run = MagicMock(return_value=MagicMock(returncode=0))
 
-    while time.time() - start_time < max_wait:
-        status_response = client.get(f"/api/tasks/{task_id}/status")
-        if status_response.status_code == 200:
-            status_data = status_response.json()
-            if status_data.get("status") in ["completed", "failed"]:
-                break
-        time.sleep(0.2)
+    with (
+        patch("asyncio.create_subprocess_exec", return_value=mock_process),
+        patch("app.routers.projects.os.makedirs"),
+        patch("app.routers.projects.os.path.exists", return_value=False),
+        patch("app.routers.projects.os.listdir", return_value=[]),
+        patch("shutil.copytree"),
+        patch("shutil.rmtree"),
+        patch("shutil.copy2"),
+        patch("subprocess.run", mock_subprocess_run),
+    ):
+        # Create a project using the base (should auto-add to library)
+        response = client.post(
+            "/api/projects/",
+            json={"name": "Auto Add Test Project", "base_id": raw_base_id},
+        )
+        assert response.status_code == 200, f"Project creation failed: {response.text}"
+        data = response.json()
+        assert "project" in data
+
+        # Wait for the background task to complete
+        task_id = data["task_id"]
+        max_wait = 10
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait:
+            status_response = client.get(f"/api/tasks/{task_id}/status")
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                if status_data.get("status") in ["completed", "failed"]:
+                    break
+            time.sleep(0.2)
 
     # Verify the base is now in the user's library
     library_response = client.get("/api/marketplace/my-bases")
     assert library_response.status_code == 200
-    library_ids = [b["id"] for b in library_response.json()]
+    library_ids = [b["id"] for b in library_response.json().get("bases", [])]
     assert raw_base_id in library_ids, "Base should be auto-added to library after project creation"
 
 
@@ -272,7 +291,7 @@ def test_create_project_with_base_already_in_library(
     # Verify it's there
     library_response = client.get("/api/marketplace/my-bases")
     assert library_response.status_code == 200
-    library_ids = [b["id"] for b in library_response.json()]
+    library_ids = [b["id"] for b in library_response.json().get("bases", [])]
     assert default_base_id in library_ids, "Base should be in library (added by fixture)"
 
     # Create a project - should work fine with base already in library
