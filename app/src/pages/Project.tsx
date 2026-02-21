@@ -1455,6 +1455,7 @@ export default function Project() {
         icon={<GitBranch size={20} />}
         isOpen={activePanel === 'github'}
         onClose={() => setActivePanel(null)}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
       >
         <GitHubPanel projectId={project?.id} />
       </FloatingPanel>
@@ -1464,6 +1465,7 @@ export default function Project() {
         icon={<BookOpen size={20} />}
         isOpen={activePanel === 'notes'}
         onClose={() => setActivePanel(null)}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
       >
         <NotesPanel projectSlug={slug!} />
       </FloatingPanel>
@@ -1473,6 +1475,7 @@ export default function Project() {
         icon={<Gear size={20} />}
         isOpen={activePanel === 'settings'}
         onClose={() => setActivePanel(null)}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
       >
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
