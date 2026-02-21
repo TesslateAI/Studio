@@ -11,8 +11,6 @@ import {
   Cube,
   GitBranch,
   BookOpen,
-  Sun,
-  Moon,
   Image,
   Storefront,
   Gear,
@@ -50,7 +48,6 @@ import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector } from '../components/ContainerSelector';
 import { projectsApi, marketplaceApi, authApi } from '../lib/api';
-import { useTheme } from '../theme/ThemeContext';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
 import toast from 'react-hot-toast';
@@ -68,7 +65,6 @@ export default function Project() {
   const [searchParams] = useSearchParams();
   const containerId = searchParams.get('container');
 
-  const { theme, toggleTheme } = useTheme();
   const { chatPosition } = useChatPosition();
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
@@ -788,11 +784,6 @@ export default function Project() {
 
   const rightSidebarItems = [
     {
-      icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
-      title: 'Toggle Theme',
-      onClick: toggleTheme,
-    },
-    {
       icon: <BookOpen size={18} />,
       title: 'Notes',
       onClick: () => togglePanel('notes'),
@@ -1205,8 +1196,12 @@ export default function Project() {
                           </div>
                           <div
                             className="w-full h-[calc(100%-50px)] bg-white"
-                            onMouseEnter={() => { isPointerOverPreviewRef.current = true; }}
-                            onMouseLeave={() => { isPointerOverPreviewRef.current = false; }}
+                            onMouseEnter={() => {
+                              isPointerOverPreviewRef.current = true;
+                            }}
+                            onMouseLeave={() => {
+                              isPointerOverPreviewRef.current = false;
+                            }}
                           >
                             <iframe
                               ref={iframeRef}
@@ -1238,7 +1233,9 @@ export default function Project() {
 
                   {/* Kanban View */}
                   {kanbanMounted && project?.id && (
-                    <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                    <div
+                      className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}
+                    >
                       <KanbanPanel projectId={project.id as string} />
                     </div>
                   )}
@@ -1354,8 +1351,12 @@ export default function Project() {
                         </div>
                         <div
                           className="w-full h-[calc(100%-50px)] bg-white"
-                          onMouseEnter={() => { isPointerOverPreviewRef.current = true; }}
-                          onMouseLeave={() => { isPointerOverPreviewRef.current = false; }}
+                          onMouseEnter={() => {
+                            isPointerOverPreviewRef.current = true;
+                          }}
+                          onMouseLeave={() => {
+                            isPointerOverPreviewRef.current = false;
+                          }}
                         >
                           <iframe
                             ref={iframeRef}

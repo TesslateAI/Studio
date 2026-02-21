@@ -126,7 +126,13 @@ Returns full project details including containers, files count, and settings.
 POST /api/projects/{project_id}/fork
 ```
 
-Creates a copy of an existing project with all files and containers. The forked project gets a new unique slug.
+Creates a deep copy of an existing project. The forked project gets a new unique slug. Copies include:
+- All project files
+- All containers (status reset to "stopped", new container names generated)
+- All container connections (IDs remapped to new containers)
+- All browser previews (container IDs remapped)
+
+Enforces the same tier-based project limit as `create_project()` via the shared `enforce_project_limit()` helper.
 
 **Request Body**:
 ```json
@@ -1109,6 +1115,14 @@ Background task function that performs project initialization:
 4. Updates task progress throughout
 
 Uses TaskManager for progress tracking visible to the frontend.
+
+### enforce_project_limit()
+
+Shared helper that checks if the user has reached their subscription tier's project limit. Used by both `create_project()` and `fork_project()`. Raises HTTP 403 if the limit is reached.
+
+```python
+await enforce_project_limit(current_user, db)
+```
 
 ## Example Workflows
 

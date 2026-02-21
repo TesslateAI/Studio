@@ -121,7 +121,8 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
     ],
     editorProps: {
       attributes: {
-        class: 'prose prose-invert max-w-none focus:outline-none min-h-[calc(100vh-200px)] p-6',
+        class:
+          'tiptap-editor prose prose-invert max-w-none focus:outline-none min-h-[calc(100vh-200px)] p-6',
       },
     },
     onUpdate: ({ editor }) => {

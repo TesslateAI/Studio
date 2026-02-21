@@ -90,10 +90,10 @@ Browse published agents with filtering and pagination.
 **Query Parameters**:
 - `category`: Filter by category (web-development, data-analysis, devops, etc.)
 - `pricing_type`: Filter by pricing (free, credits, subscription)
-- `search`: Search in name and description
-- `sort`: Sort by (popular, recent, rating)
-- `skip`: Pagination offset (default: 0)
-- `limit`: Results per page (default: 20, max: 100)
+- `search`: Search in name, description, and tags
+- `sort`: Sort by (featured, popular, newest, price_asc, price_desc)
+- `page`: Page number (1-indexed, default: 1)
+- `limit`: Results per page (default: 12, max: 50)
 
 **Response**:
 ```json
@@ -818,6 +818,20 @@ Creators can withdraw earnings via Stripe Connect (future feature).
 3. **Moderation**: All items reviewed before publishing
 4. **Content Filtering**: Descriptions and prompts scanned for inappropriate content
 5. **Rate Limiting**: Publish and purchase endpoints rate-limited
+
+## Implementation Notes
+
+### Agent Search Casts JSON to Text
+
+The `search` parameter on `GET /api/marketplace/agents` searches across `name`, `description`, and `tags`. Since `tags` is a JSON column in PostgreSQL, it must be cast to `String` before applying `func.lower()`. Without this cast, PostgreSQL throws an error because `lower()` does not accept JSON input.
+
+```python
+# Correct — cast JSON to text before lower()
+func.lower(cast(MarketplaceAgent.tags, String)).like(func.lower(search_filter))
+
+# Wrong — causes 500 error
+func.lower(MarketplaceAgent.tags).like(func.lower(search_filter))
+```
 
 ## Related Files
 

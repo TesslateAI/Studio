@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { MagnifyingGlass, X } from '@phosphor-icons/react';
 import { useTheme } from '../theme/ThemeContext';
 import { shortcutGroups, type ShortcutGroup } from '../lib/keyboard-registry';
@@ -87,7 +88,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
 
   const isDark = theme === 'dark';
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh]">
       {/* Backdrop */}
       <div
@@ -138,11 +139,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           <div
             className={`
               flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-colors
-              ${
-                isDark
-                  ? 'bg-white/5 border-white/10'
-                  : 'bg-black/5 border-black/10'
-              }
+              ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}
             `}
           >
             <MagnifyingGlass size={18} className={isDark ? 'text-white/40' : 'text-black/40'} />
@@ -234,7 +231,8 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           </span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

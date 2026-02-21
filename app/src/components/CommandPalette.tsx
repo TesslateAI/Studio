@@ -502,8 +502,7 @@ function CommandItem({
       onSelect={() => onSelect(command)}
       className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer
                  text-white/80 transition-colors
-                 data-[selected=true]:bg-[var(--primary)] data-[selected=true]:text-white
-                 aria-selected:bg-[var(--primary)] aria-selected:text-white"
+                 data-[selected=true]:bg-[var(--primary)] data-[selected=true]:text-white"
     >
       <span className="shrink-0 w-6 h-6 flex items-center justify-center text-white/60 data-[selected=true]:text-white">
         {command.icon}

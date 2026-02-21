@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -344,7 +344,7 @@ async def get_marketplace_agents(
         query = query.where(
             func.lower(MarketplaceAgent.name).like(func.lower(search_filter))
             | func.lower(MarketplaceAgent.description).like(func.lower(search_filter))
-            | func.lower(MarketplaceAgent.tags).like(func.lower(search_filter))
+            | func.lower(cast(MarketplaceAgent.tags, String)).like(func.lower(search_filter))
         )
 
     # Apply sorting

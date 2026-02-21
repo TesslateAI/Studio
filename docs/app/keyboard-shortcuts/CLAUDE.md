@@ -17,7 +17,7 @@ Load this context when:
 |------|---------|
 | `app/src/lib/keyboard-registry.ts` | Central registry of all shortcuts with platform detection |
 | `app/src/components/CommandPalette.tsx` | Cmd+K command palette UI using cmdk library |
-| `app/src/components/KeyboardShortcutsModal.tsx` | "?" help modal showing all shortcuts |
+| `app/src/components/KeyboardShortcutsModal.tsx` | "?" help modal showing all shortcuts (uses `createPortal` to render at `document.body`, escaping CSS `transform` containing blocks from parent elements like framer-motion `motion.div`) |
 | `app/src/contexts/CommandContext.tsx` | Command dispatch system replacing CustomEvent |
 
 ## Related Contexts
@@ -352,6 +352,26 @@ keys: [modKey, 'K']  // Shows ⌘ on Mac, Ctrl on Windows
 
 // Wrong
 keys: ['Ctrl', 'K']  // Always shows Ctrl
+```
+
+### Issue: Modal Hidden or Clipped Inside Sidebar
+
+**Symptom**: KeyboardShortcutsModal renders but is invisible or clipped within the sidebar instead of appearing centered on viewport.
+
+**Root Cause**: The modal renders inside a parent element with CSS `transform` (e.g., framer-motion `motion.div`). CSS transforms create a new containing block, causing `position: fixed` children to be positioned relative to the transformed parent rather than the viewport.
+
+**Solution**: The modal uses `createPortal(jsx, document.body)` from `react-dom` to render at the document root, escaping any transformed parent containers. This pattern is also used by `ExportTemplateModal.tsx` and `Tooltip.tsx` in this codebase.
+
+```typescript
+import { createPortal } from 'react-dom';
+
+// Renders at document.body, bypassing transform containing blocks
+return createPortal(
+  <div className="fixed inset-0 z-[100] ...">
+    {/* Modal content */}
+  </div>,
+  document.body
+);
 ```
 
 ## File Organization

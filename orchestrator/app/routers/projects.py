@@ -122,6 +122,20 @@ async def get_projects(
     return projects
 
 
+async def enforce_project_limit(user: User, db: AsyncSession) -> None:
+    """Raise 403 if user has reached their tier's project limit."""
+    settings = get_settings()
+    result = await db.execute(select(func.count(Project.id)).where(Project.owner_id == user.id))
+    current_count = result.scalar()
+    tier = user.subscription_tier or "free"
+    max_projects = settings.get_tier_max_projects(tier)
+    if current_count >= max_projects:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Project limit reached. Your {tier} tier allows {max_projects} project(s). Upgrade to create more projects.",
+        )
+
+
 async def _perform_project_setup(
     project_data: ProjectCreate,
     db_project_id: UUID,
@@ -1042,25 +1056,9 @@ async def create_project(
         )
 
         # Check project limits based on subscription tier
-        from ..config import get_settings
+        await enforce_project_limit(current_user, db)
 
         settings = get_settings()
-
-        # Count current active projects (not including deployed-only)
-        current_projects_result = await db.execute(
-            select(func.count(Project.id)).where(Project.owner_id == current_user.id)
-        )
-        current_projects_count = current_projects_result.scalar()
-
-        # Determine max projects based on tier
-        max_projects = settings.get_tier_max_projects(current_user.subscription_tier or "free")
-
-        # Enforce limit
-        if current_projects_count >= max_projects:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Project limit reached. Your {current_user.subscription_tier} tier allows {max_projects} project(s). Upgrade to create more projects.",
-            )
 
         # Generate unique slug for the project
         project_slug = generate_project_slug(project.name)
@@ -2394,6 +2392,9 @@ async def fork_project(
     if not source_project:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    # Enforce project limit (same check as create_project)
+    await enforce_project_limit(current_user, db)
+
     try:
         logger.info(f"[FORK] Forking project {project_id} for user {current_user.id}")
 
@@ -2413,8 +2414,7 @@ async def fork_project(
                     owner_id=current_user.id,
                 )
                 db.add(forked_project)
-                await db.commit()
-                await db.refresh(forked_project)
+                await db.flush()
                 break
             except Exception as e:
                 if (
@@ -2446,10 +2446,92 @@ async def fork_project(
             db.add(forked_file)
             files_copied += 1
 
+        # Copy containers and build old_id → new_id map
+        container_id_map = {}
+        containers_result = await db.execute(
+            select(Container).where(Container.project_id == project_id)
+        )
+        source_containers = containers_result.scalars().all()
+
+        for src_container in source_containers:
+            new_container = Container(
+                project_id=forked_project.id,
+                base_id=src_container.base_id,
+                name=src_container.name,
+                directory=src_container.directory,
+                container_name=f"{forked_project.slug}-{src_container.name}",
+                port=src_container.port,
+                internal_port=src_container.internal_port,
+                environment_vars=src_container.environment_vars,
+                dockerfile_path=src_container.dockerfile_path,
+                volume_name=None,
+                container_type=src_container.container_type,
+                service_slug=src_container.service_slug,
+                deployment_mode=src_container.deployment_mode,
+                external_endpoint=src_container.external_endpoint,
+                credentials_id=None,
+                position_x=src_container.position_x,
+                position_y=src_container.position_y,
+                status="stopped",
+            )
+            db.add(new_container)
+            await db.flush()
+            container_id_map[src_container.id] = new_container.id
+
+        # Copy container connections (remap IDs)
+        connections_copied = 0
+        connections_result = await db.execute(
+            select(ContainerConnection).where(ContainerConnection.project_id == project_id)
+        )
+        source_connections = connections_result.scalars().all()
+
+        for src_conn in source_connections:
+            new_source_id = container_id_map.get(src_conn.source_container_id)
+            new_target_id = container_id_map.get(src_conn.target_container_id)
+            if new_source_id is None or new_target_id is None:
+                continue
+            new_conn = ContainerConnection(
+                project_id=forked_project.id,
+                source_container_id=new_source_id,
+                target_container_id=new_target_id,
+                connection_type=src_conn.connection_type,
+                connector_type=src_conn.connector_type,
+                config=src_conn.config,
+                label=src_conn.label,
+            )
+            db.add(new_conn)
+            connections_copied += 1
+
+        # Copy browser previews (remap container ID)
+        previews_result = await db.execute(
+            select(BrowserPreview).where(BrowserPreview.project_id == project_id)
+        )
+        source_previews = previews_result.scalars().all()
+
+        for src_preview in source_previews:
+            if src_preview.connected_container_id is not None:
+                new_container_id = container_id_map.get(src_preview.connected_container_id)
+                if new_container_id is None:
+                    continue  # source container wasn't copied (shouldn't happen)
+            else:
+                new_container_id = None  # preserve unconnected preview
+            new_preview = BrowserPreview(
+                project_id=forked_project.id,
+                connected_container_id=new_container_id,
+                position_x=src_preview.position_x,
+                position_y=src_preview.position_y,
+                current_path=src_preview.current_path,
+            )
+            db.add(new_preview)
+
+        # Single atomic commit — all or nothing
         await db.commit()
         await db.refresh(forked_project)
 
-        logger.info(f"[FORK] Copied {files_copied} files to project {forked_project.id}")
+        logger.info(
+            f"[FORK] Copied {files_copied} files, {len(container_id_map)} containers, "
+            f"{connections_copied} connections to project {forked_project.id}"
+        )
 
         return forked_project
 
