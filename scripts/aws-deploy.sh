@@ -15,6 +15,8 @@
 #   ./scripts/aws-deploy.sh build beta                    # Build, push, restart all images
 #   ./scripts/aws-deploy.sh build production backend      # Build only backend
 #   ./scripts/aws-deploy.sh build beta frontend backend   # Build multiple images
+#   ./scripts/aws-deploy.sh build beta --cached           # Build with Docker cache
+#   ./scripts/aws-deploy.sh build beta backend --cached   # Build only backend with cache
 # =============================================================================
 
 set -e
@@ -237,8 +239,17 @@ case "$COMMAND" in
             error "Build is not available for shared environment (shared only manages ECR repos)"
         fi
 
-        # Parse optional image arguments (defaults to all images)
-        IMAGES="${*:3}"
+        # Parse optional image arguments and flags
+        USE_CACHE=false
+        IMAGES=""
+        for arg in "${@:3}"; do
+            if [ "$arg" = "--cached" ]; then
+                USE_CACHE=true
+            else
+                IMAGES="$IMAGES $arg"
+            fi
+        done
+        IMAGES="${IMAGES# }"  # trim leading space
         : "${IMAGES:=backend frontend devserver}"
 
         # ECR config
@@ -276,6 +287,11 @@ case "$COMMAND" in
         info "Images:      $IMAGES"
         info "Registry:    $ECR_REGISTRY"
         info "Tag:         $ENVIRONMENT"
+        if [ "$USE_CACHE" = true ]; then
+            info "Cache:       enabled"
+        else
+            info "Cache:       disabled (use --cached to enable)"
+        fi
         info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo
 
@@ -292,8 +308,13 @@ case "$COMMAND" in
             DOCKERFILE="${DOCKERFILES[$img]}"
             CONTEXT="${BUILD_CONTEXTS[$img]}"
 
+            CACHE_FLAG="--no-cache"
+            if [ "$USE_CACHE" = true ]; then
+                CACHE_FLAG=""
+            fi
+
             info "[$img] Building ${FULL_TAG}..."
-            docker build --no-cache -t "$FULL_TAG" -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT"
+            docker build $CACHE_FLAG -t "$FULL_TAG" -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT"
             success "[$img] ✓ Build complete"
 
             info "[$img] Pushing..."
