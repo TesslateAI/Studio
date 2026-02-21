@@ -786,7 +786,7 @@ export default function Project() {
     {
       icon: <Storefront size={18} />,
       title: 'Agents',
-      onClick: () => navigate('/marketplace'),
+      onClick: () => window.open('/marketplace', '_blank'),
     },
     {
       icon: <Article size={18} />,
