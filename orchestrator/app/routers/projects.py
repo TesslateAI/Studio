@@ -192,7 +192,7 @@ async def _perform_project_setup(
             # Handle different source types
             container_id = None
             if project_data.source_type in ("github", "gitlab", "bitbucket"):
-                await _setup_git_provider_project(
+                container_id = await _setup_git_provider_project(
                     project_data, db_project, user_id, settings, db, task, project_path
                 )
             elif project_data.source_type == "base":
@@ -224,7 +224,7 @@ async def _setup_git_provider_project(
     db: AsyncSession,
     task: Task,
     project_path: str,
-) -> None:
+) -> str | None:
     """
     Unified setup for projects imported from GitHub, GitLab, or Bitbucket.
 
@@ -234,7 +234,11 @@ async def _setup_git_provider_project(
     clones directly into the PVC. Files are never stored in the database.
 
     In Docker mode: Clones directly to the project filesystem path.
+
+    Returns:
+        Container ID string if container was created, None otherwise.
     """
+    from ..services.framework_detector import FrameworkDetector
     from ..services.git_providers import (
         GitProviderType,
         get_git_provider_manager,
@@ -283,6 +287,10 @@ async def _setup_git_provider_project(
     authenticated_url = provider_class.format_clone_url(
         repo_info["owner"], repo_info["repo"], access_token
     )
+
+    # Framework detection defaults (updated after clone based on package.json)
+    framework_name = "unknown"
+    framework_port = 5173  # default fallback
 
     # ==========================================================================
     # K8s Mode: Create environment and clone directly to PVC
@@ -347,6 +355,21 @@ async def _setup_git_provider_project(
         # TODO: Run patcher inside pod if needed - for now skip since basic Next.js should work
         logger.info("[CREATE] Skipping auto-patch in K8s mode (TODO: implement in-pod patching)")
 
+        # Detect framework from package.json in PVC
+        try:
+            pkg_content = await asyncio.to_thread(
+                orchestrator.k8s_client._exec_in_pod,
+                pod_name, namespace, "file-manager",
+                ["/bin/sh", "-c", "cat /app/package.json"],
+                timeout=10,
+            )
+            if pkg_content and pkg_content.strip():
+                framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
+                framework_port = fw_config.port
+                logger.info(f"[CREATE] K8s: Detected framework '{framework_name}' (port {framework_port})")
+        except Exception as e:
+            logger.warning(f"[CREATE] Could not detect framework in K8s: {e}")
+
         task.update_progress(90, 100, "Project files ready")
 
     # ==========================================================================
@@ -384,6 +407,17 @@ async def _setup_git_provider_project(
         except Exception as patch_error:
             logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
 
+        # Detect framework from package.json on filesystem
+        try:
+            pkg_path = os.path.join(project_path, "package.json")
+            if os.path.exists(pkg_path):
+                pkg_content = await read_file_async(pkg_path)
+                framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
+                framework_port = fw_config.port
+                logger.info(f"[CREATE] Docker: Detected framework '{framework_name}' (port {framework_port})")
+        except Exception as e:
+            logger.warning(f"[CREATE] Could not detect framework: {e}")
+
         task.update_progress(90, 100, "Project setup complete")
 
     # Update project with Git info
@@ -403,6 +437,29 @@ async def _setup_git_provider_project(
     )
     db.add(git_repo)
     await db.commit()
+
+    # Create Container record so the project is usable immediately
+    task.update_progress(95, 100, "Creating container from imported repository")
+
+    repo_name_slug = repo_info["repo"].lower().replace(" ", "-")
+    container = Container(
+        project_id=db_project.id,
+        base_id=None,  # No marketplace base for git imports
+        name=repo_name_slug,
+        directory=".",
+        container_name=f"{db_project.slug}-{repo_name_slug}",
+        internal_port=framework_port,
+        container_type="base",
+        status="stopped",
+        position_x=200,
+        position_y=200,
+    )
+    db.add(container)
+    await db.commit()
+    await db.refresh(container)
+    logger.info(f"[CREATE] Created container {container.id} for git import '{repo_name_slug}' ({framework_name}, port {framework_port})")
+
+    return str(container.id)
 
 
 async def _setup_github_project(

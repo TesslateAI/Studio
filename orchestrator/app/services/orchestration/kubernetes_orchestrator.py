@@ -394,8 +394,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
             # Check if directory already exists with actual content (not just empty dir)
             # This prevents skipping git clone when directory exists but is empty
             check_script = f"""
-if [ -d '{target_dir}' ] && [ -f '{target_dir}/package.json' ]; then
-    file_count=$(ls -1 '{target_dir}' 2>/dev/null | wc -l)
+if [ -d '{target_dir}' ]; then
+    file_count=$(ls -1A '{target_dir}' 2>/dev/null | wc -l)
     echo "EXISTS:$file_count"
 else
     echo "NOT_EXISTS"
@@ -414,7 +414,7 @@ fi
 
             if check_result.startswith("EXISTS:"):
                 file_count = int(check_result.split(":")[1]) if ":" in check_result else 0
-                if file_count >= 3:  # At least package.json, README.md, and one more file
+                if file_count >= 3:
                     logger.info(
                         f"[K8S] Directory {target_dir} already exists with {file_count} files, skipping git clone"
                     )
@@ -425,11 +425,11 @@ fi
                     )
                     # Fall through to clone
 
-            # CRITICAL: git_url is REQUIRED - containers must have a marketplace base with git repo
+            # git_url is required to clone — if missing, files must already exist
             if not git_url:
                 raise RuntimeError(
-                    f"Container '{container_directory}' has no git_url. "
-                    "All containers must be created from a marketplace base with a git repository."
+                    f"Container '{container_directory}' has no git_url and no files on PVC. "
+                    "Either import files first or create the container from a marketplace base."
                 )
 
             # Clone from git repository
@@ -545,8 +545,12 @@ fi
 
             # CRITICAL: Initialize container files BEFORE starting
             # Skip if project was restored from snapshot (files already exist)
+            # Also skip if this is a git-imported container (base_id=None) — files
+            # were cloned directly to the PVC during project import.
             if is_hibernated:
                 logger.info("[K8S] Skipping git clone - project restored from snapshot")
+            elif container.base_id is None:
+                logger.info("[K8S] Skipping git clone - git-imported container (files already on PVC)")
             else:
                 # This clones from git or sets up the project directory
                 git_url = None
