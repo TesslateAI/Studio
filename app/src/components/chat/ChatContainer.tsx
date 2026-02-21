@@ -97,6 +97,34 @@ export function ChatContainer({
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
   const [editMode, setEditMode] = useState<EditMode>('ask');
+  const editModeRef = useRef<EditMode>(editMode);
+  useEffect(() => {
+    editModeRef.current = editMode;
+
+    // Auto-approve any pending approval cards when switching to "Allow All Edits"
+    if (editMode === 'allow') {
+      setMessages((prev) => {
+        const pending = prev.filter((m) => m.type === 'approval_request' && m.approvalId);
+        if (pending.length === 0) return prev;
+
+        for (const msg of pending) {
+          const id = msg.approvalId!;
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: 'approval_response',
+              approval_id: id,
+              response: 'allow_all',
+            }));
+          } else {
+            chatApi.sendApprovalResponse(id, 'allow_all')
+              .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
+          }
+        }
+
+        return prev.filter((m) => m.type !== 'approval_request');
+      });
+    }
+  }, [editMode]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [agentExecuting, setAgentExecuting] = useState(false);
   const [currentStream, setCurrentStream] = useState('');
@@ -368,17 +396,28 @@ export function ChatContainer({
               return newMap;
             });
           } else if (data.type === 'approval_required') {
-            // Handle approval request - add approval message to chat
-            const approvalMessage: Message = {
-              id: `approval-${Date.now()}`,
-              type: 'approval_request',
-              content: '',
-              approvalId: data.data.approval_id,
-              toolName: data.data.tool_name,
-              toolParameters: data.data.tool_parameters,
-              toolDescription: data.data.tool_description,
-            };
-            setMessages((prev) => [...prev, approvalMessage]);
+            // Auto-approve if user has switched to "Allow All Edits" mode
+            if (editModeRef.current === 'allow') {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'approval_response',
+                  approval_id: data.data.approval_id,
+                  response: 'allow_all',
+                }));
+              }
+            } else {
+              // Show approval prompt in "Ask" mode
+              const approvalMessage: Message = {
+                id: `approval-${Date.now()}`,
+                type: 'approval_request',
+                content: '',
+                approvalId: data.data.approval_id,
+                toolName: data.data.tool_name,
+                toolParameters: data.data.tool_parameters,
+                toolDescription: data.data.tool_description,
+              };
+              setMessages((prev) => [...prev, approvalMessage]);
+            }
           } else if (data.type === 'status_update') {
             // Handle hibernation status updates
             // Backend sends: { type: 'status_update', payload: { environment_status, message, action } }
@@ -839,17 +878,25 @@ export function ChatContainer({
               'Agent execution failed';
             throw new Error(errorMsg);
           } else if (event.type === 'approval_required') {
-            // Handle approval request - add approval message to chat
-            const approvalMessage: Message = {
-              id: `approval-${Date.now()}`,
-              type: 'approval_request',
-              content: '',
-              approvalId: event.data.approval_id,
-              toolName: event.data.tool_name,
-              toolParameters: event.data.tool_parameters,
-              toolDescription: event.data.tool_description,
-            };
-            setMessages((prev) => [...prev, approvalMessage]);
+            // Auto-approve if user has switched to "Allow All Edits" mode
+            if (editModeRef.current === 'allow') {
+              chatApi.sendApprovalResponse(
+                event.data.approval_id as string,
+                'allow_all'
+              ).catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
+            } else {
+              // Show approval prompt in "Ask" mode
+              const approvalMessage: Message = {
+                id: `approval-${Date.now()}`,
+                type: 'approval_request',
+                content: '',
+                approvalId: event.data.approval_id,
+                toolName: event.data.tool_name,
+                toolParameters: event.data.tool_parameters,
+                toolDescription: event.data.tool_description,
+              };
+              setMessages((prev) => [...prev, approvalMessage]);
+            }
           }
         },
         controller.signal
