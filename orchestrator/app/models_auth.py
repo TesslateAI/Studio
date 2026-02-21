@@ -95,8 +95,8 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
 
     # Public profile fields
     avatar_url: Mapped[str | None] = mapped_column(
-        String(500), nullable=True
-    )  # Profile picture URL
+        Text, nullable=True
+    )  # Profile picture URL or base64 data URI
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)  # Short bio/description
     twitter_handle: Mapped[str | None] = mapped_column(
         String(100), nullable=True
