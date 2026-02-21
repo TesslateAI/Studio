@@ -532,6 +532,9 @@ export default function Project() {
           if (containerStatus?.running && containerStatus?.url) {
             // Container already running - just set the URL without starting
             console.log('[loadContainer] FAST PATH: container running at', containerStatus.url);
+            // Reset any in-flight startup state from a previously loading container
+            containerStartup.reset();
+            setNeedsContainerStart(false);
             setDevServerUrl(containerStatus.url);
             setDevServerUrlWithAuth(containerStatus.url);
             setCurrentPreviewUrl(containerStatus.url);
