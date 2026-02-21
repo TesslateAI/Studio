@@ -13,6 +13,7 @@ import {
   type OnEdgesChange,
   type OnConnect,
   type OnBeforeDelete,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import { Hand } from '@phosphor-icons/react';
 
@@ -34,6 +35,7 @@ interface GraphCanvasProps {
   onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void;
   onEdgesDelete?: (edges: Edge[]) => void;
   onBeforeDelete?: OnBeforeDelete;
+  onInit?: (instance: ReactFlowInstance) => void;
   nodeTypes: NodeTypes;
   edgeTypes: EdgeTypes;
   theme: 'dark' | 'light';
@@ -61,6 +63,7 @@ const GraphCanvasComponent = ({
   onEdgeClick,
   onEdgesDelete,
   onBeforeDelete,
+  onInit,
   nodeTypes,
   edgeTypes,
   theme,
@@ -83,6 +86,7 @@ const GraphCanvasComponent = ({
       onEdgeClick={onEdgeClick}
       onEdgesDelete={onEdgesDelete}
       onBeforeDelete={onBeforeDelete}
+      onInit={onInit}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       defaultViewport={DEFAULT_VIEWPORT}
@@ -154,7 +158,8 @@ const arePropsEqual = (prev: GraphCanvasProps, next: GraphCanvasProps): boolean 
     prev.edgeTypes === next.edgeTypes &&
     prev.onEdgeClick === next.onEdgeClick &&
     prev.onEdgesDelete === next.onEdgesDelete &&
-    prev.onBeforeDelete === next.onBeforeDelete
+    prev.onBeforeDelete === next.onBeforeDelete &&
+    prev.onInit === next.onInit
   );
 };
 

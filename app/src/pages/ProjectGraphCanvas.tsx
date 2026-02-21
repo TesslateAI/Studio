@@ -9,6 +9,7 @@ import {
   type Node,
   type NodeTypes,
   type OnConnect,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
@@ -99,7 +100,10 @@ export const ProjectGraphCanvas = () => {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
+  const handleReactFlowInit = useCallback((instance: ReactFlowInstance) => {
+    reactFlowInstance.current = instance;
+  }, []);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
@@ -607,16 +611,15 @@ export const ProjectGraphCanvas = () => {
       event.preventDefault();
 
       const baseData = event.dataTransfer.getData('base');
-      if (!baseData || !reactFlowWrapper.current) return;
+      if (!baseData || !reactFlowInstance.current) return;
 
       const item = JSON.parse(baseData);
-      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
 
-      // Calculate position on canvas (base position for dropped item or workflow)
-      const dropPosition = {
-        x: event.clientX - reactFlowBounds.left - 100,
-        y: event.clientY - reactFlowBounds.top - 50,
-      };
+      // Convert screen coordinates to flow coordinates (accounts for zoom and pan)
+      const dropPosition = reactFlowInstance.current.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
 
       // Handle browser preview drops
       if (item.type === 'browser') {
@@ -1634,10 +1637,7 @@ export const ProjectGraphCanvas = () => {
           {/* Graph View */}
           <div className={`w-full h-full ${activeView === 'graph' ? 'flex' : 'hidden'} relative`}>
             {/* React Flow canvas */}
-            <div
-              className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform"
-              ref={reactFlowWrapper}
-            >
+            <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
               {/* Floating component drawer */}
               <MarketplaceSidebar />
 
@@ -1649,6 +1649,7 @@ export const ProjectGraphCanvas = () => {
                 onConnect={onConnect}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
+                onInit={handleReactFlowInit}
                 onNodeDragStart={handleNodeDragStart}
                 onNodeDragStop={handleNodeDragStop}
                 onNodeClick={handleNodeClick}
