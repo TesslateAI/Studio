@@ -90,6 +90,35 @@ This guide walks you through deploying Tesslate Studio on AWS EKS using Terrafor
    - Create an API token at: https://dash.cloudflare.com/profile/api-tokens
    - Required permissions: `Zone:DNS:Edit`, `Zone:Zone:Read`
 
+## Multi-Environment Support
+
+This Terraform configuration supports **separate production and beta environments** using:
+
+- **Separate backend state files**: Each environment has its own state file in S3
+  - Production: `s3://<TERRAFORM_STATE_BUCKET>/production/terraform.tfstate`
+  - Beta: `s3://<TERRAFORM_STATE_BUCKET>/beta/terraform.tfstate`
+
+- **Environment-specific tfvars**: Variables are stored in AWS Secrets Manager
+  - Download with: `./scripts/terraform/secrets.sh production` or `./scripts/terraform/secrets.sh beta`
+
+- **Helper script**: `scripts/aws-deploy.sh` manages initialization and deployment
+  - Ensures correct backend config is used for each environment
+  - Prevents accidental cross-environment changes
+
+### Shared Resources (ECR)
+
+ECR repositories (`tesslate-backend`, `tesslate-frontend`, `tesslate-devserver`) are **shared across environments** — both push different image tags (`:beta`, `:production`) to the same repos.
+
+ECR is managed by a **dedicated shared stack** (`k8s/terraform/shared/`) with its own state file:
+
+```bash
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
+```
+
+Per-environment stacks reference ECR via computed URL locals (`local.ecr_*_url` in `aws/ecr.tf`) — no cross-state dependencies needed.
+
 ## Deployment Steps
 
 ### Step 1: Configure Variables
@@ -107,18 +136,45 @@ Key variables to set:
 - `app_secret_key` - Generate with `python -c "import secrets; print(secrets.token_hex(32))"`
 - `litellm_api_base` and `litellm_master_key` - Your LiteLLM instance
 
-### Step 2: Initialize Terraform
+### Step 2: Pull Environment Variables from AWS Secrets Manager
 
 ```bash
-terraform init
+cd ../../../scripts/terraform
+
+# Pull secrets for your environment
+./sync_tfvars.sh pull production  # For production deployment
+# OR
+./sync_tfvars.sh pull beta         # For beta deployment
+
+cd ../../k8s/terraform/aws
 ```
 
-This downloads required providers and modules.
+This creates `terraform.production.tfvars` or `terraform.beta.tfvars` with secrets stored in AWS Secrets Manager.
 
-### Step 3: Review the Plan
+**Note**: Backend configuration is environment-specific and stored in `backend-{env}.hcl` files (not in main.tf).
+
+### Step 3: Initialize Terraform with Environment-Specific Backend
 
 ```bash
-terraform plan -out=tfplan
+# For production
+./deploy.sh init production
+
+# OR for beta
+./deploy.sh init beta
+```
+
+This initializes Terraform with the correct backend configuration:
+- Production: `s3://<TERRAFORM_STATE_BUCKET>/production/terraform.tfstate`
+- Beta: `s3://<TERRAFORM_STATE_BUCKET>/beta/terraform.tfstate`
+
+### Step 4: Review the Plan
+
+```bash
+# For production
+./deploy.sh plan production
+
+# OR for beta
+./deploy.sh plan beta
 ```
 
 Review the resources that will be created:
@@ -129,25 +185,29 @@ Review the resources that will be created:
 - IAM roles with IRSA
 - NGINX Ingress, cert-manager, external-dns
 
-### Step 4: Apply Infrastructure
+### Step 5: Apply Infrastructure
 
 ```bash
-terraform apply tfplan
+# For production (requires confirmation)
+./deploy.sh apply production
+
+# OR for beta
+./deploy.sh apply beta
 ```
 
 This takes approximately 15-20 minutes. Grab a coffee!
 
-### Step 5: Configure kubectl
+### Step 6: Configure kubectl
 
 ```bash
 # Get the command from Terraform output
-terraform output configure_kubectl_command
+./deploy.sh output {environment}
 
-# Run it (example):
+# Run the configure_kubectl_command (example):
 aws eks update-kubeconfig --name tesslate-production-eks --region us-east-1
 ```
 
-### Step 6: Build and Push Docker Images
+### Step 7: Build and Push Docker Images
 
 ```bash
 # Login to ECR
@@ -174,7 +234,7 @@ docker build -t $DEVSERVER_REPO:latest -f orchestrator/Dockerfile.devserver orch
 docker push $DEVSERVER_REPO:latest
 ```
 
-### Step 7: Update Kustomization with ECR URLs
+### Step 8: Update Kustomization with ECR URLs
 
 ```bash
 cd k8s/overlays/aws
@@ -183,13 +243,13 @@ cd k8s/overlays/aws
 # Replace ACCOUNT_ID and REGION with actual values from terraform output
 ```
 
-### Step 8: Deploy Tesslate Application
+### Step 9: Deploy Tesslate Application
 
 ```bash
 kubectl apply -k k8s/overlays/aws
 ```
 
-### Step 9: Configure Cloudflare DNS
+### Step 10: Configure Cloudflare DNS
 
 After deployment, get the NLB DNS name:
 
@@ -206,7 +266,7 @@ In Cloudflare Dashboard:
    - Mode: Full (strict)
    - Edge Certificates: Enable Universal SSL
 
-### Step 10: Verify Deployment
+### Step 11: Verify Deployment
 
 ```bash
 # Check all pods are running
@@ -319,8 +379,10 @@ To destroy all resources:
 # First, delete all user project namespaces
 kubectl get ns | grep proj- | awk '{print $1}' | xargs kubectl delete ns
 
-# Then destroy Terraform resources
-terraform destroy
+# Then destroy Terraform resources for the environment
+./deploy.sh destroy production  # Requires typing "destroy production" to confirm
+# OR
+./deploy.sh destroy beta
 ```
 
 **WARNING**: This will delete all data including S3 bucket contents if `s3_force_destroy = true`.

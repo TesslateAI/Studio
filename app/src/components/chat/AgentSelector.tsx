@@ -1,19 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-interface Agent {
-  id: string;
-  name: string;
-  icon: string; // Emoji string from backend
-  active?: boolean;
-  backendId?: number; // Link to backend agent ID
-  mode?: 'stream' | 'agent';
-}
+import { type ChatAgent } from '../../types/chat';
 
 interface AgentSelectorProps {
-  agents: Agent[];
-  currentAgent: Agent;
-  onSelectAgent: (agent: Agent) => void;
+  agents: ChatAgent[];
+  currentAgent: ChatAgent;
+  onSelectAgent: (agent: ChatAgent) => void;
   /** When true, only shows the agent icon without name */
   compact?: boolean;
 }
@@ -28,18 +20,26 @@ export function AgentSelector({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
+  // Close dropdown on click outside or window losing focus (e.g. iframe click)
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
+    const handleBlur = () => setIsOpen(false);
 
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [isOpen]);
 
-  const handleSelect = (agent: Agent) => {
+  const handleSelect = (agent: ChatAgent) => {
     onSelectAgent(agent);
     setIsOpen(false);
   };
@@ -47,7 +47,7 @@ export function AgentSelector({
   // Show placeholder if no agent selected
   if (!currentAgent || !currentAgent.name) {
     return (
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative" ref={dropdownRef} onFocus={(e) => e.stopPropagation()}>
         <button
           disabled
           className="
@@ -71,7 +71,7 @@ export function AgentSelector({
   }
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative" ref={dropdownRef} onFocus={(e) => e.stopPropagation()}>
       <button
         onClick={(e) => {
           e.stopPropagation();

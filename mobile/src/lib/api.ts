@@ -179,7 +179,7 @@ export const projectsApi = {
     const body: any = {
       name,
       description,
-      source_type: sourceType || 'template'
+      source_type: sourceType || 'base'
     };
 
     if (sourceType === 'github') {

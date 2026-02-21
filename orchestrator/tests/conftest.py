@@ -37,8 +37,10 @@ def pytest_configure(config):
     Sets up test environment variables and registers custom markers.
     """
     # CRITICAL: Set test environment variables BEFORE any app imports
+    # Integration tests use port 5433 (docker-compose.test.yml)
+    # Unit/mocked tests don't actually connect to DB
     os.environ["DATABASE_URL"] = (
-        "postgresql+asyncpg://tesslate_user:dev_password_change_me@localhost:5432/tesslate_dev"
+        "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test"
     )
     os.environ["SECRET_KEY"] = "test-secret-key-for-testing-only"
     os.environ["DEPLOYMENT_MODE"] = "docker"

@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import os
 import re
+import shlex
 import shutil
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -40,8 +41,10 @@ from ..models import (
     MarketplaceBase,
     Project,
     ProjectAsset,
+    ProjectAssetDirectory,
     ProjectFile,
     User,
+    UserPurchasedBase,
 )
 from ..schemas import BrowserPreview as BrowserPreviewSchema
 from ..schemas import (
@@ -49,16 +52,20 @@ from ..schemas import (
     BrowserPreviewUpdate,
     ContainerConnectionCreate,
     ContainerCreate,
+    ContainerCredentialUpdate,
     ContainerRename,
     ContainerUpdate,
     ProjectCreate,
+    TemplateExportRequest,
 )
 from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
 from ..schemas import Project as ProjectSchema
 from ..schemas import ProjectFile as ProjectFileSchema
+from ..services.secret_codec import decode_secret_map, encode_secret_map
+from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
 from ..services.task_manager import Task, get_task_manager
-from ..users import current_active_user, current_superuser
+from ..users import current_active_user, current_optional_user, current_superuser
 from ..utils.async_fileio import makedirs_async, read_file_async, walk_directory_async
 from ..utils.resource_naming import get_project_path
 from ..utils.slug_generator import generate_project_slug
@@ -113,6 +120,20 @@ async def get_projects(
     result = await db.execute(select(Project).where(Project.owner_id == current_user.id))
     projects = result.scalars().all()
     return projects
+
+
+async def enforce_project_limit(user: User, db: AsyncSession) -> None:
+    """Raise 403 if user has reached their tier's project limit."""
+    settings = get_settings()
+    result = await db.execute(select(func.count(Project.id)).where(Project.owner_id == user.id))
+    current_count = result.scalar()
+    tier = user.subscription_tier or "free"
+    max_projects = settings.get_tier_max_projects(tier)
+    if current_count >= max_projects:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Project limit reached. Your {tier} tier allows {max_projects} project(s). Upgrade to create more projects.",
+        )
 
 
 async def _perform_project_setup(
@@ -171,7 +192,7 @@ async def _perform_project_setup(
             # Handle different source types
             container_id = None
             if project_data.source_type in ("github", "gitlab", "bitbucket"):
-                await _setup_git_provider_project(
+                container_id = await _setup_git_provider_project(
                     project_data, db_project, user_id, settings, db, task, project_path
                 )
             elif project_data.source_type == "base":
@@ -203,7 +224,7 @@ async def _setup_git_provider_project(
     db: AsyncSession,
     task: Task,
     project_path: str,
-) -> None:
+) -> str | None:
     """
     Unified setup for projects imported from GitHub, GitLab, or Bitbucket.
 
@@ -213,7 +234,11 @@ async def _setup_git_provider_project(
     clones directly into the PVC. Files are never stored in the database.
 
     In Docker mode: Clones directly to the project filesystem path.
+
+    Returns:
+        Container ID string if container was created, None otherwise.
     """
+    from ..services.framework_detector import FrameworkDetector
     from ..services.git_providers import (
         GitProviderType,
         get_git_provider_manager,
@@ -262,6 +287,10 @@ async def _setup_git_provider_project(
     authenticated_url = provider_class.format_clone_url(
         repo_info["owner"], repo_info["repo"], access_token
     )
+
+    # Framework detection defaults (updated after clone based on package.json)
+    framework_name = "unknown"
+    framework_port = 5173  # default fallback
 
     # ==========================================================================
     # K8s Mode: Create environment and clone directly to PVC
@@ -326,6 +355,25 @@ async def _setup_git_provider_project(
         # TODO: Run patcher inside pod if needed - for now skip since basic Next.js should work
         logger.info("[CREATE] Skipping auto-patch in K8s mode (TODO: implement in-pod patching)")
 
+        # Detect framework from package.json in PVC
+        try:
+            pkg_content = await asyncio.to_thread(
+                orchestrator.k8s_client._exec_in_pod,
+                pod_name,
+                namespace,
+                "file-manager",
+                ["/bin/sh", "-c", "cat /app/package.json"],
+                timeout=10,
+            )
+            if pkg_content and pkg_content.strip():
+                framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
+                framework_port = fw_config.port
+                logger.info(
+                    f"[CREATE] K8s: Detected framework '{framework_name}' (port {framework_port})"
+                )
+        except Exception as e:
+            logger.warning(f"[CREATE] Could not detect framework in K8s: {e}")
+
         task.update_progress(90, 100, "Project files ready")
 
     # ==========================================================================
@@ -363,6 +411,19 @@ async def _setup_git_provider_project(
         except Exception as patch_error:
             logger.warning(f"[CREATE] Auto-patch error: {patch_error}")
 
+        # Detect framework from package.json on filesystem
+        try:
+            pkg_path = os.path.join(project_path, "package.json")
+            if os.path.exists(pkg_path):
+                pkg_content = await read_file_async(pkg_path)
+                framework_name, fw_config = FrameworkDetector.detect_from_package_json(pkg_content)
+                framework_port = fw_config.port
+                logger.info(
+                    f"[CREATE] Docker: Detected framework '{framework_name}' (port {framework_port})"
+                )
+        except Exception as e:
+            logger.warning(f"[CREATE] Could not detect framework: {e}")
+
         task.update_progress(90, 100, "Project setup complete")
 
     # Update project with Git info
@@ -382,6 +443,31 @@ async def _setup_git_provider_project(
     )
     db.add(git_repo)
     await db.commit()
+
+    # Create Container record so the project is usable immediately
+    task.update_progress(95, 100, "Creating container from imported repository")
+
+    repo_name_slug = repo_info["repo"].lower().replace(" ", "-")
+    container = Container(
+        project_id=db_project.id,
+        base_id=None,  # No marketplace base for git imports
+        name=repo_name_slug,
+        directory=".",
+        container_name=f"{db_project.slug}-{repo_name_slug}",
+        internal_port=framework_port,
+        container_type="base",
+        status="stopped",
+        position_x=200,
+        position_y=200,
+    )
+    db.add(container)
+    await db.commit()
+    await db.refresh(container)
+    logger.info(
+        f"[CREATE] Created container {container.id} for git import '{repo_name_slug}' ({framework_name}, port {framework_port})"
+    )
+
+    return str(container.id)
 
 
 async def _setup_github_project(
@@ -536,6 +622,140 @@ async def _setup_github_project(
     await db.commit()
 
 
+async def _setup_archive_base_project(
+    base_repo: MarketplaceBase,
+    db_project: Project,
+    user_id: UUID,
+    settings,
+    db: AsyncSession,
+    task: Task,
+    project_path: str,
+) -> str:
+    """Setup project from an archive-based marketplace base (exported template)."""
+    import subprocess
+
+    from ..services.template_export import extract_archive_to_directory
+    from ..services.template_storage import get_template_storage
+
+    use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
+
+    if not base_repo.archive_path:
+        raise ValueError("Archive template has no archive file. Export may still be in progress.")
+
+    task.update_progress(20, 100, "Retrieving template archive...")
+
+    storage = get_template_storage()
+    archive_bytes = await storage.retrieve_archive(base_repo.archive_path)
+
+    task.update_progress(40, 100, "Extracting template files...")
+
+    if settings.deployment_mode == "docker" and use_volumes:
+        volume_project_path = f"/projects/{db_project.slug}"
+        os.makedirs(volume_project_path, exist_ok=True)
+        files_extracted = await extract_archive_to_directory(archive_bytes, volume_project_path)
+
+        # Fix permissions for devserver (runs as user 1000:1000)
+        subprocess.run(["chown", "-R", "1000:1000", volume_project_path], check=True)
+        logger.info(f"[CREATE] Extracted {files_extracted} files to volume: {volume_project_path}")
+        task.update_progress(80, 100, f"Extracted {files_extracted} files")
+
+    elif settings.deployment_mode == "kubernetes":
+        # K8s: Extract to temp directory and save to DB
+        import tempfile
+
+        temp_dir = tempfile.mkdtemp(prefix=f"archive-extract-{db_project.slug}-")
+        try:
+            files_extracted = await extract_archive_to_directory(archive_bytes, temp_dir)
+            task.update_progress(60, 100, "Saving files to database...")
+
+            files_saved = 0
+            walk_results = await walk_directory_async(
+                temp_dir,
+                exclude_dirs=[
+                    "node_modules",
+                    ".git",
+                    "dist",
+                    "build",
+                    ".next",
+                    "__pycache__",
+                    "venv",
+                ],
+            )
+            for root, _dirs, files in walk_results:
+                for file in files:
+                    if file.startswith(".") or file.endswith(
+                        (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
+                    ):
+                        continue
+                    file_full_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_full_path, temp_dir).replace("\\", "/")
+                    try:
+                        content = await read_file_async(file_full_path)
+                        db_file = ProjectFile(
+                            project_id=db_project.id, file_path=relative_path, content=content
+                        )
+                        db.add(db_file)
+                        files_saved += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"[CREATE] Could not read extracted file {relative_path}: {e}"
+                        )
+
+            await db.commit()
+            task.update_progress(80, 100, f"Saved {files_saved} files to database")
+            logger.info(f"[CREATE] Saved {files_saved} extracted files for K8s mode")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    else:
+        # Bind mount mode
+        os.makedirs(project_path, exist_ok=True)
+        files_extracted = await extract_archive_to_directory(archive_bytes, project_path)
+        task.update_progress(80, 100, f"Extracted {files_extracted} files")
+
+    await db.commit()
+
+    # Create container linked to the base
+    task.update_progress(90, 100, "Creating container from template")
+
+    # Check for TESSLATE.md in the archive for port config
+    from ..services.base_config_parser import parse_tesslate_md
+
+    internal_port = 3000  # Default fallback
+    if settings.deployment_mode == "docker" and use_volumes:
+        tesslate_path = os.path.join(f"/projects/{db_project.slug}", "TESSLATE.md")
+    else:
+        tesslate_path = os.path.join(project_path, "TESSLATE.md")
+
+    if os.path.exists(tesslate_path):
+        try:
+            tesslate_content = await read_file_async(tesslate_path)
+            base_config = parse_tesslate_md(tesslate_content)
+            internal_port = base_config.port
+            logger.info(f"[CREATE] Parsed port {internal_port} from template TESSLATE.md")
+        except Exception as e:
+            logger.warning(f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000")
+
+    container = Container(
+        project_id=db_project.id,
+        base_id=base_repo.id,
+        name=base_repo.slug.lower(),
+        directory=".",
+        container_name=f"{db_project.slug}-{base_repo.slug.lower()}",
+        internal_port=internal_port,
+        container_type="base",
+        status="stopped",
+        position_x=200,
+        position_y=200,
+    )
+    db.add(container)
+    await db.commit()
+    await db.refresh(container)
+    logger.info(f"[CREATE] Created container {container.id} from archive template {base_repo.slug}")
+
+    return str(container.id)
+
+
 async def _setup_base_project(
     project_data: ProjectCreate,
     db_project: Project,
@@ -568,18 +788,47 @@ async def _setup_base_project(
         select(UserPurchasedBase).where(
             UserPurchasedBase.user_id == user_id,
             UserPurchasedBase.base_id == project_data.base_id,
-            UserPurchasedBase.is_active,
         )
     )
 
-    if not purchase:
-        # User must add the base to their library first (via "+" button in CreateProjectModal)
-        raise ValueError(
-            f"Please add '{base_repo.name}' to your library first by clicking the + button."
+    if purchase and not purchase.is_active:
+        # Re-activate a previously deactivated purchase
+        if base_repo.pricing_type != "free":
+            raise ValueError(
+                f"'{base_repo.name}' requires purchase. Please buy it from the marketplace first."
+            )
+        from datetime import UTC, datetime
+
+        purchase.is_active = True
+        purchase.purchase_date = datetime.now(UTC)
+        base_repo.downloads += 1
+        await db.flush()
+        logger.info(f"[CREATE] Re-activated base '{base_repo.name}' for user {user_id}")
+    elif not purchase:
+        # Auto-add free bases to the user's library on project creation
+        if base_repo.pricing_type != "free":
+            raise ValueError(
+                f"'{base_repo.name}' requires purchase. Please buy it from the marketplace first."
+            )
+        purchase = UserPurchasedBase(
+            user_id=user_id,
+            base_id=project_data.base_id,
+            purchase_type="free",
+            is_active=True,
         )
+        db.add(purchase)
+        base_repo.downloads += 1
+        await db.flush()
+        logger.info(f"[CREATE] Auto-added base '{base_repo.name}' to user {user_id} library")
 
     # Note: MarketplaceBase doesn't have a metadata column - framework detection
     # happens via TESSLATE.md parsing during container startup
+
+    # Handle archive-based templates (exported from projects)
+    if base_repo.source_type == "archive":
+        return await _setup_archive_base_project(
+            base_repo, db_project, user_id, settings, db, task, project_path
+        )
 
     # Track if we're using a temp clone directory (for K8s mode without local cache)
     # Must be defined before try block so finally block can reference it
@@ -859,30 +1108,22 @@ async def create_project(
     - Project files will be populated from the repository
     """
     try:
+        # Validate base_id is provided for base source type
+        if project.source_type == "base" and not project.base_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A template must be selected to create a project. Please select a template and try again.",
+            )
+
         logger.info(
-            f"[CREATE] Creating project for user {current_user.id}: {project.name} (source: {project.source_type})"
+            f"[CREATE] Creating project for user {current_user.id}: {project.name} "
+            f"(source: {project.source_type}, base_id: {project.base_id})"
         )
 
         # Check project limits based on subscription tier
-        from ..config import get_settings
+        await enforce_project_limit(current_user, db)
 
         settings = get_settings()
-
-        # Count current active projects (not including deployed-only)
-        current_projects_result = await db.execute(
-            select(func.count(Project.id)).where(Project.owner_id == current_user.id)
-        )
-        current_projects_count = current_projects_result.scalar()
-
-        # Determine max projects based on tier
-        max_projects = settings.get_tier_max_projects(current_user.subscription_tier or "free")
-
-        # Enforce limit
-        if current_projects_count >= max_projects:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Project limit reached. Your {current_user.subscription_tier} tier allows {max_projects} project(s). Upgrade to create more projects.",
-            )
 
         # Generate unique slug for the project
         project_slug = generate_project_slug(project.name)
@@ -1962,6 +2203,242 @@ async def update_project_settings(
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}") from e
 
 
+@router.post("/{project_slug}/export-template")
+async def export_project_as_template(
+    project_slug: str,
+    export_data: TemplateExportRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export a project as a reusable template archive.
+
+    Creates a MarketplaceBase record with source_type='archive' and starts
+    a background task to package the project files into a tar.gz archive.
+    """
+    settings = get_settings()
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    # Create the marketplace base record
+    template_slug = generate_project_slug(export_data.name)
+
+    marketplace_base = MarketplaceBase(
+        name=export_data.name,
+        slug=template_slug,
+        description=export_data.description,
+        long_description=export_data.long_description,
+        category=export_data.category,
+        icon=export_data.icon or "\U0001f4e6",
+        tags=export_data.tags,
+        features=export_data.features,
+        tech_stack=export_data.tech_stack,
+        visibility=export_data.visibility,
+        pricing_type="free",
+        price=0,
+        source_type="archive",
+        git_repo_url=None,
+        source_project_id=project.id,
+        created_by_user_id=current_user.id,
+    )
+    db.add(marketplace_base)
+    await db.flush()
+
+    # Auto-add to user's library
+    user_purchase = UserPurchasedBase(
+        user_id=current_user.id,
+        base_id=marketplace_base.id,
+        purchase_type="free",
+        is_active=True,
+    )
+    db.add(user_purchase)
+    await db.commit()
+    await db.refresh(marketplace_base)
+
+    base_id = marketplace_base.id
+
+    # Capture ORM values before request session closes
+    proj_slug = project.slug
+    proj_id = project.id
+    user_id = current_user.id
+
+    # Start background export task
+    task_manager = get_task_manager()
+    task = task_manager.create_task(
+        user_id=current_user.id,
+        task_type="template_export",
+        metadata={
+            "template_id": str(base_id),
+            "template_name": export_data.name,
+            "project_slug": project_slug,
+        },
+    )
+
+    async def _run_export():
+        from ..database import AsyncSessionLocal
+        from ..services.template_export import export_project_to_archive
+        from ..services.template_storage import get_template_storage
+
+        try:
+            task.update_progress(5, 100, "Preparing export...")
+
+            # Determine the project path
+            use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
+            if settings.deployment_mode == "docker" and use_volumes:
+                project_path = f"/projects/{proj_slug}"
+            elif settings.deployment_mode == "kubernetes":
+                # K8s: We need to reconstruct from DB files
+                import tempfile
+
+                project_path = tempfile.mkdtemp(prefix=f"export-{proj_slug}-")
+                async with AsyncSessionLocal() as export_db:
+                    result = await export_db.execute(
+                        select(ProjectFile).where(ProjectFile.project_id == proj_id)
+                    )
+                    db_files = result.scalars().all()
+
+                    for db_file in db_files:
+                        file_full_path = os.path.join(project_path, db_file.file_path)
+                        os.makedirs(os.path.dirname(file_full_path), exist_ok=True)
+                        with open(file_full_path, "w") as f:
+                            f.write(db_file.content or "")
+
+                    logger.info(f"[TEMPLATE] Reconstructed {len(db_files)} files for K8s export")
+            else:
+                project_path = os.path.join("/app/projects", proj_slug)
+
+            if not os.path.exists(project_path):
+                raise FileNotFoundError(
+                    f"Project directory not found: {project_path}. "
+                    "Make sure the project containers are running."
+                )
+
+            # Create archive
+            archive_bytes = await export_project_to_archive(
+                project_path,
+                task=task,
+                max_size_mb=settings.template_max_size_mb,
+            )
+
+            # Store archive
+            storage = get_template_storage()
+            archive_path = await storage.store_archive(user_id, base_id, archive_bytes)
+
+            # Update the marketplace base record
+            async with AsyncSessionLocal() as update_db:
+                result = await update_db.execute(
+                    select(MarketplaceBase).where(MarketplaceBase.id == base_id)
+                )
+                base = result.scalar_one()
+                base.archive_path = archive_path
+                base.archive_size_bytes = len(archive_bytes)
+                await update_db.commit()
+
+            task.update_progress(100, 100, "Template exported successfully!")
+            task.result = {"template_id": str(base_id), "slug": template_slug}
+
+            # Cleanup temp dir for K8s
+            if settings.deployment_mode == "kubernetes" and project_path.startswith("/tmp"):
+                shutil.rmtree(project_path, ignore_errors=True)
+
+        except Exception as e:
+            logger.error(f"[TEMPLATE] Export failed: {e}", exc_info=True)
+            task.error = str(e)
+
+    background_tasks.add_task(_run_export)
+
+    return {
+        "id": str(base_id),
+        "slug": template_slug,
+        "task_id": task.id,
+    }
+
+
+@router.get("/{project_slug}/download-tesslate")
+async def download_tesslate_folder(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download the .tesslate/ folder as a ZIP archive.
+
+    Contains trajectory logs, subagent trajectories, and mirrored plans.
+    Uses the orchestrator abstraction for platform-agnostic file access.
+    """
+    import io
+    import zipfile
+
+    from fastapi.responses import StreamingResponse
+
+    from ..services.orchestration import get_orchestrator
+
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+    orchestrator = get_orchestrator()
+
+    # Get the first container for file access
+    container_result = await db.execute(
+        select(Container).where(Container.project_id == project.id).limit(1)
+    )
+    container = container_result.scalar_one_or_none()
+    container_name = None
+    container_directory = None
+    if container:
+        container_name = (
+            container.directory if container.directory and container.directory != "." else None
+        )
+        if container.directory and container.directory != ".":
+            container_directory = container.directory
+
+    # List .tesslate directory contents via execute_command (recursive find)
+    try:
+        result = await orchestrator.execute_command(
+            user_id=current_user.id,
+            project_id=project.id,
+            container_name=container_name,
+            command="find .tesslate -type f 2>/dev/null || true",
+            project_slug=project.slug,
+        )
+        stdout = ""
+        if isinstance(result, dict):
+            stdout = result.get("stdout", "") or result.get("output", "")
+        elif isinstance(result, str):
+            stdout = result
+
+        file_paths = [p.strip() for p in stdout.strip().split("\n") if p.strip()]
+    except Exception as e:
+        logger.warning(f"[DOWNLOAD-TESSLATE] Failed to list .tesslate: {e}")
+        file_paths = []
+
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="No .tesslate/ data found for this project")
+
+    # Build ZIP in memory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fp in file_paths:
+            try:
+                content = await orchestrator.read_file(
+                    user_id=current_user.id,
+                    project_id=project.id,
+                    container_name=container_name,
+                    file_path=fp,
+                    project_slug=project.slug,
+                    subdir=container_directory,
+                )
+                if content is not None:
+                    zf.writestr(fp, content)
+            except Exception as e:
+                logger.debug(f"[DOWNLOAD-TESSLATE] Skipping {fp}: {e}")
+
+    buf.seek(0)
+    filename = f"{project.slug}-tesslate.zip"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/{project_id}/fork", response_model=ProjectSchema)
 async def fork_project(
     project_id: str,
@@ -1979,6 +2456,9 @@ async def fork_project(
     source_project = result.scalar_one_or_none()
     if not source_project:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Enforce project limit (same check as create_project)
+    await enforce_project_limit(current_user, db)
 
     try:
         logger.info(f"[FORK] Forking project {project_id} for user {current_user.id}")
@@ -1999,8 +2479,7 @@ async def fork_project(
                     owner_id=current_user.id,
                 )
                 db.add(forked_project)
-                await db.commit()
-                await db.refresh(forked_project)
+                await db.flush()
                 break
             except Exception as e:
                 if (
@@ -2032,10 +2511,92 @@ async def fork_project(
             db.add(forked_file)
             files_copied += 1
 
+        # Copy containers and build old_id → new_id map
+        container_id_map = {}
+        containers_result = await db.execute(
+            select(Container).where(Container.project_id == project_id)
+        )
+        source_containers = containers_result.scalars().all()
+
+        for src_container in source_containers:
+            new_container = Container(
+                project_id=forked_project.id,
+                base_id=src_container.base_id,
+                name=src_container.name,
+                directory=src_container.directory,
+                container_name=f"{forked_project.slug}-{src_container.name}",
+                port=src_container.port,
+                internal_port=src_container.internal_port,
+                environment_vars=src_container.environment_vars,
+                dockerfile_path=src_container.dockerfile_path,
+                volume_name=None,
+                container_type=src_container.container_type,
+                service_slug=src_container.service_slug,
+                deployment_mode=src_container.deployment_mode,
+                external_endpoint=src_container.external_endpoint,
+                credentials_id=None,
+                position_x=src_container.position_x,
+                position_y=src_container.position_y,
+                status="stopped",
+            )
+            db.add(new_container)
+            await db.flush()
+            container_id_map[src_container.id] = new_container.id
+
+        # Copy container connections (remap IDs)
+        connections_copied = 0
+        connections_result = await db.execute(
+            select(ContainerConnection).where(ContainerConnection.project_id == project_id)
+        )
+        source_connections = connections_result.scalars().all()
+
+        for src_conn in source_connections:
+            new_source_id = container_id_map.get(src_conn.source_container_id)
+            new_target_id = container_id_map.get(src_conn.target_container_id)
+            if new_source_id is None or new_target_id is None:
+                continue
+            new_conn = ContainerConnection(
+                project_id=forked_project.id,
+                source_container_id=new_source_id,
+                target_container_id=new_target_id,
+                connection_type=src_conn.connection_type,
+                connector_type=src_conn.connector_type,
+                config=src_conn.config,
+                label=src_conn.label,
+            )
+            db.add(new_conn)
+            connections_copied += 1
+
+        # Copy browser previews (remap container ID)
+        previews_result = await db.execute(
+            select(BrowserPreview).where(BrowserPreview.project_id == project_id)
+        )
+        source_previews = previews_result.scalars().all()
+
+        for src_preview in source_previews:
+            if src_preview.connected_container_id is not None:
+                new_container_id = container_id_map.get(src_preview.connected_container_id)
+                if new_container_id is None:
+                    continue  # source container wasn't copied (shouldn't happen)
+            else:
+                new_container_id = None  # preserve unconnected preview
+            new_preview = BrowserPreview(
+                project_id=forked_project.id,
+                connected_container_id=new_container_id,
+                position_x=src_preview.position_x,
+                position_y=src_preview.position_y,
+                current_path=src_preview.current_path,
+            )
+            db.add(new_preview)
+
+        # Single atomic commit — all or nothing
         await db.commit()
         await db.refresh(forked_project)
 
-        logger.info(f"[FORK] Copied {files_copied} files to project {forked_project.id}")
+        logger.info(
+            f"[FORK] Copied {files_copied} files, {len(container_id_map)} containers, "
+            f"{connections_copied} connections to project {forked_project.id}"
+        )
 
         return forked_project
 
@@ -2184,12 +2745,21 @@ async def list_asset_directories(
                         if not any(part.startswith(".") for part in rel_path.split("/")):
                             directories_set.add(rel_path)
         else:
-            # Kubernetes mode - directories are created via exec, so rely on DB + manual tracking
-            # For K8s, we could use kubectl exec to list directories, but for now use DB
+            # Kubernetes mode - no local filesystem to scan
             pass
 
     except Exception as e:
         logger.warning(f"Failed to scan filesystem for directories: {e}")
+
+    # Include persisted directory records from DB (works for both modes)
+    try:
+        dir_result = await db.execute(
+            select(ProjectAssetDirectory.path).where(ProjectAssetDirectory.project_id == project_id)
+        )
+        persisted_dirs = [row[0] for row in dir_result.all()]
+        directories_set.update(persisted_dirs)
+    except Exception:
+        pass  # Table may not exist yet during migration
 
     return {"directories": sorted(directories_set)}
 
@@ -2232,7 +2802,7 @@ async def create_asset_directory(
             orchestrator = get_orchestrator()
 
             # Use exec to create directory in container
-            command = ["/bin/sh", "-c", f"mkdir -p /app/{directory_path}"]
+            command = ["/bin/sh", "-c", f"mkdir -p {shlex.quote(f'/app/{directory_path}')}"]
             await orchestrator.execute_command(
                 user_id=current_user.id,
                 project_id=project_id,
@@ -2242,9 +2812,26 @@ async def create_asset_directory(
             )
             logger.info(f"[ASSETS] Created directory in container: {directory_path}")
 
+        # Persist directory record to DB (idempotent)
+        normalized_path = f"/{directory_path}"
+        existing_dir = await db.scalar(
+            select(ProjectAssetDirectory).where(
+                ProjectAssetDirectory.project_id == project_id,
+                ProjectAssetDirectory.path == normalized_path,
+            )
+        )
+        if not existing_dir:
+            db_dir = ProjectAssetDirectory(project_id=project_id, path=normalized_path)
+            db.add(db_dir)
+            await db.commit()
+            logger.info(f"[ASSETS] Persisted directory record: {normalized_path}")
+
         return {"message": "Directory created", "path": directory_path}
 
+    except HTTPException:
+        raise
     except Exception as e:
+        await db.rollback()
         logger.error(f"[ASSETS] Failed to create directory: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create directory: {str(e)}") from e
 
@@ -2356,26 +2943,13 @@ async def upload_asset(
 
             orchestrator = get_orchestrator()
 
-            # Ensure directory exists
-            await orchestrator.execute_command(
-                user_id=current_user.id,
+            # Write binary file to container using tar streaming
+            # (echo|base64 approach breaks for files >100KB due to ARG_MAX)
+            await orchestrator.write_binary_to_container(
                 project_id=project_id,
-                container_name=None,
-                command=["/bin/sh", "-c", f"mkdir -p /app/{directory}"],
-                timeout=30,
-            )
-
-            # Write file to container
-            success = await orchestrator.write_file(
-                user_id=current_user.id,
-                project_id=project_id,
-                container_name=None,
                 file_path=file_path_relative,
-                content=content.decode("latin-1"),  # Binary content
+                data=content,
             )
-
-            if not success:
-                raise RuntimeError("Failed to write file to container")
 
             logger.info(f"[ASSETS] Saved file to container: {file_path_relative}")
 
@@ -2472,23 +3046,30 @@ async def get_asset_file(
     project_slug: str,
     asset_id: UUID,
     auth_token: str | None = Query(None),
-    current_user: User | None = Depends(current_active_user),
+    current_user: User | None = Depends(current_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Serve the actual asset file.
-    Supports both Bearer token and query parameter token for image loading.
+    Supports both cookie/Bearer token and query parameter token for image loading.
     """
-    # If no current_user from Bearer, try auth_token query parameter
+    # If no current_user from cookie/Bearer, try auth_token query parameter
     if not current_user and auth_token:
-        from ..database import User as DBUser
-        from ..users import fastapi_users
-
         try:
-            user_payload = await fastapi_users.authenticator.decode_token(auth_token)
-            if user_payload:
-                user_id = user_payload.get("sub")
-                current_user = await db.get(DBUser, UUID(user_id))
+            from jose import jwt as jose_jwt
+
+            auth_settings = get_settings()
+            payload = jose_jwt.decode(
+                auth_token,
+                auth_settings.secret_key,
+                algorithms=[auth_settings.algorithm],
+                audience="fastapi-users:auth",
+            )
+            user_id = payload.get("sub")
+            if user_id:
+                token_user = await db.get(User, UUID(user_id))
+                if token_user and token_user.is_active:
+                    current_user = token_user
         except Exception:
             pass
 
@@ -2511,24 +3092,39 @@ async def get_asset_file(
 
         return FileResponse(file_path, media_type=asset.mime_type, filename=asset.filename)
     else:
-        # Kubernetes mode - read from container and return
+        # Kubernetes mode - read binary file from container using base64
         from ..services.orchestration import get_orchestrator
 
         orchestrator = get_orchestrator()
 
-        content = await orchestrator.read_file(
-            user_id=current_user.id,
-            project_id=project.id,
-            container_name=None,
-            file_path=asset.file_path,
-        )
+        try:
+            import base64 as b64module
 
-        if not content:
-            raise HTTPException(status_code=404, detail="Asset file not found in container")
+            result = await orchestrator.execute_command(
+                user_id=current_user.id,
+                project_id=project.id,
+                container_name=None,
+                command=["/bin/sh", "-c", f"base64 {shlex.quote(f'/app/{asset.file_path}')}"],
+                timeout=30,
+            )
 
-        from fastapi.responses import Response
+            if not result or not result.strip():
+                raise HTTPException(status_code=404, detail="Asset file not found in container")
 
-        return Response(content=content.encode("latin-1"), media_type=asset.mime_type)
+            # Remove all whitespace (base64 command outputs 76-char lines with newlines)
+            clean_b64 = "".join(result.split())
+            binary_content = b64module.b64decode(clean_b64)
+
+            from fastapi.responses import Response
+
+            return Response(content=binary_content, media_type=asset.mime_type)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[ASSETS] Failed to read asset from container: {e}")
+            raise HTTPException(
+                status_code=404, detail="Asset file not found in container"
+            ) from None
 
 
 @router.delete("/{project_slug}/assets/{asset_id}")
@@ -3594,8 +4190,9 @@ async def add_container_to_project(
             from ..services.orchestration import get_orchestrator
 
             orchestrator = get_orchestrator()
+            env_overrides = await build_env_overrides(db, project.id, all_containers)
             await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id
+                project, all_containers, all_connections, current_user.id, env_overrides
             )
 
             return {
@@ -3659,12 +4256,42 @@ async def create_container_connection(
         if not target or target.project_id != project.id:
             raise HTTPException(status_code=404, detail="Target container not found")
 
+        # Prevent duplicate connections between the same two containers
+        existing = await db.execute(
+            select(ContainerConnection).where(
+                ContainerConnection.project_id == project.id,
+                ContainerConnection.source_container_id == connection_data.source_container_id,
+                ContainerConnection.target_container_id == connection_data.target_container_id,
+            )
+        )
+        if existing.scalars().first():
+            raise HTTPException(
+                status_code=409, detail="Connection already exists between these containers"
+            )
+
+        # Auto-detect connector_type for service containers
+        connector_type = connection_data.connector_type
+        config = connection_data.config
+        if source.container_type == "service" and source.service_slug:
+            connector_type = "env_injection"
+            # Resolve template keys so the frontend knows what will be injected
+            from ..services.secret_manager_env import resolve_connection_env_vars
+            from ..services.service_definitions import get_service
+
+            svc_def = get_service(source.service_slug)
+            resolved = resolve_connection_env_vars(source, svc_def)
+            if resolved:
+                config = config or {}
+                config["env_mapping"] = {k: k for k in resolved}
+
         # Create connection
         new_connection = ContainerConnection(
             project_id=project.id,
             source_container_id=connection_data.source_container_id,
             target_container_id=connection_data.target_container_id,
             connection_type=connection_data.connection_type,
+            connector_type=connector_type,
+            config=config,
             label=connection_data.label,
         )
 
@@ -3692,8 +4319,9 @@ async def create_container_connection(
             all_connections = connections_result.scalars().all()
 
             orchestrator = get_orchestrator()
+            env_overrides = await build_env_overrides(db, project.id, all_containers)
             await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id
+                project, all_containers, all_connections, current_user.id, env_overrides
             )
 
             logger.info("[CONTAINER] Updated docker-compose.yml with new connection")
@@ -3991,6 +4619,16 @@ async def get_containers_status(
         raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}") from e
 
 
+def _container_response(container, injected_env_vars: list | None = None) -> dict:
+    """Serialize container with write-only env vars (hide values, expose keys only)."""
+    data = ContainerSchema.model_validate(container).model_dump()
+    data["environment_vars"] = None
+    data["env_var_keys"] = container.env_var_keys
+    data["env_vars_count"] = container.env_vars_count
+    data["injected_env_vars"] = injected_env_vars
+    return data
+
+
 @router.get("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
 async def get_container(
     project_slug: str,
@@ -4007,7 +4645,8 @@ async def get_container(
     if not container or container.project_id != project.id:
         raise HTTPException(status_code=404, detail="Container not found")
 
-    return container
+    injected = await get_injected_env_vars_for_container(db, container.id, project.id)
+    return _container_response(container, injected_env_vars=injected)
 
 
 @router.patch("/{project_slug}/containers/{container_id}", response_model=ContainerSchema)
@@ -4037,19 +4676,98 @@ async def update_container(
             container.position_y = container_data.position_y
         if container_data.port is not None:
             container.port = container_data.port
-        if container_data.environment_vars is not None:
-            container.environment_vars = container_data.environment_vars
+        if container_data.env_vars_to_set:
+            existing = decode_secret_map(container.environment_vars or {})
+            existing.update(container_data.env_vars_to_set)
+            container.environment_vars = encode_secret_map(existing)
+            flag_modified(container, "environment_vars")
+        if container_data.env_vars_to_delete:
+            existing = decode_secret_map(container.environment_vars or {})
+            for key in container_data.env_vars_to_delete:
+                existing.pop(key, None)
+            container.environment_vars = encode_secret_map(existing)
             flag_modified(container, "environment_vars")
 
         await db.commit()
         await db.refresh(container)
 
-        return container
+        return _container_response(container)
 
     except Exception as e:
         await db.rollback()
         logger.error(f"[CONTAINER] Failed to update container: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update container: {str(e)}") from e
+
+
+@router.put("/{project_slug}/containers/{container_id}/credentials", response_model=ContainerSchema)
+async def update_container_credentials(
+    project_slug: str,
+    container_id: UUID,
+    body: ContainerCredentialUpdate,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update credentials for an external service container."""
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    container = await db.get(Container, container_id)
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    if container.deployment_mode != "external":
+        raise HTTPException(status_code=400, detail="Container is not an external service")
+
+    try:
+        from ..services.deployment_encryption import get_deployment_encryption_service
+
+        encryption_service = get_deployment_encryption_service()
+        encrypted = encryption_service.encrypt(json.dumps(body.credentials))
+
+        # Update existing credential or create a new one
+        credential = None
+        if container.credentials_id:
+            credential = await db.get(DeploymentCredential, container.credentials_id)
+
+        if credential:
+            credential.access_token_encrypted = encrypted
+            if body.external_endpoint is not None:
+                credential.provider_metadata = {
+                    **(credential.provider_metadata or {}),
+                    "external_endpoint": body.external_endpoint,
+                }
+                flag_modified(credential, "provider_metadata")
+        else:
+            credential = DeploymentCredential(
+                user_id=current_user.id,
+                project_id=project.id,
+                provider=container.service_slug or "external",
+                access_token_encrypted=encrypted,
+                provider_metadata={
+                    "service_type": "external",
+                    "external_endpoint": body.external_endpoint,
+                },
+            )
+            db.add(credential)
+            await db.flush()
+            container.credentials_id = credential.id
+
+        if body.external_endpoint is not None:
+            container.external_endpoint = body.external_endpoint
+
+        await db.commit()
+        await db.refresh(container)
+
+        logger.info(f"[CONTAINER] Updated credentials for container {container_id}")
+
+        injected = await get_injected_env_vars_for_container(db, container.id, project.id)
+        return _container_response(container, injected_env_vars=injected)
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[CONTAINER] Failed to update credentials: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update credentials: {str(e)}"
+        ) from e
 
 
 @router.post("/{project_slug}/containers/{container_id}/rename", response_model=ContainerSchema)
@@ -4083,7 +4801,7 @@ async def rename_container(
 
     # If name hasn't changed, return early
     if new_name == container.name:
-        return container
+        return _container_response(container)
 
     try:
         # Sanitize the new name for Docker and directory naming
@@ -4177,8 +4895,9 @@ async def rename_container(
 
             if is_docker_mode():
                 orchestrator = get_orchestrator()
+                env_overrides = await build_env_overrides(db, project.id, all_containers)
                 await orchestrator.write_compose_file(
-                    project, all_containers, all_connections, current_user.id
+                    project, all_containers, all_connections, current_user.id, env_overrides
                 )
                 logger.info("[CONTAINER] Regenerated docker-compose.yml after rename")
         except Exception as e:
@@ -4187,7 +4906,7 @@ async def rename_container(
         logger.info(
             f"[CONTAINER] ✅ Renamed container {container_id} from '{container.name}' to '{new_name}'"
         )
-        return container
+        return _container_response(container)
 
     except HTTPException:
         raise
@@ -4273,8 +4992,13 @@ async def delete_container(
 
                 # Update docker-compose.yml
                 orchestrator = get_orchestrator()
+                env_overrides = await build_env_overrides(db, project.id, remaining_containers)
                 await orchestrator.write_compose_file(
-                    project, remaining_containers, remaining_connections, current_user.id
+                    project,
+                    remaining_containers,
+                    remaining_connections,
+                    current_user.id,
+                    env_overrides,
                 )
 
                 logger.info("[CONTAINER] Updated docker-compose.yml after deletion")
@@ -4466,7 +5190,7 @@ async def _start_container_background_task(
                 settings = get_settings()
                 if settings.deployment_mode == "docker":
                     # Docker mode always uses HTTP on localhost
-                    container_url = f"http://{project.slug}-{service_name}.localhost"
+                    container_url = f"http://{project.slug}-{service_name}.{settings.app_domain}"
                 else:
                     protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
                     container_url = (
@@ -4585,7 +5309,7 @@ async def _start_container_background_task(
                 ).strip("-")
                 if settings.deployment_mode == "docker":
                     # Docker mode always uses HTTP on localhost
-                    container_url = f"http://{project.slug}-{sanitized_name}.localhost"
+                    container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
                 else:
                     protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
                     container_url = (
@@ -4679,7 +5403,7 @@ async def start_single_container(
             )
             sanitized_name = "".join(c for c in sanitized_name if c.isalnum() or c == "-")
             sanitized_name = re.sub(r"-+", "-", sanitized_name).strip("-")
-            container_url = f"http://{project.slug}-{sanitized_name}.localhost"
+            container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
 
             logger.info(
                 f"[COMPOSE] Container {container.name} already running, returning fast path"
@@ -4842,10 +5566,10 @@ async def check_container_health(
         )
     else:
         # Docker URL pattern: {project_slug}-{container}.localhost
-        external_url = f"http://{project.slug}-{container_dir}.localhost"
+        external_url = f"http://{project.slug}-{container_dir}.{settings.app_domain}"
         # Health check through Traefik (orchestrator can't reach container directly)
         health_check_url = "http://traefik"
-        health_check_headers = {"Host": f"{project.slug}-{container_dir}.localhost"}
+        health_check_headers = {"Host": f"{project.slug}-{container_dir}.{settings.app_domain}"}
 
     try:
         async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
@@ -5013,7 +5737,7 @@ async def _restart_container_background_task(
             )
             if settings.deployment_mode == "docker":
                 # Docker mode always uses HTTP on localhost
-                container_url = f"http://{project.slug}-{sanitized_name}.localhost"
+                container_url = f"http://{project.slug}-{sanitized_name}.{settings.app_domain}"
             else:
                 protocol = "https" if settings.k8s_wildcard_tls_secret else "http"
                 container_url = (

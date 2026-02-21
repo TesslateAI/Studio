@@ -1,18 +1,20 @@
 """
 Pydantic schemas for feedback system.
 """
-from typing import Optional, List
+
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 # ============================================================================
 # Feedback Post Schemas
 # ============================================================================
 
+
 class FeedbackPostCreate(BaseModel):
     """Schema for creating a new feedback post."""
+
     type: str = Field(..., description="Type of feedback: 'bug' or 'suggestion'")
     title: str = Field(..., min_length=1, max_length=500, description="Feedback title")
     description: str = Field(..., min_length=1, description="Detailed description")
@@ -20,11 +22,15 @@ class FeedbackPostCreate(BaseModel):
 
 class FeedbackPostUpdate(BaseModel):
     """Schema for updating a feedback post (admin only)."""
-    status: Optional[str] = Field(None, description="Status: 'open', 'in_progress', 'resolved', 'closed'")
+
+    status: str | None = Field(
+        None, description="Status: 'open', 'in_progress', 'resolved', 'closed'"
+    )
 
 
 class FeedbackPostRead(BaseModel):
     """Schema for reading feedback post data."""
+
     id: uuid.UUID
     user_id: uuid.UUID
     user_name: str  # From relationship
@@ -44,7 +50,8 @@ class FeedbackPostRead(BaseModel):
 
 class FeedbackPostList(BaseModel):
     """Schema for listing feedback posts."""
-    posts: List[FeedbackPostRead]
+
+    posts: list[FeedbackPostRead]
     total: int
 
 
@@ -52,13 +59,16 @@ class FeedbackPostList(BaseModel):
 # Feedback Comment Schemas
 # ============================================================================
 
+
 class FeedbackCommentCreate(BaseModel):
     """Schema for creating a new comment."""
+
     content: str = Field(..., min_length=1, description="Comment content")
 
 
 class FeedbackCommentRead(BaseModel):
     """Schema for reading comment data."""
+
     id: uuid.UUID
     user_id: uuid.UUID
     user_name: str  # From relationship
@@ -75,8 +85,10 @@ class FeedbackCommentRead(BaseModel):
 # Feedback Detail Schema (with comments)
 # ============================================================================
 
+
 class FeedbackPostDetail(BaseModel):
     """Schema for reading feedback post with comments."""
+
     id: uuid.UUID
     user_id: uuid.UUID
     user_name: str
@@ -89,7 +101,7 @@ class FeedbackPostDetail(BaseModel):
     is_owner: bool = False  # Whether current user owns this feedback
     created_at: datetime
     updated_at: datetime
-    comments: List[FeedbackCommentRead] = []
+    comments: list[FeedbackCommentRead] = []
 
     class Config:
         from_attributes = True
@@ -99,7 +111,9 @@ class FeedbackPostDetail(BaseModel):
 # Response Schemas
 # ============================================================================
 
+
 class UpvoteResponse(BaseModel):
     """Response after toggling upvote."""
+
     upvoted: bool  # True if upvoted, False if removed
     upvote_count: int  # New upvote count

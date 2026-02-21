@@ -22,6 +22,7 @@ export { HttpApiEdge } from './HttpApiEdge';
 export { DatabaseEdge } from './DatabaseEdge';
 export { CacheEdge } from './CacheEdge';
 export { BrowserPreviewEdge } from './BrowserPreviewEdge';
+export { EdgeDeleteButton } from './EdgeDeleteButton';
 
 // Edge type mapping for React Flow
 export const edgeTypes = {

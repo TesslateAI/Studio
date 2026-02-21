@@ -462,26 +462,29 @@ class TestBashExecToolOracle:
 
         expected = test_case["expected"]
 
-        # Mock the shell session operations
-        with (
-            patch("app.agent.tools.shell_ops.bash.shell_open_executor") as mock_open,
-            patch("app.agent.tools.shell_ops.bash.shell_exec_executor") as mock_exec,
-            patch("app.agent.tools.shell_ops.bash.shell_close_executor") as mock_close,
+        # Mock the orchestrator used by bash_exec_tool
+        mock_orchestrator = MagicMock()
+
+        # Setup mock output based on expected behavior
+        if expected.get("success"):
+            mock_output = test_case.get("mock_output", "")
+            if "output_contains" in expected:
+                mock_output = expected["output_contains"]
+            mock_orchestrator.execute_command = AsyncMock(return_value=mock_output)
+        else:
+            mock_orchestrator.execute_command = AsyncMock(
+                side_effect=RuntimeError("command not found")
+            )
+
+        # Mock get_project_status so bash_exec can resolve container_name
+        mock_orchestrator.get_project_status = AsyncMock(
+            return_value={"containers": {"frontend": {"running": True}}}
+        )
+
+        with patch(
+            "app.services.orchestration.get_orchestrator",
+            return_value=mock_orchestrator,
         ):
-            mock_open.return_value = {"success": True, "session_id": "mock-session-123"}
-
-            # Setup mock output based on expected behavior
-            if expected.get("success"):
-                mock_output = test_case.get("mock_output", "")
-                if "output_contains" in expected:
-                    mock_output = expected["output_contains"]
-
-                mock_exec.return_value = {"output": mock_output}
-            else:
-                mock_exec.return_value = {"output": "", "error": "command not found"}
-
-            mock_close.return_value = {"success": True}
-
             # Execute tool
             result = await bash_exec_tool(test_case["input"], test_context)
 

@@ -1,0 +1,12 @@
+# Frontend ConfigMap for Minikube
+# For AWS environments, this is managed by Terraform (kubernetes.tf)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: tesslate
+data:
+  # Local API URL (minikube doesn't use domain variable)
+  api-url: "http://localhost"
+  # PostHog host (same for all environments)
+  posthog-host: "https://app.posthog.com"

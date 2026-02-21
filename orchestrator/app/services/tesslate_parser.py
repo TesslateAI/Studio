@@ -10,10 +10,9 @@ Parses TESSLATE.md files from base repositories to extract:
 This enables dynamic project startup across different tech stacks.
 """
 
-import re
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
 import logging
+import re
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +20,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TesslateConfig:
     """Configuration extracted from TESSLATE.md."""
+
     framework: str
     port: int
     start_command: str
-    stop_command: Optional[str] = None
-    environment_vars: Dict[str, str] = None
+    stop_command: str | None = None
+    environment_vars: dict[str, str] = None
 
     def __post_init__(self):
         if self.environment_vars is None:
@@ -40,25 +40,15 @@ class TesslateParser:
     # start_command should only contain the dev server command, NOT npm install
     DEFAULT_CONFIGS = {
         "vite": TesslateConfig(
-            framework="vite",
-            port=5173,
-            start_command="npm run dev -- --host 0.0.0.0 --port 5173"
+            framework="vite", port=5173, start_command="npm run dev -- --host 0.0.0.0 --port 5173"
         ),
         "nextjs": TesslateConfig(
             framework="nextjs",
             port=3000,
-            start_command="npm run dev -- --hostname 0.0.0.0 --port 3000"
+            start_command="npm run dev -- --hostname 0.0.0.0 --port 3000",
         ),
-        "react": TesslateConfig(
-            framework="react",
-            port=3000,
-            start_command="npm start"
-        ),
-        "expo": TesslateConfig(
-            framework="expo",
-            port=19006,
-            start_command="npx expo start --web"
-        ),
+        "react": TesslateConfig(framework="react", port=3000, start_command="npm start"),
+        "expo": TesslateConfig(framework="expo", port=19006, start_command="npx expo start --web"),
     }
 
     @staticmethod
@@ -93,7 +83,7 @@ class TesslateParser:
                 port=port,
                 start_command=start_command,
                 stop_command=stop_command,
-                environment_vars=env_vars
+                environment_vars=env_vars,
             )
 
             logger.info(f"Parsed TESSLATE.md: framework={framework}, port={port}")
@@ -107,7 +97,7 @@ class TesslateParser:
     def _extract_framework(content: str) -> str:
         """Extract framework from TESSLATE.md."""
         # Look for "**Framework**: <name>" pattern
-        pattern = r'\*\*Framework\*\*:\s*([^\n]+)'
+        pattern = r"\*\*Framework\*\*:\s*([^\n]+)"
         match = re.search(pattern, content, re.IGNORECASE)
 
         if match:
@@ -145,9 +135,9 @@ class TesslateParser:
         """Extract primary port from TESSLATE.md."""
         # Look for "**Port**: <number>" or "- **Port**: <number>"
         patterns = [
-            r'\*\*Port\*\*:\s*(\d+)',
-            r'port:\s*(\d+)',
-            r'Development:\s*(\d+)',
+            r"\*\*Port\*\*:\s*(\d+)",
+            r"port:\s*(\d+)",
+            r"Development:\s*(\d+)",
         ]
 
         for pattern in patterns:
@@ -165,59 +155,59 @@ class TesslateParser:
     def _extract_start_command(content: str) -> str:
         """Extract start command from TESSLATE.md."""
         # Look for "**Start Command**:" section with bash code block
-        pattern = r'\*\*Start\s+Command\*\*:\s*```(?:bash)?\s*(.+?)\s*```'
+        pattern = r"\*\*Start\s+Command\*\*:\s*```(?:bash)?\s*(.+?)\s*```"
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
 
         if match:
             commands = match.group(1).strip()
             # Clean up: remove comments
             lines = []
-            for line in commands.split('\n'):
+            for line in commands.split("\n"):
                 line = line.strip()
                 # Skip empty lines and comments
-                if line and not line.startswith('#'):
+                if line and not line.startswith("#"):
                     lines.append(line)
 
-            return '\n'.join(lines)
+            return "\n".join(lines)
 
         # Fallback: default Vite command
         return "npm run dev -- --host 0.0.0.0 --port 5173"
 
     @staticmethod
-    def _extract_stop_command(content: str) -> Optional[str]:
+    def _extract_stop_command(content: str) -> str | None:
         """Extract stop command from TESSLATE.md (optional)."""
         # Look for "**Stop Command**:" section
-        pattern = r'\*\*Stop\s+Command\*\*:\s*```(?:bash)?\s*(.+?)\s*```'
+        pattern = r"\*\*Stop\s+Command\*\*:\s*```(?:bash)?\s*(.+?)\s*```"
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
 
         if match:
             commands = match.group(1).strip()
             lines = []
-            for line in commands.split('\n'):
+            for line in commands.split("\n"):
                 line = line.strip()
-                if line and not line.startswith('#'):
+                if line and not line.startswith("#"):
                     lines.append(line)
 
-            return '\n'.join(lines) if lines else None
+            return "\n".join(lines) if lines else None
 
         return None
 
     @staticmethod
-    def _extract_environment_vars(content: str) -> Dict[str, str]:
+    def _extract_environment_vars(content: str) -> dict[str, str]:
         """Extract environment variables from TESSLATE.md (optional)."""
         env_vars = {}
 
         # Look for "## Environment Variables" section with code block
-        pattern = r'##\s*Environment\s+Variables\s*```(?:env)?\s*(.+?)\s*```'
+        pattern = r"##\s*Environment\s+Variables\s*```(?:env)?\s*(.+?)\s*```"
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
 
         if match:
             env_section = match.group(1).strip()
             # Look for KEY=value patterns
-            for line in env_section.split('\n'):
+            for line in env_section.split("\n"):
                 line = line.strip()
-                if '=' in line and not line.startswith('#'):
-                    key, value = line.split('=', 1)
+                if "=" in line and not line.startswith("#"):
+                    key, value = line.split("=", 1)
                     env_vars[key.strip()] = value.strip()
 
         return env_vars
@@ -226,6 +216,5 @@ class TesslateParser:
     def get_default_config(framework: str = "vite") -> TesslateConfig:
         """Get default configuration for a framework."""
         return TesslateParser.DEFAULT_CONFIGS.get(
-            framework.lower(),
-            TesslateParser.DEFAULT_CONFIGS["vite"]
+            framework.lower(), TesslateParser.DEFAULT_CONFIGS["vite"]
         )

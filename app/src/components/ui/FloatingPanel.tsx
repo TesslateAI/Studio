@@ -21,7 +21,7 @@ export function FloatingPanel({
   isOpen,
   onClose,
   defaultPosition = { x: 100, y: 100 },
-  defaultSize = { width: 400, height: 500 }
+  defaultSize = { width: 400, height: 500 },
 }: FloatingPanelProps) {
   const { theme } = useTheme();
   const [position, setPosition] = useState(defaultPosition);
@@ -31,6 +31,17 @@ export function FloatingPanel({
   const [resizeDirection, setResizeDirection] = useState<ResizeDirection>('se');
   const [dockHoverPosition, setDockHoverPosition] = useState<DockPosition>(null);
   const [actualDockPosition, setActualDockPosition] = useState<DockPosition>(null);
+
+  // Reset position to defaultPosition each time the panel opens
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    if (isOpen && !prevOpenRef.current) {
+      setPosition(defaultPosition);
+      setSize(defaultSize);
+      setActualDockPosition(null);
+    }
+    prevOpenRef.current = isOpen;
+  }, [isOpen, defaultPosition, defaultSize]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0, panelX: 0, panelY: 0 });
@@ -190,7 +201,7 @@ export function FloatingPanel({
       x: e.clientX,
       y: e.clientY,
       panelX: rect.left,
-      panelY: rect.top
+      panelY: rect.top,
     };
 
     // If docked, undock and restore to a floating position
@@ -222,7 +233,7 @@ export function FloatingPanel({
       width: rect.width,
       height: rect.height,
       panelX: rect.left,
-      panelY: rect.top
+      panelY: rect.top,
     };
 
     setResizeDirection(direction);
@@ -238,7 +249,7 @@ export function FloatingPanel({
         left: `${position.x}px`,
         top: `${position.y}px`,
         width: `${size.width}px`,
-        height: `${size.height}px`
+        height: `${size.height}px`,
       };
 
   // On mobile, override with empty object (fullscreen handled by CSS)
@@ -266,9 +277,10 @@ export function FloatingPanel({
           backdrop-blur-xl
           shadow-2xl overflow-hidden
           z-[200]
-          ${theme === 'dark'
-            ? 'bg-[rgba(30,30,30,0.98)] md:border-white/20'
-            : 'bg-[rgba(248,249,250,0.98)] md:border-black/10'
+          ${
+            theme === 'dark'
+              ? 'bg-[rgba(30,30,30,0.98)] md:border-white/20'
+              : 'bg-[rgba(248,249,250,0.98)] md:border-black/10'
           }
           ${isDocked ? 'resize-none rounded-none h-screen' : 'md:min-w-[300px] md:min-h-[200px]'}
           ${isDragging || isResizing ? 'cursor-grabbing transition-none select-none' : 'transition-all duration-200'}
@@ -278,21 +290,23 @@ export function FloatingPanel({
         `}
         style={{
           ...mobileStyleOverride,
-          userSelect: isDragging || isResizing ? 'none' : 'auto'
+          userSelect: isDragging || isResizing ? 'none' : 'auto',
         }}
       >
         {/* Drag handle */}
         <div
           className={`panel-drag-handle h-10 border-b select-none flex items-center justify-between px-3 md:rounded-t-lg md:cursor-grab ${
-            theme === 'dark'
-              ? 'bg-black/20 border-white/10'
-              : 'bg-white/40 border-black/5'
+            theme === 'dark' ? 'bg-black/20 border-white/10' : 'bg-white/40 border-black/5'
           } ${isDragging ? 'md:cursor-grabbing' : ''} max-md:cursor-default`}
           onMouseDown={handleDragStart}
         >
           <div className="flex items-center gap-2">
             {icon && <span className="text-orange-500">{icon}</span>}
-            <span className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-black'}`}>{title}</span>
+            <span
+              className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-black'}`}
+            >
+              {title}
+            </span>
           </div>
           <button
             onClick={onClose}
@@ -302,16 +316,24 @@ export function FloatingPanel({
                 : 'hover:bg-black/5 active:bg-black/10 text-gray-600 hover:text-black'
             }`}
           >
-            <svg className="w-5 h-5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="w-5 h-5 md:w-4 md:h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
 
         {/* Panel content */}
-        <div className="panel-content flex-1 overflow-y-auto">
-          {children}
-        </div>
+        <div className="panel-content flex-1 overflow-y-auto">{children}</div>
 
         {/* Resize handles - Desktop only */}
         {!isDocked && (
@@ -321,9 +343,11 @@ export function FloatingPanel({
               className="hidden md:block absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-10"
               onMouseDown={(e) => handleResizeStart(e, 'se')}
             >
-              <div className={`absolute bottom-0.5 right-0.5 w-2.5 h-2.5 border-r-2 border-b-2 ${
-                theme === 'dark' ? 'border-white/30' : 'border-black/20'
-              }`} />
+              <div
+                className={`absolute bottom-0.5 right-0.5 w-2.5 h-2.5 border-r-2 border-b-2 ${
+                  theme === 'dark' ? 'border-white/30' : 'border-black/20'
+                }`}
+              />
             </div>
             <div
               className="hidden md:block absolute bottom-0 left-0 w-4 h-4 cursor-nesw-resize z-10"

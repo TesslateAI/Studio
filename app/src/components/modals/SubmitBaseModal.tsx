@@ -9,8 +9,9 @@ interface LibraryBase {
   slug: string;
   description: string;
   long_description?: string;
-  git_repo_url: string;
-  default_branch: string;
+  git_repo_url?: string | null;
+  default_branch?: string | null;
+  source_type?: 'git' | 'archive';
   category: string;
   icon: string;
   visibility: 'private' | 'public';
@@ -44,7 +45,7 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
   const [gitRepoUrl, setGitRepoUrl] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
   const [category, setCategory] = useState('fullstack');
-  const [visibility, setVisibility] = useState<'private' | 'public'>('public');
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
   const [icon, setIcon] = useState('\u{1F4E6}');
   const [tags, setTags] = useState('');
   const [techStack, setTechStack] = useState('');
@@ -58,8 +59,8 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
     if (editBase) {
       setName(editBase.name);
       setDescription(editBase.description);
-      setGitRepoUrl(editBase.git_repo_url);
-      setDefaultBranch(editBase.default_branch);
+      setGitRepoUrl(editBase.git_repo_url || '');
+      setDefaultBranch(editBase.default_branch || 'main');
       setCategory(editBase.category);
       setVisibility(editBase.visibility);
       setIcon(editBase.icon);
@@ -73,7 +74,7 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
       setGitRepoUrl('');
       setDefaultBranch('main');
       setCategory('fullstack');
-      setVisibility('public');
+      setVisibility('private');
       setIcon('\u{1F4E6}');
       setTags('');
       setTechStack('');
@@ -91,23 +92,27 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
       .filter(Boolean);
   };
 
+  const isArchive = editBase?.source_type === 'archive';
+
   const handleSubmit = async () => {
-    if (!name.trim() || !description.trim() || !gitRepoUrl.trim()) {
-      toast.error('Name, description, and git URL are required');
+    if (!name.trim() || !description.trim()) {
+      toast.error('Name and description are required');
       return;
     }
-    if (!gitRepoUrl.startsWith('https://')) {
+    if (!isArchive && !gitRepoUrl.trim()) {
+      toast.error('Git URL is required');
+      return;
+    }
+    if (!isArchive && !gitRepoUrl.startsWith('https://')) {
       toast.error('Git URL must start with https://');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const data = {
+      const data: Record<string, unknown> = {
         name: name.trim(),
         description: description.trim(),
-        git_repo_url: gitRepoUrl.trim(),
-        default_branch: defaultBranch.trim() || 'main',
         category,
         visibility,
         icon: icon || '\u{1F4E6}',
@@ -116,6 +121,10 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
         features: parseCommaSeparated(features),
         long_description: longDescription.trim() || undefined,
       };
+      if (!isArchive) {
+        data.git_repo_url = gitRepoUrl.trim();
+        data.default_branch = defaultBranch.trim() || 'main';
+      }
 
       if (isEditMode && editBase) {
         await marketplaceApi.updateBase(editBase.id, data);
@@ -187,30 +196,34 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
             />
           </div>
 
-          {/* Git Repo URL */}
-          <div>
-            <label className={labelClass}>Git Repository URL *</label>
-            <input
-              type="url"
-              value={gitRepoUrl}
-              onChange={(e) => setGitRepoUrl(e.target.value)}
-              placeholder="https://github.com/user/repo"
-              className={inputClass}
-            />
-          </div>
-
-          {/* Row: Branch + Category */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Git Repo URL - hidden for archive templates */}
+          {!isArchive && (
             <div>
-              <label className={labelClass}>Default Branch</label>
+              <label className={labelClass}>Git Repository URL *</label>
               <input
-                type="text"
-                value={defaultBranch}
-                onChange={(e) => setDefaultBranch(e.target.value)}
-                placeholder="main"
+                type="url"
+                value={gitRepoUrl}
+                onChange={(e) => setGitRepoUrl(e.target.value)}
+                placeholder="https://github.com/user/repo"
                 className={inputClass}
               />
             </div>
+          )}
+
+          {/* Row: Branch + Category */}
+          <div className={isArchive ? '' : 'grid grid-cols-2 gap-3'}>
+            {!isArchive && (
+              <div>
+                <label className={labelClass}>Default Branch</label>
+                <input
+                  type="text"
+                  value={defaultBranch}
+                  onChange={(e) => setDefaultBranch(e.target.value)}
+                  placeholder="main"
+                  className={inputClass}
+                />
+              </div>
+            )}
             <div>
               <label className={labelClass}>Category</label>
               <select
@@ -335,7 +348,12 @@ export function SubmitBaseModal({ isOpen, onClose, onSuccess, editBase }: Submit
           </button>
           <button
             onClick={handleSubmit}
-            disabled={isSubmitting || !name.trim() || !description.trim() || !gitRepoUrl.trim()}
+            disabled={
+              isSubmitting ||
+              !name.trim() ||
+              !description.trim() ||
+              (!isArchive && !gitRepoUrl.trim())
+            }
             className="flex-1 bg-[var(--primary)] text-white py-2.5 rounded-xl font-medium hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             {isSubmitting ? (

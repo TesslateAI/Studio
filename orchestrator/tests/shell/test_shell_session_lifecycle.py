@@ -312,45 +312,44 @@ class TestShellToolSessionIntegration:
 
     @pytest.mark.asyncio
     async def test_bash_exec_manages_session_lifecycle(self, test_context):
-        """Test that bash_exec properly manages session lifecycle."""
+        """Test that bash_exec executes commands via the orchestrator."""
         from app.agent.tools.shell_ops.bash import bash_exec_tool
 
-        with (
-            patch("app.agent.tools.shell_ops.bash.shell_open_executor") as mock_open,
-            patch("app.agent.tools.shell_ops.bash.shell_exec_executor") as mock_exec,
-        ):
-            mock_open.return_value = {"success": True, "session_id": "temp-session"}
-            mock_exec.return_value = {"output": "hello world"}
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute_command = AsyncMock(return_value="hello world")
+        mock_orchestrator.get_project_status = AsyncMock(
+            return_value={"containers": {"frontend": {"running": True}}}
+        )
 
+        with patch(
+            "app.services.orchestration.get_orchestrator",
+            return_value=mock_orchestrator,
+        ):
             result = await bash_exec_tool({"command": "echo hello"}, test_context)
 
             assert result["success"] is True
             assert "hello" in result.get("output", "")
-
-            # Session should have been opened
-            mock_open.assert_called_once()
+            mock_orchestrator.execute_command.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_bash_exec_reuses_session(self, test_context):
-        """Test that bash_exec reuses existing session within agent run."""
+    async def test_bash_exec_reuses_container(self, test_context):
+        """Test that bash_exec uses container_name from context when available."""
         from app.agent.tools.shell_ops.bash import bash_exec_tool
 
-        # Pre-populate session in context
-        test_context["_bash_session_id"] = "existing-session"
+        test_context["container_name"] = "frontend"
 
-        with (
-            patch("app.agent.tools.shell_ops.bash.shell_open_executor") as mock_open,
-            patch("app.agent.tools.shell_ops.bash.shell_exec_executor") as mock_exec,
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute_command = AsyncMock(return_value="reused")
+
+        with patch(
+            "app.services.orchestration.get_orchestrator",
+            return_value=mock_orchestrator,
         ):
-            mock_exec.return_value = {"output": "reused"}
-
             result = await bash_exec_tool({"command": "echo reused"}, test_context)
 
-            # Should NOT have opened a new session
-            mock_open.assert_not_called()
-
-            # Should have reused existing
-            assert result["details"]["session_reused"] is True
+            assert result["success"] is True
+            # Should NOT have called get_project_status since container_name was in context
+            mock_orchestrator.get_project_status.assert_not_called()
 
 
 # ============================================================================
@@ -396,16 +395,25 @@ class TestSessionErrorHandling:
 
     @pytest.mark.asyncio
     async def test_session_creation_failure(self, test_context):
-        """Test handling of session creation failure."""
+        """Test handling of command execution failure."""
         from app.agent.tools.shell_ops.bash import bash_exec_tool
 
-        with patch("app.agent.tools.shell_ops.bash.shell_open_executor") as mock_open:
-            mock_open.return_value = {"success": False, "error": "Container not running"}
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.execute_command = AsyncMock(
+            side_effect=RuntimeError("Container not running")
+        )
+        mock_orchestrator.get_project_status = AsyncMock(
+            return_value={"containers": {"frontend": {"running": True}}}
+        )
 
+        with patch(
+            "app.services.orchestration.get_orchestrator",
+            return_value=mock_orchestrator,
+        ):
             result = await bash_exec_tool({"command": "echo test"}, test_context)
 
             assert result["success"] is False
-            assert "Failed to open shell session" in result["message"]
+            assert "Container not running" in result["message"]
 
 
 # ============================================================================

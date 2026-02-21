@@ -7,16 +7,16 @@ for creating, managing, and cleaning up user development environments.
 Refactored from: orchestrator/app/k8s_client.py
 """
 
+import asyncio
+import logging
+import os
+import shlex
+from typing import Any
+from uuid import UUID
+
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream
-import os
-import logging
-import asyncio
-import shlex
-import json
-from typing import Dict, Optional, Any, List
-from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +57,16 @@ class KubernetesClient:
         self.namespace = os.getenv("KUBERNETES_NAMESPACE", self.settings.k8s_default_namespace)
         self.user_namespace = self.settings.k8s_user_environments_namespace
 
-        logger.info(f"Kubernetes client initialized - Main namespace: {self.namespace}, User environments: {self.user_namespace}")
+        logger.info(
+            f"Kubernetes client initialized - Main namespace: {self.namespace}, User environments: {self.user_namespace}"
+        )
 
     # =========================================================================
     # NAMESPACE MANAGEMENT
     # =========================================================================
 
     async def create_namespace_if_not_exists(
-        self,
-        namespace: str,
-        project_id: str,
-        user_id: UUID
+        self, namespace: str, project_id: str, user_id: UUID
     ) -> None:
         """
         Create a Kubernetes namespace if it doesn't exist.
@@ -84,13 +83,12 @@ class KubernetesClient:
 
         for attempt in range(max_wait_seconds // wait_interval):
             try:
-                ns = await asyncio.to_thread(
-                    self.core_v1.read_namespace,
-                    name=namespace
-                )
+                ns = await asyncio.to_thread(self.core_v1.read_namespace, name=namespace)
                 # Check if namespace is terminating
                 if ns.status and ns.status.phase == "Terminating":
-                    logger.info(f"[K8S] Namespace {namespace} is terminating, waiting... (attempt {attempt + 1})")
+                    logger.info(
+                        f"[K8S] Namespace {namespace} is terminating, waiting... (attempt {attempt + 1})"
+                    )
                     await asyncio.sleep(wait_interval)
                     continue
                 # Namespace exists and is active
@@ -106,21 +104,20 @@ class KubernetesClient:
                                 "app": "tesslate",
                                 "managed-by": "tesslate-backend",
                                 "project-id": project_id,
-                                "user-id": str(user_id)
-                            }
+                                "user-id": str(user_id),
+                            },
                         )
                     )
-                    await asyncio.to_thread(
-                        self.core_v1.create_namespace,
-                        body=namespace_manifest
-                    )
+                    await asyncio.to_thread(self.core_v1.create_namespace, body=namespace_manifest)
                     logger.info(f"[K8S] ✅ Created namespace: {namespace}")
                     return
                 else:
                     raise
 
         # If we get here, namespace was stuck terminating for too long
-        raise RuntimeError(f"Namespace {namespace} stuck in Terminating state after {max_wait_seconds}s")
+        raise RuntimeError(
+            f"Namespace {namespace} stuck in Terminating state after {max_wait_seconds}s"
+        )
 
     async def namespace_exists(self, namespace: str) -> bool:
         """
@@ -133,10 +130,7 @@ class KubernetesClient:
             True if namespace exists, False otherwise
         """
         try:
-            await asyncio.to_thread(
-                self.core_v1.read_namespace,
-                name=namespace
-            )
+            await asyncio.to_thread(self.core_v1.read_namespace, name=namespace)
             return True
         except ApiException as e:
             if e.status == 404:
@@ -144,9 +138,7 @@ class KubernetesClient:
             raise
 
     async def apply_network_policy(
-        self,
-        network_policy: client.V1NetworkPolicy,
-        namespace: str
+        self, network_policy: client.V1NetworkPolicy, namespace: str
     ) -> None:
         """
         Apply a NetworkPolicy manifest (create or update).
@@ -156,7 +148,7 @@ class KubernetesClient:
             namespace: Namespace to apply to
         """
         if not self.settings.k8s_enable_network_policies:
-            logger.debug(f"[K8S] NetworkPolicy creation disabled, skipping")
+            logger.debug("[K8S] NetworkPolicy creation disabled, skipping")
             return
 
         policy_name = network_policy.metadata.name
@@ -165,7 +157,7 @@ class KubernetesClient:
             await asyncio.to_thread(
                 self.networking_v1.create_namespaced_network_policy,
                 namespace=namespace,
-                body=network_policy
+                body=network_policy,
             )
             logger.info(f"[K8S] ✅ Created NetworkPolicy: {policy_name}")
         except ApiException as e:
@@ -175,17 +167,14 @@ class KubernetesClient:
                     self.networking_v1.patch_namespaced_network_policy,
                     name=policy_name,
                     namespace=namespace,
-                    body=network_policy
+                    body=network_policy,
                 )
                 logger.info(f"[K8S] ✅ Updated NetworkPolicy: {policy_name}")
             else:
                 raise
 
     async def copy_wildcard_tls_secret(
-        self,
-        target_namespace: str,
-        source_namespace: str = None,
-        secret_name: str = None
+        self, target_namespace: str, source_namespace: str = None, secret_name: str = None
     ) -> bool:
         """
         Copy wildcard TLS secret from source namespace to target namespace.
@@ -208,15 +197,13 @@ class KubernetesClient:
 
         # Skip if no TLS secret configured (e.g., local dev without TLS)
         if not secret_name:
-            logger.debug(f"[K8S] No wildcard TLS secret configured, skipping copy")
+            logger.debug("[K8S] No wildcard TLS secret configured, skipping copy")
             return False
 
         # Check if secret already exists in target namespace
         try:
             await asyncio.to_thread(
-                self.core_v1.read_namespaced_secret,
-                name=secret_name,
-                namespace=target_namespace
+                self.core_v1.read_namespaced_secret, name=secret_name, namespace=target_namespace
             )
             logger.debug(f"[K8S] TLS secret {secret_name} already exists in {target_namespace}")
             return True
@@ -227,13 +214,13 @@ class KubernetesClient:
         # Read secret from source namespace
         try:
             source_secret = await asyncio.to_thread(
-                self.core_v1.read_namespaced_secret,
-                name=secret_name,
-                namespace=source_namespace
+                self.core_v1.read_namespaced_secret, name=secret_name, namespace=source_namespace
             )
         except ApiException as e:
             if e.status == 404:
-                logger.warning(f"[K8S] Wildcard TLS secret {secret_name} not found in {source_namespace}")
+                logger.warning(
+                    f"[K8S] Wildcard TLS secret {secret_name} not found in {source_namespace}"
+                )
                 return False
             raise
 
@@ -246,17 +233,15 @@ class KubernetesClient:
                 labels={
                     "app": "tesslate",
                     "managed-by": "tesslate-backend",
-                    "copied-from": source_namespace
-                }
+                    "copied-from": source_namespace,
+                },
             ),
             type=source_secret.type,
-            data=source_secret.data
+            data=source_secret.data,
         )
 
         await asyncio.to_thread(
-            self.core_v1.create_namespaced_secret,
-            namespace=target_namespace,
-            body=new_secret
+            self.core_v1.create_namespaced_secret, namespace=target_namespace, body=new_secret
         )
         logger.info(f"[K8S] ✅ Copied wildcard TLS secret to {target_namespace}")
         return True
@@ -281,12 +266,8 @@ class KubernetesClient:
     # =========================================================================
 
     def generate_resource_names(
-        self,
-        user_id: UUID,
-        project_id: str,
-        project_slug: str = None,
-        container_name: str = None
-    ) -> Dict[str, str]:
+        self, user_id: UUID, project_id: str, project_slug: str = None, container_name: str = None
+    ) -> dict[str, str]:
         """
         Generate consistent resource names for a user's project/container.
 
@@ -306,11 +287,11 @@ class KubernetesClient:
         # Generate safe container name
         if container_name:
             safe_container = container_name.lower()
-            safe_container = safe_container.replace('_', '-').replace(' ', '-').replace('.', '-')
-            safe_container = ''.join(c for c in safe_container if c.isalnum() or c == '-')
-            while '--' in safe_container:
-                safe_container = safe_container.replace('--', '-')
-            safe_container = safe_container.strip('-')
+            safe_container = safe_container.replace("_", "-").replace(" ", "-").replace(".", "-")
+            safe_container = "".join(c for c in safe_container if c.isalnum() or c == "-")
+            while "--" in safe_container:
+                safe_container = safe_container.replace("--", "-")
+            safe_container = safe_container.strip("-")
             max_container_len = 63 - 22
             safe_container = safe_container[:max_container_len]
             base_name = f"dev-{user_short}-{project_short}-{safe_container}"
@@ -333,25 +314,19 @@ class KubernetesClient:
             "service": f"{base_name}-svc",
             "ingress": f"{base_name}-ing",
             "hostname": hostname,
-            "safe_container_name": safe_container
+            "safe_container_name": safe_container,
         }
 
     # =========================================================================
     # DEPLOYMENT LIFECYCLE
     # =========================================================================
 
-    async def create_deployment(
-        self,
-        deployment: client.V1Deployment,
-        namespace: str
-    ) -> None:
+    async def create_deployment(self, deployment: client.V1Deployment, namespace: str) -> None:
         """Create or update a Deployment."""
         deployment_name = deployment.metadata.name
         try:
             await asyncio.to_thread(
-                self.apps_v1.create_namespaced_deployment,
-                namespace=namespace,
-                body=deployment
+                self.apps_v1.create_namespaced_deployment, namespace=namespace, body=deployment
             )
             logger.info(f"[K8S] ✅ Created deployment: {deployment_name}")
         except ApiException as e:
@@ -361,7 +336,7 @@ class KubernetesClient:
                     self.apps_v1.patch_namespaced_deployment,
                     name=deployment_name,
                     namespace=namespace,
-                    body=deployment
+                    body=deployment,
                 )
                 logger.info(f"[K8S] ✅ Updated deployment: {deployment_name}")
             else:
@@ -371,21 +346,14 @@ class KubernetesClient:
         """Delete a Deployment."""
         try:
             await asyncio.to_thread(
-                self.apps_v1.delete_namespaced_deployment,
-                name=name,
-                namespace=namespace
+                self.apps_v1.delete_namespaced_deployment, name=name, namespace=namespace
             )
             logger.info(f"[K8S] Deleted deployment: {name}")
         except ApiException as e:
             if e.status != 404:
                 raise
 
-    async def scale_deployment(
-        self,
-        user_id: UUID,
-        project_id: str,
-        replicas: int
-    ) -> None:
+    async def scale_deployment(self, user_id: UUID, project_id: str, replicas: int) -> None:
         """Scale a deployment to a specific number of replicas."""
         names = self.generate_resource_names(user_id, project_id)
         namespace = names["namespace"]
@@ -394,7 +362,7 @@ class KubernetesClient:
             deployment = await asyncio.to_thread(
                 self.apps_v1.read_namespaced_deployment,
                 name=names["deployment"],
-                namespace=namespace
+                namespace=namespace,
             )
 
             deployment.spec.replicas = replicas
@@ -403,7 +371,7 @@ class KubernetesClient:
                 self.apps_v1.patch_namespaced_deployment,
                 name=names["deployment"],
                 namespace=namespace,
-                body=deployment
+                body=deployment,
             )
 
             action = "paused" if replicas == 0 else "resumed"
@@ -418,18 +386,12 @@ class KubernetesClient:
     # SERVICE MANAGEMENT
     # =========================================================================
 
-    async def create_service(
-        self,
-        service: client.V1Service,
-        namespace: str
-    ) -> None:
+    async def create_service(self, service: client.V1Service, namespace: str) -> None:
         """Create or update a Service."""
         service_name = service.metadata.name
         try:
             await asyncio.to_thread(
-                self.core_v1.create_namespaced_service,
-                namespace=namespace,
-                body=service
+                self.core_v1.create_namespaced_service, namespace=namespace, body=service
             )
             logger.info(f"[K8S] ✅ Created service: {service_name}")
         except ApiException as e:
@@ -439,7 +401,7 @@ class KubernetesClient:
                     self.core_v1.patch_namespaced_service,
                     name=service_name,
                     namespace=namespace,
-                    body=service
+                    body=service,
                 )
                 logger.info(f"[K8S] ✅ Updated service: {service_name}")
             else:
@@ -449,9 +411,7 @@ class KubernetesClient:
         """Delete a Service."""
         try:
             await asyncio.to_thread(
-                self.core_v1.delete_namespaced_service,
-                name=name,
-                namespace=namespace
+                self.core_v1.delete_namespaced_service, name=name, namespace=namespace
             )
             logger.info(f"[K8S] Deleted service: {name}")
         except ApiException as e:
@@ -462,18 +422,12 @@ class KubernetesClient:
     # INGRESS MANAGEMENT
     # =========================================================================
 
-    async def create_ingress(
-        self,
-        ingress: client.V1Ingress,
-        namespace: str
-    ) -> None:
+    async def create_ingress(self, ingress: client.V1Ingress, namespace: str) -> None:
         """Create or update an Ingress."""
         ingress_name = ingress.metadata.name
         try:
             await asyncio.to_thread(
-                self.networking_v1.create_namespaced_ingress,
-                namespace=namespace,
-                body=ingress
+                self.networking_v1.create_namespaced_ingress, namespace=namespace, body=ingress
             )
             logger.info(f"[K8S] ✅ Created ingress: {ingress_name}")
         except ApiException as e:
@@ -483,7 +437,7 @@ class KubernetesClient:
                     self.networking_v1.patch_namespaced_ingress,
                     name=ingress_name,
                     namespace=namespace,
-                    body=ingress
+                    body=ingress,
                 )
                 logger.info(f"[K8S] ✅ Updated ingress: {ingress_name}")
             else:
@@ -493,9 +447,7 @@ class KubernetesClient:
         """Delete an Ingress."""
         try:
             await asyncio.to_thread(
-                self.networking_v1.delete_namespaced_ingress,
-                name=name,
-                namespace=namespace
+                self.networking_v1.delete_namespaced_ingress, name=name, namespace=namespace
             )
             logger.info(f"[K8S] Deleted ingress: {name}")
         except ApiException as e:
@@ -506,18 +458,14 @@ class KubernetesClient:
     # PVC MANAGEMENT
     # =========================================================================
 
-    async def create_pvc(
-        self,
-        pvc: client.V1PersistentVolumeClaim,
-        namespace: str
-    ) -> None:
+    async def create_pvc(self, pvc: client.V1PersistentVolumeClaim, namespace: str) -> None:
         """Create a PVC if it doesn't exist (PVCs are immutable)."""
         pvc_name = pvc.metadata.name
         try:
             await asyncio.to_thread(
                 self.core_v1.create_namespaced_persistent_volume_claim,
                 namespace=namespace,
-                body=pvc
+                body=pvc,
             )
             logger.info(f"[K8S] ✅ Created PVC: {pvc_name}")
         except ApiException as e:
@@ -532,7 +480,7 @@ class KubernetesClient:
             await asyncio.to_thread(
                 self.core_v1.delete_namespaced_persistent_volume_claim,
                 name=name,
-                namespace=namespace
+                namespace=namespace,
             )
             logger.info(f"[K8S] Deleted PVC: {name}")
         except ApiException as e:
@@ -563,8 +511,8 @@ class KubernetesClient:
         pod_name: str,
         namespace: str,
         container_name: str,
-        command: List[str],
-        timeout: int = 30
+        command: list[str],
+        timeout: int = 30,
     ) -> str:
         """
         Execute a command in a pod and return output.
@@ -598,10 +546,10 @@ class KubernetesClient:
                 stdout=True,
                 tty=False,
                 _preload_content=True,
-                _request_timeout=timeout
+                _request_timeout=timeout,
             )
 
-            logger.debug(f"[K8S:EXEC] Command completed successfully")
+            logger.debug("[K8S:EXEC] Command completed successfully")
             return resp
 
         except Exception as e:
@@ -615,7 +563,7 @@ class KubernetesClient:
         container_name: str,
         pod_path: str,
         local_path: str,
-        timeout: int = 120
+        timeout: int = 120,
     ) -> bool:
         """
         Copy a file from a pod to local filesystem using tar stream.
@@ -643,7 +591,7 @@ class KubernetesClient:
 
             # Use base64 encoding to safely transfer binary data over WebSocket
             # This avoids all encoding issues with the kubernetes stream API
-            command = ['sh', '-c', f'base64 < {pod_path}']
+            command = ["sh", "-c", f"base64 < {pod_path}"]
 
             resp = stream(
                 stream_client.connect_get_namespaced_pod_exec,
@@ -656,11 +604,11 @@ class KubernetesClient:
                 stdout=True,
                 tty=False,
                 _preload_content=False,
-                _request_timeout=timeout
+                _request_timeout=timeout,
             )
 
             # Read base64-encoded data (safe ASCII text)
-            base64_data = ''
+            base64_data = ""
             while resp.is_open():
                 resp.update(timeout=timeout)
                 if resp.peek_stdout():
@@ -681,18 +629,87 @@ class KubernetesClient:
             os.makedirs(local_dir, exist_ok=True)
 
             # Remove any whitespace from base64 data
-            base64_data = base64_data.replace('\n', '').replace('\r', '').strip()
+            base64_data = base64_data.replace("\n", "").replace("\r", "").strip()
             file_data = base64.b64decode(base64_data)
 
-            with open(local_path, 'wb') as f:
+            with open(local_path, "wb") as f:
                 f.write(file_data)
 
-            logger.info(f"[K8S:COPY] ✅ Copied from pod: {pod_path} ({os.path.getsize(local_path)} bytes)")
+            logger.info(
+                f"[K8S:COPY] ✅ Copied from pod: {pod_path} ({os.path.getsize(local_path)} bytes)"
+            )
             return True
 
         except Exception as e:
             logger.error(f"[K8S:COPY] Failed to copy from pod: {e}", exc_info=True)
             raise RuntimeError(f"Failed to copy file from pod: {str(e)}") from e
+
+    def _write_bytes_to_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        container_name: str,
+        data: bytes,
+        pod_path: str,
+        timeout: int = 120,
+    ) -> bool:
+        """
+        Write raw bytes to a file in a pod using tar stream via stdin.
+
+        Handles binary data of any size without hitting command argument limits
+        (ARG_MAX). Uses the same tar streaming approach as _copy_to_pod but
+        accepts in-memory bytes instead of a local file path.
+        """
+        import io
+        import tarfile
+
+        try:
+            logger.info(f"[K8S:WRITE] Writing {len(data)} bytes to pod: {pod_path}")
+
+            stream_client = self._get_stream_client()
+
+            # Create tar archive in memory containing the file data
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode="w") as tar:
+                info = tarfile.TarInfo(name=os.path.basename(pod_path))
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+            tar_stream.seek(0)
+            tar_data = tar_stream.read()
+
+            # Ensure directory exists
+            pod_dir = os.path.dirname(pod_path)
+            self._exec_in_pod(
+                pod_name, namespace, container_name,
+                ["mkdir", "-p", pod_dir], timeout=10,
+            )
+
+            # Stream tar data to pod via stdin
+            command = ["tar", "xf", "-", "-C", pod_dir]
+
+            resp = stream(
+                stream_client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container_name,
+                command=command,
+                stderr=True,
+                stdin=True,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+                _request_timeout=timeout,
+            )
+
+            resp.write_stdin(tar_data)
+            resp.close()
+
+            logger.info(f"[K8S:WRITE] ✅ Wrote to pod: {pod_path} ({len(data)} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"[K8S:WRITE] Failed to write to pod: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to write bytes to pod: {str(e)}") from e
 
     def _copy_to_pod(
         self,
@@ -701,7 +718,7 @@ class KubernetesClient:
         container_name: str,
         local_path: str,
         pod_path: str,
-        timeout: int = 120
+        timeout: int = 120,
     ) -> bool:
         """
         Copy a file from local filesystem to a pod using tar stream.
@@ -720,8 +737,8 @@ class KubernetesClient:
         Returns:
             True if successful
         """
-        import tarfile
         import io
+        import tarfile
 
         try:
             logger.info(f"[K8S:COPY] Copying to pod: {local_path} -> {pod_path}")
@@ -733,14 +750,14 @@ class KubernetesClient:
 
             # Create tar archive in memory
             tar_stream = io.BytesIO()
-            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+            with tarfile.open(fileobj=tar_stream, mode="w") as tar:
                 tar.add(local_path, arcname=os.path.basename(pod_path))
             tar_stream.seek(0)
             tar_data = tar_stream.read()
 
             # Use tar to extract file in pod
             pod_dir = os.path.dirname(pod_path)
-            command = ['tar', 'xf', '-', '-C', pod_dir]
+            command = ["tar", "xf", "-", "-C", pod_dir]
 
             resp = stream(
                 stream_client.connect_get_namespaced_pod_exec,
@@ -753,7 +770,7 @@ class KubernetesClient:
                 stdout=True,
                 tty=False,
                 _preload_content=False,
-                _request_timeout=timeout
+                _request_timeout=timeout,
             )
 
             # Send tar data to stdin
@@ -774,17 +791,11 @@ class KubernetesClient:
         container_name: str,
         pod_path: str,
         local_path: str,
-        timeout: int = 120
+        timeout: int = 120,
     ) -> bool:
         """Async wrapper for _copy_from_pod."""
         return await asyncio.to_thread(
-            self._copy_from_pod,
-            pod_name,
-            namespace,
-            container_name,
-            pod_path,
-            local_path,
-            timeout
+            self._copy_from_pod, pod_name, namespace, container_name, pod_path, local_path, timeout
         )
 
     async def copy_file_to_pod(
@@ -794,25 +805,16 @@ class KubernetesClient:
         container_name: str,
         local_path: str,
         pod_path: str,
-        timeout: int = 120
+        timeout: int = 120,
     ) -> bool:
         """Async wrapper for _copy_to_pod."""
         return await asyncio.to_thread(
-            self._copy_to_pod,
-            pod_name,
-            namespace,
-            container_name,
-            local_path,
-            pod_path,
-            timeout
+            self._copy_to_pod, pod_name, namespace, container_name, local_path, pod_path, timeout
         )
 
     async def get_pod_for_deployment(
-        self,
-        deployment_name: str,
-        namespace: str,
-        use_prefix_match: bool = False
-    ) -> Optional[str]:
+        self, deployment_name: str, namespace: str, use_prefix_match: bool = False
+    ) -> str | None:
         """Get a ready pod name for a deployment.
 
         Args:
@@ -824,8 +826,7 @@ class KubernetesClient:
             if use_prefix_match:
                 # Get all pods in namespace and filter by prefix
                 pods = await asyncio.to_thread(
-                    self.core_v1.list_namespaced_pod,
-                    namespace=namespace
+                    self.core_v1.list_namespaced_pod, namespace=namespace
                 )
                 # Filter by app label prefix
                 matching_pods = []
@@ -838,15 +839,14 @@ class KubernetesClient:
                 pods = await asyncio.to_thread(
                     self.core_v1.list_namespaced_pod,
                     namespace=namespace,
-                    label_selector=f"app={deployment_name}"
+                    label_selector=f"app={deployment_name}",
                 )
 
             for pod in pods.items:
-                if pod.status.phase == "Running":
-                    if pod.status.container_statuses:
-                        for cs in pod.status.container_statuses:
-                            if cs.ready:
-                                return pod.metadata.name
+                if pod.status.phase == "Running" and pod.status.container_statuses:
+                    for cs in pod.status.container_statuses:
+                        if cs.ready:
+                            return pod.metadata.name
             return None
 
         except Exception as e:
@@ -863,7 +863,7 @@ class KubernetesClient:
                 return condition.status == "True"
         return False
 
-    async def get_file_manager_pod(self, namespace: str) -> Optional[str]:
+    async def get_file_manager_pod(self, namespace: str) -> str | None:
         """
         Get the file-manager pod name in a namespace.
 
@@ -880,15 +880,14 @@ class KubernetesClient:
             pods = await asyncio.to_thread(
                 self.core_v1.list_namespaced_pod,
                 namespace=namespace,
-                label_selector="app=file-manager"
+                label_selector="app=file-manager",
             )
 
             for pod in pods.items:
-                if pod.status.phase == "Running":
-                    if pod.status.container_statuses:
-                        for cs in pod.status.container_statuses:
-                            if cs.ready:
-                                return pod.metadata.name
+                if pod.status.phase == "Running" and pod.status.container_statuses:
+                    for cs in pod.status.container_statuses:
+                        if cs.ready:
+                            return pod.metadata.name
 
             logger.debug(f"[K8S] No ready file-manager pod found in {namespace}")
             return None
@@ -903,10 +902,7 @@ class KubernetesClient:
             return None
 
     async def wait_for_deployment_ready(
-        self,
-        deployment_name: str,
-        namespace: str,
-        timeout: int = 120
+        self, deployment_name: str, namespace: str, timeout: int = 120
     ) -> None:
         """Wait for a deployment to be ready."""
         for _ in range(timeout):
@@ -914,11 +910,13 @@ class KubernetesClient:
                 deployment = await asyncio.to_thread(
                     self.apps_v1.read_namespaced_deployment,
                     name=deployment_name,
-                    namespace=namespace
+                    namespace=namespace,
                 )
 
-                if (deployment.status.ready_replicas and
-                    deployment.status.ready_replicas == deployment.status.replicas):
+                if (
+                    deployment.status.ready_replicas
+                    and deployment.status.ready_replicas == deployment.status.replicas
+                ):
                     logger.info(f"[K8S] Deployment {deployment_name} is ready")
                     return
 
@@ -928,21 +926,52 @@ class KubernetesClient:
 
             await asyncio.sleep(1)
 
-        raise RuntimeError(f"Deployment {deployment_name} did not become ready within {timeout} seconds")
+        raise RuntimeError(
+            f"Deployment {deployment_name} did not become ready within {timeout} seconds"
+        )
 
     # =========================================================================
     # FILE OPERATIONS
     # =========================================================================
+
+    @staticmethod
+    def _safe_pod_path(file_path: str, subdir: str | None = None) -> str:
+        """
+        Validate file_path stays within /app/ inside the pod.
+
+        Uses PurePosixPath + os.path.normpath to normalize and contain.
+        No filesystem access needed — this runs on the orchestrator, not in the pod.
+
+        Raises ValueError if the path would escape /app/.
+        """
+        from pathlib import PurePosixPath
+
+        base = PurePosixPath("/app")
+        if subdir:
+            base = base / subdir
+
+        # Join and normalize (collapses ..)
+        normalized = PurePosixPath(os.path.normpath(str(base / file_path)))
+
+        # Containment: must still be under /app
+        try:
+            normalized.relative_to(PurePosixPath("/app"))
+        except ValueError as err:
+            raise ValueError(
+                f"Path escapes container boundary: {file_path!r} (resolved to {normalized})"
+            ) from err
+
+        return str(normalized)
 
     async def read_file_from_pod(
         self,
         user_id: UUID,
         project_id: str,
         file_path: str,
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None,
-        subdir: Optional[str] = None
-    ) -> Optional[str]:
+        container_name: str | None = None,
+        project_slug: str | None = None,
+        subdir: str | None = None,
+    ) -> str | None:
         """Read a file from a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
@@ -950,27 +979,23 @@ class KubernetesClient:
         try:
             # Use prefix match if no specific container, to find any pod for this project
             use_prefix = container_name is None
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
+            pod_name = await self.get_pod_for_deployment(
+                names["deployment"], namespace, use_prefix_match=use_prefix
+            )
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
-            safe_path = file_path.replace("..", "").strip("/")
-            # Include subdir for multi-container projects
-            if subdir:
-                full_path = f"/app/{subdir}/{safe_path}"
-            else:
-                full_path = f"/app/{safe_path}"
+            full_path = self._safe_pod_path(file_path, subdir)
 
             # Check if file exists
-            check_cmd = ["/bin/sh", "-c", f"test -f {shlex.quote(full_path)} && echo exists || echo notfound"]
+            check_cmd = [
+                "/bin/sh",
+                "-c",
+                f"test -f {shlex.quote(full_path)} && echo exists || echo notfound",
+            ]
             result = await asyncio.to_thread(
-                self._exec_in_pod,
-                pod_name,
-                namespace,
-                k8s_container,
-                check_cmd,
-                timeout=10
+                self._exec_in_pod, pod_name, namespace, k8s_container, check_cmd, timeout=10
             )
 
             if "notfound" in result:
@@ -979,17 +1004,15 @@ class KubernetesClient:
             # Read file content
             read_cmd = ["/bin/sh", "-c", f"cat {shlex.quote(full_path)}"]
             content = await asyncio.to_thread(
-                self._exec_in_pod,
-                pod_name,
-                namespace,
-                k8s_container,
-                read_cmd,
-                timeout=30
+                self._exec_in_pod, pod_name, namespace, k8s_container, read_cmd, timeout=30
             )
 
             logger.info(f"[K8S] Read {file_path} ({len(content)} bytes)")
             return content
 
+        except ValueError as e:
+            logger.warning(f"[K8S] Path traversal blocked in read_file_from_pod: {e}")
+            return None
         except RuntimeError:
             raise
         except Exception as e:
@@ -1002,9 +1025,9 @@ class KubernetesClient:
         project_id: str,
         file_path: str,
         content: str,
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None,
-        subdir: Optional[str] = None
+        container_name: str | None = None,
+        project_slug: str | None = None,
+        subdir: str | None = None,
     ) -> bool:
         """Write a file to a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
@@ -1013,50 +1036,29 @@ class KubernetesClient:
         try:
             # Use prefix match if no specific container, to find any pod for this project
             use_prefix = container_name is None
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
+            pod_name = await self.get_pod_for_deployment(
+                names["deployment"], namespace, use_prefix_match=use_prefix
+            )
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
-            safe_path = file_path.replace("..", "").strip("/")
-            # Include subdir for multi-container projects
-            if subdir:
-                full_path = f"/app/{subdir}/{safe_path}"
-            else:
-                full_path = f"/app/{safe_path}"
+            full_path = self._safe_pod_path(file_path, subdir)
 
-            # Ensure parent directory exists
-            dir_path = os.path.dirname(full_path)
-            if dir_path and dir_path != "/app":
-                mkdir_cmd = ["/bin/sh", "-c", f"mkdir -p {shlex.quote(dir_path)}"]
-                await asyncio.to_thread(
-                    self._exec_in_pod,
-                    pod_name,
-                    namespace,
-                    k8s_container,
-                    mkdir_cmd,
-                    timeout=10
-                )
-
-            # Write file using heredoc
-            marker = "EOF_MARKER_K8S_WRITE"
-            write_cmd = [
-                "/bin/sh", "-c",
-                f"cat > {shlex.quote(full_path)} << '{marker}'\n{content}\n{marker}"
-            ]
-
+            # Use tar streaming to write file (heredoc/echo breaks for files >100KB)
+            data = content.encode("utf-8")
             await asyncio.to_thread(
-                self._exec_in_pod,
-                pod_name,
-                namespace,
-                k8s_container,
-                write_cmd,
-                timeout=60
+                self._write_bytes_to_pod,
+                pod_name, namespace, k8s_container,
+                data, full_path, timeout=60,
             )
 
             logger.info(f"[K8S] Wrote {file_path} ({len(content)} bytes)")
             return True
 
+        except ValueError as e:
+            logger.warning(f"[K8S] Path traversal blocked in write_file_to_pod: {e}")
+            return False
         except RuntimeError:
             raise
         except Exception as e:
@@ -1068,8 +1070,8 @@ class KubernetesClient:
         user_id: UUID,
         project_id: str,
         file_path: str,
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
+        container_name: str | None = None,
+        project_slug: str | None = None,
     ) -> bool:
         """Delete a file from a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
@@ -1078,27 +1080,26 @@ class KubernetesClient:
         try:
             # Use prefix match if no specific container, to find any pod for this project
             use_prefix = container_name is None
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
+            pod_name = await self.get_pod_for_deployment(
+                names["deployment"], namespace, use_prefix_match=use_prefix
+            )
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
-            safe_path = file_path.replace("..", "").strip("/")
-            full_path = f"/app/{safe_path}"
+            full_path = self._safe_pod_path(file_path)
 
             delete_cmd = ["/bin/sh", "-c", f"rm -f {shlex.quote(full_path)}"]
             await asyncio.to_thread(
-                self._exec_in_pod,
-                pod_name,
-                namespace,
-                k8s_container,
-                delete_cmd,
-                timeout=10
+                self._exec_in_pod, pod_name, namespace, k8s_container, delete_cmd, timeout=10
             )
 
             logger.info(f"[K8S] Deleted {file_path}")
             return True
 
+        except ValueError as e:
+            logger.warning(f"[K8S] Path traversal blocked in delete_file_from_pod: {e}")
+            return False
         except RuntimeError:
             raise
         except Exception as e:
@@ -1110,9 +1111,9 @@ class KubernetesClient:
         user_id: UUID,
         project_id: str,
         directory: str = ".",
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        container_name: str | None = None,
+        project_slug: str | None = None,
+    ) -> list[dict[str, Any]]:
         """List files in a directory within a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
@@ -1120,34 +1121,24 @@ class KubernetesClient:
         try:
             # Use prefix match if no specific container, to find any pod for this project
             use_prefix = container_name is None
-            pod_name = await self.get_pod_for_deployment(names["deployment"], namespace, use_prefix_match=use_prefix)
+            pod_name = await self.get_pod_for_deployment(
+                names["deployment"], namespace, use_prefix_match=use_prefix
+            )
             if not pod_name:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
-            safe_dir = directory.replace("..", "").strip("/")
-            if not safe_dir or safe_dir == ".":
-                full_path = "/app"
-            else:
-                full_path = f"/app/{safe_dir}"
+            full_path = self._safe_pod_path(directory if directory and directory != "." else ".")
 
             # Use ls -la instead of find -printf (BusyBox find doesn't support -printf)
-            list_cmd = [
-                "/bin/sh", "-c",
-                f"cd {shlex.quote(full_path)} && ls -la"
-            ]
+            list_cmd = ["/bin/sh", "-c", f"cd {shlex.quote(full_path)} && ls -la"]
 
             output = await asyncio.to_thread(
-                self._exec_in_pod,
-                pod_name,
-                namespace,
-                k8s_container,
-                list_cmd,
-                timeout=30
+                self._exec_in_pod, pod_name, namespace, k8s_container, list_cmd, timeout=30
             )
 
             files = []
-            for line in output.strip().split('\n'):
+            for line in output.strip().split("\n"):
                 if not line:
                     continue
 
@@ -1158,27 +1149,34 @@ class KubernetesClient:
 
                 # Skip total line and . / .. entries
                 name = parts[-1]
-                if name in ('.', '..', 'total') or line.startswith('total'):
+                if name in (".", "..", "total") or line.startswith("total"):
                     continue
 
                 perms = parts[0]
-                file_type = "directory" if perms.startswith('d') else "file"
+                file_type = "directory" if perms.startswith("d") else "file"
                 size = int(parts[4]) if parts[4].isdigit() else 0
 
                 # Skip hidden files and node_modules
-                if name.startswith('.') or name == 'node_modules':
+                if name.startswith(".") or name == "node_modules":
                     continue
 
-                files.append({
-                    "name": name,
-                    "type": file_type,
-                    "size": size,
-                    "path": f"{safe_dir}/{name}" if safe_dir != "." else name
-                })
+                files.append(
+                    {
+                        "name": name,
+                        "type": file_type,
+                        "size": size,
+                        "path": f"{full_path.removeprefix('/app/')}/{name}"
+                        if full_path != "/app"
+                        else name,
+                    }
+                )
 
             logger.info(f"[K8S] Found {len(files)} files in {directory}")
             return files
 
+        except ValueError as e:
+            logger.warning(f"[K8S] Path traversal blocked in list_files_in_pod: {e}")
+            return []
         except RuntimeError:
             raise
         except Exception as e:
@@ -1191,9 +1189,9 @@ class KubernetesClient:
         project_id: str,
         pattern: str,
         directory: str = ".",
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        container_name: str | None = None,
+        project_slug: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Find files matching a glob pattern in a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
@@ -1204,33 +1202,25 @@ class KubernetesClient:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
-            safe_dir = directory.replace("..", "").strip("/")
-            if not safe_dir or safe_dir == ".":
-                full_path = "/app"
-            else:
-                full_path = f"/app/{safe_dir}"
+            full_path = self._safe_pod_path(directory if directory and directory != "." else ".")
 
             # Use find with -exec stat for BusyBox compatibility (no -printf support)
             glob_cmd = [
-                "/bin/sh", "-c",
-                f"cd {shlex.quote(full_path)} && find . -type f -name {shlex.quote(pattern)} 2>/dev/null"
+                "/bin/sh",
+                "-c",
+                f"cd {shlex.quote(full_path)} && find . -type f -name {shlex.quote(pattern)} 2>/dev/null",
             ]
 
             output = await asyncio.to_thread(
-                self._exec_in_pod,
-                pod_name,
-                namespace,
-                k8s_container,
-                glob_cmd,
-                timeout=30
+                self._exec_in_pod, pod_name, namespace, k8s_container, glob_cmd, timeout=30
             )
 
             matches = []
-            for line in output.strip().split('\n'):
+            for line in output.strip().split("\n"):
                 if not line:
                     continue
 
-                path = line.lstrip('./')
+                path = line.lstrip("./")
                 if not path:
                     continue
 
@@ -1238,15 +1228,14 @@ class KubernetesClient:
                 size = 0
                 modified = 0
 
-                matches.append({
-                    "path": path,
-                    "size": size,
-                    "modified": modified
-                })
+                matches.append({"path": path, "size": size, "modified": modified})
 
             logger.info(f"[K8S] Found {len(matches)} files matching '{pattern}'")
             return matches
 
+        except ValueError as e:
+            logger.warning(f"[K8S] Path traversal blocked in glob_files_in_pod: {e}")
+            return []
         except Exception as e:
             logger.error(f"[K8S] Failed to glob files: {e}", exc_info=True)
             return []
@@ -1260,9 +1249,9 @@ class KubernetesClient:
         file_pattern: str = "*",
         case_sensitive: bool = True,
         max_results: int = 100,
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        container_name: str | None = None,
+        project_slug: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Search file contents for a pattern in a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
@@ -1273,50 +1262,41 @@ class KubernetesClient:
                 raise RuntimeError(f"No pod found for user {user_id}, project {project_id}")
 
             k8s_container = "dev-server"
-            safe_dir = directory.replace("..", "").strip("/")
-            if not safe_dir or safe_dir == ".":
-                full_path = "/app"
-            else:
-                full_path = f"/app/{safe_dir}"
+            full_path = self._safe_pod_path(directory if directory and directory != "." else ".")
 
             case_flag = "" if case_sensitive else "-i"
             grep_cmd = [
-                "/bin/sh", "-c",
-                f"cd {shlex.quote(full_path)} && grep -rn {case_flag} {shlex.quote(pattern)} --include={shlex.quote(file_pattern)} . 2>/dev/null | head -n {max_results}"
+                "/bin/sh",
+                "-c",
+                f"cd {shlex.quote(full_path)} && grep -rn {case_flag} {shlex.quote(pattern)} --include={shlex.quote(file_pattern)} . 2>/dev/null | head -n {max_results}",
             ]
 
             output = await asyncio.to_thread(
-                self._exec_in_pod,
-                pod_name,
-                namespace,
-                k8s_container,
-                grep_cmd,
-                timeout=30
+                self._exec_in_pod, pod_name, namespace, k8s_container, grep_cmd, timeout=30
             )
 
             matches = []
-            for line in output.strip().split('\n'):
+            for line in output.strip().split("\n"):
                 if not line:
                     continue
 
-                parts = line.split(':', 2)
+                parts = line.split(":", 2)
                 if len(parts) < 3:
                     continue
 
-                file_path = parts[0].lstrip('./')
+                file_path = parts[0].lstrip("./")
                 line_num = parts[1]
                 content = parts[2]
 
                 if line_num.isdigit():
-                    matches.append({
-                        "file": file_path,
-                        "line": int(line_num),
-                        "content": content
-                    })
+                    matches.append({"file": file_path, "line": int(line_num), "content": content})
 
             logger.info(f"[K8S] Found {len(matches)} matches for '{pattern}'")
             return matches
 
+        except ValueError as e:
+            logger.warning(f"[K8S] Path traversal blocked in grep_in_pod: {e}")
+            return []
         except Exception as e:
             logger.error(f"[K8S] Failed to grep files: {e}", exc_info=True)
             return []
@@ -1325,10 +1305,10 @@ class KubernetesClient:
         self,
         user_id: UUID,
         project_id: str,
-        command: List[str],
+        command: list[str],
         timeout: int = 120,
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
+        container_name: str | None = None,
+        project_slug: str | None = None,
     ) -> str:
         """Execute a command in a dev container pod."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
@@ -1338,7 +1318,7 @@ class KubernetesClient:
             pods = await asyncio.to_thread(
                 self.core_v1.list_namespaced_pod,
                 namespace=namespace,
-                label_selector=f"app={names['deployment']}"
+                label_selector=f"app={names['deployment']}",
             )
 
             if not pods.items:
@@ -1372,7 +1352,7 @@ class KubernetesClient:
                     namespace,
                     k8s_container,
                     full_command,
-                    timeout=timeout
+                    timeout=timeout,
                 )
 
                 logger.info(f"[K8S] Command completed ({len(output)} bytes)")
@@ -1385,13 +1365,13 @@ class KubernetesClient:
                 if "timeout" in error_msg.lower():
                     raise RuntimeError(
                         f"Command timed out after {timeout} seconds."
-                    )
+                    ) from exec_error
                 elif "connection" in error_msg.lower():
                     raise RuntimeError(
-                        f"Lost connection to pod. The development environment may have restarted."
-                    )
+                        "Lost connection to pod. The development environment may have restarted."
+                    ) from exec_error
                 else:
-                    raise RuntimeError(f"Command execution failed: {error_msg}")
+                    raise RuntimeError(f"Command execution failed: {error_msg}") from exec_error
 
         except RuntimeError:
             raise
@@ -1407,9 +1387,9 @@ class KubernetesClient:
         user_id: UUID,
         project_id: str,
         check_responsive: bool = True,
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
-    ) -> Dict[str, Any]:
+        container_name: str | None = None,
+        project_slug: str | None = None,
+    ) -> dict[str, Any]:
         """Enhanced pod readiness check with responsiveness testing."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
@@ -1427,9 +1407,7 @@ class KubernetesClient:
                 label_selector = None  # Will filter manually
 
             pods = await asyncio.to_thread(
-                self.core_v1.list_namespaced_pod,
-                namespace=namespace,
-                label_selector=label_selector
+                self.core_v1.list_namespaced_pod, namespace=namespace, label_selector=label_selector
             )
 
             # If no specific container, filter pods by prefix
@@ -1450,7 +1428,7 @@ class KubernetesClient:
                     "phase": "NotFound",
                     "conditions": [],
                     "responsive": False,
-                    "message": "No pod found for this project"
+                    "message": "No pod found for this project",
                 }
 
             pod = pods.items[0]
@@ -1470,12 +1448,7 @@ class KubernetesClient:
                 try:
                     test_cmd = ["/bin/sh", "-c", "echo ready"]
                     await asyncio.to_thread(
-                        self._exec_in_pod,
-                        pod_name,
-                        namespace,
-                        "dev-server",
-                        test_cmd,
-                        timeout=5
+                        self._exec_in_pod, pod_name, namespace, "dev-server", test_cmd, timeout=5
                     )
                     responsive = True
                 except Exception as e:
@@ -1500,7 +1473,7 @@ class KubernetesClient:
                 "conditions": conditions,
                 "responsive": responsive if check_responsive else None,
                 "message": message,
-                "pod_name": pod_name
+                "pod_name": pod_name,
             }
 
         except Exception as e:
@@ -1510,7 +1483,7 @@ class KubernetesClient:
                 "phase": "Error",
                 "conditions": [],
                 "responsive": False,
-                "message": f"Error checking pod: {str(e)}"
+                "message": f"Error checking pod: {str(e)}",
             }
 
     # =========================================================================
@@ -1521,9 +1494,9 @@ class KubernetesClient:
         self,
         user_id: UUID,
         project_id: str,
-        container_name: Optional[str] = None,
-        project_slug: Optional[str] = None
-    ) -> Dict[str, Any]:
+        container_name: str | None = None,
+        project_slug: str | None = None,
+    ) -> dict[str, Any]:
         """Get the status of a development environment."""
         names = self.generate_resource_names(user_id, project_id, project_slug, container_name)
         namespace = names["namespace"]
@@ -1532,24 +1505,26 @@ class KubernetesClient:
             deployment = await asyncio.to_thread(
                 self.apps_v1.read_namespaced_deployment,
                 name=names["deployment"],
-                namespace=namespace
+                namespace=namespace,
             )
 
             pods = await asyncio.to_thread(
                 self.core_v1.list_namespaced_pod,
                 namespace=namespace,
-                label_selector=f"app={names['deployment']}"
+                label_selector=f"app={names['deployment']}",
             )
 
             deployment_status = deployment.status
             pod_statuses = []
 
             for pod in pods.items:
-                pod_statuses.append({
-                    "name": pod.metadata.name,
-                    "phase": pod.status.phase,
-                    "ready": self.is_pod_ready(pod)
-                })
+                pod_statuses.append(
+                    {
+                        "name": pod.metadata.name,
+                        "phase": pod.status.phase,
+                        "ready": self.is_pod_ready(pod),
+                    }
+                )
 
             return {
                 "hostname": names["hostname"],
@@ -1558,30 +1533,21 @@ class KubernetesClient:
                 "replicas": {
                     "desired": deployment_status.replicas,
                     "ready": deployment_status.ready_replicas or 0,
-                    "available": deployment_status.available_replicas or 0
+                    "available": deployment_status.available_replicas or 0,
                 },
                 "pods": pod_statuses,
-                "status": "ready" if deployment_status.ready_replicas == deployment_status.replicas else "pending"
+                "status": "ready"
+                if deployment_status.ready_replicas == deployment_status.replicas
+                else "pending",
             }
 
         except ApiException as e:
             if e.status == 404:
-                return {
-                    "status": "not_found",
-                    "hostname": names["hostname"]
-                }
+                return {"status": "not_found", "hostname": names["hostname"]}
             logger.error(f"[K8S] Error getting dev environment status: {e}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "hostname": names["hostname"]
-            }
+            return {"status": "error", "error": str(e), "hostname": names["hostname"]}
 
-    async def check_dev_environment_health(
-        self,
-        user_id: UUID,
-        project_id: str
-    ) -> Dict[str, Any]:
+    async def check_dev_environment_health(self, user_id: UUID, project_id: str) -> dict[str, Any]:
         """Check if a development environment exists and is healthy."""
         status = await self.get_dev_environment_status(user_id, project_id)
 
@@ -1590,7 +1556,7 @@ class KubernetesClient:
                 "exists": False,
                 "ready": False,
                 "url": None,
-                "message": "Development environment does not exist"
+                "message": "Development environment does not exist",
             }
 
         if status["status"] == "error":
@@ -1598,7 +1564,7 @@ class KubernetesClient:
                 "exists": False,
                 "ready": False,
                 "url": None,
-                "message": f"Error checking environment: {status.get('error', 'Unknown error')}"
+                "message": f"Error checking environment: {status.get('error', 'Unknown error')}",
             }
 
         is_ready = status.get("deployment_ready", False)
@@ -1608,10 +1574,10 @@ class KubernetesClient:
             "url": status["url"] if is_ready else None,
             "message": "Environment is ready" if is_ready else "Environment is starting up",
             "replicas": status.get("replicas"),
-            "pods": status.get("pods")
+            "pods": status.get("pods"),
         }
 
-    async def list_dev_environments(self, user_id: Optional[UUID] = None) -> list:
+    async def list_dev_environments(self, user_id: UUID | None = None) -> list:
         """List all development environments, optionally filtered by user."""
         try:
             label_selector = "app=dev-environment"
@@ -1621,7 +1587,7 @@ class KubernetesClient:
             deployments = await asyncio.to_thread(
                 self.apps_v1.list_namespaced_deployment,
                 namespace=self.user_namespace,
-                label_selector=label_selector
+                label_selector=label_selector,
             )
 
             environments = []
@@ -1632,12 +1598,14 @@ class KubernetesClient:
 
                 if env_user_id and project_id:
                     status = await self.get_dev_environment_status(env_user_id, project_id)
-                    environments.append({
-                        "user_id": env_user_id,
-                        "project_id": project_id,
-                        "deployment_name": deployment.metadata.name,
-                        **status
-                    })
+                    environments.append(
+                        {
+                            "user_id": env_user_id,
+                            "project_id": project_id,
+                            "deployment_name": deployment.metadata.name,
+                            **status,
+                        }
+                    )
 
             return environments
 
@@ -1651,7 +1619,7 @@ class KubernetesClient:
 
 
 # Global instance - lazily initialized
-_k8s_client_instance: Optional[KubernetesClient] = None
+_k8s_client_instance: KubernetesClient | None = None
 
 
 def get_k8s_client() -> KubernetesClient:

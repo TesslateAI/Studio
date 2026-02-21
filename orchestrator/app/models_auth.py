@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 
 from fastapi_users.db import SQLAlchemyBaseOAuthAccountTable, SQLAlchemyBaseUserTable
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -95,8 +95,8 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
 
     # Public profile fields
     avatar_url: Mapped[str | None] = mapped_column(
-        String(500), nullable=True
-    )  # Profile picture URL
+        Text, nullable=True
+    )  # Profile picture URL or base64 data URI
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)  # Short bio/description
     twitter_handle: Mapped[str | None] = mapped_column(
         String(100), nullable=True
@@ -111,6 +111,12 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
         String, unique=True, index=True, nullable=True
     )
     referred_by: Mapped[str | None] = mapped_column(String, nullable=True)  # Referrer code
+
+    # Two-Factor Authentication
+    two_fa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    two_fa_method: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # "email", "totp", etc.
 
     # Activity tracking
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -141,7 +147,9 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     purchased_bases = relationship(
         "UserPurchasedBase", back_populates="user", cascade="all, delete-orphan"
     )
-    created_bases = relationship("MarketplaceBase", foreign_keys="MarketplaceBase.created_by_user_id")
+    created_bases = relationship(
+        "MarketplaceBase", foreign_keys="MarketplaceBase.created_by_user_id"
+    )
     api_keys = relationship("UserAPIKey", back_populates="user", cascade="all, delete-orphan")
     custom_models = relationship(
         "UserCustomModel", back_populates="user", cascade="all, delete-orphan"

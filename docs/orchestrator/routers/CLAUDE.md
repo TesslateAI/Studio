@@ -27,6 +27,7 @@ Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 - `tasks.py` (258 lines) - Background task status queries
 - `shell.py` (246 lines) - Interactive shell sessions
 - `creators.py` (238 lines) - Creator program management
+- `two_fa.py` (218 lines) - Email 2FA login, code verification, resend, password reset
 - `auth.py` (222 lines) - Pod access verification, custom auth
 - `users.py` (128 lines) - User profile management
 - `agents.py` (108 lines) - User agent management

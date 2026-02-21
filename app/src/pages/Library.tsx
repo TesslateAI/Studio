@@ -35,6 +35,11 @@ import {
   Gear,
   SignOut,
   Repeat,
+  CaretDown,
+  CaretRight,
+  Robot,
+  ToggleLeft,
+  ToggleRight,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import {
@@ -78,6 +83,10 @@ interface LibraryAgent {
   is_custom: boolean;
   parent_agent_id: string | null;
   system_prompt?: string;
+  config?: {
+    features?: Record<string, boolean>;
+    [key: string]: unknown;
+  };
   is_enabled?: boolean;
   is_published?: boolean;
   usage_count?: number;
@@ -132,8 +141,8 @@ interface LibraryBase {
   slug: string;
   description: string;
   long_description?: string;
-  git_repo_url: string;
-  default_branch: string;
+  git_repo_url?: string;
+  default_branch?: string;
   category: string;
   icon: string;
   visibility: 'private' | 'public';
@@ -142,6 +151,8 @@ interface LibraryBase {
   tech_stack?: string[];
   downloads: number;
   rating: number;
+  source_type?: 'git' | 'archive';
+  archive_size_bytes?: number;
   created_at: string;
 }
 
@@ -151,6 +162,7 @@ const _ALL_TOOLS = [
   'write_file',
   'patch_file',
   'multi_edit',
+  'apply_patch',
   'bash_exec',
   'shell_open',
   'shell_exec',
@@ -158,6 +170,8 @@ const _ALL_TOOLS = [
   'get_project_info',
   'todo_read',
   'todo_write',
+  'save_plan',
+  'update_plan',
   'web_fetch',
 ];
 
@@ -175,6 +189,9 @@ const getToolIcon = (toolName: string): { icon: React.ReactNode; label: string }
     get_project_info: { icon: <Package size={12} weight="fill" />, label: 'Project Info' },
     todo_read: { icon: <ListChecks size={12} weight="fill" />, label: 'Todo Read' },
     todo_write: { icon: <ListChecks size={12} weight="fill" />, label: 'Todo Write' },
+    save_plan: { icon: <ListChecks size={12} weight="fill" />, label: 'Save Plan' },
+    update_plan: { icon: <ListChecks size={12} weight="fill" />, label: 'Update Plan' },
+    apply_patch: { icon: <FileText size={12} weight="fill" />, label: 'Apply Patch' },
     web_fetch: { icon: <Globe size={12} weight="fill" />, label: 'Web Fetch' },
   };
   return toolIcons[toolName] || null;
@@ -566,8 +583,14 @@ export default function Library() {
             <BasesTab
               bases={bases}
               loading={loading}
-              onSubmit={() => { setEditingBase(null); setShowSubmitBaseModal(true); }}
-              onEdit={(base) => { setEditingBase(base); setShowSubmitBaseModal(true); }}
+              onSubmit={() => {
+                setEditingBase(null);
+                setShowSubmitBaseModal(true);
+              }}
+              onEdit={(base) => {
+                setEditingBase(base);
+                setShowSubmitBaseModal(true);
+              }}
               onToggleVisibility={handleToggleBaseVisibility}
               onDelete={handleDeleteBase}
             />
@@ -610,12 +633,20 @@ export default function Library() {
                 };
                 response = await marketplaceApi.createCustomAgent(createData);
 
-                // Update with additional fields (tools, tool_configs, avatar_url)
-                if (updatedData.tools || updatedData.tool_configs || updatedData.avatar_url) {
-                  await marketplaceApi.updateAgent(response.id, {
+                // Update with additional fields (tools, tool_configs, avatar_url, config)
+                const agentId = response.agent_id || response.id;
+                if (
+                  agentId &&
+                  (updatedData.tools ||
+                    updatedData.tool_configs ||
+                    updatedData.avatar_url ||
+                    updatedData.config)
+                ) {
+                  await marketplaceApi.updateAgent(agentId, {
                     tools: updatedData.tools,
                     tool_configs: updatedData.tool_configs,
                     avatar_url: updatedData.avatar_url,
+                    config: updatedData.config,
                   });
                 }
 
@@ -633,8 +664,17 @@ export default function Library() {
               loadLibraryAgents();
             } catch (error: unknown) {
               console.error('Save failed:', error);
-              const err = error as { response?: { data?: { detail?: string } } };
-              toast.error(err.response?.data?.detail || 'Failed to save agent');
+              const err = error as {
+                response?: { data?: { detail?: string | Array<{ msg: string }> } };
+              };
+              const detail = err.response?.data?.detail;
+              const message =
+                typeof detail === 'string'
+                  ? detail
+                  : Array.isArray(detail)
+                    ? detail.map((d) => d.msg).join(', ')
+                    : 'Failed to save agent';
+              toast.error(message);
             }
           }}
         />
@@ -643,7 +683,10 @@ export default function Library() {
       {/* Submit/Edit Base Modal */}
       <SubmitBaseModal
         isOpen={showSubmitBaseModal}
-        onClose={() => { setShowSubmitBaseModal(false); setEditingBase(null); }}
+        onClose={() => {
+          setShowSubmitBaseModal(false);
+          setEditingBase(null);
+        }}
         onSuccess={loadCreatedBases}
         editBase={editingBase}
       />
@@ -675,8 +718,17 @@ function AgentsTab({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [agentToDelete, setAgentToDelete] = useState<LibraryAgent | null>(null);
 
+  const [deleteAction, setDeleteAction] = useState<'remove' | 'delete'>('remove');
+
   const handleRemove = (agent: LibraryAgent) => {
     setAgentToDelete(agent);
+    setDeleteAction('remove');
+    setShowDeleteDialog(true);
+  };
+
+  const handleDelete = (agent: LibraryAgent) => {
+    setAgentToDelete(agent);
+    setDeleteAction('delete');
     setShowDeleteDialog(true);
   };
 
@@ -684,15 +736,27 @@ function AgentsTab({
     if (!agentToDelete) return;
 
     setShowDeleteDialog(false);
-    const removingToast = toast.loading(`Removing ${agentToDelete.name}...`);
+    const isDelete = deleteAction === 'delete';
+    const actionToast = toast.loading(
+      isDelete ? `Deleting ${agentToDelete.name}...` : `Removing ${agentToDelete.name}...`
+    );
 
     try {
-      await marketplaceApi.removeFromLibrary(agentToDelete.id);
-      toast.success(`${agentToDelete.name} removed from library`, { id: removingToast });
+      if (isDelete) {
+        await marketplaceApi.deleteCustomAgent(agentToDelete.id);
+        toast.success(`${agentToDelete.name} deleted permanently`, { id: actionToast });
+      } else {
+        await marketplaceApi.removeFromLibrary(agentToDelete.id);
+        toast.success(`${agentToDelete.name} removed from library`, { id: actionToast });
+      }
       onReload();
-    } catch (error) {
-      console.error('Remove failed:', error);
-      toast.error('Failed to remove agent from library', { id: removingToast });
+    } catch (error: unknown) {
+      console.error(`${isDelete ? 'Delete' : 'Remove'} failed:`, error);
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(
+        err.response?.data?.detail || `Failed to ${isDelete ? 'delete' : 'remove'} agent`,
+        { id: actionToast }
+      );
     } finally {
       setAgentToDelete(null);
     }
@@ -798,11 +862,12 @@ function AgentsTab({
             onTogglePublish={() => onTogglePublish(agent)}
             onModelChange={(model) => onModelChange(agent, model)}
             onRemove={() => handleRemove(agent)}
+            onDelete={() => handleDelete(agent)}
           />
         ))}
       </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete/Remove Confirmation Dialog */}
       <ConfirmDialog
         isOpen={showDeleteDialog}
         onClose={() => {
@@ -810,9 +875,13 @@ function AgentsTab({
           setAgentToDelete(null);
         }}
         onConfirm={confirmRemoveAgent}
-        title="Remove Agent"
-        message={`Remove "${agentToDelete?.name}" from your library? This cannot be undone.`}
-        confirmText="Remove"
+        title={deleteAction === 'delete' ? 'Delete Agent' : 'Remove Agent'}
+        message={
+          deleteAction === 'delete'
+            ? `Permanently delete "${agentToDelete?.name}"? This will remove the agent entirely and cannot be undone.`
+            : `Remove "${agentToDelete?.name}" from your library? You can re-install it from the Marketplace at any time.`
+        }
+        confirmText={deleteAction === 'delete' ? 'Delete Permanently' : 'Remove'}
         cancelText="Cancel"
         variant="danger"
       />
@@ -901,20 +970,23 @@ function BasesTab({
                     <span className="text-xs text-[var(--text)]/40">{base.category}</span>
                   </div>
                 </div>
-                {/* Visibility badge */}
-                <div
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                    base.visibility === 'public'
-                      ? 'bg-green-500/20 text-green-400'
-                      : 'bg-gray-500/20 text-gray-400'
-                  }`}
-                >
-                  {base.visibility === 'public' ? (
-                    <Globe size={10} />
-                  ) : (
-                    <LockKey size={10} />
+                {/* Badges */}
+                <div className="flex items-center gap-1.5">
+                  {base.source_type === 'archive' && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-500/20 text-purple-400">
+                      Exported
+                    </span>
                   )}
-                  {base.visibility}
+                  <div
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                      base.visibility === 'public'
+                        ? 'bg-green-500/20 text-green-400'
+                        : 'bg-gray-500/20 text-gray-400'
+                    }`}
+                  >
+                    {base.visibility === 'public' ? <Globe size={10} /> : <LockKey size={10} />}
+                    {base.visibility}
+                  </div>
                 </div>
               </div>
 
@@ -939,6 +1011,13 @@ function BasesTab({
               <div className="flex items-center gap-3 mb-4 text-xs text-[var(--text)]/40">
                 <span>{base.downloads || 0} downloads</span>
                 <span>{base.rating?.toFixed(1) || '5.0'} rating</span>
+                {base.source_type === 'archive' && base.archive_size_bytes && (
+                  <span>
+                    {base.archive_size_bytes < 1024 * 1024
+                      ? `${(base.archive_size_bytes / 1024).toFixed(0)} KB`
+                      : `${(base.archive_size_bytes / 1024 / 1024).toFixed(1)} MB`}
+                  </span>
+                )}
               </div>
 
               {/* Actions */}
@@ -1779,6 +1858,7 @@ function AgentCard({
   onTogglePublish,
   onModelChange,
   onRemove,
+  onDelete,
 }: {
   agent: LibraryAgent;
   availableModels: string[];
@@ -1788,6 +1868,7 @@ function AgentCard({
   onTogglePublish: () => void;
   onModelChange: (model: string) => void;
   onRemove: () => void;
+  onDelete: () => void;
 }) {
   const canEdit = agent.source_type === 'open' || agent.is_custom;
   const canChangeModel = agent.source_type === 'open' || agent.is_custom;
@@ -2000,15 +2081,25 @@ function AgentCard({
         </button>
       </div>
 
-      {/* Remove Button */}
-      <div className="mt-3">
-        <button
-          onClick={onRemove}
-          className="w-full py-2 px-3 bg-white/5 hover:bg-[var(--status-error)]/10 border border-[var(--text)]/15 hover:border-[var(--status-error)]/20 text-[var(--text)]/60 hover:text-[var(--status-error)] rounded-lg transition-colors flex items-center justify-center gap-2"
-        >
-          <Trash size={16} />
-          Remove from Library
-        </button>
+      {/* Remove / Delete Buttons */}
+      <div className="mt-3 space-y-2">
+        {agent.is_custom && !agent.is_published ? (
+          <button
+            onClick={onDelete}
+            className="w-full py-2 px-3 bg-[var(--status-error)]/10 hover:bg-[var(--status-error)]/20 border border-[var(--status-error)]/20 hover:border-[var(--status-error)]/30 text-[var(--status-error)] rounded-lg transition-colors flex items-center justify-center gap-2 font-medium"
+          >
+            <Trash size={16} weight="bold" />
+            Delete Agent
+          </button>
+        ) : (
+          <button
+            onClick={onRemove}
+            className="w-full py-2 px-3 bg-white/5 hover:bg-[var(--status-error)]/10 border border-[var(--text)]/15 hover:border-[var(--status-error)]/20 text-[var(--text)]/60 hover:text-[var(--status-error)] rounded-lg transition-colors flex items-center justify-center gap-2"
+          >
+            <Trash size={16} />
+            Remove from Library
+          </button>
+        )}
       </div>
 
       {/* Purchase Date */}
@@ -2019,7 +2110,27 @@ function AgentCard({
   );
 }
 
-// Edit Agent Modal Component (keeping original)
+// Feature flag definitions with descriptions
+const FEATURE_FLAGS = [
+  { key: 'streaming', label: 'Streaming', description: 'SSE token streaming' },
+  { key: 'subagents', label: 'Subagents', description: 'Invoke specialized subagents' },
+  { key: 'plan_mode', label: 'Plan Mode', description: 'save_plan / update_plan tools' },
+  { key: 'web_search', label: 'Web Search', description: 'web_fetch tool' },
+  { key: 'apply_patch', label: 'Apply Patch', description: 'Codex-style unified patches' },
+] as const;
+
+// Subagent type for the UI
+interface SubagentItem {
+  id: string;
+  name: string;
+  description: string;
+  system_prompt: string;
+  tools: string[];
+  model: string;
+  is_builtin: boolean;
+}
+
+// Edit Agent Modal Component
 function EditAgentModal({
   agent,
   availableModels,
@@ -2040,6 +2151,7 @@ function EditAgentModal({
       { description?: string; examples?: string[]; system_prompt?: string }
     >;
     avatar_url?: string | null;
+    config?: Record<string, unknown>;
   }) => void;
 }) {
   const [name, setName] = useState(agent.name);
@@ -2055,6 +2167,49 @@ function EditAgentModal({
   const [avatarUrl, setAvatarUrl] = useState<string | null>(agent.avatar_url || null);
   const editorRef = useRef<MarkerEditorHandle>(null);
 
+  // Feature flags state — default all enabled
+  const defaultFeatures: Record<string, boolean> = {};
+  FEATURE_FLAGS.forEach((f) => {
+    defaultFeatures[f.key] = true;
+  });
+  const [features, setFeatures] = useState<Record<string, boolean>>({
+    ...defaultFeatures,
+    ...(agent.config?.features || {}),
+  });
+
+  // Subagents state
+  const [subagents, setSubagents] = useState<SubagentItem[]>([]);
+  const [subagentsExpanded, setSubagentsExpanded] = useState(false);
+  const [subagentsLoading, setSubagentsLoading] = useState(false);
+  const [editingSubagent, setEditingSubagent] = useState<string | null>(null);
+  const [editingSubagentPrompt, setEditingSubagentPrompt] = useState('');
+  const [showAddSubagent, setShowAddSubagent] = useState(false);
+  const [newSubagent, setNewSubagent] = useState({
+    name: '',
+    description: '',
+    system_prompt: '',
+  });
+
+  // Load subagents when section is expanded
+  useEffect(() => {
+    if (subagentsExpanded && agent.id && subagents.length === 0) {
+      setSubagentsLoading(true);
+      marketplaceApi
+        .getSubagents(agent.id)
+        .then((data) => {
+          setSubagents(data.subagents || []);
+        })
+        .catch((err) => {
+          console.error('Failed to load subagents:', err);
+        })
+        .finally(() => setSubagentsLoading(false));
+    }
+  }, [subagentsExpanded, agent.id, subagents.length]);
+
+  const toggleFeature = (key: string) => {
+    setFeatures((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const handleReset = () => {
     setSystemPrompt(originalPrompt);
     toast.success('Reset to original system prompt');
@@ -2062,6 +2217,54 @@ function EditAgentModal({
 
   const insertMarker = (marker: string) => {
     editorRef.current?.insertMarker(marker);
+  };
+
+  const handleSaveSubagentPrompt = async (subagentId: string) => {
+    try {
+      await marketplaceApi.updateSubagent(agent.id, subagentId, {
+        system_prompt: editingSubagentPrompt,
+      });
+      setSubagents((prev) =>
+        prev.map((s) => (s.id === subagentId ? { ...s, system_prompt: editingSubagentPrompt } : s))
+      );
+      setEditingSubagent(null);
+      toast.success('Subagent prompt updated');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to update subagent');
+    }
+  };
+
+  const handleAddSubagent = async () => {
+    if (!newSubagent.name.trim() || !newSubagent.system_prompt.trim()) {
+      toast.error('Name and system prompt are required');
+      return;
+    }
+    try {
+      const created = await marketplaceApi.createSubagent(agent.id, {
+        name: newSubagent.name,
+        description: newSubagent.description,
+        system_prompt: newSubagent.system_prompt,
+      });
+      setSubagents((prev) => [...prev, created]);
+      setShowAddSubagent(false);
+      setNewSubagent({ name: '', description: '', system_prompt: '' });
+      toast.success('Subagent created');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to create subagent');
+    }
+  };
+
+  const handleDeleteSubagent = async (subagentId: string) => {
+    try {
+      await marketplaceApi.deleteSubagent(agent.id, subagentId);
+      setSubagents((prev) => prev.filter((s) => s.id !== subagentId));
+      toast.success('Subagent removed');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to delete subagent');
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -2074,6 +2277,7 @@ function EditAgentModal({
       tools,
       tool_configs: toolConfigs,
       avatar_url: avatarUrl,
+      config: { features },
     });
   };
 
@@ -2157,6 +2361,44 @@ function EditAgentModal({
                 )}
               </div>
 
+              {/* Feature Flags */}
+              {agent.agent_type === 'TesslateAgent' && (
+                <div className="p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
+                  <h3 className="text-sm font-semibold text-[var(--text)] mb-3 flex items-center gap-2">
+                    <Gear size={16} />
+                    Features
+                  </h3>
+                  <div className="space-y-2">
+                    {FEATURE_FLAGS.map((flag) => (
+                      <button
+                        key={flag.key}
+                        type="button"
+                        onClick={() => toggleFeature(flag.key)}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
+                      >
+                        <div className="flex flex-col items-start">
+                          <span className="text-sm text-[var(--text)]">{flag.label}</span>
+                          <span className="text-xs text-[var(--text)]/40">{flag.description}</span>
+                        </div>
+                        {features[flag.key] ? (
+                          <ToggleRight
+                            size={28}
+                            weight="fill"
+                            className="text-[var(--primary)] flex-shrink-0"
+                          />
+                        ) : (
+                          <ToggleLeft
+                            size={28}
+                            weight="fill"
+                            className="text-[var(--text)]/30 flex-shrink-0"
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-sm font-medium text-[var(--text)]">
@@ -2196,7 +2438,7 @@ function EditAgentModal({
               </div>
             </div>
 
-            {/* Right Column: Tool Management */}
+            {/* Right Column: Tool Management + Subagents */}
             <div className="space-y-4">
               <div className="p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
                 <ToolManagement
@@ -2209,6 +2451,195 @@ function EditAgentModal({
                   availableModels={availableModels}
                 />
               </div>
+
+              {/* Subagents Section (collapsible) */}
+              {agent.agent_type === 'TesslateAgent' && (
+                <div className="p-4 bg-[var(--text)]/5 rounded-lg border border-[var(--text)]/10">
+                  <button
+                    type="button"
+                    onClick={() => setSubagentsExpanded(!subagentsExpanded)}
+                    className="w-full flex items-center justify-between text-sm font-semibold text-[var(--text)]"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Robot size={16} />
+                      Subagents
+                      {subagents.length > 0 && (
+                        <span className="text-xs font-normal text-[var(--text)]/40">
+                          ({subagents.length})
+                        </span>
+                      )}
+                    </span>
+                    {subagentsExpanded ? <CaretDown size={16} /> : <CaretRight size={16} />}
+                  </button>
+
+                  {subagentsExpanded && (
+                    <div className="mt-3 space-y-2">
+                      {subagentsLoading ? (
+                        <div className="flex items-center justify-center py-4">
+                          <LoadingSpinner />
+                        </div>
+                      ) : (
+                        <>
+                          {subagents.map((sub) => (
+                            <div
+                              key={sub.id}
+                              className="p-3 bg-white/5 rounded-lg border border-[var(--text)]/10"
+                            >
+                              {editingSubagent === sub.id ? (
+                                /* Inline prompt editor */
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium text-[var(--text)]">
+                                      {sub.name}
+                                      {sub.is_builtin && (
+                                        <span className="ml-2 text-xs text-[var(--text)]/40">
+                                          built-in (editing creates fork)
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                  <textarea
+                                    value={editingSubagentPrompt}
+                                    onChange={(e) => setEditingSubagentPrompt(e.target.value)}
+                                    className="w-full px-3 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] text-xs font-mono focus:outline-none focus:border-[var(--primary)]/50 resize-y"
+                                    rows={8}
+                                  />
+                                  <div className="flex items-center gap-2 justify-end">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingSubagent(null)}
+                                      className="px-3 py-1 text-xs bg-white/5 hover:bg-white/10 rounded transition-colors text-[var(--text)]/60"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveSubagentPrompt(sub.id)}
+                                      className="px-3 py-1 text-xs bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded transition-colors text-white"
+                                    >
+                                      Save Prompt
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* Normal view */
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-medium text-[var(--text)]">
+                                        {sub.name}
+                                      </span>
+                                      {sub.is_builtin && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--text)]/10 text-[var(--text)]/50">
+                                          built-in
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-[var(--text)]/40 truncate">
+                                      {sub.description}
+                                    </p>
+                                    {sub.tools.length > 0 && (
+                                      <p className="text-[10px] text-[var(--text)]/30 mt-0.5">
+                                        {sub.tools.length} tool{sub.tools.length !== 1 ? 's' : ''}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingSubagent(sub.id);
+                                        setEditingSubagentPrompt(sub.system_prompt || '');
+                                      }}
+                                      className="px-2 py-1 text-[10px] bg-white/5 hover:bg-white/10 rounded transition-colors text-[var(--text)]/60"
+                                    >
+                                      Edit Prompt
+                                    </button>
+                                    {!sub.is_builtin && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteSubagent(sub.id)}
+                                        className="p-1 hover:bg-red-500/10 rounded transition-colors text-red-400/60 hover:text-red-400"
+                                      >
+                                        <Trash size={12} />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          {/* Add Subagent */}
+                          {showAddSubagent ? (
+                            <div className="p-3 bg-white/5 rounded-lg border border-[var(--primary)]/20 space-y-2">
+                              <input
+                                type="text"
+                                value={newSubagent.name}
+                                onChange={(e) =>
+                                  setNewSubagent((p) => ({ ...p, name: e.target.value }))
+                                }
+                                placeholder="Subagent name"
+                                className="w-full px-3 py-1.5 bg-white/5 border border-[var(--text)]/15 rounded text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
+                              />
+                              <input
+                                type="text"
+                                value={newSubagent.description}
+                                onChange={(e) =>
+                                  setNewSubagent((p) => ({ ...p, description: e.target.value }))
+                                }
+                                placeholder="Description (optional)"
+                                className="w-full px-3 py-1.5 bg-white/5 border border-[var(--text)]/15 rounded text-sm text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
+                              />
+                              <textarea
+                                value={newSubagent.system_prompt}
+                                onChange={(e) =>
+                                  setNewSubagent((p) => ({ ...p, system_prompt: e.target.value }))
+                                }
+                                placeholder="System prompt..."
+                                className="w-full px-3 py-2 bg-white/5 border border-[var(--text)]/15 rounded text-xs font-mono text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 resize-y"
+                                rows={6}
+                              />
+                              <div className="flex items-center gap-2 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowAddSubagent(false);
+                                    setNewSubagent({
+                                      name: '',
+                                      description: '',
+                                      system_prompt: '',
+                                    });
+                                  }}
+                                  className="px-3 py-1 text-xs bg-white/5 hover:bg-white/10 rounded transition-colors text-[var(--text)]/60"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleAddSubagent}
+                                  className="px-3 py-1 text-xs bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded transition-colors text-white"
+                                >
+                                  Create
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setShowAddSubagent(true)}
+                              className="w-full flex items-center justify-center gap-1 py-2 text-xs text-[var(--text)]/40 hover:text-[var(--text)]/60 hover:bg-white/5 rounded-lg border border-dashed border-[var(--text)]/10 hover:border-[var(--text)]/20 transition-colors"
+                            >
+                              <Plus size={12} />
+                              Add Subagent
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

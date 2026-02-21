@@ -2,13 +2,15 @@
 Marketplace API endpoints for browsing, purchasing, and managing agents.
 """
 
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime
-from typing import Any, Dict, List
+from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,8 +28,8 @@ from ..models import (
     UserPurchasedBase,
 )
 from ..schemas import BaseSubmitRequest, BaseUpdateRequest
-from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..services.cache_service import cache
+from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..users import current_active_user, current_optional_user
 
 logger = logging.getLogger(__name__)
@@ -38,7 +40,7 @@ settings = get_settings()
 _MODELS_CACHE_TTL = 300
 
 
-async def _get_cached_litellm_models() -> List[Dict[str, Any]]:
+async def _get_cached_litellm_models() -> list[dict[str, Any]]:
     """
     Get LiteLLM models with distributed caching.
 
@@ -65,6 +67,45 @@ async def _get_cached_litellm_models() -> List[Dict[str, Any]]:
     return models
 
 
+async def _get_cached_model_pricing() -> dict[str, dict[str, float]]:
+    """
+    Build a model-id → {input, output} pricing map from LiteLLM /model/info.
+
+    Prices are returned in USD per 1M tokens.  The proxy reports per-token
+    costs, so we multiply by 1_000_000 here.  Results are cached alongside
+    the model list.
+    """
+    cache_key = "litellm_model_pricing"
+
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    from ..services.litellm_service import litellm_service
+
+    info_list = await litellm_service.get_model_info()
+
+    pricing_map: dict[str, dict[str, float]] = {}
+    for entry in info_list:
+        model_info = entry.get("model_info") or {}
+        model_name = entry.get("model_name") or model_info.get("id")
+        if not model_name:
+            continue
+
+        input_cost = model_info.get("input_cost_per_token")
+        output_cost = model_info.get("output_cost_per_token")
+        if input_cost is not None or output_cost is not None:
+            pricing_map[model_name] = {
+                "input": round((input_cost or 0) * 1_000_000, 4),
+                "output": round((output_cost or 0) * 1_000_000, 4),
+            }
+
+    await cache.set(cache_key, pricing_map, ttl=_MODELS_CACHE_TTL)
+    logger.info(f"Refreshed model pricing cache ({len(pricing_map)} models with pricing)")
+
+    return pricing_map
+
+
 # ============================================================================
 # Models Configuration
 # ============================================================================
@@ -81,33 +122,10 @@ async def get_available_models(
     """
     from ..models import UserAPIKey, UserCustomModel
 
-    # Get models from LiteLLM (cached to avoid blocking on external calls)
-    litellm_models = await _get_cached_litellm_models()
-
-    # Model pricing database (approximate, in USD per 1M tokens)
-    # These are typical costs - actual costs may vary
-    model_pricing = {
-        # OpenAI
-        "gpt-4": {"input": 30.0, "output": 60.0},
-        "gpt-4-turbo": {"input": 10.0, "output": 30.0},
-        "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
-        # Anthropic
-        "claude-3-opus": {"input": 15.0, "output": 75.0},
-        "claude-3-sonnet": {"input": 3.0, "output": 15.0},
-        "claude-3-haiku": {"input": 0.25, "output": 1.25},
-        # Open source / self-hosted
-        "llama-3.3": {"input": 0.0, "output": 0.0},
-        "qwen": {"input": 0.0, "output": 0.0},
-        "default": {"input": 2.0, "output": 6.0},  # Default for unknown models
-    }
-
-    def get_model_pricing(model_id: str):
-        """Get pricing for a model based on ID"""
-        model_lower = model_id.lower()
-        for key, price in model_pricing.items():
-            if key in model_lower:
-                return price
-        return model_pricing["default"]
+    # Get models and pricing from LiteLLM in parallel (both cached independently)
+    litellm_models, pricing_map = await asyncio.gather(
+        _get_cached_litellm_models(), _get_cached_model_pricing()
+    )
 
     # Convert LiteLLM models to response format with pricing
     system_models = [
@@ -116,7 +134,7 @@ async def get_available_models(
             "name": model.get("id"),
             "source": "system",
             "provider": "internal",
-            "pricing": get_model_pricing(model.get("id", "")),
+            "pricing": pricing_map.get(model.get("id", ""), {"input": 0.0, "output": 0.0}),
             "available": True,
         }
         for model in litellm_models
@@ -175,7 +193,7 @@ async def get_available_models(
                 "name": m.strip(),
                 "source": "system",
                 "provider": "internal",
-                "pricing": get_model_pricing(m.strip()),
+                "pricing": pricing_map.get(m.strip(), {"input": 0.0, "output": 0.0}),
                 "available": True,
             }
             for m in models_str.split(",")
@@ -308,8 +326,9 @@ async def get_marketplace_agents(
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
-            MarketplaceAgent.is_active == True,
-            (MarketplaceAgent.forked_by_user_id.is_(None)) | (MarketplaceAgent.is_published == True),
+            MarketplaceAgent.is_active.is_(True),
+            (MarketplaceAgent.forked_by_user_id.is_(None))
+            | (MarketplaceAgent.is_published.is_(True)),
         )
     )
 
@@ -325,7 +344,7 @@ async def get_marketplace_agents(
         query = query.where(
             func.lower(MarketplaceAgent.name).like(func.lower(search_filter))
             | func.lower(MarketplaceAgent.description).like(func.lower(search_filter))
-            | func.lower(MarketplaceAgent.tags).like(func.lower(search_filter))
+            | func.lower(cast(MarketplaceAgent.tags, String)).like(func.lower(search_filter))
         )
 
     # Apply sorting
@@ -421,7 +440,9 @@ async def get_marketplace_agents(
 
 @router.get("/agents/{slug}")
 async def get_agent_details(
-    slug: str, db: AsyncSession = Depends(get_db), current_user: User | None = Depends(current_optional_user)
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
 ):
     """
     Get detailed information about a specific agent.
@@ -1107,13 +1128,13 @@ async def fork_agent(
 
 @router.post("/agents/create")
 async def create_custom_agent(
-    name: str,
-    description: str,
-    system_prompt: str,
-    mode: str = "stream",
-    agent_type: str = "StreamAgent",
-    model: str = "qwen-3-235b-a22b-thinking-2507",
-    category: str = "custom",
+    name: str = Body(...),
+    description: str = Body(...),
+    system_prompt: str = Body(...),
+    mode: str = Body(default="stream"),
+    agent_type: str = Body(default="StreamAgent"),
+    model: str = Body(default="qwen-3-235b-a22b-thinking-2507"),
+    category: str = Body(default="custom"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -1236,7 +1257,7 @@ async def update_custom_agent(
                 is_forkable=False,
                 parent_agent_id=agent.id,
                 forked_by_user_id=current_user.id,
-                config={},
+                config=update_data.get("config", agent.config or {}),
                 icon=agent.icon,
                 avatar_url=update_data.get("avatar_url", agent.avatar_url),
                 preview_image=agent.preview_image,
@@ -1310,6 +1331,15 @@ async def update_custom_agent(
         agent.avatar_url = update_data["avatar_url"]
     if update_data.get("model"):
         agent.required_models = [update_data["model"]]
+    # Merge config (features, etc.) - deep merge so partial updates work
+    if "config" in update_data and isinstance(update_data["config"], dict):
+        existing_config = agent.config or {}
+        for key, value in update_data["config"].items():
+            if isinstance(value, dict) and isinstance(existing_config.get(key), dict):
+                existing_config[key] = {**existing_config[key], **value}
+            else:
+                existing_config[key] = value
+        agent.config = existing_config
 
     await db.commit()
 
@@ -1402,6 +1432,274 @@ async def toggle_agent(
     }
 
 
+# ============================================================================
+# Subagent CRUD Endpoints
+# ============================================================================
+
+
+@router.get("/agents/{agent_id}/subagents")
+async def list_subagents(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    List subagents for an agent: built-in configs + custom user subagents from DB.
+    """
+    from ..agent.subagent_manager import _get_builtin_configs
+
+    # Built-in subagents
+    builtins = _get_builtin_configs()
+    result_list = []
+    for _name, cfg in builtins.items():
+        result_list.append(
+            {
+                "id": None,
+                "name": cfg.name,
+                "description": cfg.description,
+                "tools": cfg.tools,
+                "system_prompt": cfg.system_prompt,
+                "is_builtin": True,
+                "model": "inherit",
+            }
+        )
+
+    # Custom subagents from DB (item_type="subagent" with parent_agent_id matching)
+    try:
+        agent_uuid = UUID(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent_id: {agent_id}") from exc
+
+    custom_result = await db.execute(
+        select(MarketplaceAgent)
+        .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
+        .where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.is_active == True,  # noqa: E712
+            MarketplaceAgent.item_type == "subagent",
+            MarketplaceAgent.parent_agent_id == agent_uuid,
+        )
+    )
+    custom_subagents = custom_result.scalars().all()
+
+    for sub in custom_subagents:
+        result_list.append(
+            {
+                "id": sub.id,
+                "name": sub.name,
+                "description": sub.description,
+                "tools": sub.tools,
+                "system_prompt": sub.system_prompt,
+                "is_builtin": False,
+                "model": (sub.config or {}).get("model", "inherit"),
+            }
+        )
+
+    return {"subagents": result_list}
+
+
+@router.post("/agents/{agent_id}/subagents")
+async def create_subagent(
+    agent_id: str,
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Create a custom subagent. Creates a MarketplaceAgent with item_type='subagent'.
+    """
+    name = data.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    try:
+        agent_uuid = UUID(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent_id: {agent_id}") from exc
+
+    subagent = MarketplaceAgent(
+        name=name,
+        slug=f"subagent-{name.lower().replace(' ', '-')}-{current_user.id}-{datetime.now(UTC).timestamp()}",
+        description=data.get("description", ""),
+        category="subagent",
+        item_type="subagent",
+        system_prompt=data.get("system_prompt", ""),
+        mode="chat",
+        agent_type="TesslateAgent",
+        tools=data.get("tools"),
+        model=data.get("model", "inherit"),
+        config={"model": data.get("model", "inherit")},
+        parent_agent_id=agent_uuid,
+        forked_by_user_id=current_user.id,
+        pricing_type="free",
+        price=0,
+        source_type="open",
+        is_active=True,
+        is_published=False,
+    )
+
+    db.add(subagent)
+    await db.flush()
+
+    # Auto-add to user's library
+    purchase = UserPurchasedAgent(
+        user_id=current_user.id,
+        agent_id=subagent.id,
+        purchase_type="free",
+        is_active=True,
+    )
+    db.add(purchase)
+    await db.commit()
+
+    return {
+        "success": True,
+        "subagent_id": subagent.id,
+        "message": f"Subagent '{name}' created",
+    }
+
+
+@router.patch("/agents/{agent_id}/subagents/{subagent_id}")
+async def update_subagent(
+    agent_id: str,
+    subagent_id: str,
+    data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Update a subagent's prompt, tools, or config.
+    For built-in subagents (no DB id), this creates a user fork.
+    """
+    # Check if this is a built-in subagent being edited (subagent_id == name)
+    from ..agent.subagent_manager import _get_builtin_configs
+
+    builtins = _get_builtin_configs()
+
+    try:
+        agent_uuid = UUID(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent_id: {agent_id}") from exc
+
+    if subagent_id in builtins:
+        # Fork the built-in: create a custom DB subagent with the user's edits
+        builtin = builtins[subagent_id]
+        forked = MarketplaceAgent(
+            name=data.get("name", builtin.name),
+            slug=f"subagent-{subagent_id}-fork-{current_user.id}-{datetime.now(UTC).timestamp()}",
+            description=data.get("description", builtin.description),
+            category="subagent",
+            item_type="subagent",
+            system_prompt=data.get("system_prompt", builtin.system_prompt),
+            mode="chat",
+            agent_type="TesslateAgent",
+            tools=data.get("tools", builtin.tools),
+            model=data.get("model", "inherit"),
+            config={"model": data.get("model", "inherit")},
+            parent_agent_id=agent_uuid,
+            forked_by_user_id=current_user.id,
+            pricing_type="free",
+            price=0,
+            source_type="open",
+            is_active=True,
+            is_published=False,
+        )
+        db.add(forked)
+        await db.flush()
+
+        purchase = UserPurchasedAgent(
+            user_id=current_user.id,
+            agent_id=forked.id,
+            purchase_type="free",
+            is_active=True,
+        )
+        db.add(purchase)
+        await db.commit()
+
+        return {
+            "success": True,
+            "subagent_id": forked.id,
+            "forked": True,
+            "message": f"Created custom fork of built-in subagent '{subagent_id}'",
+        }
+
+    # Update existing custom subagent
+    try:
+        subagent_uuid = UUID(subagent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid subagent_id: {subagent_id}") from exc
+
+    result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == subagent_uuid,
+            MarketplaceAgent.item_type == "subagent",
+            MarketplaceAgent.forked_by_user_id == current_user.id,
+        )
+    )
+    subagent = result.scalar_one_or_none()
+    if not subagent:
+        raise HTTPException(status_code=404, detail="Subagent not found")
+
+    if "name" in data:
+        subagent.name = data["name"]
+    if "description" in data:
+        subagent.description = data["description"]
+    if "system_prompt" in data:
+        subagent.system_prompt = data["system_prompt"]
+    if "tools" in data:
+        subagent.tools = data["tools"]
+    if "model" in data:
+        existing_config = subagent.config or {}
+        existing_config["model"] = data["model"]
+        subagent.config = existing_config
+
+    await db.commit()
+
+    return {"success": True, "subagent_id": subagent.id, "message": "Subagent updated"}
+
+
+@router.delete("/agents/{agent_id}/subagents/{subagent_id}")
+async def delete_subagent(
+    agent_id: str,
+    subagent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Delete a custom subagent from the user's library.
+    """
+    try:
+        subagent_uuid = UUID(subagent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid subagent_id: {subagent_id}") from exc
+
+    # Remove purchase
+    purchase_result = await db.execute(
+        select(UserPurchasedAgent).where(
+            UserPurchasedAgent.user_id == current_user.id,
+            UserPurchasedAgent.agent_id == subagent_uuid,
+        )
+    )
+    purchase = purchase_result.scalar_one_or_none()
+    if purchase:
+        await db.delete(purchase)
+
+    # Delete the subagent if user owns it
+    result = await db.execute(
+        select(MarketplaceAgent).where(
+            MarketplaceAgent.id == subagent_uuid,
+            MarketplaceAgent.item_type == "subagent",
+            MarketplaceAgent.forked_by_user_id == current_user.id,
+        )
+    )
+    subagent = result.scalar_one_or_none()
+    if subagent:
+        await db.delete(subagent)
+
+    await db.commit()
+
+    return {"success": True, "message": "Subagent removed"}
+
+
 @router.delete("/agents/{agent_id}/library")
 async def remove_agent_from_library(
     agent_id: str,
@@ -1422,14 +1720,17 @@ async def remove_agent_from_library(
     if not purchase:
         raise HTTPException(status_code=404, detail="Agent not in your library")
 
-    # Check if agent is assigned to any projects
+    # Check if agent is assigned to any of the current user's projects
     project_assignments_result = await db.execute(
-        select(ProjectAgent).where(ProjectAgent.agent_id == agent_id)
+        select(ProjectAgent).where(
+            ProjectAgent.agent_id == agent_id,
+            ProjectAgent.user_id == current_user.id,
+        )
     )
     project_assignments = project_assignments_result.scalars().all()
 
     if project_assignments:
-        # Remove from all projects first
+        # Remove from all of this user's projects first
         for assignment in project_assignments:
             await db.delete(assignment)
 
@@ -1562,6 +1863,47 @@ async def unpublish_agent(
     await db.commit()
 
     return {"message": "Agent unpublished successfully", "agent_id": agent_id, "success": True}
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_custom_agent(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Permanently delete a user's custom/forked agent.
+    Agent must be owned by the user and not currently published.
+    """
+    result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
+    agent = result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify ownership
+    if agent.forked_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own custom agents")
+
+    # Must unpublish before deleting
+    if agent.is_published:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete a published agent. Unpublish it first.",
+        )
+
+    # Delete related records (purchases, project assignments, reviews)
+    await db.execute(
+        UserPurchasedAgent.__table__.delete().where(UserPurchasedAgent.agent_id == agent_id)
+    )
+    await db.execute(ProjectAgent.__table__.delete().where(ProjectAgent.agent_id == agent_id))
+    await db.execute(AgentReview.__table__.delete().where(AgentReview.agent_id == agent_id))
+
+    # Delete the agent
+    await db.delete(agent)
+    await db.commit()
+
+    return {"message": "Agent deleted permanently", "agent_id": agent_id, "success": True}
 
 
 # ============================================================================
@@ -1885,7 +2227,7 @@ async def get_agent_reviews(
                 "user_id": str(user.id),
                 "user_name": user.name or user.email.split("@")[0],
                 "user_avatar_url": user.avatar_url,
-                "is_own_review": str(user.id) == str(current_user.id),
+                "is_own_review": (str(user.id) == str(current_user.id)) if current_user else False,
             }
         )
 
@@ -1963,7 +2305,7 @@ async def get_marketplace_bases(
     - Unauthenticated: Shows catalog without purchase status
     """
     query = select(MarketplaceBase).where(
-        MarketplaceBase.is_active == True,
+        MarketplaceBase.is_active.is_(True),
         or_(
             MarketplaceBase.created_by_user_id.is_(None),  # seeded bases always visible
             MarketplaceBase.visibility == "public",  # user bases only when public
@@ -2036,11 +2378,13 @@ async def get_marketplace_bases(
                 "is_featured": base.is_featured,
                 "is_active": base.is_active,
                 "is_purchased": base.id in purchased_base_ids,
-                "source_type": "open",  # All bases are open source
+                "source_type": base.source_type or "git",
                 "is_forkable": False,  # Bases can't be forked
                 "usage_count": base.downloads,
-                "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
-                "visibility": base.visibility or "public",
+                "created_by_user_id": str(base.created_by_user_id)
+                if base.created_by_user_id
+                else None,
+                "visibility": base.visibility or "private",
             }
         )
 
@@ -2064,9 +2408,12 @@ async def get_base_details(
         raise HTTPException(status_code=404, detail="Base not found")
 
     # Private bases are only visible to their creator
-    if base.visibility == "private" and base.created_by_user_id:
-        if not current_user or current_user.id != base.created_by_user_id:
-            raise HTTPException(status_code=404, detail="Base not found")
+    if (
+        base.visibility == "private"
+        and base.created_by_user_id
+        and (not current_user or current_user.id != base.created_by_user_id)
+    ):
+        raise HTTPException(status_code=404, detail="Base not found")
 
     # Check if user has purchased this base (only if authenticated)
     is_purchased = False
@@ -2111,11 +2458,12 @@ async def get_base_details(
         "is_featured": base.is_featured,
         "is_active": base.is_active,
         "is_purchased": is_purchased,
-        "source_type": "open",
+        "source_type": base.source_type or "git",
         "is_forkable": False,
         "usage_count": base.downloads,
+        "archive_size_bytes": base.archive_size_bytes,
         "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
-        "visibility": base.visibility or "public",
+        "visibility": base.visibility or "private",
         "reviews": [
             {
                 "id": review.id,
@@ -2208,6 +2556,175 @@ async def get_user_bases(
         )
 
     return {"bases": response}
+
+
+# ============================================================================
+# Base Reviews
+# ============================================================================
+
+
+@router.post("/bases/{base_id}/review")
+async def create_base_review(
+    base_id: str,
+    rating: int = Query(ge=1, le=5),
+    comment: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Create or update a review for a base.
+    """
+    # Verify user owns the base
+    purchase_result = await db.execute(
+        select(UserPurchasedBase).where(
+            UserPurchasedBase.user_id == current_user.id,
+            UserPurchasedBase.base_id == base_id,
+            UserPurchasedBase.is_active,
+        )
+    )
+    purchase = purchase_result.scalar_one_or_none()
+
+    if not purchase:
+        raise HTTPException(status_code=403, detail="You must own this base to review it")
+
+    # Check for existing review
+    existing_result = await db.execute(
+        select(BaseReview).where(
+            BaseReview.user_id == current_user.id, BaseReview.base_id == base_id
+        )
+    )
+    existing_review = existing_result.scalar_one_or_none()
+
+    if existing_review:
+        # Update existing review
+        existing_review.rating = rating
+        existing_review.comment = comment
+        existing_review.created_at = datetime.now(UTC)
+    else:
+        # Create new review
+        review = BaseReview(
+            base_id=base_id, user_id=current_user.id, rating=rating, comment=comment
+        )
+        db.add(review)
+
+    # Update base's average rating
+    rating_result = await db.execute(
+        select(func.avg(BaseReview.rating), func.count(BaseReview.id)).where(
+            BaseReview.base_id == base_id
+        )
+    )
+    avg_rating, review_count = rating_result.one()
+
+    base_result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = base_result.scalar_one()
+    base.rating = float(avg_rating) if avg_rating else 5.0
+    base.reviews_count = review_count
+
+    await db.commit()
+
+    return {"message": "Review submitted successfully", "rating": rating}
+
+
+@router.get("/bases/{base_id}/reviews")
+async def get_base_reviews(
+    base_id: str,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(current_optional_user),
+):
+    """
+    Get all reviews for a base with user info.
+    Public endpoint - authentication is optional.
+    Returns paginated reviews with user avatar and name.
+    """
+    # Check base exists
+    base_result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = base_result.scalar_one_or_none()
+    if not base:
+        raise HTTPException(status_code=404, detail="Base not found")
+
+    # Get reviews with user info
+    offset = (page - 1) * limit
+    reviews_result = await db.execute(
+        select(BaseReview, User)
+        .join(User, User.id == BaseReview.user_id)
+        .where(BaseReview.base_id == base_id)
+        .order_by(BaseReview.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    reviews = reviews_result.all()
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count(BaseReview.id)).where(BaseReview.base_id == base_id)
+    )
+    total = count_result.scalar() or 0
+
+    response = []
+    for review, user in reviews:
+        response.append(
+            {
+                "id": str(review.id),
+                "rating": review.rating,
+                "comment": review.comment,
+                "created_at": review.created_at.isoformat() if review.created_at else None,
+                "user_id": str(user.id),
+                "user_name": user.name or user.email.split("@")[0],
+                "user_avatar_url": user.avatar_url,
+                "is_own_review": (str(user.id) == str(current_user.id)) if current_user else False,
+            }
+        )
+
+    return {
+        "reviews": response,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": offset + len(reviews) < total,
+    }
+
+
+@router.delete("/bases/{base_id}/review")
+async def delete_base_review(
+    base_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """
+    Delete current user's review for a base.
+    """
+    # Find user's review
+    review_result = await db.execute(
+        select(BaseReview).where(
+            BaseReview.user_id == current_user.id, BaseReview.base_id == base_id
+        )
+    )
+    review = review_result.scalar_one_or_none()
+
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    # Delete the review
+    await db.delete(review)
+
+    # Update base's average rating
+    rating_result = await db.execute(
+        select(func.avg(BaseReview.rating), func.count(BaseReview.id)).where(
+            BaseReview.base_id == base_id
+        )
+    )
+    avg_rating, review_count = rating_result.one()
+
+    base_result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = base_result.scalar_one()
+    base.rating = float(avg_rating) if avg_rating else 5.0
+    base.reviews_count = review_count or 0
+
+    await db.commit()
+
+    return {"message": "Review deleted successfully"}
 
 
 # ============================================================================
@@ -2322,7 +2839,9 @@ async def set_base_visibility(
     if not base:
         raise HTTPException(status_code=404, detail="Base not found")
     if base.created_by_user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You can only change visibility of bases you created")
+        raise HTTPException(
+            status_code=403, detail="You can only change visibility of bases you created"
+        )
 
     base.visibility = visibility
     await db.commit()
@@ -2352,7 +2871,145 @@ async def delete_base(
     base.is_active = False
     await db.commit()
 
+    # Clean up archive file if this is an archive-based template
+    if base.source_type == "archive" and base.archive_path:
+        try:
+            from ..services.template_storage import get_template_storage
+
+            storage = get_template_storage()
+            await storage.delete_archive(base.archive_path)
+        except Exception as e:
+            logger.warning(f"[MARKETPLACE] Failed to delete archive for base {base.id}: {e}")
+
     return {"id": str(base.id), "success": True}
+
+
+@router.post("/templates/{base_id}/re-export")
+async def re_export_template(
+    base_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Re-export a template from its source project (updates the archive)."""
+    import os
+
+    from ..services.task_manager import get_task_manager
+
+    result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.id == base_id))
+    base = result.scalar_one_or_none()
+
+    if not base:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if base.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only re-export templates you created")
+    if base.source_type != "archive":
+        raise HTTPException(status_code=400, detail="Only archive templates can be re-exported")
+    if not base.source_project_id:
+        raise HTTPException(status_code=400, detail="Template has no linked source project")
+
+    # Verify source project exists and is owned by user
+    result = await db.execute(select(Project).where(Project.id == base.source_project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Source project no longer exists")
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You don't own the source project")
+
+    # Capture values from ORM objects before request session closes
+    project_slug = project.slug
+    project_id = project.id
+    base_name = base.name
+    base_archive_path = base.archive_path
+    user_id = current_user.id
+
+    settings = get_settings()
+    task_manager = get_task_manager()
+    task = task_manager.create_task(
+        user_id=user_id,
+        task_type="template_re_export",
+        metadata={
+            "template_id": str(base_id),
+            "template_name": base_name,
+        },
+    )
+
+    async def _run_re_export():
+        from ..database import AsyncSessionLocal
+        from ..models import ProjectFile as ProjectFileModel
+        from ..services.template_export import export_project_to_archive
+        from ..services.template_storage import get_template_storage
+
+        try:
+            task.update_progress(5, 100, "Preparing re-export...")
+
+            use_volumes = os.getenv("USE_DOCKER_VOLUMES", "true").lower() == "true"
+            if settings.deployment_mode == "docker" and use_volumes:
+                project_path = f"/projects/{project_slug}"
+            elif settings.deployment_mode == "kubernetes":
+                import tempfile
+
+                project_path = tempfile.mkdtemp(prefix=f"reexport-{project_slug}-")
+                async with AsyncSessionLocal() as export_db:
+                    from sqlalchemy import select as sa_select
+
+                    result = await export_db.execute(
+                        sa_select(ProjectFileModel).where(ProjectFileModel.project_id == project_id)
+                    )
+                    db_files = result.scalars().all()
+                    for db_file in db_files:
+                        file_full_path = os.path.join(project_path, db_file.file_path)
+                        os.makedirs(os.path.dirname(file_full_path), exist_ok=True)
+                        with open(file_full_path, "w") as f:
+                            f.write(db_file.content or "")
+            else:
+                project_path = os.path.join("/app/projects", project_slug)
+
+            if not os.path.exists(project_path):
+                raise FileNotFoundError(
+                    "Project directory not found. Make sure the project is running."
+                )
+
+            archive_bytes = await export_project_to_archive(
+                project_path, task=task, max_size_mb=settings.template_max_size_mb
+            )
+
+            # Delete old archive if it exists
+            storage = get_template_storage()
+            if base_archive_path:
+                try:
+                    await storage.delete_archive(base_archive_path)
+                except Exception as del_err:
+                    logger.warning(f"[TEMPLATE] Could not delete old archive: {del_err}")
+
+            archive_path = await storage.store_archive(user_id, base_id, archive_bytes)
+
+            async with AsyncSessionLocal() as update_db:
+                from sqlalchemy import select as sa_select
+
+                result = await update_db.execute(
+                    sa_select(MarketplaceBase).where(MarketplaceBase.id == base_id)
+                )
+                updated_base = result.scalar_one()
+                updated_base.archive_path = archive_path
+                updated_base.archive_size_bytes = len(archive_bytes)
+                await update_db.commit()
+
+            task.update_progress(100, 100, "Template re-exported successfully!")
+            task.result = {"template_id": str(base_id)}
+
+            if settings.deployment_mode == "kubernetes" and project_path.startswith("/tmp"):
+                import shutil
+
+                shutil.rmtree(project_path, ignore_errors=True)
+
+        except Exception as e:
+            logger.error(f"[TEMPLATE] Re-export failed: {e}", exc_info=True)
+            task.error = str(e)
+
+    background_tasks.add_task(_run_re_export)
+
+    return {"id": str(base_id), "task_id": task.id}
 
 
 @router.get("/my-created-bases")
@@ -2362,10 +3019,12 @@ async def get_my_created_bases(
 ):
     """Get all bases created/submitted by the current user."""
     result = await db.execute(
-        select(MarketplaceBase).where(
+        select(MarketplaceBase)
+        .where(
             MarketplaceBase.created_by_user_id == current_user.id,
-            MarketplaceBase.is_active == True,
-        ).order_by(MarketplaceBase.created_at.desc())
+            MarketplaceBase.is_active.is_(True),
+        )
+        .order_by(MarketplaceBase.created_at.desc())
     )
     bases = result.scalars().all()
 
@@ -2384,9 +3043,11 @@ async def get_my_created_bases(
                 "tags": base.tags,
                 "features": base.features,
                 "tech_stack": base.tech_stack,
-                "visibility": base.visibility or "public",
+                "visibility": base.visibility or "private",
                 "downloads": base.downloads or 0,
                 "rating": base.rating or 5.0,
+                "source_type": base.source_type or "git",
+                "archive_size_bytes": base.archive_size_bytes,
                 "created_at": base.created_at.isoformat() if base.created_at else None,
             }
             for base in bases
@@ -2609,3 +3270,18 @@ async def increment_workflow_downloads(
     await db.commit()
 
     return {"success": True, "downloads": workflow.downloads}
+
+
+@router.get("/services/{slug}")
+async def get_service_definition(
+    slug: str,
+    current_user: User = Depends(current_active_user),
+):
+    """Return a service definition by slug (for credential field metadata)."""
+    from ..services.service_definitions import get_service, service_to_dict
+
+    service = get_service(slug)
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    return service_to_dict(service)

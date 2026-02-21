@@ -8,10 +8,10 @@ Tool providers are responsible for:
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import Any
 
-from ..view_context import ViewContext
 from ..registry import Tool
+from ..view_context import ViewContext
 
 
 class AbstractToolProvider(ABC):
@@ -43,7 +43,7 @@ class AbstractToolProvider(ABC):
         pass
 
     @abstractmethod
-    def get_tools(self) -> List[Tool]:
+    def get_tools(self) -> list[Tool]:
         """
         Return list of tools available in this view context.
 
@@ -52,7 +52,7 @@ class AbstractToolProvider(ABC):
         """
         pass
 
-    def get_tool_configs(self) -> Dict[str, Dict[str, Any]]:
+    def get_tool_configs(self) -> dict[str, dict[str, Any]]:
         """
         Return custom configurations for tools in this view.
 
@@ -67,7 +67,7 @@ class AbstractToolProvider(ABC):
         """
         return {}
 
-    def validate_context(self, context: Dict[str, Any]) -> bool:
+    def validate_context(self, context: dict[str, Any]) -> bool:
         """
         Validate that the execution context matches requirements.
 
@@ -82,11 +82,7 @@ class AbstractToolProvider(ABC):
         """
         return True
 
-    def is_tool_available(
-        self,
-        tool_name: str,
-        context: Dict[str, Any]
-    ) -> bool:
+    def is_tool_available(self, tool_name: str, context: dict[str, Any]) -> bool:
         """
         Check if a specific tool is available in current context.
 
@@ -116,7 +112,7 @@ class AbstractToolProvider(ABC):
         """
         return f"Tool '{tool_name}' is not available in {self.get_view_context().value} view"
 
-    def get_tool_names(self) -> List[str]:
+    def get_tool_names(self) -> list[str]:
         """
         Get list of tool names provided by this provider.
 

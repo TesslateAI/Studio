@@ -14,11 +14,10 @@ Uses UUIDs to ensure:
 - URL-safe
 """
 
-from typing import Union
 from uuid import UUID
 
 
-def get_project_path(user_id: Union[UUID, str], project_id: Union[UUID, str]) -> str:
+def get_project_path(user_id: UUID | str, project_id: UUID | str) -> str:
     """
     Get file system path for a project.
 
@@ -41,7 +40,7 @@ def get_project_path(user_id: Union[UUID, str], project_id: Union[UUID, str]) ->
     return f"users/{str(user_id)}/{str(project_id)}"
 
 
-def get_container_name(user_id: Union[UUID, str], project_id: Union[UUID, str], mode: str = "docker") -> str:
+def get_container_name(user_id: UUID | str, project_id: UUID | str, mode: str = "docker") -> str:
     """
     Get container/pod name for a project's development environment.
 
@@ -72,7 +71,7 @@ def get_container_name(user_id: Union[UUID, str], project_id: Union[UUID, str], 
         return f"tesslate-dev-{user_str}-{project_str}"
 
 
-def get_short_container_name(user_id: Union[UUID, str], project_id: Union[UUID, str]) -> str:
+def get_short_container_name(user_id: UUID | str, project_id: UUID | str) -> str:
     """
     Get shortened container/pod name using first 8 chars of UUIDs.
 
@@ -95,7 +94,9 @@ def get_short_container_name(user_id: Union[UUID, str], project_id: Union[UUID, 
     return f"dev-{user_short}-{project_short}"
 
 
-def get_dev_hostname(user_id: Union[UUID, str], project_id: Union[UUID, str], base_domain: str = "localhost") -> str:
+def get_dev_hostname(
+    user_id: UUID | str, project_id: UUID | str, base_domain: str = "localhost"
+) -> str:
     """
     Get development server hostname/URL.
 
@@ -120,7 +121,9 @@ def get_dev_hostname(user_id: Union[UUID, str], project_id: Union[UUID, str], ba
     return f"{name_without_prefix}.{base_domain}"
 
 
-def get_kubectl_exec_prefix(user_id: Union[UUID, str], project_id: Union[UUID, str], namespace: str = "tesslate-user-environments") -> str:
+def get_kubectl_exec_prefix(
+    user_id: UUID | str, project_id: UUID | str, namespace: str = "tesslate-user-environments"
+) -> str:
     """
     Get kubectl exec command prefix for executing commands in user's pod.
 
@@ -140,7 +143,7 @@ def get_kubectl_exec_prefix(user_id: Union[UUID, str], project_id: Union[UUID, s
     return f"kubectl exec -n {namespace} {pod_name} --"
 
 
-def get_docker_exec_prefix(user_id: Union[UUID, str], project_id: Union[UUID, str]) -> str:
+def get_docker_exec_prefix(user_id: UUID | str, project_id: UUID | str) -> str:
     """
     Get docker exec command prefix for executing commands in user's container.
 
@@ -219,7 +222,7 @@ def parse_hostname(hostname: str) -> tuple[str, str]:
         ("550e8400-e29b-41d4-a716-446655440000", "7c9e6679-7425-40de-944b-e07fc1f90ae7")
     """
     # Extract subdomain (everything before first dot)
-    subdomain = hostname.split('.')[0]
+    subdomain = hostname.split(".")[0]
 
     # Parse as container name
     return parse_container_name(f"dev-{subdomain}")

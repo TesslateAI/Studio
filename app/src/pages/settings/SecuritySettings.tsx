@@ -1,23 +1,50 @@
-import { Shield } from 'lucide-react';
+import { useState } from 'react';
+import { Shield, CheckCircle } from 'lucide-react';
 import { SettingsSection, SettingsGroup, SettingsItem } from '../../components/settings';
+import { PulsingGridSpinner } from '../../components/PulsingGridSpinner';
+import { useAuth } from '../../contexts/AuthContext';
+import { authApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 
 export default function SecuritySettings() {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+
+  const handleChangePassword = async () => {
+    if (!user?.email) return;
+
+    setLoading(true);
+    try {
+      await authApi.forgotPassword(user.email);
+      toast.success('Password reset link sent to your email');
+    } catch {
+      // Show success anyway to avoid leaking info
+      toast.success('Password reset link sent to your email');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <SettingsSection
-      title="Security"
-      description="Manage your account security settings"
-    >
+    <SettingsSection title="Security" description="Manage your account security settings">
       <SettingsGroup title="Password">
         <SettingsItem
           label="Change password"
-          description="Update your account password"
+          description="We'll send a password reset link to your email"
           control={
             <button
-              onClick={() => toast('Password change coming soon!')}
-              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm font-medium text-[var(--text)] hover:bg-white/10 transition-colors min-h-[44px]"
+              onClick={handleChangePassword}
+              disabled={loading}
+              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm font-medium text-[var(--text)] hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[44px]"
             >
-              Change
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <PulsingGridSpinner size={14} />
+                  <span>Sending...</span>
+                </div>
+              ) : (
+                'Change'
+              )}
             </button>
           }
         />
@@ -25,15 +52,13 @@ export default function SecuritySettings() {
 
       <SettingsGroup title="Two-factor authentication">
         <SettingsItem
-          label="Enable 2FA"
-          description="Add an extra layer of security to your account"
+          label="Email verification is active"
+          description="A 6-digit verification code is sent to your email on every email/password login"
           control={
-            <button
-              onClick={() => toast('Two-factor authentication coming soon!')}
-              className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm font-medium text-[var(--text)] hover:bg-white/10 transition-colors min-h-[44px]"
-            >
-              Set up
-            </button>
+            <span className="flex items-center gap-1.5 text-green-400 text-sm font-medium">
+              <CheckCircle size={16} />
+              Active
+            </span>
           }
         />
       </SettingsGroup>
@@ -58,10 +83,10 @@ export default function SecuritySettings() {
         <div className="flex items-start gap-3">
           <Shield size={20} className="text-[var(--text)]/60 mt-0.5 flex-shrink-0" />
           <div className="text-sm text-[var(--text)]/60">
-            <p className="font-medium mb-1">Security features are coming soon</p>
+            <p className="font-medium mb-1">Your account is protected</p>
             <p className="text-xs">
-              We're working on additional security features including password management,
-              two-factor authentication, and session management.
+              A verification code is sent to your email each time you sign in with email and
+              password. OAuth logins (Google, GitHub) are not affected.
             </p>
           </div>
         </div>

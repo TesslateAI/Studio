@@ -9,11 +9,12 @@ class Settings(BaseSettings):
 
     # Database - PostgreSQL required
     database_url: str
+    database_ssl: bool = False  # Set to True for RDS connections
 
     # LiteLLM Configuration (for per-user API keys and usage tracking)
     litellm_api_base: str = ""
     litellm_master_key: str = ""
-    litellm_default_models: str = "qwen-3-235b-a22b-thinking-2507"  # Comma-separated list
+    litellm_default_models: str = "claude-sonnet-4.6"  # Comma-separated list
     litellm_team_id: str = "default"  # Team/access group for users
     litellm_email_domain: str = "localhost"  # Domain for internal emails
     litellm_initial_budget: float = 10.0  # Initial budget per user in USD
@@ -338,6 +339,31 @@ class Settings(BaseSettings):
     # Kubernetes Namespace Configuration
     k8s_default_namespace: str = "tesslate"
     k8s_user_environments_namespace: str = "tesslate-user-environments"
+
+    # ==========================================================================
+    # SMTP Configuration (for 2FA email codes)
+    # ==========================================================================
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_sender_email: str = ""
+
+    # ==========================================================================
+    # Two-Factor Authentication
+    # ==========================================================================
+    two_fa_enabled: bool = False  # Set to True to enable email 2FA for logins
+    two_fa_code_length: int = 6
+    two_fa_code_expiry_seconds: int = 600  # 10 minutes
+    two_fa_max_attempts: int = 5
+    two_fa_temp_token_expiry_seconds: int = 600  # 10 minutes
+
+    # ==========================================================================
+    # Template Export Configuration
+    # ==========================================================================
+    template_storage_path: str = "/templates"
+    template_max_size_mb: int = 100
 
     # ==========================================================================
     # Container Cleanup Configuration

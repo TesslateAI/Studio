@@ -4,12 +4,14 @@ Custom authentication routes for Tesslate Studio.
 Note: Register, login, and token management are handled by fastapi-users in main.py
 This file only contains custom endpoints like pod access verification.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
-from sqlalchemy.ext.asyncio import AsyncSession
+
 import logging
 
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ..database import get_db
-from ..models import User, PodAccessLog
+from ..models import PodAccessLog, User
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -20,7 +22,7 @@ router = APIRouter()
 async def verify_dev_environment_access(
     request: Request,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Verify user access to development environment.
@@ -48,7 +50,9 @@ async def verify_dev_environment_access(
     original_uri = request.headers.get("X-Original-URI", request.url.path)
     expected_user_id_str = request.headers.get("X-Expected-User-ID", "")
     request_host = request.headers.get("X-Forwarded-Host", request.headers.get("Host", ""))
-    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+    ip_address = request.headers.get(
+        "X-Forwarded-For", request.client.host if request.client else "unknown"
+    )
     user_agent = request.headers.get("User-Agent", "")
 
     # Extract project_id from hostname if available
@@ -60,12 +64,14 @@ async def verify_dev_environment_access(
     try:
         # Extract subdomain from hostname
         # e.g., "ff-9en0cx.localhost" -> "ff-9en0cx"
-        subdomain = request_host.split('.')[0] if '.' in request_host else request_host
+        subdomain = request_host.split(".")[0] if "." in request_host else request_host
 
         # Try parsing as K8s format first
         try:
-            from ..utils.resource_naming import parse_hostname
             from uuid import UUID
+
+            from ..utils.resource_naming import parse_hostname
+
             _, project_id_str = parse_hostname(request_host)
             project_id = UUID(project_id_str)
         except (ValueError, IndexError, Exception):
@@ -74,7 +80,6 @@ async def verify_dev_environment_access(
     except Exception as e:
         logger.debug(f"Could not extract project info from hostname: {e}")
 
-    success = False
     failure_reason = None
     expected_user_id = None
 
@@ -82,6 +87,7 @@ async def verify_dev_environment_access(
         # MODE 1: NGINX Ingress (Kubernetes) - X-Expected-User-ID header present
         if expected_user_id_str:
             from uuid import UUID
+
             expected_user_id = UUID(expected_user_id_str)
 
             # Verify user matches expected user
@@ -93,19 +99,17 @@ async def verify_dev_environment_access(
                     f"URI: {original_uri}, Host: {request_host}, IP: {ip_address}"
                 )
                 raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Access denied - user mismatch"
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Access denied - user mismatch"
                 )
 
         # MODE 2: Traefik forwardAuth (Docker) - Look up project by slug
         elif project_slug:
             from sqlalchemy import select
+
             from ..models import Project
 
             # Look up project by slug
-            result = await db.execute(
-                select(Project).where(Project.slug == project_slug)
-            )
+            result = await db.execute(select(Project).where(Project.slug == project_slug))
             project = result.scalar_one_or_none()
 
             if not project:
@@ -116,8 +120,7 @@ async def verify_dev_environment_access(
                     f"Host: {request_host}, IP: {ip_address}"
                 )
                 raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Project not found"
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Project not found"
                 )
 
             # Verify current user owns this project
@@ -130,7 +133,7 @@ async def verify_dev_environment_access(
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Access denied - you do not own this project"
+                    detail="Access denied - you do not own this project",
                 )
 
             # Set expected_user_id for audit logging
@@ -139,7 +142,9 @@ async def verify_dev_environment_access(
 
         # Neither mode available
         else:
-            failure_reason = "Missing X-Expected-User-ID header and could not extract project from hostname"
+            failure_reason = (
+                "Missing X-Expected-User-ID header and could not extract project from hostname"
+            )
             logger.warning(f"[SECURITY] {failure_reason}. URI: {original_uri}, IP: {ip_address}")
 
             # Log failed attempt to database
@@ -152,18 +157,17 @@ async def verify_dev_environment_access(
                 request_host=request_host,
                 ip_address=ip_address,
                 user_agent=user_agent,
-                failure_reason=failure_reason
+                failure_reason=failure_reason,
             )
             db.add(access_log)
             await db.commit()
 
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid request - missing user verification data"
+                detail="Invalid request - missing user verification data",
             )
 
         # Access granted - log successful verification
-        success = True
 
         logger.info(
             f"[AUDIT] Verified access for user {current_user.id} ({current_user.username}) "
@@ -180,7 +184,7 @@ async def verify_dev_environment_access(
             request_host=request_host,
             ip_address=ip_address,
             user_agent=user_agent,
-            failure_reason=None
+            failure_reason=None,
         )
         db.add(access_log)
         await db.commit()
@@ -200,6 +204,7 @@ async def verify_dev_environment_access(
         # Log error to database
         try:
             from uuid import UUID
+
             access_log = PodAccessLog(
                 user_id=current_user.id,
                 expected_user_id=UUID(expected_user_id_str) if expected_user_id_str else None,
@@ -209,7 +214,7 @@ async def verify_dev_environment_access(
                 request_host=request_host,
                 ip_address=ip_address,
                 user_agent=user_agent,
-                failure_reason=failure_reason
+                failure_reason=failure_reason,
             )
             db.add(access_log)
             await db.commit()
@@ -217,6 +222,5 @@ async def verify_dev_environment_access(
             logger.error(f"[ERROR] Failed to log access attempt to database: {db_error}")
 
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication verification failed"
-        )
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication verification failed"
+        ) from e

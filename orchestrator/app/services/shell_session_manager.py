@@ -1,4 +1,3 @@
-from uuid import UUID
 """
 Shell Session Manager
 
@@ -8,15 +7,16 @@ Designed for AI agent programmatic access.
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from typing import Any
+from uuid import UUID
 
-from ..models import ShellSession, User, Project
-from ..services.pty_broker import get_pty_broker, PTYSession
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ..config import get_settings
-from ..utils.resource_naming import get_container_name
+from ..models import Project, ShellSession
+from ..services.pty_broker import PTYSession, get_pty_broker
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -34,7 +34,7 @@ class ShellSessionManager:
 
     def __init__(self):
         self.pty_broker = get_pty_broker()
-        self.active_sessions: Dict[str, PTYSession] = {}
+        self.active_sessions: dict[str, PTYSession] = {}
         # Track sessions that need stats updates (non-blocking batching)
         self.pending_stats_updates: set = set()
         self._stats_update_task = None
@@ -45,8 +45,9 @@ class ShellSessionManager:
         project_id: str,
         db: AsyncSession,
         command: str = "/bin/sh",
-        container_name: Optional[str] = None,  # For multi-container Docker: which container to connect to
-    ) -> Dict[str, Any]:
+        container_name: str
+        | None = None,  # For multi-container Docker: which container to connect to
+    ) -> dict[str, Any]:
         """
         Create a new shell session with validation and resource limits.
 
@@ -64,16 +65,12 @@ class ShellSessionManager:
 
         # 1. Validate user owns project
         result = await db.execute(
-            select(Project).where(
-                Project.id == project_id,
-                Project.owner_id == user_id
-            )
+            select(Project).where(Project.id == project_id, Project.owner_id == user_id)
         )
         project = result.scalar_one_or_none()
         if not project:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Project not found or access denied"
+                status_code=status.HTTP_403_FORBIDDEN, detail="Project not found or access denied"
             )
 
         # 2. Check user session limits
@@ -81,7 +78,7 @@ class ShellSessionManager:
         if len(user_sessions) >= self.MAX_SESSIONS_PER_USER:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Maximum {self.MAX_SESSIONS_PER_USER} concurrent sessions per user"
+                detail=f"Maximum {self.MAX_SESSIONS_PER_USER} concurrent sessions per user",
             )
 
         # 3. Check project session limits
@@ -89,11 +86,13 @@ class ShellSessionManager:
         if len(project_sessions) >= self.MAX_SESSIONS_PER_PROJECT:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Maximum {self.MAX_SESSIONS_PER_PROJECT} concurrent sessions per project"
+                detail=f"Maximum {self.MAX_SESSIONS_PER_PROJECT} concurrent sessions per project",
             )
 
         # 4. Get container/pod name based on deployment mode
-        logger.info(f"[SHELL] Resolving container name for project {project_id}, container_hint: {container_name}")
+        logger.info(
+            f"[SHELL] Resolving container name for project {project_id}, container_hint: {container_name}"
+        )
         resolved_container_name = await self._get_container_name(
             user_id, project_id, project.slug, container_name
         )
@@ -102,7 +101,7 @@ class ShellSessionManager:
         # 5. Verify container is running
         # IMPORTANT: Pass original container_name (not resolved) for K8s mode
         # because is_container_ready generates resource names from it internally
-        logger.info(f"[SHELL] Checking if container is running...")
+        logger.info("[SHELL] Checking if container is running...")
         is_running = await self._is_container_running(
             user_id, project_id, project.slug, container_name
         )
@@ -110,11 +109,11 @@ class ShellSessionManager:
         if not is_running:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Development environment is not running"
+                detail="Development environment is not running",
             )
 
         # 6. Create PTY session
-        logger.info(f"[SHELL] Creating PTY session via pty_broker.create_session()...")
+        logger.info("[SHELL] Creating PTY session via pty_broker.create_session()...")
         try:
             pty_session = await self.pty_broker.create_session(
                 user_id=user_id,
@@ -127,8 +126,8 @@ class ShellSessionManager:
             logger.error(f"[SHELL] Failed to create PTY session: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create shell session: {str(e)}"
-            )
+                detail=f"Failed to create shell session: {str(e)}",
+            ) from e
 
         # 7. Save to database
         db_session = ShellSession(
@@ -168,7 +167,7 @@ class ShellSessionManager:
         session_id: str,
         data: bytes,
         db: AsyncSession,
-        user_id: Optional[UUID] = None,
+        user_id: UUID | None = None,
     ) -> None:
         """
         Write data to PTY stdin.
@@ -186,14 +185,15 @@ class ShellSessionManager:
             # Try to recover session from PTY broker
             session = self.pty_broker.sessions.get(session_id)
             if session:
-                logger.warning(f"Session {session_id} found in broker but not in manager, recovering...")
+                logger.warning(
+                    f"Session {session_id} found in broker but not in manager, recovering..."
+                )
                 self.active_sessions[session_id] = session
             else:
                 # Check database for session info
                 result = await db.execute(
                     select(ShellSession).where(
-                        ShellSession.session_id == session_id,
-                        ShellSession.status == "active"
+                        ShellSession.session_id == session_id, ShellSession.status == "active"
                     )
                 )
                 db_session = result.scalar_one_or_none()
@@ -213,9 +213,7 @@ class ShellSessionManager:
                 f"User {user_id} attempted to access session {session_id} "
                 f"owned by user {session.user_id}"
             )
-            raise PermissionError(
-                f"Session {session_id} does not belong to the requesting user"
-            )
+            raise PermissionError(f"Session {session_id} does not belong to the requesting user")
 
         await self.pty_broker.write_to_pty(session_id, data)
 
@@ -227,8 +225,8 @@ class ShellSessionManager:
         self,
         session_id: str,
         db: AsyncSession,
-        user_id: Optional[UUID] = None,
-    ) -> Dict[str, Any]:
+        user_id: UUID | None = None,
+    ) -> dict[str, Any]:
         """
         Read new output from session since last read.
 
@@ -251,7 +249,9 @@ class ShellSessionManager:
             # Try to recover session from PTY broker
             session = self.pty_broker.sessions.get(session_id)
             if session:
-                logger.warning(f"Session {session_id} found in broker but not in manager, recovering...")
+                logger.warning(
+                    f"Session {session_id} found in broker but not in manager, recovering..."
+                )
                 self.active_sessions[session_id] = session
             else:
                 raise ValueError(
@@ -264,9 +264,7 @@ class ShellSessionManager:
                 f"User {user_id} attempted to access session {session_id} "
                 f"owned by user {session.user_id}"
             )
-            raise PermissionError(
-                f"Session {session_id} does not belong to the requesting user"
-            )
+            raise PermissionError(f"Session {session_id} does not belong to the requesting user")
 
         # Get new output
         new_data, is_eof = await session.read_new_output()
@@ -276,7 +274,7 @@ class ShellSessionManager:
         self.pending_stats_updates.add(session_id)
 
         return {
-            "output": base64.b64encode(new_data).decode('utf-8'),
+            "output": base64.b64encode(new_data).decode("utf-8"),
             "bytes": len(new_data),
             "is_eof": is_eof,
         }
@@ -291,9 +289,7 @@ class ShellSessionManager:
         await self.pty_broker.close_session(session_id)
 
         # Update database
-        result = await db.execute(
-            select(ShellSession).where(ShellSession.session_id == session_id)
-        )
+        result = await db.execute(select(ShellSession).where(ShellSession.session_id == session_id))
         db_session = result.scalar_one_or_none()
         if db_session:
             db_session.status = "closed"
@@ -309,14 +305,13 @@ class ShellSessionManager:
     async def list_sessions(
         self,
         user_id: UUID,
-        project_id: Optional[UUID],
+        project_id: UUID | None,
         db: AsyncSession,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List all active sessions for a user/project."""
 
         query = select(ShellSession).where(
-            ShellSession.user_id == user_id,
-            ShellSession.status == "active"
+            ShellSession.user_id == user_id, ShellSession.status == "active"
         )
 
         if project_id:
@@ -350,8 +345,7 @@ class ShellSessionManager:
 
         result = await db.execute(
             select(ShellSession).where(
-                ShellSession.status == "active",
-                ShellSession.last_activity_at < cutoff_time
+                ShellSession.status == "active", ShellSession.last_activity_at < cutoff_time
             )
         )
         idle_sessions = result.scalars().all()
@@ -370,11 +364,7 @@ class ShellSessionManager:
     # Helper methods
 
     async def _get_container_name(
-        self,
-        user_id: UUID,
-        project_id: str,
-        project_slug: str,
-        container_name: Optional[str] = None
+        self, user_id: UUID, project_id: str, project_slug: str, container_name: str | None = None
     ) -> str:
         """
         Get container/pod name based on deployment mode.
@@ -389,6 +379,7 @@ class ShellSessionManager:
             The Docker container name or K8s pod name
         """
         from .orchestration import get_orchestrator, is_kubernetes_mode
+
         orchestrator = get_orchestrator()
 
         if is_kubernetes_mode():
@@ -397,11 +388,11 @@ class ShellSessionManager:
             if container_name:
                 # Sanitize container name same way as helpers.py does
                 safe_name = container_name.lower()
-                safe_name = safe_name.replace('_', '-').replace(' ', '-').replace('.', '-')
-                safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '-')
-                while '--' in safe_name:
-                    safe_name = safe_name.replace('--', '-')
-                safe_name = safe_name.strip('-')
+                safe_name = safe_name.replace("_", "-").replace(" ", "-").replace(".", "-")
+                safe_name = "".join(c for c in safe_name if c.isalnum() or c == "-")
+                while "--" in safe_name:
+                    safe_name = safe_name.replace("--", "-")
+                safe_name = safe_name.strip("-")
                 return f"dev-{safe_name}"
             else:
                 # No container specified - find first running deployment in namespace
@@ -411,15 +402,17 @@ class ShellSessionManager:
                     pods = await asyncio.to_thread(
                         orchestrator.k8s_client.core_v1.list_namespaced_pod,
                         namespace=namespace,
-                        label_selector="tesslate.io/component=dev-container"
+                        label_selector="tesslate.io/component=dev-container",
                     )
                     if pods.items:
                         # Get deployment name from first dev container pod
                         # Labels use tesslate.io/container-directory
-                        container_dir = pods.items[0].metadata.labels.get('tesslate.io/container-directory')
+                        container_dir = pods.items[0].metadata.labels.get(
+                            "tesslate.io/container-directory"
+                        )
                         if container_dir:
                             return f"dev-{container_dir}"
-                        return pods.items[0].metadata.labels.get('app', 'dev')
+                        return pods.items[0].metadata.labels.get("app", "dev")
                 except Exception as e:
                     logger.warning(f"Failed to list pods in namespace {namespace}: {e}")
                 return "dev"  # Fallback (shouldn't reach here normally)
@@ -429,34 +422,32 @@ class ShellSessionManager:
             if container_name:
                 # Sanitize the container name to match docker-compose naming
                 # Note: Must match sanitization in projects.py container creation
-                sanitized = container_name.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-                sanitized = ''.join(c for c in sanitized if c.isalnum() or c == '-')
-                sanitized = sanitized.strip('-')
+                sanitized = (
+                    container_name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
+                )
+                sanitized = "".join(c for c in sanitized if c.isalnum() or c == "-")
+                sanitized = sanitized.strip("-")
                 return f"{project_slug}-{sanitized}"
             else:
                 # Default to the first container in the project
                 # We'll look this up from the docker-compose file
                 status = await orchestrator.get_project_status(project_slug, project_id)
 
-                if status.get('containers'):
+                if status.get("containers"):
                     # Get the first running container, or first container if none running
-                    for service_name, info in status['containers'].items():
-                        if info.get('running'):
-                            return info.get('name', f"{project_slug}-{service_name}")
+                    for service_name, info in status["containers"].items():
+                        if info.get("running"):
+                            return info.get("name", f"{project_slug}-{service_name}")
                     # Fallback to first container
-                    first_service = next(iter(status['containers'].keys()))
-                    return status['containers'][first_service].get('name', f"{project_slug}-{first_service}")
+                    first_service = next(iter(status["containers"].keys()))
+                    return status["containers"][first_service].get(
+                        "name", f"{project_slug}-{first_service}"
+                    )
 
-                raise ValueError(
-                    "No containers found for project. Please start the project first."
-                )
+                raise ValueError("No containers found for project. Please start the project first.")
 
     async def _is_container_running(
-        self,
-        user_id: UUID,
-        project_id: str,
-        project_slug: str,
-        container_name: Optional[str] = None
+        self, user_id: UUID, project_id: str, project_slug: str, container_name: str | None = None
     ) -> bool:
         """
         Check if container/pod is running.
@@ -471,6 +462,7 @@ class ShellSessionManager:
             True if the container is running
         """
         from .orchestration import get_orchestrator, is_kubernetes_mode
+
         orchestrator = get_orchestrator()
 
         if is_kubernetes_mode():
@@ -480,10 +472,14 @@ class ShellSessionManager:
         else:
             # Docker multi-container mode
             status = await orchestrator.get_project_status(project_slug, project_id)
-            logger.info(f"[_is_container_running] project_slug={project_slug}, container_name={container_name}, status={status}")
+            logger.info(
+                f"[_is_container_running] project_slug={project_slug}, container_name={container_name}, status={status}"
+            )
 
-            if status.get('status') == 'not_found':
-                logger.warning(f"[_is_container_running] Project status not found for {project_slug}")
+            if status.get("status") == "not_found":
+                logger.warning(
+                    f"[_is_container_running] Project status not found for {project_slug}"
+                )
                 return False
 
             if container_name:
@@ -491,80 +487,76 @@ class ShellSessionManager:
                 # container_name could be:
                 # - Full docker name: "project-slug-next-js-15"
                 # - Service name: "next-js-15"
-                containers = status.get('containers', {})
-                logger.info(f"[_is_container_running] Looking for '{container_name}' in containers: {containers}")
+                containers = status.get("containers", {})
+                logger.info(
+                    f"[_is_container_running] Looking for '{container_name}' in containers: {containers}"
+                )
 
                 # First try: look up by 'name' field (matches full docker container name)
-                for service_name, info in containers.items():
-                    if info.get('name') == container_name:
-                        logger.info(f"[_is_container_running] Found by name field: running={info.get('running', False)}")
-                        return info.get('running', False)
+                for _service_name, info in containers.items():
+                    if info.get("name") == container_name:
+                        logger.info(
+                            f"[_is_container_running] Found by name field: running={info.get('running', False)}"
+                        )
+                        return info.get("running", False)
 
                 # Second try: extract service name if full name (project-slug-service)
                 if container_name.startswith(f"{project_slug}-"):
-                    service_name = container_name[len(project_slug)+1:]
+                    service_name = container_name[len(project_slug) + 1 :]
                     container_info = containers.get(service_name)
                     if container_info:
-                        logger.info(f"[_is_container_running] Found by extracted service name '{service_name}': running={container_info.get('running', False)}")
-                        return container_info.get('running', False)
+                        logger.info(
+                            f"[_is_container_running] Found by extracted service name '{service_name}': running={container_info.get('running', False)}"
+                        )
+                        return container_info.get("running", False)
 
                 # Third try: direct service name lookup
                 container_info = containers.get(container_name)
                 if container_info:
-                    logger.info(f"[_is_container_running] Found by direct lookup: running={container_info.get('running', False)}")
-                    return container_info.get('running', False)
+                    logger.info(
+                        f"[_is_container_running] Found by direct lookup: running={container_info.get('running', False)}"
+                    )
+                    return container_info.get("running", False)
 
-                logger.warning(f"[_is_container_running] Container '{container_name}' not found in containers dict")
+                logger.warning(
+                    f"[_is_container_running] Container '{container_name}' not found in containers dict"
+                )
                 return False
             else:
                 # Check if any container is running
-                for info in status.get('containers', {}).values():
-                    if info.get('running'):
-                        return True
-                return False
+                return any(info.get("running") for info in status.get("containers", {}).values())
 
     async def _get_user_active_sessions(
-        self,
-        user_id: UUID,
-        db: AsyncSession
-    ) -> List[ShellSession]:
+        self, user_id: UUID, db: AsyncSession
+    ) -> list[ShellSession]:
         """Get all active sessions for a user."""
         result = await db.execute(
             select(ShellSession).where(
-                ShellSession.user_id == user_id,
-                ShellSession.status == "active"
+                ShellSession.user_id == user_id, ShellSession.status == "active"
             )
         )
         return list(result.scalars().all())
 
     async def _get_project_active_sessions(
-        self,
-        project_id: str,
-        db: AsyncSession
-    ) -> List[ShellSession]:
+        self, project_id: str, db: AsyncSession
+    ) -> list[ShellSession]:
         """Get all active sessions for a project."""
         result = await db.execute(
             select(ShellSession).where(
-                ShellSession.project_id == project_id,
-                ShellSession.status == "active"
+                ShellSession.project_id == project_id, ShellSession.status == "active"
             )
         )
         return list(result.scalars().all())
 
     async def _update_session_stats(
-        self,
-        session_id: str,
-        db: AsyncSession,
-        read_count: int = 0
+        self, session_id: str, db: AsyncSession, read_count: int = 0
     ) -> None:
         """Update session statistics in database."""
         session = self.active_sessions.get(session_id)
         if not session:
             return
 
-        result = await db.execute(
-            select(ShellSession).where(ShellSession.session_id == session_id)
-        )
+        result = await db.execute(select(ShellSession).where(ShellSession.session_id == session_id))
         db_session = result.scalar_one_or_none()
         if db_session:
             db_session.bytes_read = session.bytes_read
@@ -622,6 +614,7 @@ class ShellSessionManager:
 
 # Singleton instance
 _shell_session_manager = None
+
 
 def get_shell_session_manager() -> ShellSessionManager:
     """Get singleton shell session manager."""

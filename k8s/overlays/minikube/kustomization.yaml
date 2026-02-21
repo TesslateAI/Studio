@@ -8,10 +8,13 @@ namespace: tesslate
 
 resources:
   - ../../base
+  # Ingress (managed by terraform on AWS, included here for minikube)
+  - ingress.yaml
   # Local secrets (MinIO deployed separately in minio-system namespace)
   - secrets/postgres-secret.yaml
   - secrets/s3-credentials.yaml
   - secrets/app-secrets.yaml
+  - frontend-config.yaml
   # Storage class
   - storage-class.yaml
 
@@ -36,5 +39,7 @@ images:
     newName: tesslate-devserver
     newTag: latest
 
-commonLabels:
-  environment: minikube
+labels:
+  - pairs:
+      environment: minikube
+    includeSelectors: true

@@ -82,22 +82,42 @@ output "s3_bucket_region" {
 # -----------------------------------------------------------------------------
 output "ecr_backend_repository_url" {
   description = "ECR repository URL for backend"
-  value       = aws_ecr_repository.backend.repository_url
+  value       = local.ecr_backend_url
 }
 
 output "ecr_frontend_repository_url" {
   description = "ECR repository URL for frontend"
-  value       = aws_ecr_repository.frontend.repository_url
+  value       = local.ecr_frontend_url
 }
 
 output "ecr_devserver_repository_url" {
   description = "ECR repository URL for devserver"
-  value       = aws_ecr_repository.devserver.repository_url
+  value       = local.ecr_devserver_url
 }
 
 output "ecr_registry_url" {
   description = "ECR registry URL (without repository name)"
-  value       = split("/", aws_ecr_repository.backend.repository_url)[0]
+  value       = local.ecr_registry_url
+}
+
+output "image_tag" {
+  description = "Image tag used for ECR images"
+  value       = local.image_tag
+}
+
+output "backend_image" {
+  description = "Full backend image reference (repo:tag)"
+  value       = "${local.ecr_backend_url}:${local.image_tag}"
+}
+
+output "frontend_image" {
+  description = "Full frontend image reference (repo:tag)"
+  value       = "${local.ecr_frontend_url}:${local.image_tag}"
+}
+
+output "devserver_image" {
+  description = "Full devserver image reference (repo:tag)"
+  value       = "${local.ecr_devserver_url}:${local.image_tag}"
 }
 
 # -----------------------------------------------------------------------------
@@ -123,6 +143,17 @@ output "cert_manager_role_arn" {
   value       = module.cert_manager_irsa.iam_role_arn
 }
 
+output "github_actions_access_key_id" {
+  description = "AWS access key ID for GitHub Actions (add as GitHub secret: AWS_ACCESS_KEY_ID)"
+  value       = try(aws_iam_access_key.github_actions[0].id, "")
+}
+
+output "github_actions_secret_access_key" {
+  description = "AWS secret access key for GitHub Actions (add as GitHub secret: AWS_SECRET_ACCESS_KEY)"
+  value       = try(aws_iam_access_key.github_actions[0].secret, "")
+  sensitive   = true
+}
+
 # -----------------------------------------------------------------------------
 # Database Outputs (if RDS is enabled)
 # -----------------------------------------------------------------------------
@@ -136,6 +167,34 @@ output "rds_database_name" {
   value       = var.create_rds ? aws_db_instance.tesslate[0].db_name : "tesslate"
 }
 
+output "rds_port" {
+  description = "RDS port"
+  value       = var.create_rds ? aws_db_instance.tesslate[0].port : 5432
+}
+
+output "rds_security_group_id" {
+  description = "RDS security group ID"
+  value       = var.create_rds ? aws_security_group.rds[0].id : "N/A"
+}
+
+# -----------------------------------------------------------------------------
+# LiteLLM Outputs
+# -----------------------------------------------------------------------------
+output "litellm_rds_endpoint" {
+  description = "LiteLLM RDS endpoint"
+  value       = var.litellm_create_rds ? aws_db_instance.litellm[0].endpoint : "Using K8s-managed PostgreSQL"
+}
+
+output "litellm_internal_url" {
+  description = "LiteLLM internal service URL"
+  value       = "http://litellm-service.tesslate.svc.cluster.local:4000"
+}
+
+output "litellm_public_url" {
+  description = "LiteLLM public URL (if enabled)"
+  value       = var.litellm_public_access ? "https://litellm.${var.domain_name}" : "Not exposed publicly"
+}
+
 # -----------------------------------------------------------------------------
 # Useful Commands
 # -----------------------------------------------------------------------------
@@ -146,23 +205,23 @@ output "configure_kubectl_command" {
 
 output "ecr_login_command" {
   description = "Command to login to ECR"
-  value       = "aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${split("/", aws_ecr_repository.backend.repository_url)[0]}"
+  value       = "aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${local.ecr_registry_url}"
 }
 
 output "build_and_push_commands" {
   description = "Commands to build and push Docker images"
   value = <<-EOT
     # Backend
-    docker build -t ${aws_ecr_repository.backend.repository_url}:latest -f orchestrator/Dockerfile orchestrator/
-    docker push ${aws_ecr_repository.backend.repository_url}:latest
+    docker build -t ${local.ecr_backend_url}:${local.image_tag} -f orchestrator/Dockerfile orchestrator/
+    docker push ${local.ecr_backend_url}:${local.image_tag}
 
     # Frontend
-    docker build -t ${aws_ecr_repository.frontend.repository_url}:latest -f app/Dockerfile.prod app/
-    docker push ${aws_ecr_repository.frontend.repository_url}:latest
+    docker build -t ${local.ecr_frontend_url}:${local.image_tag} -f app/Dockerfile.prod app/
+    docker push ${local.ecr_frontend_url}:${local.image_tag}
 
     # Devserver
-    docker build -t ${aws_ecr_repository.devserver.repository_url}:latest -f orchestrator/Dockerfile.devserver orchestrator/
-    docker push ${aws_ecr_repository.devserver.repository_url}:latest
+    docker build -t ${local.ecr_devserver_url}:${local.image_tag} -f orchestrator/Dockerfile.devserver orchestrator/
+    docker push ${local.ecr_devserver_url}:${local.image_tag}
   EOT
 }
 

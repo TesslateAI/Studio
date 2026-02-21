@@ -7,7 +7,6 @@ Tracks which tool types have been approved with "Allow All" for each chat sessio
 
 import asyncio
 import logging
-from typing import Dict, Set, Optional
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
@@ -16,13 +15,13 @@ logger = logging.getLogger(__name__)
 class ApprovalRequest:
     """Represents a pending tool approval request."""
 
-    def __init__(self, approval_id: str, tool_name: str, parameters: Dict, session_id: str):
+    def __init__(self, approval_id: str, tool_name: str, parameters: dict, session_id: str):
         self.approval_id = approval_id
         self.tool_name = tool_name
         self.parameters = parameters
         self.session_id = session_id
         self.event = asyncio.Event()
-        self.response: Optional[str] = None  # 'allow_once', 'allow_all', 'stop'
+        self.response: str | None = None  # 'allow_once', 'allow_all', 'stop'
 
 
 class ApprovalManager:
@@ -37,10 +36,10 @@ class ApprovalManager:
 
     def __init__(self):
         # session_id -> set of approved tool names
-        self._approved_tools: Dict[str, Set[str]] = {}
+        self._approved_tools: dict[str, set[str]] = {}
 
         # approval_id -> ApprovalRequest
-        self._pending_approvals: Dict[str, ApprovalRequest] = {}
+        self._pending_approvals: dict[str, ApprovalRequest] = {}
 
         logger.info("[ApprovalManager] Initialized")
 
@@ -89,10 +88,7 @@ class ApprovalManager:
             logger.info(f"[ApprovalManager] Cleared approvals for session {session_id}")
 
     async def request_approval(
-        self,
-        tool_name: str,
-        parameters: Dict,
-        session_id: str
+        self, tool_name: str, parameters: dict, session_id: str
     ) -> tuple[str, str]:
         """
         Request user approval for a tool execution.
@@ -137,7 +133,7 @@ class ApprovalManager:
         request.response = response
 
         # If "Allow All", mark this tool as approved for the session
-        if response == 'allow_all':
+        if response == "allow_all":
             self.approve_tool_for_session(request.session_id, request.tool_name)
 
         # Signal the waiting coroutine
@@ -148,13 +144,13 @@ class ApprovalManager:
         # Clean up
         del self._pending_approvals[approval_id]
 
-    def get_pending_request(self, approval_id: str) -> Optional[ApprovalRequest]:
+    def get_pending_request(self, approval_id: str) -> ApprovalRequest | None:
         """Get a pending approval request by ID."""
         return self._pending_approvals.get(approval_id)
 
 
 # Global instance
-_approval_manager: Optional[ApprovalManager] = None
+_approval_manager: ApprovalManager | None = None
 
 
 def get_approval_manager() -> ApprovalManager:

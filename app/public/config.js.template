@@ -1,0 +1,7 @@
+// Runtime configuration injected by nginx at container startup
+// This file is processed by envsubst to replace ${VAR} with environment variables
+window._env_ = {
+  API_URL: "${VITE_API_URL}",
+  POSTHOG_KEY: "${VITE_PUBLIC_POSTHOG_KEY}",
+  POSTHOG_HOST: "${VITE_PUBLIC_POSTHOG_HOST}"
+};

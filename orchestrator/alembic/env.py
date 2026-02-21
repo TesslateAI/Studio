@@ -1,13 +1,12 @@
 import asyncio
-from logging.config import fileConfig
 import os
 import sys
+from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
-from alembic import context
 
 # Add parent directory to path so we can import app modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -17,9 +16,6 @@ from app.config import get_settings
 
 # Import Base and all models (this ensures all tables are registered)
 from app.database import Base
-from app import models  # This imports all models
-from app import models_kanban  # Import kanban models
-from app import models_auth  # Import auth models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

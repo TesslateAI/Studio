@@ -1,7 +1,7 @@
 """
 Git Provider Manager - Factory for creating provider instances.
 """
-from typing import Dict, Type, Optional, List
+
 import logging
 
 from .base import BaseGitProvider, GitProviderType
@@ -16,13 +16,11 @@ class GitProviderManager:
     Handles registration of provider classes and instantiation with credentials.
     """
 
-    _providers: Dict[GitProviderType, Type[BaseGitProvider]] = {}
+    _providers: dict[GitProviderType, type[BaseGitProvider]] = {}
 
     @classmethod
     def register_provider(
-        cls,
-        provider_type: GitProviderType,
-        provider_class: Type[BaseGitProvider]
+        cls, provider_type: GitProviderType, provider_class: type[BaseGitProvider]
     ) -> None:
         """
         Register a provider class for a given provider type.
@@ -35,10 +33,7 @@ class GitProviderManager:
         logger.debug(f"Registered git provider: {provider_type.value}")
 
     @classmethod
-    def get_provider_class(
-        cls,
-        provider_type: GitProviderType
-    ) -> Type[BaseGitProvider]:
+    def get_provider_class(cls, provider_type: GitProviderType) -> type[BaseGitProvider]:
         """
         Get the provider class (not instance) for static method access.
 
@@ -52,19 +47,14 @@ class GitProviderManager:
             ValueError: If provider type is not registered
         """
         if provider_type not in cls._providers:
-            available = ", ".join(p.value for p in cls._providers.keys())
+            available = ", ".join(p.value for p in cls._providers)
             raise ValueError(
-                f"Unknown provider: {provider_type.value}. "
-                f"Available providers: {available}"
+                f"Unknown provider: {provider_type.value}. Available providers: {available}"
             )
         return cls._providers[provider_type]
 
     @classmethod
-    def get_provider(
-        cls,
-        provider_type: GitProviderType,
-        access_token: str
-    ) -> BaseGitProvider:
+    def get_provider(cls, provider_type: GitProviderType, access_token: str) -> BaseGitProvider:
         """
         Get an initialized provider instance.
 
@@ -79,21 +69,16 @@ class GitProviderManager:
             ValueError: If provider type is not registered
         """
         if provider_type not in cls._providers:
-            available = ", ".join(p.value for p in cls._providers.keys())
+            available = ", ".join(p.value for p in cls._providers)
             raise ValueError(
-                f"Unknown provider: {provider_type.value}. "
-                f"Available providers: {available}"
+                f"Unknown provider: {provider_type.value}. Available providers: {available}"
             )
 
         provider_class = cls._providers[provider_type]
         return provider_class(access_token)
 
     @classmethod
-    def get_provider_by_name(
-        cls,
-        provider_name: str,
-        access_token: str
-    ) -> BaseGitProvider:
+    def get_provider_by_name(cls, provider_name: str, access_token: str) -> BaseGitProvider:
         """
         Get an initialized provider instance by name string.
 
@@ -112,9 +97,8 @@ class GitProviderManager:
         except ValueError:
             available = ", ".join(p.value for p in GitProviderType)
             raise ValueError(
-                f"Invalid provider name: {provider_name}. "
-                f"Valid providers: {available}"
-            )
+                f"Invalid provider name: {provider_name}. Valid providers: {available}"
+            ) from None
 
         return cls.get_provider(provider_type, access_token)
 
@@ -132,7 +116,7 @@ class GitProviderManager:
         return provider_type in cls._providers
 
     @classmethod
-    def list_available_providers(cls) -> List[Dict[str, str]]:
+    def list_available_providers(cls) -> list[dict[str, str]]:
         """
         List all available providers with their metadata.
 
@@ -143,33 +127,39 @@ class GitProviderManager:
 
         # GitHub
         if GitProviderType.GITHUB in cls._providers:
-            providers.append({
-                "name": "github",
-                "display_name": "GitHub",
-                "icon": "github-logo",
-                "oauth_scopes": "repo user:email",
-                "description": "Connect your GitHub account to import repositories"
-            })
+            providers.append(
+                {
+                    "name": "github",
+                    "display_name": "GitHub",
+                    "icon": "github-logo",
+                    "oauth_scopes": "repo user:email",
+                    "description": "Connect your GitHub account to import repositories",
+                }
+            )
 
         # GitLab
         if GitProviderType.GITLAB in cls._providers:
-            providers.append({
-                "name": "gitlab",
-                "display_name": "GitLab",
-                "icon": "gitlab-logo",
-                "oauth_scopes": "read_user read_repository read_api",
-                "description": "Connect your GitLab account to import repositories"
-            })
+            providers.append(
+                {
+                    "name": "gitlab",
+                    "display_name": "GitLab",
+                    "icon": "gitlab-logo",
+                    "oauth_scopes": "read_user read_repository read_api",
+                    "description": "Connect your GitLab account to import repositories",
+                }
+            )
 
         # Bitbucket
         if GitProviderType.BITBUCKET in cls._providers:
-            providers.append({
-                "name": "bitbucket",
-                "display_name": "Bitbucket",
-                "icon": "bitbucket-logo",
-                "oauth_scopes": "repository account",
-                "description": "Connect your Bitbucket account to import repositories"
-            })
+            providers.append(
+                {
+                    "name": "bitbucket",
+                    "display_name": "Bitbucket",
+                    "icon": "bitbucket-logo",
+                    "oauth_scopes": "repository account",
+                    "description": "Connect your Bitbucket account to import repositories",
+                }
+            )
 
         return providers
 
@@ -182,18 +172,21 @@ def _register_providers() -> None:
     """
     try:
         from .providers.github import GitHubProvider
+
         GitProviderManager.register_provider(GitProviderType.GITHUB, GitHubProvider)
     except ImportError as e:
         logger.warning(f"Failed to register GitHub provider: {e}")
 
     try:
         from .providers.gitlab import GitLabProvider
+
         GitProviderManager.register_provider(GitProviderType.GITLAB, GitLabProvider)
     except ImportError as e:
         logger.warning(f"Failed to register GitLab provider: {e}")
 
     try:
         from .providers.bitbucket import BitbucketProvider
+
         GitProviderManager.register_provider(GitProviderType.BITBUCKET, BitbucketProvider)
     except ImportError as e:
         logger.warning(f"Failed to register Bitbucket provider: {e}")
@@ -204,7 +197,7 @@ _register_providers()
 
 
 # Global instance
-_git_provider_manager: Optional[GitProviderManager] = None
+_git_provider_manager: GitProviderManager | None = None
 
 
 def get_git_provider_manager() -> GitProviderManager:

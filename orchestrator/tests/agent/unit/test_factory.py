@@ -33,6 +33,7 @@ class TestAgentFactory:
         model.agent_type = "StreamAgent"
         model.system_prompt = "You are a helpful assistant."
         model.tools = None
+        model.tool_configs = None
         return model
 
     @pytest.fixture
@@ -44,6 +45,7 @@ class TestAgentFactory:
         model.agent_type = "IterativeAgent"
         model.system_prompt = "You are a tool-using assistant."
         model.tools = ["read_file", "write_file", "bash_exec"]
+        model.tool_configs = None
         return model
 
     @pytest.mark.asyncio

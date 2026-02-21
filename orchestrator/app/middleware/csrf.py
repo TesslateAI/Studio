@@ -13,13 +13,14 @@ Exempt Routes:
 - Public auth endpoints (login, register, OAuth callbacks)
 - Bearer token authenticated requests (CSRF not needed for stateless auth)
 """
-import secrets
-from typing import Callable
 
-from fastapi import Request, Response, HTTPException, status
+import secrets
+from collections.abc import Callable
+
+from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from starlette.middleware.base import BaseHTTPMiddleware
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from ..config import get_settings
 
@@ -40,6 +41,7 @@ csrf_serializer = URLSafeTimedSerializer(CSRF_SECRET, salt="csrf")
 # ============================================================================
 # CSRF Token Functions
 # ============================================================================
+
 
 def generate_csrf_token() -> str:
     """
@@ -73,6 +75,7 @@ def validate_csrf_token(token: str, max_age: int = CSRF_TOKEN_MAX_AGE) -> bool:
 # CSRF Middleware
 # ============================================================================
 
+
 class CSRFProtectionMiddleware(BaseHTTPMiddleware):
     """
     Middleware to protect against CSRF attacks.
@@ -88,10 +91,14 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         "/api/auth/login",
         "/api/auth/jwt/login",
         "/api/auth/cookie/login",
+        "/api/auth/jwt/logout",
+        "/api/auth/cookie/logout",
         "/api/auth/refresh",
         "/api/auth/csrf",  # CSRF token endpoint itself
         "/api/auth/google/callback",
         "/api/auth/github/callback",
+        "/api/auth/2fa/verify",  # Uses temp_token, not cookie auth
+        "/api/auth/2fa/resend",  # Uses temp_token, not cookie auth
         "/api/track-landing",  # Referral tracking endpoint
         "/api/webhooks/stripe",  # Stripe webhooks need to bypass CSRF
         "/docs",
@@ -147,7 +154,9 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         if not validate_csrf_token(csrf_cookie):
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "CSRF token invalid or expired. Please refresh the page and try again."},
+                content={
+                    "detail": "CSRF token invalid or expired. Please refresh the page and try again."
+                },
             )
 
         # CSRF validation passed, proceed with request
@@ -158,6 +167,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
 # ============================================================================
 # CSRF Token Endpoint
 # ============================================================================
+
 
 def get_csrf_token_response() -> JSONResponse:
     """

@@ -126,8 +126,9 @@ export default function Dashboard() {
           setIsCreating(false);
 
           // Navigate to builder with container if available
-          if (result?.container_id) {
-            navigate(`/project/${project.slug}/builder?container=${result.container_id}`);
+          const taskResult = result?.result as { container_id?: string } | undefined;
+          if (taskResult?.container_id) {
+            navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
           } else {
             // Fallback to builder without container param
             navigate(`/project/${project.slug}/builder`);
@@ -544,8 +545,36 @@ export default function Dashboard() {
             );
 
             const project = response.project;
-            toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
-            navigate(`/project/${project.slug}/builder`);
+            const taskId = response.task_id;
+
+            // Poll for task completion to get container_id (same pattern as base imports)
+            if (taskId) {
+              toast.loading('Setting up project...', { id: creatingToast });
+              try {
+                const result = await tasksApi.pollUntilComplete(taskId);
+                toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
+                setShowImportDialog(false);
+                setIsCreating(false);
+
+                // Navigate to builder with container if available
+                const taskResult = result?.result as { container_id?: string } | undefined;
+                if (taskResult?.container_id) {
+                  navigate(`/project/${project.slug}/builder?container=${taskResult.container_id}`);
+                } else {
+                  navigate(`/project/${project.slug}/builder`);
+                }
+              } catch (taskError) {
+                console.error('Project import task failed:', taskError);
+                toast.error('Project created but import setup failed', { id: creatingToast });
+                setIsCreating(false);
+                navigate(`/project/${project.slug}`);
+              }
+            } else {
+              toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
+              setShowImportDialog(false);
+              setIsCreating(false);
+              navigate(`/project/${project.slug}/builder`);
+            }
           } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };
             const detail = err?.response?.data?.detail;

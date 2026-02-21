@@ -26,16 +26,16 @@ Usage:
     export CLEANUP_ENABLED=false
     pytest orchestrator/tests/k8s/test_container_startup_timing.py -v -s
 """
+
 import asyncio
-import os
 import time
-from datetime import datetime, timezone
-from typing import Optional, Tuple, Dict, Any
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
 
-from .timing_observer import StartupTimingObserver, HttpProbeResult
+from .timing_observer import HttpProbeResult
 
 
 class TestContainerStartupTiming:
@@ -45,21 +45,17 @@ class TestContainerStartupTiming:
     def setup(self, timing_observer):
         """Initialize test state."""
         self.observer = timing_observer
-        self.auth_token: Optional[str] = None
-        self.user_id: Optional[str] = None
-        self.project_slug: Optional[str] = None
-        self.project_id: Optional[str] = None
-        self.container_id: Optional[str] = None
-        self.container_url: Optional[str] = None
-        self.base_url: Optional[str] = None
+        self.auth_token: str | None = None
+        self.user_id: str | None = None
+        self.project_slug: str | None = None
+        self.project_id: str | None = None
+        self.container_id: str | None = None
+        self.container_url: str | None = None
+        self.base_url: str | None = None
 
     async def _register_or_login_user(
-        self,
-        client: httpx.AsyncClient,
-        base_url: str,
-        email: str,
-        password: str
-    ) -> Tuple[str, str]:
+        self, client: httpx.AsyncClient, base_url: str, email: str, password: str
+    ) -> tuple[str, str]:
         """Register a new user or login if already exists."""
         self.observer.record("auth_start")
 
@@ -71,7 +67,7 @@ class TestContainerStartupTiming:
                     "email": email,
                     "password": password,
                     "name": "Timing Test User",
-                }
+                },
             )
 
             if register_response.status_code == 201:
@@ -88,11 +84,13 @@ class TestContainerStartupTiming:
             data={
                 "username": email,
                 "password": password,
-            }
+            },
         )
 
         if login_response.status_code != 200:
-            raise RuntimeError(f"Login failed: {login_response.status_code} - {login_response.text}")
+            raise RuntimeError(
+                f"Login failed: {login_response.status_code} - {login_response.text}"
+            )
 
         token_data = login_response.json()
         token = token_data["access_token"]
@@ -101,8 +99,7 @@ class TestContainerStartupTiming:
 
         # Get user info
         me_response = await client.get(
-            f"{base_url}/api/users/me",
-            headers={"Authorization": f"Bearer {token}"}
+            f"{base_url}/api/users/me", headers={"Authorization": f"Bearer {token}"}
         )
 
         if me_response.status_code != 200:
@@ -114,16 +111,12 @@ class TestContainerStartupTiming:
         return token, user_id
 
     async def _create_project(
-        self,
-        client: httpx.AsyncClient,
-        base_url: str,
-        token: str,
-        base_id: str
-    ) -> Tuple[str, str]:
+        self, client: httpx.AsyncClient, base_url: str, token: str, base_id: str
+    ) -> tuple[str, str]:
         """Create a new project from a marketplace base."""
         self.observer.record("project_creation_start")
 
-        project_name = f"Timing Test {datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        project_name = f"Timing Test {datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
 
         response = await client.post(
             f"{base_url}/api/projects/",
@@ -132,8 +125,8 @@ class TestContainerStartupTiming:
                 "name": project_name,
                 "description": "Container startup timing test project",
                 "source_type": "base",
-                "base_id": base_id  # Create from marketplace base
-            }
+                "base_id": base_id,  # Create from marketplace base
+            },
         )
 
         if response.status_code not in (200, 201, 202):
@@ -144,10 +137,7 @@ class TestContainerStartupTiming:
         project_id = data["project"]["id"]
         task_id = data.get("task_id")
 
-        self.observer.record("project_created_in_db", {
-            "slug": project_slug,
-            "task_id": task_id
-        })
+        self.observer.record("project_created_in_db", {"slug": project_slug, "task_id": task_id})
 
         # Poll task status until complete
         if task_id:
@@ -158,19 +148,14 @@ class TestContainerStartupTiming:
         return project_slug, project_id
 
     async def _get_nextjs_base_id(
-        self,
-        client: httpx.AsyncClient,
-        base_url: str,
-        token: str,
-        base_slug: str
+        self, client: httpx.AsyncClient, base_url: str, token: str, base_slug: str
     ) -> str:
         """Get the Next.js 15 base ID from marketplace."""
         self.observer.record("marketplace_lookup_start")
 
         # Get all bases
         response = await client.get(
-            f"{base_url}/api/marketplace/bases",
-            headers={"Authorization": f"Bearer {token}"}
+            f"{base_url}/api/marketplace/bases", headers={"Authorization": f"Bearer {token}"}
         )
 
         if response.status_code != 200:
@@ -196,12 +181,14 @@ class TestContainerStartupTiming:
 
         if not nextjs_base:
             available_slugs = [b.get("slug") for b in bases[:10]]
-            raise RuntimeError(f"Next.js base '{base_slug}' not found. Available: {available_slugs}")
+            raise RuntimeError(
+                f"Next.js base '{base_slug}' not found. Available: {available_slugs}"
+            )
 
-        self.observer.record("marketplace_lookup_complete", {
-            "base_slug": nextjs_base["slug"],
-            "base_id": nextjs_base["id"]
-        })
+        self.observer.record(
+            "marketplace_lookup_complete",
+            {"base_slug": nextjs_base["slug"], "base_id": nextjs_base["id"]},
+        )
 
         return nextjs_base["id"]
 
@@ -212,7 +199,7 @@ class TestContainerStartupTiming:
         token: str,
         project_slug: str,
         project_id: str,
-        base_id: str
+        base_id: str,
     ) -> str:
         """Add a Next.js container to the project."""
         self.observer.record("container_add_start")
@@ -226,8 +213,8 @@ class TestContainerStartupTiming:
                 "base_id": base_id,
                 "container_type": "base",
                 "position_x": 100,
-                "position_y": 100
-            }
+                "position_y": 100,
+            },
         )
 
         if response.status_code not in (200, 201, 202):
@@ -237,10 +224,9 @@ class TestContainerStartupTiming:
         container_id = data["container"]["id"]
         task_id = data.get("task_id")
 
-        self.observer.record("container_added_to_db", {
-            "container_id": container_id,
-            "task_id": task_id
-        })
+        self.observer.record(
+            "container_added_to_db", {"container_id": container_id, "task_id": task_id}
+        )
 
         # Wait for file initialization task
         if task_id:
@@ -256,14 +242,14 @@ class TestContainerStartupTiming:
         base_url: str,
         token: str,
         project_slug: str,
-        container_id: str
+        container_id: str,
     ) -> str:
         """Start the container and return its URL."""
         self.observer.record("container_start_request")
 
         response = await client.post(
             f"{base_url}/api/projects/{project_slug}/containers/{container_id}/start",
-            headers={"Authorization": f"Bearer {token}"}
+            headers={"Authorization": f"Bearer {token}"},
         )
 
         if response.status_code != 202:
@@ -275,7 +261,9 @@ class TestContainerStartupTiming:
         self.observer.record("container_start_task_created", {"task_id": task_id})
 
         # Wait for container startup with detailed phase tracking and get task result
-        task_result = await self._wait_for_task_with_phases(client, base_url, token, task_id, "container_startup")
+        task_result = await self._wait_for_task_with_phases(
+            client, base_url, token, task_id, "container_startup"
+        )
 
         self.observer.record("container_k8s_ready")
 
@@ -293,7 +281,7 @@ class TestContainerStartupTiming:
         if not container_url:
             status_response = await client.get(
                 f"{base_url}/api/projects/{project_slug}/containers/{container_id}",
-                headers={"Authorization": f"Bearer {token}"}
+                headers={"Authorization": f"Bearer {token}"},
             )
 
             if status_response.status_code == 200:
@@ -302,11 +290,22 @@ class TestContainerStartupTiming:
 
                 # Try to construct URL from directory or name
                 if not container_url:
-                    container_dir = container_data.get("directory") or container_data.get("directory_name") or container_data.get("name")
+                    container_dir = (
+                        container_data.get("directory")
+                        or container_data.get("directory_name")
+                        or container_data.get("name")
+                    )
                     if container_dir:
                         # Normalize directory name for URL
-                        container_dir = container_dir.lower().replace(' ', '-').replace('_', '-').replace('.', '-')
-                        container_url = f"https://{container_dir}.{project_slug}.studio.your-domain.com"
+                        container_dir = (
+                            container_dir.lower()
+                            .replace(" ", "-")
+                            .replace("_", "-")
+                            .replace(".", "-")
+                        )
+                        container_url = (
+                            f"https://{container_dir}.{project_slug}.studio.your-domain.com"
+                        )
 
         # Final fallback: use container name
         if not container_url:
@@ -323,7 +322,7 @@ class TestContainerStartupTiming:
         token: str,
         task_id: str,
         phase_prefix: str,
-        timeout: int = 600
+        timeout: int = 600,
     ):
         """Wait for a task to complete, recording progress."""
         start = time.time()
@@ -332,7 +331,7 @@ class TestContainerStartupTiming:
         while time.time() - start < timeout:
             response = await client.get(
                 f"{base_url}/api/tasks/{task_id}/status",
-                headers={"Authorization": f"Bearer {token}"}
+                headers={"Authorization": f"Bearer {token}"},
             )
 
             if response.status_code != 200:
@@ -345,10 +344,10 @@ class TestContainerStartupTiming:
 
             current_progress = progress.get("percentage", 0)
             if current_progress != last_progress and current_progress > 0:
-                self.observer.record(f"{phase_prefix}_progress_{current_progress}", {
-                    "message": progress.get("message", ""),
-                    "status": status
-                })
+                self.observer.record(
+                    f"{phase_prefix}_progress_{current_progress}",
+                    {"message": progress.get("message", ""), "status": status},
+                )
                 last_progress = current_progress
 
             if status == "completed":
@@ -368,8 +367,8 @@ class TestContainerStartupTiming:
         token: str,
         task_id: str,
         phase_prefix: str,
-        timeout: int = 600
-    ) -> Optional[Dict[str, Any]]:
+        timeout: int = 600,
+    ) -> dict[str, Any] | None:
         """Wait for container startup task, recording K8s phases from logs.
 
         Returns the task result dict on completion.
@@ -380,7 +379,7 @@ class TestContainerStartupTiming:
         while time.time() - start < timeout:
             response = await client.get(
                 f"{base_url}/api/tasks/{task_id}/status",
-                headers={"Authorization": f"Bearer {token}"}
+                headers={"Authorization": f"Bearer {token}"},
             )
 
             if response.status_code != 200:
@@ -397,10 +396,10 @@ class TestContainerStartupTiming:
             phase_message = progress.get("message", "")
             if phase_message and phase_message not in seen_phases:
                 seen_phases.add(phase_message)
-                self.observer.record(f"k8s_phase", {
-                    "message": phase_message,
-                    "progress_pct": progress.get("percentage", 0)
-                })
+                self.observer.record(
+                    "k8s_phase",
+                    {"message": phase_message, "progress_pct": progress.get("percentage", 0)},
+                )
 
             # Parse logs for timing info
             for log in logs:
@@ -450,10 +449,7 @@ class TestContainerStartupTiming:
         raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
 
     async def _poll_container_url(
-        self,
-        client: httpx.AsyncClient,
-        url: str,
-        timeout: int = 180
+        self, client: httpx.AsyncClient, url: str, timeout: int = 180
     ) -> bool:
         """Poll the container URL until it returns valid Next.js HTML."""
         if not url:
@@ -478,43 +474,46 @@ class TestContainerStartupTiming:
 
                 # Check for Next.js markers
                 is_html = "text/html" in content_type
-                has_next_markers = any([
-                    "__NEXT_DATA__" in body,
-                    "next/dist" in body,
-                    "_next/static" in body,
-                    "<!DOCTYPE html>" in body and "Next" in body,
-                    "next-size-adjust" in body
-                ])
+                has_next_markers = any(
+                    [
+                        "__NEXT_DATA__" in body,
+                        "next/dist" in body,
+                        "_next/static" in body,
+                        "<!DOCTYPE html>" in body and "Next" in body,
+                        "next-size-adjust" in body,
+                    ]
+                )
 
                 result = HttpProbeResult(
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     status_code=response.status_code,
                     response_time_ms=probe_time,
                     is_html=is_html,
-                    has_next_js_markers=has_next_markers
+                    has_next_js_markers=has_next_markers,
                 )
                 self.observer.record_http_probe(result)
 
                 if response.status_code == 200 and has_next_markers:
-                    self.observer.record("first_successful_html", {
-                        "poll_count": poll_count,
-                        "response_time_ms": probe_time
-                    })
+                    self.observer.record(
+                        "first_successful_html",
+                        {"poll_count": poll_count, "response_time_ms": probe_time},
+                    )
                     return True
 
                 # Log significant error responses (but not every poll)
-                if poll_count % 5 == 1:  # Log every 5th poll
-                    if response.status_code in (404, 502, 503):
-                        self.observer.record(f"http_{response.status_code}", {
-                            "poll_count": poll_count
-                        })
+                if poll_count % 5 == 1 and response.status_code in (
+                    404,
+                    502,
+                    503,
+                ):  # Log every 5th poll
+                    self.observer.record(f"http_{response.status_code}", {"poll_count": poll_count})
 
             except Exception as e:
                 result = HttpProbeResult(
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     status_code=0,
                     response_time_ms=(time.time() - probe_start) * 1000,
-                    error=str(e)
+                    error=str(e),
                 )
                 self.observer.record_http_probe(result)
 
@@ -528,9 +527,9 @@ class TestContainerStartupTiming:
         client: httpx.AsyncClient,
         base_url: str,
         token: str,
-        project_slug: Optional[str],
-        user_id: Optional[str],
-        cleanup_enabled: bool
+        project_slug: str | None,
+        user_id: str | None,
+        cleanup_enabled: bool,
     ):
         """Clean up test resources."""
         if not cleanup_enabled:
@@ -544,12 +543,11 @@ class TestContainerStartupTiming:
             try:
                 response = await client.delete(
                     f"{base_url}/api/projects/{project_slug}",
-                    headers={"Authorization": f"Bearer {token}"}
+                    headers={"Authorization": f"Bearer {token}"},
                 )
-                self.observer.record("project_deleted", {
-                    "slug": project_slug,
-                    "status": response.status_code
-                })
+                self.observer.record(
+                    "project_deleted", {"slug": project_slug, "status": response.status_code}
+                )
             except Exception as e:
                 self.observer.record("cleanup_project_error", {"error": str(e)})
 
@@ -558,17 +556,19 @@ class TestContainerStartupTiming:
             try:
                 # Try admin delete endpoint
                 response = await client.delete(
-                    f"{base_url}/api/users/{user_id}",
-                    headers={"Authorization": f"Bearer {token}"}
+                    f"{base_url}/api/users/{user_id}", headers={"Authorization": f"Bearer {token}"}
                 )
                 if response.status_code in (200, 204):
                     self.observer.record("user_deleted", {"user_id": user_id})
                 else:
-                    self.observer.record("user_delete_skipped", {
-                        "user_id": user_id,
-                        "status": response.status_code,
-                        "reason": "endpoint may require admin"
-                    })
+                    self.observer.record(
+                        "user_delete_skipped",
+                        {
+                            "user_id": user_id,
+                            "status": response.status_code,
+                            "reason": "endpoint may require admin",
+                        },
+                    )
             except Exception as e:
                 self.observer.record("cleanup_user_error", {"error": str(e)})
 
@@ -586,7 +586,7 @@ class TestContainerStartupTiming:
         test_user_password: str,
         nextjs_base_slug: str,
         cleanup_enabled: bool,
-        test_timeout: int
+        test_timeout: int,
     ):
         """
         Full end-to-end test measuring container startup timing.
@@ -629,24 +629,20 @@ class TestContainerStartupTiming:
             # Phase 4: Add Container
             print("[TEST] Adding Next.js container...")
             self.container_id = await self._add_container(
-                http_client, base_url, self.auth_token,
-                self.project_slug, self.project_id, base_id
+                http_client, base_url, self.auth_token, self.project_slug, self.project_id, base_id
             )
             print(f"[TEST] Container added: {self.container_id}")
 
             # Phase 5: Start Container
             print("[TEST] Starting container...")
             self.container_url = await self._start_container(
-                http_client, base_url, self.auth_token,
-                self.project_slug, self.container_id
+                http_client, base_url, self.auth_token, self.project_slug, self.container_id
             )
             print(f"[TEST] Container started. URL: {self.container_url}")
 
             # Phase 6: Poll for HTML
             print("[TEST] Polling for HTML response...")
-            success = await self._poll_container_url(
-                http_client, self.container_url, timeout=180
-            )
+            success = await self._poll_container_url(http_client, self.container_url, timeout=180)
 
             self.observer.record("test_complete", {"success": success})
 
@@ -675,6 +671,6 @@ class TestContainerStartupTiming:
                 self.auth_token,
                 self.project_slug,
                 self.user_id,
-                cleanup_enabled
+                cleanup_enabled,
             )
             print("[TEST] Done.")

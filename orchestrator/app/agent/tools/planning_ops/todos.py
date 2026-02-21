@@ -6,21 +6,20 @@ Stores todos in-memory per conversation session.
 """
 
 import logging
-from typing import Dict, Any, List
 from datetime import datetime
-from uuid import UUID
+from typing import Any
 
+from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
-from ..output_formatter import success_output, error_output, pluralize
 
 logger = logging.getLogger(__name__)
 
 # In-memory storage for todos (keyed by conversation_id or session_id)
 # In production, you might want to persist this to database
-_todo_storage: Dict[str, List[Dict[str, Any]]] = {}
+_todo_storage: dict[str, list[dict[str, Any]]] = {}
 
 
-def _get_session_key(context: Dict[str, Any]) -> str:
+def _get_session_key(context: dict[str, Any]) -> str:
     """Generate a unique key for the current session."""
     # Use user_id + project_id as session key
     # In production, you might have a conversation_id in context
@@ -29,7 +28,7 @@ def _get_session_key(context: Dict[str, Any]) -> str:
     return f"user_{user_id}_project_{project_id}"
 
 
-async def todo_read_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+async def todo_read_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
     Read the current todo list for this session.
 
@@ -60,12 +59,12 @@ async def todo_read_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dic
             "total": len(todos),
             "pending": pending,
             "in_progress": in_progress,
-            "completed": completed
-        }
+            "completed": completed,
+        },
     )
 
 
-async def todo_write_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+async def todo_write_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
     Write/update the todo list for this session.
 
@@ -91,16 +90,20 @@ async def todo_write_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
 
     # Better validation with helpful error messages
     if todos is None:
-        return error_output("Missing 'todos' parameter. Expected: {\"todos\": [{\"content\": \"...\", \"status\": \"pending\"}]}")
+        return error_output(
+            'Missing \'todos\' parameter. Expected: {"todos": [{"content": "...", "status": "pending"}]}'
+        )
 
     if not isinstance(todos, list):
         return error_output(
             f"Invalid 'todos' parameter type: expected array, got {type(todos).__name__}. "
-            f"Example: {{\"todos\": [{{\"content\": \"Read file\", \"status\": \"pending\"}}]}}"
+            f'Example: {{"todos": [{{"content": "Read file", "status": "pending"}}]}}'
         )
 
     if len(todos) == 0:
-        return error_output("Empty 'todos' array. Add at least one todo with 'content' and 'status' fields.")
+        return error_output(
+            "Empty 'todos' array. Add at least one todo with 'content' and 'status' fields."
+        )
 
     # Validate todo structure
     for i, todo in enumerate(todos):
@@ -108,7 +111,7 @@ async def todo_write_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             return error_output(
                 f"Todo at index {i} must be an object with 'content' and 'status' fields. "
                 f"Got: {type(todo).__name__}. "
-                f"Example: {{\"content\": \"Task description\", \"status\": \"pending\"}}"
+                f'Example: {{"content": "Task description", "status": "pending"}}'
             )
         if "content" not in todo:
             return error_output(f"Todo at index {i} is missing required 'content' field")
@@ -118,7 +121,9 @@ async def todo_write_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
         # Validate status
         valid_statuses = ["pending", "in_progress", "completed"]
         if todo["status"] not in valid_statuses:
-            return error_output(f"Todo at index {i} has invalid status '{todo['status']}'. Must be one of: {', '.join(valid_statuses)}")
+            return error_output(
+                f"Todo at index {i} has invalid status '{todo['status']}'. Must be one of: {', '.join(valid_statuses)}"
+            )
 
         # Add default priority if missing
         if "priority" not in todo:
@@ -148,67 +153,62 @@ async def todo_write_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Di
             "total": len(todos),
             "pending": pending,
             "in_progress": in_progress,
-            "completed": completed
-        }
+            "completed": completed,
+        },
     )
 
 
 def register_planning_tools(registry):
     """Register todo planning tools."""
 
-    registry.register(Tool(
-        name="todo_read",
-        description="Read the current todo list for this session. Useful for checking progress and planning next steps.",
-        parameters={
-            "type": "object",
-            "properties": {},
-            "required": []
-        },
-        executor=todo_read_tool,
-        category=ToolCategory.PROJECT,  # Using PROJECT category since there's no PLANNING category
-        examples=[
-            '{"tool_name": "todo_read", "parameters": {}}'
-        ]
-    ))
+    registry.register(
+        Tool(
+            name="todo_read",
+            description="Read the current todo list for this session. Useful for checking progress and planning next steps.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            executor=todo_read_tool,
+            category=ToolCategory.PROJECT,  # Using PROJECT category since there's no PLANNING category
+            examples=['{"tool_name": "todo_read", "parameters": {}}'],
+        )
+    )
 
-    registry.register(Tool(
-        name="todo_write",
-        description="Write/update the complete todo list for this session. Replaces existing todos. Use for planning multi-step tasks and tracking progress.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "todos": {
-                    "type": "array",
-                    "description": "Complete list of todos",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "content": {
-                                "type": "string",
-                                "description": "Task description"
+    registry.register(
+        Tool(
+            name="todo_write",
+            description="Write/update the complete todo list for this session. Replaces existing todos. Use for planning multi-step tasks and tracking progress.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "Complete list of todos",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string", "description": "Task description"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "completed"],
+                                    "description": "Current status of the task",
+                                },
+                                "priority": {
+                                    "type": "string",
+                                    "enum": ["high", "medium", "low"],
+                                    "description": "Task priority (optional, default: medium)",
+                                },
                             },
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "in_progress", "completed"],
-                                "description": "Current status of the task"
-                            },
-                            "priority": {
-                                "type": "string",
-                                "enum": ["high", "medium", "low"],
-                                "description": "Task priority (optional, default: medium)"
-                            }
+                            "required": ["content", "status"],
                         },
-                        "required": ["content", "status"]
                     }
-                }
+                },
+                "required": ["todos"],
             },
-            "required": ["todos"]
-        },
-        executor=todo_write_tool,
-        category=ToolCategory.PROJECT,
-        examples=[
-            '{"tool_name": "todo_write", "parameters": {"todos": [{"content": "Read package.json", "status": "completed"}, {"content": "Update dependencies", "status": "in_progress"}, {"content": "Run tests", "status": "pending", "priority": "high"}]}}'
-        ]
-    ))
+            executor=todo_write_tool,
+            category=ToolCategory.PROJECT,
+            examples=[
+                '{"tool_name": "todo_write", "parameters": {"todos": [{"content": "Read package.json", "status": "completed"}, {"content": "Update dependencies", "status": "in_progress"}, {"content": "Run tests", "status": "pending", "priority": "high"}]}}'
+            ],
+        )
+    )
 
     logger.info("Registered 2 todo planning tools")

@@ -1,4 +1,3 @@
-from uuid import UUID
 """
 Audit logging service for agent command executions.
 
@@ -7,12 +6,13 @@ logging execution details to the database for security and compliance.
 """
 
 import logging
-from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 from datetime import datetime, timedelta
+from uuid import UUID
 
-from ..models import AgentCommandLog, User, Project
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import AgentCommandLog
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +36,12 @@ class AgentAuditService:
         command: str,
         working_dir: str = ".",
         success: bool = False,
-        exit_code: Optional[int] = None,
-        stdout: Optional[str] = None,
-        stderr: Optional[str] = None,
-        duration_ms: Optional[int] = None,
+        exit_code: int | None = None,
+        stdout: str | None = None,
+        stderr: str | None = None,
+        duration_ms: int | None = None,
         risk_level: str = "safe",
-        dry_run: bool = False
+        dry_run: bool = False,
     ) -> AgentCommandLog:
         """
         Log an agent command execution to the database.
@@ -80,7 +80,7 @@ class AgentAuditService:
             stderr=stderr,
             duration_ms=duration_ms,
             risk_level=risk_level,
-            dry_run=dry_run
+            dry_run=dry_run,
         )
 
         self.db.add(log_entry)
@@ -97,9 +97,9 @@ class AgentAuditService:
     async def get_user_command_history(
         self,
         user_id: UUID,
-        project_id: Optional[UUID] = None,
+        project_id: UUID | None = None,
         limit: int = 100,
-        include_dry_run: bool = False
+        include_dry_run: bool = False,
     ) -> list[AgentCommandLog]:
         """
         Get command history for a user.
@@ -119,7 +119,7 @@ class AgentAuditService:
             query = query.where(AgentCommandLog.project_id == project_id)
 
         if not include_dry_run:
-            query = query.where(AgentCommandLog.dry_run == False)
+            query = query.where(not AgentCommandLog.dry_run)
 
         query = query.order_by(AgentCommandLog.created_at.desc()).limit(limit)
 
@@ -143,7 +143,7 @@ class AgentAuditService:
         total_query = select(func.count(AgentCommandLog.id)).where(
             AgentCommandLog.user_id == user_id,
             AgentCommandLog.created_at >= since,
-            AgentCommandLog.dry_run == False
+            not AgentCommandLog.dry_run,
         )
         total_result = await self.db.execute(total_query)
         total_commands = total_result.scalar()
@@ -152,8 +152,8 @@ class AgentAuditService:
         success_query = select(func.count(AgentCommandLog.id)).where(
             AgentCommandLog.user_id == user_id,
             AgentCommandLog.created_at >= since,
-            AgentCommandLog.success == True,
-            AgentCommandLog.dry_run == False
+            AgentCommandLog.success,
+            not AgentCommandLog.dry_run,
         )
         success_result = await self.db.execute(success_query)
         successful_commands = success_result.scalar()
@@ -163,7 +163,7 @@ class AgentAuditService:
             AgentCommandLog.user_id == user_id,
             AgentCommandLog.created_at >= since,
             AgentCommandLog.risk_level == "high",
-            AgentCommandLog.dry_run == False
+            not AgentCommandLog.dry_run,
         )
         high_risk_result = await self.db.execute(high_risk_query)
         high_risk_commands = high_risk_result.scalar()
@@ -172,8 +172,8 @@ class AgentAuditService:
         avg_duration_query = select(func.avg(AgentCommandLog.duration_ms)).where(
             AgentCommandLog.user_id == user_id,
             AgentCommandLog.created_at >= since,
-            AgentCommandLog.dry_run == False,
-            AgentCommandLog.duration_ms.isnot(None)
+            not AgentCommandLog.dry_run,
+            AgentCommandLog.duration_ms.isnot(None),
         )
         avg_duration_result = await self.db.execute(avg_duration_query)
         avg_duration = avg_duration_result.scalar() or 0
@@ -184,14 +184,10 @@ class AgentAuditService:
             "failed_commands": (total_commands or 0) - (successful_commands or 0),
             "high_risk_commands": high_risk_commands or 0,
             "average_duration_ms": int(avg_duration),
-            "period_days": days
+            "period_days": days,
         }
 
-    async def detect_suspicious_activity(
-        self,
-        user_id: UUID,
-        time_window_minutes: int = 5
-    ) -> dict:
+    async def detect_suspicious_activity(self, user_id: UUID, time_window_minutes: int = 5) -> dict:
         """
         Detect suspicious command patterns that may indicate security issues.
 
@@ -213,7 +209,7 @@ class AgentAuditService:
         query = select(AgentCommandLog).where(
             AgentCommandLog.user_id == user_id,
             AgentCommandLog.created_at >= since,
-            AgentCommandLog.dry_run == False
+            not AgentCommandLog.dry_run,
         )
 
         result = await self.db.execute(query)
@@ -223,50 +219,52 @@ class AgentAuditService:
 
         # Check for rapid execution (rate limiting)
         if len(recent_commands) > 50:
-            alerts.append({
-                "type": "rapid_execution",
-                "severity": "high",
-                "message": f"User executed {len(recent_commands)} commands in {time_window_minutes} minutes",
-                "count": len(recent_commands)
-            })
+            alerts.append(
+                {
+                    "type": "rapid_execution",
+                    "severity": "high",
+                    "message": f"User executed {len(recent_commands)} commands in {time_window_minutes} minutes",
+                    "count": len(recent_commands),
+                }
+            )
 
         # Check for high failure rate
         if len(recent_commands) >= 10:
             failed_count = sum(1 for cmd in recent_commands if not cmd.success)
             failure_rate = failed_count / len(recent_commands)
             if failure_rate > 0.5:
-                alerts.append({
-                    "type": "high_failure_rate",
-                    "severity": "medium",
-                    "message": f"High failure rate: {failure_rate:.1%} of commands failed",
-                    "failure_rate": failure_rate
-                })
+                alerts.append(
+                    {
+                        "type": "high_failure_rate",
+                        "severity": "medium",
+                        "message": f"High failure rate: {failure_rate:.1%} of commands failed",
+                        "failure_rate": failure_rate,
+                    }
+                )
 
         # Check for excessive file deletions
-        deletion_commands = [
-            cmd for cmd in recent_commands
-            if "rm" in cmd.command.lower()
-        ]
+        deletion_commands = [cmd for cmd in recent_commands if "rm" in cmd.command.lower()]
         if len(deletion_commands) > 10:
-            alerts.append({
-                "type": "excessive_deletions",
-                "severity": "high",
-                "message": f"User executed {len(deletion_commands)} file deletion commands",
-                "count": len(deletion_commands)
-            })
+            alerts.append(
+                {
+                    "type": "excessive_deletions",
+                    "severity": "high",
+                    "message": f"User executed {len(deletion_commands)} file deletion commands",
+                    "count": len(deletion_commands),
+                }
+            )
 
         # Check for repeated high-risk commands
-        high_risk_commands = [
-            cmd for cmd in recent_commands
-            if cmd.risk_level == "high"
-        ]
+        high_risk_commands = [cmd for cmd in recent_commands if cmd.risk_level == "high"]
         if len(high_risk_commands) > 5:
-            alerts.append({
-                "type": "high_risk_activity",
-                "severity": "high",
-                "message": f"User executed {len(high_risk_commands)} high-risk commands",
-                "count": len(high_risk_commands)
-            })
+            alerts.append(
+                {
+                    "type": "high_risk_activity",
+                    "severity": "high",
+                    "message": f"User executed {len(high_risk_commands)} high-risk commands",
+                    "count": len(high_risk_commands),
+                }
+            )
 
         if alerts:
             logger.warning(
@@ -279,7 +277,7 @@ class AgentAuditService:
             "time_window_minutes": time_window_minutes,
             "total_commands": len(recent_commands),
             "alerts": alerts,
-            "is_suspicious": len(alerts) > 0
+            "is_suspicious": len(alerts) > 0,
         }
 
 

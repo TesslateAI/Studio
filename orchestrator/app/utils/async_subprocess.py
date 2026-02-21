@@ -2,18 +2,22 @@
 Async subprocess utilities
 Replaces synchronous subprocess.run() calls with async alternatives.
 """
+
+from __future__ import annotations
+
 import asyncio
-from typing import Optional, List, Tuple
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
 @dataclass
 class SubprocessResult:
     """Result from subprocess execution (mirrors subprocess.CompletedProcess)"""
+
     returncode: int
     stdout: str
     stderr: str
-    args: List[str]
+    args: list[str]
 
     @property
     def success(self) -> bool:
@@ -21,13 +25,13 @@ class SubprocessResult:
 
 
 async def run_async(
-    cmd: List[str],
-    timeout: Optional[float] = None,
-    cwd: Optional[str] = None,
-    env: Optional[dict] = None,
+    cmd: list[str],
+    timeout: float | None = None,
+    cwd: str | None = None,
+    env: dict | None = None,
     capture_output: bool = True,
     text: bool = True,
-    check: bool = False
+    check: bool = False,
 ) -> SubprocessResult:
     """
     Async replacement for subprocess.run()
@@ -56,25 +60,20 @@ async def run_async(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                env=env
+                env=env,
             )
         else:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=cwd,
-                env=env
-            )
+            process = await asyncio.create_subprocess_exec(*cmd, cwd=cwd, env=env)
 
         # Wait for completion with optional timeout
         try:
             if timeout:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=timeout
+                    process.communicate(), timeout=timeout
                 )
             else:
                 stdout_bytes, stderr_bytes = await process.communicate()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Kill process on timeout
             process.kill()
             await process.wait()
@@ -82,20 +81,17 @@ async def run_async(
 
         # Decode output if text mode
         if text and stdout_bytes:
-            stdout = stdout_bytes.decode('utf-8', errors='replace')
+            stdout = stdout_bytes.decode("utf-8", errors="replace")
         else:
-            stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ""
+            stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
 
         if text and stderr_bytes:
-            stderr = stderr_bytes.decode('utf-8', errors='replace')
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
         else:
-            stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ""
+            stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
 
         result = SubprocessResult(
-            returncode=process.returncode,
-            stdout=stdout,
-            stderr=stderr,
-            args=cmd
+            returncode=process.returncode, stdout=stdout, stderr=stderr, args=cmd
         )
 
         # Raise exception if check=True and failed
@@ -114,12 +110,12 @@ async def run_async(
 
 
 async def run_async_stream(
-    cmd: List[str],
-    timeout: Optional[float] = None,
-    cwd: Optional[str] = None,
-    env: Optional[dict] = None,
-    stdout_callback: Optional[callable] = None,
-    stderr_callback: Optional[callable] = None
+    cmd: list[str],
+    timeout: float | None = None,
+    cwd: str | None = None,
+    env: dict | None = None,
+    stdout_callback: Callable[[str], None] | None = None,
+    stderr_callback: Callable[[str], None] | None = None,
 ) -> SubprocessResult:
     """
     Run subprocess with real-time output streaming
@@ -136,11 +132,7 @@ async def run_async_stream(
         SubprocessResult
     """
     process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=cwd,
-        env=env
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd, env=env
     )
 
     stdout_lines = []
@@ -152,7 +144,7 @@ async def run_async_stream(
             line = await stream.readline()
             if not line:
                 break
-            line_text = line.decode('utf-8', errors='replace').rstrip()
+            line_text = line.decode("utf-8", errors="replace").rstrip()
             lines_list.append(line_text)
             if callback:
                 if asyncio.iscoroutinefunction(callback):
@@ -166,20 +158,20 @@ async def run_async_stream(
             asyncio.gather(
                 read_stream(process.stdout, stdout_callback, stdout_lines),
                 read_stream(process.stderr, stderr_callback, stderr_lines),
-                process.wait()
+                process.wait(),
             ),
-            timeout=timeout
+            timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         process.kill()
         await process.wait()
         raise
 
     return SubprocessResult(
         returncode=process.returncode,
-        stdout='\n'.join(stdout_lines),
-        stderr='\n'.join(stderr_lines),
-        args=cmd
+        stdout="\n".join(stdout_lines),
+        stderr="\n".join(stderr_lines),
+        args=cmd,
     )
 
 
@@ -188,42 +180,45 @@ async def check_command_exists(command: str) -> bool:
     try:
         if command == "docker":
             # Special handling for docker on Windows
-            result = await run_async(
-                ["docker", "--version"],
-                timeout=5,
-                capture_output=True
-            )
+            result = await run_async(["docker", "--version"], timeout=5, capture_output=True)
             return result.returncode == 0
         else:
             # Generic command check
             import shutil
+
             return await asyncio.to_thread(shutil.which, command) is not None
     except Exception:
         return False
 
 
 # Compatibility helpers for common patterns
-async def docker_inspect(container_name: str, format_str: str = "{{.State.Running}}", timeout: float = 5) -> SubprocessResult:
+async def docker_inspect(
+    container_name: str, format_str: str = "{{.State.Running}}", timeout: float = 5
+) -> SubprocessResult:
     """Helper for docker inspect commands"""
     return await run_async(
         ["docker", "inspect", f"--format={format_str}", container_name],
         timeout=timeout,
         capture_output=True,
-        text=True
+        text=True,
     )
 
 
-async def docker_exec(container_name: str, command: List[str], timeout: float = 30) -> SubprocessResult:
+async def docker_exec(
+    container_name: str, command: list[str], timeout: float = 30
+) -> SubprocessResult:
     """Helper for docker exec commands"""
     return await run_async(
         ["docker", "exec", container_name] + command,
         timeout=timeout,
         capture_output=True,
-        text=True
+        text=True,
     )
 
 
-async def docker_logs(container_name: str, tail: Optional[int] = None, timeout: float = 10) -> SubprocessResult:
+async def docker_logs(
+    container_name: str, tail: int | None = None, timeout: float = 10
+) -> SubprocessResult:
     """Helper for docker logs commands"""
     cmd = ["docker", "logs", container_name]
     if tail:

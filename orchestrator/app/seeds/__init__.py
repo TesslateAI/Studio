@@ -1,7 +1,91 @@
 """
 Database seed scripts for initial data population.
+
+All seed functions are idempotent and safe to run on every startup.
 """
 
-from .workflow_templates import seed_workflow_templates, WORKFLOW_TEMPLATES
+import logging
 
-__all__ = ["seed_workflow_templates", "WORKFLOW_TEMPLATES"]
+from .marketplace_agents import (
+    auto_add_tesslate_agent_to_users,
+    get_or_create_tesslate_account,
+    seed_marketplace_agents,
+)
+from .marketplace_bases import seed_marketplace_bases
+from .opensource_agents import seed_opensource_agents
+from .themes import seed_themes
+from .workflow_templates import WORKFLOW_TEMPLATES, seed_workflow_templates
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "run_all_seeds",
+    "seed_marketplace_bases",
+    "seed_marketplace_agents",
+    "seed_opensource_agents",
+    "seed_themes",
+    "seed_workflow_templates",
+    "auto_add_tesslate_agent_to_users",
+    "get_or_create_tesslate_account",
+    "WORKFLOW_TEMPLATES",
+]
+
+
+async def run_all_seeds():
+    """Run all seeds in dependency order. Idempotent, safe for every startup.
+
+    Each seed is wrapped in try/except so one failure doesn't block the rest.
+    Runs in a single session for efficiency.
+    """
+    from ..database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        # 1. Marketplace bases (no dependencies)
+        try:
+            count = await seed_marketplace_bases(db)
+            logger.info("Seed marketplace bases: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed marketplace bases")
+            await db.rollback()
+
+        # 2. Official agents (creates Tesslate account)
+        try:
+            count = await seed_marketplace_agents(db)
+            logger.info("Seed marketplace agents: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed marketplace agents")
+            await db.rollback()
+
+        # 3. Open-source agents (reuses Tesslate account)
+        try:
+            count = await seed_opensource_agents(db)
+            logger.info("Seed open-source agents: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed open-source agents")
+            await db.rollback()
+
+        # 4. Auto-add Tesslate Agent to all users
+        try:
+            count = await auto_add_tesslate_agent_to_users(db)
+            logger.info("Auto-add Tesslate Agent: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Tesslate Agent to users")
+            await db.rollback()
+
+        # 5. Themes
+        try:
+            count = await seed_themes(db)
+            logger.info("Seed themes: %d processed", count)
+        except Exception:
+            logger.exception("Failed to seed themes")
+            await db.rollback()
+
+        # 6. Workflow templates
+        try:
+            count = await seed_workflow_templates(db)
+            logger.info("Seed workflow templates: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed workflow templates")
+            await db.rollback()
+
+    logger.info("All database seeds completed")

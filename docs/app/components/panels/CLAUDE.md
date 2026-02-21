@@ -232,6 +232,34 @@ useEffect(() => {
 }, [projectSlug, ...dependencies]);
 ```
 
+## Notes Panel (Tiptap Editor)
+
+### CSS Selector Pattern
+
+Tiptap's `editorProps.attributes.class` puts all custom classes directly on the `.ProseMirror` div itself. This means the DOM looks like:
+
+```html
+<div class="tiptap-editor prose prose-invert ProseMirror">
+  <ul><li>Bullet point</li></ul>
+</div>
+```
+
+Both `.tiptap-editor` and `.ProseMirror` are on the **same element**. CSS selectors in `index.css` must use `.tiptap-editor.ProseMirror` (no space = same element) rather than `.tiptap-editor .ProseMirror` (space = descendant). Using the descendant selector causes all list styles, headings, code blocks, and blockquote styles to silently not apply.
+
+### Adding the tiptap-editor Class
+
+The `tiptap-editor` class MUST be included in the editor's `editorProps.attributes.class` to activate the styles in `index.css`:
+
+```typescript
+editorProps: {
+  attributes: {
+    class: 'tiptap-editor prose prose-invert max-w-none focus:outline-none ...',
+  },
+},
+```
+
+Without `tiptap-editor`, none of the custom typography rules (bullet points, ordered lists, headings, code blocks, blockquotes) will apply -- the editor will render plain unstyled text.
+
 ---
 
 **Remember**: Panels are modular. Keep them self-contained with minimal parent dependencies.

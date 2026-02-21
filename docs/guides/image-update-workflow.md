@@ -107,93 +107,39 @@ kubectl rollout status deployment/tesslate-frontend -n tesslate --timeout=120s
 
 ## AWS EKS Workflow
 
-### Prerequisites
+Use the `aws-deploy.sh build` command to handle ECR login, build, push, and pod restart in one step.
 
-```powershell
-# Login to ECR (required before push)
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-```
+### Build Specific Image
 
-### Backend Image Update
+```bash
+# Backend only
+./scripts/aws-deploy.sh build production backend
 
-```powershell
-# Step 1: Build with --no-cache
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+# Frontend only
+./scripts/aws-deploy.sh build beta frontend
 
-# Step 2: Tag for ECR
-docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
+# Devserver only (new user containers will use the new image)
+./scripts/aws-deploy.sh build production devserver
 
-# Step 3: Push to ECR
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-
-# Step 4: Delete pod to force pull new image (imagePullPolicy is Always)
-kubectl delete pod -n tesslate -l app=tesslate-backend
-
-# Step 5: Restart ingress controller (prevents stale endpoint routing)
-kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
-kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
-
-# Step 6: Verify
-kubectl get pods -n tesslate
-kubectl logs -n tesslate deployment/tesslate-backend --tail=10
-```
-
-### Frontend Image Update
-
-```powershell
-# Build, tag, push
-docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
-docker tag tesslate-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-
-# Delete pod
-kubectl delete pod -n tesslate -l app=tesslate-frontend
-
-# Verify
-kubectl get pods -n tesslate
-MSYS_NO_PATHCONV=1 kubectl exec -n tesslate deployment/tesslate-frontend -- ls -la /usr/share/nginx/html/assets/ | grep index
-```
-
-### Devserver Image Update
-
-```powershell
-# Build, tag, push
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
-docker tag tesslate-devserver:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-
-# New user containers will automatically use the new image
+# Multiple images
+./scripts/aws-deploy.sh build beta frontend backend
 ```
 
 ### All Images (Full Release)
 
-```powershell
-# Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-
-# Backend
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
-docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-
-# Frontend
-docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
-docker tag tesslate-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-
-# Devserver
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
-docker tag tesslate-devserver:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-
-# Restart pods
-kubectl delete pod -n tesslate -l app=tesslate-frontend
-kubectl delete pod -n tesslate -l app=tesslate-backend
-
-# Restart ingress
-kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
-kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
+```bash
+# Build, push, and restart all 3 images
+./scripts/aws-deploy.sh build production
+./scripts/aws-deploy.sh build beta
 ```
+
+The `build` command handles:
+1. ECR login
+2. `docker build --no-cache` with environment-specific tag (`:production` or `:beta`)
+3. `docker push` to ECR
+4. `kubectl` context switch to the correct EKS cluster
+5. Pod deletion and rollout wait for backend/frontend
+6. Deployment verification
 
 ## Verification Steps
 
@@ -347,8 +293,8 @@ minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest; docker rmi -f
 
 ### AWS One-Liner (Backend)
 
-```powershell
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/ && docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest && docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest && kubectl delete pod -n tesslate -l app=tesslate-backend
+```bash
+./scripts/aws-deploy.sh build production backend
 ```
 
 ## Next Steps

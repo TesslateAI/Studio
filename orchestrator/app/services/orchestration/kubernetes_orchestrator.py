@@ -38,6 +38,7 @@ from uuid import UUID
 from kubernetes.client.rest import ApiException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..secret_manager_env import build_env_overrides
 from ..snapshot_manager import get_snapshot_manager
 from .base import BaseOrchestrator
 from .deployment_mode import DeploymentMode
@@ -393,8 +394,8 @@ class KubernetesOrchestrator(BaseOrchestrator):
             # Check if directory already exists with actual content (not just empty dir)
             # This prevents skipping git clone when directory exists but is empty
             check_script = f"""
-if [ -d '{target_dir}' ] && [ -f '{target_dir}/package.json' ]; then
-    file_count=$(ls -1 '{target_dir}' 2>/dev/null | wc -l)
+if [ -d '{target_dir}' ]; then
+    file_count=$(ls -1A '{target_dir}' 2>/dev/null | wc -l)
     echo "EXISTS:$file_count"
 else
     echo "NOT_EXISTS"
@@ -413,7 +414,7 @@ fi
 
             if check_result.startswith("EXISTS:"):
                 file_count = int(check_result.split(":")[1]) if ":" in check_result else 0
-                if file_count >= 3:  # At least package.json, README.md, and one more file
+                if file_count >= 3:
                     logger.info(
                         f"[K8S] Directory {target_dir} already exists with {file_count} files, skipping git clone"
                     )
@@ -424,11 +425,11 @@ fi
                     )
                     # Fall through to clone
 
-            # CRITICAL: git_url is REQUIRED - containers must have a marketplace base with git repo
+            # git_url is required to clone — if missing, files must already exist
             if not git_url:
                 raise RuntimeError(
-                    f"Container '{container_directory}' has no git_url. "
-                    "All containers must be created from a marketplace base with a git repository."
+                    f"Container '{container_directory}' has no git_url and no files on PVC. "
+                    "Either import files first or create the container from a marketplace base."
                 )
 
             # Clone from git repository
@@ -544,8 +545,12 @@ fi
 
             # CRITICAL: Initialize container files BEFORE starting
             # Skip if project was restored from snapshot (files already exist)
+            # Also skip if this is a git-imported container (base_id=None) — files
+            # were cloned directly to the PVC during project import.
             if is_hibernated:
                 logger.info("[K8S] Skipping git clone - project restored from snapshot")
+            elif container.base_id is None:
+                logger.info("[K8S] Skipping git clone - git-imported container (files already on PVC)")
             else:
                 # This clones from git or sets up the project directory
                 git_url = None
@@ -594,6 +599,9 @@ fi
 
             await send_progress("starting_server", "Starting development server...", 70)
 
+            env_overrides = await build_env_overrides(db, project.id, [container])
+            extra_env = env_overrides.get(container.id, {})
+
             # Create Deployment (NO init containers - files already exist!)
             deployment = create_container_deployment(
                 namespace=namespace,
@@ -609,6 +617,7 @@ fi
                 enable_pod_affinity=self.settings.k8s_enable_pod_affinity
                 and len(all_containers) > 1,
                 affinity_topology_key=self.settings.k8s_affinity_topology_key,
+                extra_env=extra_env,
             )
             await self.k8s_client.create_deployment(deployment, namespace)
 
@@ -1239,30 +1248,16 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
                     subdir=subdir,
                 )
 
-            # Use base64 to handle special characters
-            import base64
-
-            encoded = base64.b64encode(content.encode()).decode()
-
-            # Ensure directory exists
-            dir_path = "/".join(full_path.split("/")[:-1])
+            # Use tar streaming to write file (echo|base64 breaks for files >100KB)
+            data = content.encode("latin-1")
             await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
+                self.k8s_client._write_bytes_to_pod,
                 pod_name,
                 namespace,
                 "file-manager",
-                ["mkdir", "-p", dir_path],
-                timeout=10,
-            )
-
-            # Write file
-            await asyncio.to_thread(
-                self.k8s_client._exec_in_pod,
-                pod_name,
-                namespace,
-                "file-manager",
-                ["sh", "-c", f"echo '{encoded}' | base64 -d > {full_path}"],
-                timeout=30,
+                data,
+                full_path,
+                timeout=60,
             )
 
             return True
@@ -1270,6 +1265,35 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         except Exception as e:
             logger.error(f"[K8S] Error writing file: {e}")
             return False
+
+    async def write_binary_to_container(
+        self,
+        project_id: UUID,
+        file_path: str,
+        data: bytes,
+    ) -> bool:
+        """Write binary data to a file in the project container using tar streaming.
+
+        Uses tar stdin streaming to avoid ARG_MAX limits that break the
+        echo|base64 approach for files larger than ~100KB.
+        """
+        namespace = self._get_namespace(str(project_id))
+
+        pod_name = await self.k8s_client.get_file_manager_pod(namespace)
+        container = "file-manager"
+
+        if not pod_name:
+            raise RuntimeError(f"No file-manager pod found in namespace {namespace}")
+
+        return await asyncio.to_thread(
+            self.k8s_client._write_bytes_to_pod,
+            pod_name,
+            namespace,
+            container,
+            data,
+            f"/app/{file_path}",
+            timeout=120,
+        )
 
     async def delete_file(
         self, user_id: UUID, project_id: UUID, container_name: str, file_path: str

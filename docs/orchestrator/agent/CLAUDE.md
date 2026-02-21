@@ -15,6 +15,7 @@ This context provides information about Tesslate Studio's AI agent system, inclu
 - `orchestrator/app/agent/stream_agent.py` - StreamAgent for simple streaming responses
 - `orchestrator/app/agent/iterative_agent.py` - IterativeAgent with think-act-reflect loop
 - `orchestrator/app/agent/react_agent.py` - ReActAgent with explicit reasoning steps
+- `orchestrator/app/agent/tesslate_agent.py` - TesslateAgent with native function calling, trajectory, planning, and subagents
 
 ### Tool System
 - `orchestrator/app/agent/tools/registry.py` - Tool registration and execution (400 lines)
@@ -22,6 +23,16 @@ This context provides information about Tesslate Studio's AI agent system, inclu
 - `orchestrator/app/agent/tools/file_ops/` - File read/write/edit tools
 - `orchestrator/app/agent/tools/shell_ops/` - Shell and command execution tools
 - `orchestrator/app/agent/tools/graph_ops/` - Container management tools for graph view
+
+### TesslateAgent Supporting Files
+- `orchestrator/app/agent/subagent_manager.py` - Subagent lifecycle and execution management
+- `orchestrator/app/agent/apply_patch.py` - Apply patch tool for surgical file edits
+- `orchestrator/app/agent/compaction.py` - Context compaction for long conversations
+- `orchestrator/app/agent/plan_manager.py` - Planning mode state management
+- `orchestrator/app/agent/trajectory.py` - Trajectory recording for agent steps
+- `orchestrator/app/agent/trajectory_writer.py` - Persistent trajectory storage
+- `orchestrator/app/agent/features.py` - Feature flags for agent capabilities
+- `orchestrator/app/agent/tool_converter.py` - Convert tools to native function calling format
 
 ### Supporting Files
 - `orchestrator/app/agent/parser.py` - Parse LLM responses for tool calls
@@ -85,6 +96,29 @@ else:
         "read_file", "write_file", "patch_file",
         "bash_exec", "shell_open"
     ])
+```
+
+### Pattern 4: Native Function Calling (TesslateAgent)
+```python
+# TesslateAgent uses native LLM function calling instead of JSON parsing.
+# Tools are converted to provider-native format via tool_converter.py.
+# Supports trajectory recording, context compaction, planning mode, and subagents.
+
+agent = TesslateAgent(
+    system_prompt=prompt,
+    tools=tool_registry,
+    model_adapter=model,
+    features=AgentFeatures(
+        trajectory_enabled=True,
+        compaction_enabled=True,
+        planning_enabled=True,
+        subagents_enabled=True,
+    ),
+)
+
+async for event in agent.run(user_request, context):
+    # Events: stream, tool_call, tool_result, plan_update, subagent_*, complete
+    process_event(event)
 ```
 
 ## When to Load This Context

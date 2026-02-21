@@ -5,11 +5,12 @@ This provider implements deployment to Vercel's platform using their REST API.
 It handles file uploads, build triggering, and deployment status polling.
 """
 
-from typing import List, Dict, Optional
-import httpx
 import asyncio
 import base64
-from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentResult, DeploymentFile
+
+import httpx
+
+from ..base import BaseDeploymentProvider, DeploymentConfig, DeploymentFile, DeploymentResult
 
 
 class VercelProvider(BaseDeploymentProvider):
@@ -28,9 +29,7 @@ class VercelProvider(BaseDeploymentProvider):
             raise ValueError("Missing required Vercel credential: token")
 
     async def deploy(
-        self,
-        files: List[DeploymentFile],
-        config: DeploymentConfig
+        self, files: list[DeploymentFile], config: DeploymentConfig
     ) -> DeploymentResult:
         """
         Deploy to Vercel.
@@ -59,25 +58,23 @@ class VercelProvider(BaseDeploymentProvider):
             files_payload = []
             for file in files:
                 # Normalize path
-                normalized_path = file.path.replace('\\', '/')
+                normalized_path = file.path.replace("\\", "/")
 
                 # Log each file being uploaded
                 logs.append(f"  - {normalized_path} ({len(file.content)} bytes)")
 
-                files_payload.append({
-                    "file": normalized_path,
-                    "data": base64.b64encode(file.content).decode('utf-8'),
-                    "encoding": "base64"
-                })
+                files_payload.append(
+                    {
+                        "file": normalized_path,
+                        "data": base64.b64encode(file.content).decode("utf-8"),
+                        "encoding": "base64",
+                    }
+                )
 
             # Step 2: Create deployment
             logs.append("Creating deployment...")
 
-            deployment_data = {
-                "name": project_name,
-                "files": files_payload,
-                "target": "production"
-            }
+            deployment_data = {"name": project_name, "files": files_payload, "target": "production"}
 
             # Configure based on deployment mode
             if config.deployment_mode == "source":
@@ -89,7 +86,7 @@ class VercelProvider(BaseDeploymentProvider):
                     deployment_data["projectSettings"] = {
                         "framework": framework_name,
                         "buildCommand": config.build_command or "npm run build",
-                        "outputDirectory": self._get_output_directory(config.framework or "vite")
+                        "outputDirectory": self._get_output_directory(config.framework or "vite"),
                     }
             else:
                 # Pre-built mode: Send built files only, no build configuration
@@ -99,8 +96,7 @@ class VercelProvider(BaseDeploymentProvider):
             # Add environment variables if provided
             if config.env_vars:
                 deployment_data["env"] = [
-                    {"key": k, "value": v}
-                    for k, v in config.env_vars.items()
+                    {"key": k, "value": v} for k, v in config.env_vars.items()
                 ]
 
             # Add team if specified
@@ -112,20 +108,17 @@ class VercelProvider(BaseDeploymentProvider):
 
             async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
-                    url,
-                    headers=self._get_headers(),
-                    params=params,
-                    json=deployment_data
+                    url, headers=self._get_headers(), params=params, json=deployment_data
                 )
                 response.raise_for_status()
                 result = response.json()
 
-            deployment_id = result['id']
+            deployment_id = result["id"]
             deployment_url = f"https://{result['url']}"
 
             logs.append(f"Deployment created: {deployment_id}")
             logs.append(f"Initial status: {result.get('readyState', 'UNKNOWN')}")
-            if result.get('error'):
+            if result.get("error"):
                 logs.append(f"Error in creation response: {result['error']}")
 
             # Step 3: Wait for build to complete
@@ -139,10 +132,7 @@ class VercelProvider(BaseDeploymentProvider):
                     deployment_id=deployment_id,
                     deployment_url=deployment_url,
                     logs=logs,
-                    metadata={
-                        "vercel_deployment": result,
-                        "team_id": team_id
-                    }
+                    metadata={"vercel_deployment": result, "team_id": team_id},
                 )
             else:
                 # Fetch error logs
@@ -162,32 +152,21 @@ class VercelProvider(BaseDeploymentProvider):
                     deployment_url=deployment_url,  # Include deployment_url even for failures
                     error=error_msg,
                     logs=all_logs,
-                    metadata={"deployment_id": deployment_id}
+                    metadata={"deployment_id": deployment_id},
                 )
 
         except httpx.HTTPStatusError as e:
             error_msg = f"Vercel API error: {e.response.status_code} - {e.response.text}"
             logs.append(error_msg)
-            return DeploymentResult(
-                success=False,
-                error=error_msg,
-                logs=logs
-            )
+            return DeploymentResult(success=False, error=error_msg, logs=logs)
 
         except Exception as e:
             error_msg = f"Deployment failed: {str(e)}"
             logs.append(error_msg)
-            return DeploymentResult(
-                success=False,
-                error=error_msg,
-                logs=logs
-            )
+            return DeploymentResult(success=False, error=error_msg, logs=logs)
 
     async def _wait_for_deployment(
-        self,
-        deployment_id: str,
-        logs: List[str],
-        max_wait: int = 600
+        self, deployment_id: str, logs: list[str], max_wait: int = 600
     ) -> str:
         """
         Poll deployment status until ready or failed.
@@ -206,20 +185,20 @@ class VercelProvider(BaseDeploymentProvider):
         while True:
             try:
                 status_data = await self.get_deployment_status(deployment_id)
-                state = status_data.get('readyState', 'UNKNOWN')
+                state = status_data.get("readyState", "UNKNOWN")
 
                 # Terminal states
-                if state in ['READY', 'ERROR', 'CANCELED']:
+                if state in ["READY", "ERROR", "CANCELED"]:
                     return state
 
                 # Check timeout
                 elapsed = asyncio.get_event_loop().time() - start_time
                 if elapsed > max_wait:
                     logs.append(f"Deployment timed out after {max_wait} seconds")
-                    return 'TIMEOUT'
+                    return "TIMEOUT"
 
                 # Log progress
-                if state == 'BUILDING':
+                if state == "BUILDING":
                     logs.append(f"Building... ({int(elapsed)}s elapsed)")
 
                 # Wait before next poll
@@ -227,9 +206,9 @@ class VercelProvider(BaseDeploymentProvider):
 
             except Exception as e:
                 logs.append(f"Error polling status: {str(e)}")
-                return 'ERROR'
+                return "ERROR"
 
-    def _map_framework(self, framework: str) -> Optional[str]:
+    def _map_framework(self, framework: str) -> str | None:
         """
         Map internal framework names to Vercel framework names.
 
@@ -246,7 +225,7 @@ class VercelProvider(BaseDeploymentProvider):
             "vue": "vue",
             "svelte": "svelte",
             "nuxt": "nuxtjs",
-            "angular": "angular"
+            "angular": "angular",
         }
         return mapping.get(framework.lower())
 
@@ -267,18 +246,18 @@ class VercelProvider(BaseDeploymentProvider):
             "vue": "dist",
             "svelte": "dist",
             "nuxt": ".nuxt",
-            "angular": "dist"
+            "angular": "dist",
         }
         return output_dirs.get(framework.lower(), "dist")
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self) -> dict[str, str]:
         """Get headers for Vercel API requests."""
         return {
             "Authorization": f"Bearer {self.credentials['token']}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
-    async def test_credentials(self) -> Dict[str, any]:
+    async def test_credentials(self) -> dict[str, any]:
         """
         Test if credentials are valid by making a real API call to Vercel.
 
@@ -296,37 +275,32 @@ class VercelProvider(BaseDeploymentProvider):
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    url,
-                    headers=self._get_headers(),
-                    params=params
-                )
+                response = await client.get(url, headers=self._get_headers(), params=params)
                 response.raise_for_status()
 
                 # If we get here, credentials are valid
                 data = response.json()
-                result = {
-                    "valid": True,
-                    "project_count": len(data.get('projects', []))
-                }
+                result = {"valid": True, "project_count": len(data.get("projects", []))}
                 if team_id:
                     result["team_id"] = team_id
                 return result
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                raise ValueError("Invalid Vercel access token")
+                raise ValueError("Invalid Vercel access token") from e
             elif e.response.status_code == 403:
                 if team_id:
-                    raise ValueError("Access token does not have permission to access this team")
-                raise ValueError("Access token does not have required permissions")
+                    raise ValueError(
+                        "Access token does not have permission to access this team"
+                    ) from e
+                raise ValueError("Access token does not have required permissions") from e
             else:
-                raise ValueError(f"Vercel API error: {e.response.status_code}")
-        except httpx.TimeoutException:
-            raise ValueError("Connection to Vercel API timed out")
+                raise ValueError(f"Vercel API error: {e.response.status_code}") from e
+        except httpx.TimeoutException as e:
+            raise ValueError("Connection to Vercel API timed out") from e
         except Exception as e:
-            raise ValueError(f"Failed to validate credentials: {str(e)}")
+            raise ValueError(f"Failed to validate credentials: {str(e)}") from e
 
-    async def get_deployment_status(self, deployment_id: str) -> Dict:
+    async def get_deployment_status(self, deployment_id: str) -> dict:
         """
         Get deployment status from Vercel.
 
@@ -343,11 +317,7 @@ class VercelProvider(BaseDeploymentProvider):
             params["teamId"] = team_id
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                url,
-                headers=self._get_headers(),
-                params=params
-            )
+            response = await client.get(url, headers=self._get_headers(), params=params)
             response.raise_for_status()
             return response.json()
 
@@ -369,16 +339,12 @@ class VercelProvider(BaseDeploymentProvider):
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.delete(
-                    url,
-                    headers=self._get_headers(),
-                    params=params
-                )
+                response = await client.delete(url, headers=self._get_headers(), params=params)
                 return response.status_code == 200
         except Exception:
             return False
 
-    async def get_deployment_logs(self, deployment_id: str) -> List[str]:
+    async def get_deployment_logs(self, deployment_id: str) -> list[str]:
         """
         Fetch build logs from Vercel.
 
@@ -396,28 +362,28 @@ class VercelProvider(BaseDeploymentProvider):
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    url,
-                    headers=self._get_headers(),
-                    params=params
-                )
+                response = await client.get(url, headers=self._get_headers(), params=params)
                 if response.status_code == 200:
                     events = response.json()
                     log_lines = []
                     for event in events:
-                        event_type = event.get('type', 'INFO')
-                        payload = event.get('payload', {})
+                        event_type = event.get("type", "INFO")
+                        payload = event.get("payload", {})
 
                         # Get text from payload
-                        if payload.get('text'):
+                        if payload.get("text"):
                             log_lines.append(f"[{event_type}] {payload['text']}")
 
                         # Also check for error details
-                        if payload.get('message'):
+                        if payload.get("message"):
                             log_lines.append(f"[{event_type}] {payload['message']}")
 
                         # Include the full event for debugging if it's an error
-                        if event_type == 'error' and not payload.get('text') and not payload.get('message'):
+                        if (
+                            event_type == "error"
+                            and not payload.get("text")
+                            and not payload.get("message")
+                        ):
                             log_lines.append(f"[ERROR] {payload}")
 
                     return log_lines if log_lines else ["No logs available"]

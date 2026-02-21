@@ -5,25 +5,25 @@ This module provides a RESTful API for AI agents to execute shell commands
 in user development environments with comprehensive security controls.
 """
 
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 import logging
 import time
-from typing import List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import User, Project
+from ..models import Project, User
 from ..schemas import (
+    AgentCommandLogSchema,
     AgentCommandRequest,
     AgentCommandResponse,
-    AgentCommandLogSchema,
-    AgentCommandStatsResponse
+    AgentCommandStatsResponse,
 )
-from ..services.command_validator import get_command_validator, CommandRisk
 from ..services.agent_audit import get_audit_service
-from ..users import current_active_user, current_superuser
+from ..services.command_validator import get_command_validator
+from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,7 +68,7 @@ def check_rate_limit(user_id: UUID) -> bool:
 async def execute_command(
     request: AgentCommandRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Execute a shell command in a user's development pod.
@@ -100,14 +100,13 @@ async def execute_command(
             )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded. Maximum {RATE_LIMIT_COMMANDS} commands per minute."
+                detail=f"Rate limit exceeded. Maximum {RATE_LIMIT_COMMANDS} commands per minute.",
             )
 
         # 2. Verify project ownership
         result = await db.execute(
             select(Project).where(
-                Project.id == request.project_id,
-                Project.owner_id == current_user.id
+                Project.id == request.project_id, Project.owner_id == current_user.id
             )
         )
         project = result.scalar_one_or_none()
@@ -118,8 +117,7 @@ async def execute_command(
                 f"(not found or access denied)"
             )
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found or access denied"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied"
             )
 
         # 3. Validate command
@@ -143,12 +141,12 @@ async def execute_command(
                 exit_code=-1,
                 stderr=f"Command validation failed: {validation.reason}",
                 risk_level=validation.risk_level.value,
-                dry_run=request.dry_run
+                dry_run=request.dry_run,
             )
 
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Command validation failed: {validation.reason}"
+                detail=f"Command validation failed: {validation.reason}",
             )
 
         # 4. Check if container/pod is ready
@@ -159,20 +157,20 @@ async def execute_command(
             container_status = await orchestrator.is_container_ready(
                 user_id=current_user.id,
                 project_id=request.project_id,
-                container_name=None  # Use default container
+                container_name=None,  # Use default container
             )
 
             if not container_status["ready"] or not container_status.get("responsive", False):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=f"Development environment not ready: {container_status['message']}"
+                    detail=f"Development environment not ready: {container_status['message']}",
                 )
         else:
             # Docker mode - not supported for agent commands
             # All projects should use multi-container system
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Agent commands are only supported in Kubernetes mode."
+                detail="Agent commands are only supported in Kubernetes mode.",
             )
 
         # 5. Execute command (or simulate if dry_run)
@@ -203,9 +201,13 @@ async def execute_command(
                 output = await orchestrator.execute_command(
                     user_id=current_user.id,
                     project_id=request.project_id,
-                    container_name=request.container_name if hasattr(request, 'container_name') else None,
-                    command=validation.sanitized_command if isinstance(validation.sanitized_command, list) else ["/bin/sh", "-c", validation.sanitized_command],
-                    timeout=request.timeout
+                    container_name=request.container_name
+                    if hasattr(request, "container_name")
+                    else None,
+                    command=validation.sanitized_command
+                    if isinstance(validation.sanitized_command, list)
+                    else ["/bin/sh", "-c", validation.sanitized_command],
+                    timeout=request.timeout,
                 )
                 stdout = output
                 success = True
@@ -240,13 +242,12 @@ async def execute_command(
             stderr=stderr,
             duration_ms=duration_ms,
             risk_level=validation.risk_level.value,
-            dry_run=request.dry_run
+            dry_run=request.dry_run,
         )
 
         # 7. Check for suspicious activity
         suspicious_check = await audit_service.detect_suspicious_activity(
-            user_id=current_user.id,
-            time_window_minutes=5
+            user_id=current_user.id, time_window_minutes=5
         )
 
         if suspicious_check["is_suspicious"]:
@@ -267,7 +268,7 @@ async def execute_command(
             risk_level=validation.risk_level.value,
             dry_run=request.dry_run,
             command_id=log_entry.id,
-            message="Command executed successfully" if success else "Command execution failed"
+            message="Command executed successfully" if success else "Command execution failed",
         )
 
     except HTTPException:
@@ -277,16 +278,16 @@ async def execute_command(
         logger.error(f"Unexpected error in agent execute endpoint: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
+            detail=f"Internal server error: {str(e)}",
+        ) from e
 
 
-@router.get("/history/{project_id}", response_model=List[AgentCommandLogSchema])
+@router.get("/history/{project_id}", response_model=list[AgentCommandLogSchema])
 async def get_command_history(
     project_id: str,
     limit: int = 50,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get command execution history for a project.
@@ -302,17 +303,13 @@ async def get_command_history(
     """
     # Verify project ownership
     result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
+        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
     )
     project = result.scalar_one_or_none()
 
     if not project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found or access denied"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found or access denied"
         )
 
     # Enforce limit cap
@@ -321,10 +318,7 @@ async def get_command_history(
     # Get history
     audit_service = get_audit_service(db)
     history = await audit_service.get_user_command_history(
-        user_id=current_user.id,
-        project_id=project_id,
-        limit=limit,
-        include_dry_run=False
+        user_id=current_user.id, project_id=project_id, limit=limit, include_dry_run=False
     )
 
     return history
@@ -334,7 +328,7 @@ async def get_command_history(
 async def get_command_stats(
     days: int = 7,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get command execution statistics for the current user.
@@ -351,10 +345,7 @@ async def get_command_stats(
     days = min(days, 30)
 
     audit_service = get_audit_service(db)
-    stats = await audit_service.get_command_stats(
-        user_id=current_user.id,
-        days=days
-    )
+    stats = await audit_service.get_command_stats(user_id=current_user.id, days=days)
 
     return AgentCommandStatsResponse(**stats)
 
@@ -369,6 +360,6 @@ async def health_check():
             "command_execution": True,
             "audit_logging": True,
             "rate_limiting": True,
-            "command_validation": True
-        }
+            "command_validation": True,
+        },
     }

@@ -1,7 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, Lightning, GitFork, Star } from '@phosphor-icons/react';
+import { Check, Lightning, GitFork, Star, ShieldCheck, Users } from '@phosphor-icons/react';
 import { useTheme } from '../../theme/ThemeContext';
+import { marketplaceApi } from '../../lib/api';
+import toast from 'react-hot-toast';
 
 export interface MarketplaceItem {
   id: string;
@@ -14,7 +16,7 @@ export interface MarketplaceItem {
   mode?: string;
   agent_type?: string;
   model?: string;
-  source_type: 'open' | 'closed';
+  source_type: 'open' | 'closed' | 'git' | 'archive';
   is_forkable: boolean;
   is_active: boolean;
   icon: string;
@@ -60,6 +62,7 @@ export function formatInstalls(count: number): string {
 export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCardProps) {
   const navigate = useNavigate();
   const { theme } = useTheme();
+  const [forking, setForking] = React.useState(false);
 
   const handleClick = () => {
     navigate(`/marketplace/${item.slug}`);
@@ -73,6 +76,23 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
       return;
     }
     onInstall(item);
+  };
+
+  const handleFork = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isAuthenticated || forking) return;
+
+    setForking(true);
+    try {
+      await marketplaceApi.forkAgent(item.id);
+      toast.success(`Forked "${item.name}" to your library!`);
+      navigate('/library?tab=agents');
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to fork agent');
+    } finally {
+      setForking(false);
+    }
   };
 
   const creatorId = item.forked_by_user_id || item.created_by_user_id;
@@ -93,65 +113,83 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
         group relative flex flex-col p-4 rounded-xl border cursor-pointer
         transition-all duration-200 ease-out
         hover:-translate-y-1 hover:shadow-xl
-        ${theme === 'light'
-          ? 'bg-white border-black/10 hover:border-[var(--primary)]/40'
-          : 'bg-[#1a1a1c] border-white/10 hover:border-[var(--primary)]/40'
+        ${
+          theme === 'light'
+            ? 'bg-white border-black/10 hover:border-[var(--primary)]/40'
+            : 'bg-[#1a1a1c] border-white/10 hover:border-[var(--primary)]/40'
         }
         ${!item.is_active ? 'opacity-60' : ''}
       `}
     >
       {/* Icon */}
       <div className="mb-3">
-        <div className={`
+        <div
+          className={`
           w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden
           ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-        `}>
+        `}
+        >
           {item.avatar_url ? (
-            <img
-              src={item.avatar_url}
-              alt={item.name}
-              className="w-full h-full object-cover"
-            />
+            <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover" />
           ) : (
-            <img
-              src="/favicon.svg"
-              alt="Tesslate"
-              className="w-8 h-8"
-            />
+            <img src="/favicon.svg" alt="Tesslate" className="w-8 h-8" />
           )}
         </div>
       </div>
 
       {/* Title & Badge Row */}
       <div className="flex items-start justify-between gap-2 mb-1">
-        <h3 className={`
+        <h3
+          className={`
           font-heading font-semibold text-sm sm:text-base leading-tight
           group-hover:text-[var(--primary)] transition-colors
           ${theme === 'light' ? 'text-black' : 'text-white'}
-        `}>
+        `}
+        >
           {item.name}
         </h3>
-        {item.source_type === 'open' && (
-          <span className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 bg-green-500/15 text-green-500 text-[10px] rounded font-medium">
-            <GitFork size={10} weight="bold" />
-            Open
-          </span>
-        )}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {item.source_type === 'open' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/15 text-green-500 text-[10px] rounded font-medium">
+              <GitFork size={10} weight="bold" />
+              Open
+            </span>
+          )}
+          {item.source_type === 'archive' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
+              Exported
+            </span>
+          )}
+          {item.creator_type === 'community' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
+              <Users size={10} weight="bold" />
+              Community
+            </span>
+          )}
+          {item.creator_type === 'official' && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/15 text-blue-400 text-[10px] rounded font-medium">
+              <ShieldCheck size={10} weight="bold" />
+              Official
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Description */}
-      <p className={`
+      <p
+        className={`
         text-xs sm:text-sm leading-relaxed line-clamp-2 mb-3 min-h-[32px] sm:min-h-[40px]
         ${theme === 'light' ? 'text-black/60' : 'text-white/60'}
-      `}>
+      `}
+      >
         {item.description}
       </p>
 
       {/* Footer */}
       <div className="mt-auto pt-3 border-t border-white/5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-y-2">
           {/* Author & Stats */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Creator Avatar */}
             <button
               onClick={handleCreatorClick}
@@ -160,10 +198,12 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
               `}
             >
-              <div className={`
+              <div
+                className={`
                 w-5 h-5 rounded-full overflow-hidden flex-shrink-0
                 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}
-              `}>
+              `}
+              >
                 {item.creator_avatar_url ? (
                   <img
                     src={item.creator_avatar_url}
@@ -183,58 +223,80 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
 
             {/* Rating */}
             {item.rating > 0 && (
-              <div className={`
+              <div
+                className={`
                 flex items-center gap-1 text-xs
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
-              `}>
+              `}
+              >
                 <Star size={12} weight="fill" className="text-amber-400" />
                 <span>{item.rating.toFixed(1)}</span>
               </div>
             )}
 
             {/* Uses Count */}
-            <div className={`
+            <div
+              className={`
               flex items-center gap-1 text-xs
               ${theme === 'light' ? 'text-black/40' : 'text-white/40'}
-            `}>
+            `}
+            >
               <Lightning size={12} weight="fill" />
               <span>{formatInstalls(usageCount)} uses</span>
             </div>
           </div>
 
-          {/* Install Button */}
-          {item.is_purchased && isAuthenticated ? (
-            <span className="flex items-center gap-1 px-2.5 py-1 bg-green-500/15 text-green-500 rounded-lg text-xs font-medium">
-              <Check size={12} weight="bold" />
-              Installed
-            </span>
-          ) : !isAuthenticated ? (
-            <button
-              onClick={handleInstall}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md"
-            >
-              Sign Up
-            </button>
-          ) : (
-            <button
-              onClick={handleInstall}
-              disabled={!item.is_active}
-              className={`
+          {/* Install / Fork Buttons */}
+          <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+            {item.is_purchased &&
+              isAuthenticated &&
+              item.source_type === 'open' &&
+              item.is_forkable && (
+                <button
+                  onClick={handleFork}
+                  disabled={forking}
+                  title="Fork & Customize"
+                  className="flex items-center gap-1 px-2 py-1 bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 rounded-lg text-xs font-medium transition-colors"
+                >
+                  <GitFork size={12} weight="bold" />
+                  {forking ? '...' : 'Fork'}
+                </button>
+              )}
+            {item.is_purchased && isAuthenticated ? (
+              <span className="flex items-center gap-1 px-2.5 py-1 bg-green-500/15 text-green-500 rounded-lg text-xs font-medium">
+                <Check size={12} weight="bold" />
+                Installed
+              </span>
+            ) : !isAuthenticated ? (
+              <button
+                onClick={handleInstall}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md"
+              >
+                Sign Up
+              </button>
+            ) : (
+              <button
+                onClick={handleInstall}
+                disabled={!item.is_active}
+                className={`
                 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all
-                ${item.is_active
-                  ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md'
-                  : theme === 'light'
-                    ? 'bg-black/5 text-black/40 cursor-not-allowed'
-                    : 'bg-white/5 text-white/40 cursor-not-allowed'
+                ${
+                  item.is_active
+                    ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-sm hover:shadow-md'
+                    : theme === 'light'
+                      ? 'bg-black/5 text-black/40 cursor-not-allowed'
+                      : 'bg-white/5 text-white/40 cursor-not-allowed'
                 }
               `}
-            >
-              {item.is_active
-                ? (item.pricing_type === 'free' ? 'Install' : `$${item.price}/mo`)
-                : 'Soon'
-              }
-            </button>
-          )}
+              >
+                {item.is_active
+                  ? item.pricing_type === 'free'
+                    ? 'Install'
+                    : `$${item.price}/mo`
+                  : 'Soon'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -5,19 +5,16 @@ This module handles building projects inside containers and collecting the built
 for deployment to various providers.
 """
 
+import asyncio
 import logging
 import os
-import asyncio
-import docker
-import tempfile
-import tarfile
-import io
-from typing import List, Dict, Optional, Tuple
-from pathlib import Path
 from uuid import UUID
 
-from .base import DeploymentFile
+import docker
+
 from ...services.framework_detector import FrameworkDetector
+from .base import DeploymentFile
+
 # Legacy container manager removed - multi-container projects only
 
 logger = logging.getLogger(__name__)
@@ -25,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class BuildError(Exception):
     """Exception raised when build fails."""
+
     pass
 
 
@@ -53,12 +51,12 @@ class DeploymentBuilder:
         user_id: str,
         project_id: str,
         project_slug: str,
-        framework: Optional[str] = None,
-        custom_build_command: Optional[str] = None,
-        project_settings: Optional[Dict] = None,
-        container_name: Optional[str] = None,
-        volume_name: Optional[str] = None
-    ) -> Tuple[bool, str]:
+        framework: str | None = None,
+        custom_build_command: str | None = None,
+        project_settings: dict | None = None,
+        container_name: str | None = None,
+        volume_name: str | None = None,
+    ) -> tuple[bool, str]:
         """
         Trigger a build inside the project container.
 
@@ -91,9 +89,11 @@ class DeploymentBuilder:
                     # Fallback: Auto-detect from package.json
                     package_json_path = os.path.join(project_path, "package.json")
                     if os.path.exists(package_json_path):
-                        with open(package_json_path, 'r') as f:
+                        with open(package_json_path) as f:
                             package_json_content = f.read()
-                        framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
+                        framework, _ = FrameworkDetector.detect_from_package_json(
+                            package_json_content
+                        )
                         logger.info(f"Auto-detected framework: {framework}")
                     else:
                         framework = "vite"
@@ -120,31 +120,41 @@ class DeploymentBuilder:
                 # For multi-container projects, execute directly with docker exec
                 if container_name:
                     from ...utils.async_subprocess import run_async
+
                     logger.info(f"Executing build in specific container: {container_name}")
 
                     result = await run_async(
-                        ["docker", "exec", container_name, "/bin/sh", "-c", f"cd /app && {build_command}"],
+                        [
+                            "docker",
+                            "exec",
+                            container_name,
+                            "/bin/sh",
+                            "-c",
+                            f"cd /app && {build_command}",
+                        ],
                         timeout=300,
                         capture_output=True,
-                        text=True
+                        text=True,
                     )
 
                     output = result.stdout + result.stderr
 
                     if result.returncode != 0:
-                        raise RuntimeError(f"Command failed with exit code {result.returncode}: {output}")
+                        raise RuntimeError(
+                            f"Command failed with exit code {result.returncode}: {output}"
+                        )
                 else:
                     # Single container project - use container manager
                     output = await self.container_manager.execute_command_in_container(
                         user_id=UUID(user_id),
                         project_id=project_id,
                         command=["/bin/sh", "-c", f"cd /app && {build_command}"],
-                        project_slug=project_slug
+                        project_slug=project_slug,
                     )
             except RuntimeError as e:
                 error_msg = f"Build failed: {str(e)}"
                 logger.error(error_msg)
-                raise BuildError(error_msg)
+                raise BuildError(error_msg) from e
 
             logger.info(f"Build completed successfully for project {project_id}")
             return True, output
@@ -157,13 +167,13 @@ class DeploymentBuilder:
         self,
         user_id: str,
         project_id: str,
-        framework: Optional[str] = None,
-        custom_output_dir: Optional[str] = None,
-        project_settings: Optional[Dict] = None,
+        framework: str | None = None,
+        custom_output_dir: str | None = None,
+        project_settings: dict | None = None,
         collect_source: bool = False,
-        container_directory: Optional[str] = None,
-        volume_name: Optional[str] = None
-    ) -> List[DeploymentFile]:
+        container_directory: str | None = None,
+        volume_name: str | None = None,
+    ) -> list[DeploymentFile]:
         """
         Collect files from the project for deployment.
 
@@ -191,8 +201,7 @@ class DeploymentBuilder:
                 if collect_source:
                     # Collect all source files from volume
                     files = await self._collect_files_from_volume(
-                        volume_name,
-                        subdirectory=container_directory
+                        volume_name, subdirectory=container_directory
                     )
                     logger.info(f"Collected {len(files)} source files from volume")
                     return files
@@ -201,12 +210,11 @@ class DeploymentBuilder:
                     # 1. Detect framework from volume
                     if not framework:
                         package_json_content = await self._read_file_from_volume(
-                            volume_name,
-                            "package.json"
+                            volume_name, "package.json"
                         )
                         if package_json_content:
                             framework, _ = FrameworkDetector.detect_from_package_json(
-                                package_json_content.decode('utf-8')
+                                package_json_content.decode("utf-8")
                             )
                             logger.info(f"Auto-detected framework from volume: {framework}")
                         else:
@@ -232,7 +240,9 @@ class DeploymentBuilder:
                         )
 
                     # 5. Collect files
-                    files = await self._collect_files_from_volume(volume_name, subdirectory=output_dir)
+                    files = await self._collect_files_from_volume(
+                        volume_name, subdirectory=output_dir
+                    )
                     logger.info(f"Collected {len(files)} built files from volume")
                     return files
 
@@ -264,9 +274,11 @@ class DeploymentBuilder:
                         # Fallback: Auto-detect from package.json
                         package_json_path = os.path.join(project_path, "package.json")
                         if os.path.exists(package_json_path):
-                            with open(package_json_path, 'r') as f:
+                            with open(package_json_path) as f:
                                 package_json_content = f.read()
-                            framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
+                            framework, _ = FrameworkDetector.detect_from_package_json(
+                                package_json_content
+                            )
                         else:
                             framework = "vite"
 
@@ -275,7 +287,9 @@ class DeploymentBuilder:
                     output_dir = custom_output_dir
                 elif project_settings and project_settings.get("output_directory"):
                     output_dir = project_settings["output_directory"]
-                    logger.debug(f"Using cached output directory from project settings: {output_dir}")
+                    logger.debug(
+                        f"Using cached output directory from project settings: {output_dir}"
+                    )
                 else:
                     output_dir = self._get_build_output_dir(framework)
                 build_path = os.path.join(project_path, output_dir)
@@ -298,11 +312,7 @@ class DeploymentBuilder:
             logger.error(f"Failed to collect deployment files: {e}", exc_info=True)
             raise
 
-    async def _collect_files_recursive(
-        self,
-        directory: str,
-        base_dir: str
-    ) -> List[DeploymentFile]:
+    async def _collect_files_recursive(self, directory: str, base_dir: str) -> list[DeploymentFile]:
         """
         Recursively collect all files from a directory.
 
@@ -315,9 +325,16 @@ class DeploymentBuilder:
         """
         files = []
         ignored_patterns = {
-            '.git', 'node_modules', '__pycache__', '.DS_Store',
-            '.env', '.env.local', '.env.production', '.env.development',
-            'thumbs.db', '.next/cache'
+            ".git",
+            "node_modules",
+            "__pycache__",
+            ".DS_Store",
+            ".env",
+            ".env.local",
+            ".env.production",
+            ".env.development",
+            "thumbs.db",
+            ".next/cache",
         }
 
         for root, dirs, filenames in os.walk(directory):
@@ -326,7 +343,7 @@ class DeploymentBuilder:
 
             for filename in filenames:
                 # Skip ignored files
-                if filename in ignored_patterns or filename.startswith('.'):
+                if filename in ignored_patterns or filename.startswith("."):
                     continue
 
                 file_path = os.path.join(root, filename)
@@ -337,10 +354,7 @@ class DeploymentBuilder:
                     # Use async file reading for better performance
                     content = await self._read_file_async(file_path)
 
-                    files.append(DeploymentFile(
-                        path=relative_path,
-                        content=content
-                    ))
+                    files.append(DeploymentFile(path=relative_path, content=content))
 
                 except Exception as e:
                     logger.warning(f"Failed to read file {file_path}: {e}")
@@ -372,7 +386,7 @@ class DeploymentBuilder:
         Returns:
             File content as bytes
         """
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             return f.read()
 
     def _get_project_path(self, user_id: str, project_id: str) -> str:
@@ -397,7 +411,7 @@ class DeploymentBuilder:
 
         return os.path.join(base_path, f"{user_id}/{project_id}")
 
-    def _get_build_command(self, framework: str) -> Optional[str]:
+    def _get_build_command(self, framework: str) -> str | None:
         """
         Get the build command for a framework.
 
@@ -445,10 +459,7 @@ class DeploymentBuilder:
         return output_dirs.get(framework.lower(), "dist")
 
     async def verify_build_output(
-        self,
-        user_id: str,
-        project_id: str,
-        framework: Optional[str] = None
+        self, user_id: str, project_id: str, framework: str | None = None
     ) -> bool:
         """
         Verify that build output exists and is valid.
@@ -468,7 +479,7 @@ class DeploymentBuilder:
                 # Read package.json to detect framework
                 package_json_path = os.path.join(project_path, "package.json")
                 if os.path.exists(package_json_path):
-                    with open(package_json_path, 'r') as f:
+                    with open(package_json_path) as f:
                         package_json_content = f.read()
                     framework, _ = FrameworkDetector.detect_from_package_json(package_json_content)
                 else:
@@ -483,7 +494,9 @@ class DeploymentBuilder:
                 return False
 
             # Check if directory has at least one file
-            has_files = any(os.path.isfile(os.path.join(build_path, f)) for f in os.listdir(build_path))
+            has_files = any(
+                os.path.isfile(os.path.join(build_path, f)) for f in os.listdir(build_path)
+            )
 
             if not has_files:
                 logger.error(f"Build output directory is empty: {build_path}")
@@ -497,10 +510,8 @@ class DeploymentBuilder:
             return False
 
     async def _collect_files_from_volume(
-        self,
-        project_slug: str,
-        subdirectory: Optional[str] = None
-    ) -> List[DeploymentFile]:
+        self, project_slug: str, subdirectory: str | None = None
+    ) -> list[DeploymentFile]:
         """
         Collect files from the shared projects volume using direct filesystem access.
 
@@ -529,13 +540,9 @@ class DeploymentBuilder:
             return files
         except Exception as e:
             logger.error(f"Failed to collect files from {base_path}: {e}", exc_info=True)
-            raise FileNotFoundError(f"Failed to read from {base_path}: {str(e)}")
+            raise FileNotFoundError(f"Failed to read from {base_path}: {str(e)}") from e
 
-    async def _read_file_from_volume(
-        self,
-        project_slug: str,
-        file_path: str
-    ) -> Optional[bytes]:
+    async def _read_file_from_volume(self, project_slug: str, file_path: str) -> bytes | None:
         """
         Read a single file from the shared projects volume.
 
@@ -552,18 +559,14 @@ class DeploymentBuilder:
 
         try:
             if os.path.exists(full_path):
-                with open(full_path, 'rb') as f:
+                with open(full_path, "rb") as f:
                     return f.read()
             return None
         except Exception as e:
             logger.warning(f"Failed to read file {full_path}: {e}")
             return None
 
-    async def _directory_exists_in_volume(
-        self,
-        project_slug: str,
-        directory_path: str
-    ) -> bool:
+    async def _directory_exists_in_volume(self, project_slug: str, directory_path: str) -> bool:
         """
         Check if a directory exists in the shared projects volume.
 
@@ -581,7 +584,7 @@ class DeploymentBuilder:
 
 
 # Global singleton instance
-_deployment_builder: Optional[DeploymentBuilder] = None
+_deployment_builder: DeploymentBuilder | None = None
 
 
 def get_deployment_builder() -> DeploymentBuilder:

@@ -1,0 +1,9 @@
+# Disable K8s-managed PostgreSQL when using RDS
+# Scale to 0 replicas instead of removing to allow easy rollback
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: tesslate
+spec:
+  replicas: 0

@@ -4,7 +4,7 @@
 
 services:
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.6
     container_name: tesslate-traefik
     restart: unless-stopped
     ports:
@@ -167,6 +167,14 @@ services:
       - K8S_PVC_STORAGE_CLASS=${K8S_PVC_STORAGE_CLASS:-do-block-storage}
       - K8S_PVC_SIZE=${K8S_PVC_SIZE:-5Gi}
       - K8S_PVC_ACCESS_MODE=${K8S_PVC_ACCESS_MODE:-ReadWriteOnce}
+      # SMTP Configuration (for 2FA email codes)
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_SENDER_EMAIL=${SMTP_SENDER_EMAIL:-}
+      - TWO_FA_ENABLED=${TWO_FA_ENABLED:-false}
       - PYTHONUNBUFFERED=1
       - WATCHFILES_FORCE_POLLING=true
     depends_on:
@@ -212,11 +220,12 @@ services:
       - ./app/tailwind.config.ts:/app/tailwind.config.ts
       - ./app/package.json:/app/package.json
     environment:
-      - VITE_API_URL=${VITE_API_URL:-}
-      - VITE_BACKEND_URL=http://orchestrator:8000
-      - VITE_ALLOWED_HOSTS=${ALLOWED_HOSTS:-${APP_DOMAIN:-localhost}}
+      # Frontend Runtime Config (used by Vite dev server)
+      # In dev mode, config.ts reads from import.meta.env.VITE_*
+      # In production (Docker/K8s), config.ts reads from window._env_
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
       - VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY:-}
-      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-}
+      - VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST:-https://app.posthog.com}
       - APP_DOMAIN=${APP_DOMAIN:-localhost}
       - FRONTEND_PORT=${FRONTEND_PORT:-5173}
       - DEPLOYMENT_MODE=${DEPLOYMENT_MODE:-docker}

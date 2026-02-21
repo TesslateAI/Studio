@@ -206,9 +206,22 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_forgot_password(
         self, user: User, token: str, request: Request | None = None
     ):
-        """Called after forgot password request."""
-        print(f"User {user.id} has forgot their password. Reset token: {token}")
-        # TODO: Send password reset email
+        """Called after forgot password request. Sends a password reset email."""
+        import asyncio
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        reset_url = f"{settings.get_app_base_url}/reset-password?token={token}"
+        logger.info(f"Password reset requested for user {user.id} ({user.email})")
+
+        try:
+            from .services.email_service import get_email_service
+
+            email_service = get_email_service()
+            asyncio.create_task(email_service.send_password_reset(user.email, reset_url))
+        except Exception as e:
+            logger.error(f"Failed to send password reset email to {user.email}: {e}")
 
     async def on_after_request_verify(self, user: User, token: str, request: Request | None = None):
         """Called after email verification request."""

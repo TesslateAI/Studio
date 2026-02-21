@@ -3,21 +3,15 @@ Usage tracking service for syncing LiteLLM usage data and calculating costs.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
 
-from ..models import (
-    User,
-    UsageLog,
-    MarketplaceAgent,
-    UserPurchasedAgent
-)
 from ..config import get_settings
+from ..models import MarketplaceAgent, UsageLog, User
 from .litellm_service import LiteLLMService
 from .stripe_service import stripe_service
 
@@ -38,9 +32,9 @@ class UsageService:
         self,
         user: User,
         start_date: datetime,
-        end_date: Optional[datetime] = None,
-        db: AsyncSession = None
-    ) -> List[UsageLog]:
+        end_date: datetime | None = None,
+        db: AsyncSession = None,
+    ) -> list[UsageLog]:
         """
         Sync usage data from LiteLLM for a specific user.
 
@@ -58,13 +52,12 @@ class UsageService:
             return []
 
         if end_date is None:
-            end_date = datetime.now(timezone.utc)
+            end_date = datetime.now(UTC)
 
         try:
             # Get usage data from LiteLLM
             usage_data = await self.litellm.get_user_usage(
-                api_key=user.litellm_api_key,
-                start_date=start_date
+                api_key=user.litellm_api_key, start_date=start_date
             )
 
             if not usage_data or "data" not in usage_data:
@@ -98,7 +91,7 @@ class UsageService:
                     tokens_output=tokens_output,
                     agent_id=UUID(agent_id) if agent_id else None,
                     user_id=user.id,
-                    db=db
+                    db=db,
                 )
 
                 cost_total = cost_input + cost_output
@@ -125,7 +118,7 @@ class UsageService:
                     creator_revenue=creator_revenue,
                     platform_revenue=platform_revenue,
                     request_id=request_id,
-                    billed_status="pending"
+                    billed_status="pending",
                 )
 
                 if db:
@@ -147,10 +140,10 @@ class UsageService:
         model: str,
         tokens_input: int,
         tokens_output: int,
-        agent_id: Optional[UUID],
+        agent_id: UUID | None,
         user_id: UUID,
-        db: Optional[AsyncSession]
-    ) -> tuple[int, int, Optional[UUID]]:
+        db: AsyncSession | None,
+    ) -> tuple[int, int, UUID | None]:
         """
         Calculate costs for usage based on agent pricing or default LiteLLM pricing.
 
@@ -179,7 +172,9 @@ class UsageService:
                 cost_input_per_million = agent.api_pricing_input  # $ per million tokens
                 cost_output_per_million = agent.api_pricing_output
 
-                cost_input = int((tokens_input / 1_000_000) * cost_input_per_million * 100)  # Convert to cents
+                cost_input = int(
+                    (tokens_input / 1_000_000) * cost_input_per_million * 100
+                )  # Convert to cents
                 cost_output = int((tokens_output / 1_000_000) * cost_output_per_million * 100)
 
                 creator_id = agent.created_by_user_id
@@ -193,7 +188,7 @@ class UsageService:
 
         return cost_input, cost_output, None
 
-    def _get_default_model_pricing(self, model: str) -> Dict[str, float]:
+    def _get_default_model_pricing(self, model: str) -> dict[str, float]:
         """
         Get default pricing for a model.
 
@@ -229,10 +224,7 @@ class UsageService:
         return {"input": 1.00, "output": 3.00}
 
     async def sync_all_users_usage(
-        self,
-        start_date: datetime,
-        end_date: Optional[datetime] = None,
-        db: AsyncSession = None
+        self, start_date: datetime, end_date: datetime | None = None, db: AsyncSession = None
     ) -> int:
         """
         Sync usage data for all users with LiteLLM API keys.
@@ -251,9 +243,7 @@ class UsageService:
 
         try:
             # Get all users with LiteLLM API keys
-            result = await db.execute(
-                select(User).where(User.litellm_api_key.isnot(None))
-            )
+            result = await db.execute(select(User).where(User.litellm_api_key.isnot(None)))
             users = result.scalars().all()
 
             synced_count = 0
@@ -270,12 +260,8 @@ class UsageService:
             return 0
 
     async def get_user_usage_summary(
-        self,
-        user_id: UUID,
-        start_date: datetime,
-        end_date: datetime,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        self, user_id: UUID, start_date: datetime, end_date: datetime, db: AsyncSession
+    ) -> dict[str, Any]:
         """
         Get usage summary for a user within a date range.
 
@@ -295,7 +281,7 @@ class UsageService:
                     and_(
                         UsageLog.user_id == user_id,
                         UsageLog.created_at >= start_date,
-                        UsageLog.created_at <= end_date
+                        UsageLog.created_at <= end_date,
                     )
                 )
             )
@@ -315,7 +301,7 @@ class UsageService:
                         "requests": 0,
                         "tokens_input": 0,
                         "tokens_output": 0,
-                        "cost_total": 0
+                        "cost_total": 0,
                     }
                 by_model[log.model]["requests"] += 1
                 by_model[log.model]["tokens_input"] += log.tokens_input
@@ -332,7 +318,7 @@ class UsageService:
                             "requests": 0,
                             "tokens_input": 0,
                             "tokens_output": 0,
-                            "cost_total": 0
+                            "cost_total": 0,
                         }
                     by_agent[agent_id_str]["requests"] += 1
                     by_agent[agent_id_str]["tokens_input"] += log.tokens_input
@@ -348,19 +334,14 @@ class UsageService:
                 "by_model": by_model,
                 "by_agent": by_agent,
                 "period_start": start_date.isoformat(),
-                "period_end": end_date.isoformat()
+                "period_end": end_date.isoformat(),
             }
 
         except Exception as e:
             logger.error(f"Failed to get usage summary for user {user_id}: {e}")
             return {}
 
-    async def generate_monthly_invoices(
-        self,
-        month: int,
-        year: int,
-        db: AsyncSession
-    ) -> int:
+    async def generate_monthly_invoices(self, month: int, year: int, db: AsyncSession) -> int:
         """
         Generate monthly invoices for all users with unpaid usage.
 
@@ -374,21 +355,24 @@ class UsageService:
         """
         try:
             # Calculate date range for the month
-            start_date = datetime(year, month, 1, tzinfo=timezone.utc)
+            start_date = datetime(year, month, 1, tzinfo=UTC)
             if month == 12:
-                end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+                end_date = datetime(year + 1, 1, 1, tzinfo=UTC)
             else:
-                end_date = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+                end_date = datetime(year, month + 1, 1, tzinfo=UTC)
 
             # Get all users with unpaid usage logs
             result = await db.execute(
-                select(User).join(UsageLog).where(
+                select(User)
+                .join(UsageLog)
+                .where(
                     and_(
                         UsageLog.billed_status == "pending",
                         UsageLog.created_at >= start_date,
-                        UsageLog.created_at < end_date
+                        UsageLog.created_at < end_date,
                     )
-                ).distinct()
+                )
+                .distinct()
             )
             users = result.scalars().all()
 
@@ -401,7 +385,7 @@ class UsageService:
                             UsageLog.user_id == user.id,
                             UsageLog.billed_status == "pending",
                             UsageLog.created_at >= start_date,
-                            UsageLog.created_at < end_date
+                            UsageLog.created_at < end_date,
                         )
                     )
                 )
@@ -410,9 +394,7 @@ class UsageService:
                 if usage_logs:
                     # Create invoice
                     invoice_id = await stripe_service.create_usage_invoice(
-                        user=user,
-                        usage_logs=usage_logs,
-                        db=db
+                        user=user, usage_logs=usage_logs, db=db
                     )
 
                     if invoice_id:
@@ -426,12 +408,8 @@ class UsageService:
             return 0
 
     async def get_creator_earnings(
-        self,
-        creator_id: UUID,
-        start_date: datetime,
-        end_date: datetime,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        self, creator_id: UUID, start_date: datetime, end_date: datetime, db: AsyncSession
+    ) -> dict[str, Any]:
         """
         Get earnings summary for an agent creator.
 
@@ -451,7 +429,7 @@ class UsageService:
                     and_(
                         UsageLog.creator_id == creator_id,
                         UsageLog.created_at >= start_date,
-                        UsageLog.created_at <= end_date
+                        UsageLog.created_at <= end_date,
                     )
                 )
             )
@@ -467,16 +445,17 @@ class UsageService:
                 if log.agent_id:
                     agent_id_str = str(log.agent_id)
                     if agent_id_str not in by_agent:
-                        by_agent[agent_id_str] = {
-                            "requests": 0,
-                            "revenue": 0
-                        }
+                        by_agent[agent_id_str] = {"requests": 0, "revenue": 0}
                     by_agent[agent_id_str]["requests"] += 1
                     by_agent[agent_id_str]["revenue"] += log.creator_revenue
 
             # Group by billing status
-            pending_revenue = sum(log.creator_revenue for log in usage_logs if log.billed_status == "pending")
-            paid_revenue = sum(log.creator_revenue for log in usage_logs if log.billed_status == "paid")
+            pending_revenue = sum(
+                log.creator_revenue for log in usage_logs if log.billed_status == "pending"
+            )
+            paid_revenue = sum(
+                log.creator_revenue for log in usage_logs if log.billed_status == "paid"
+            )
 
             return {
                 "total_revenue_cents": total_revenue,
@@ -488,7 +467,7 @@ class UsageService:
                 "total_requests": total_requests,
                 "by_agent": by_agent,
                 "period_start": start_date.isoformat(),
-                "period_end": end_date.isoformat()
+                "period_end": end_date.isoformat(),
             }
 
         except Exception as e:

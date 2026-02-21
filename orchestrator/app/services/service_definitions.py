@@ -17,20 +17,22 @@ Each service has:
 - Connection templates (how env vars are generated from credentials)
 """
 
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
+from typing import Any
 
 
-class ServiceType(str, Enum):
+class ServiceType(StrEnum):
     """Type of service deployment"""
+
     CONTAINER = "container"  # Runs in Docker container
-    EXTERNAL = "external"    # External cloud service (no container)
-    HYBRID = "hybrid"        # Can run either way
+    EXTERNAL = "external"  # External cloud service (no container)
+    HYBRID = "hybrid"  # Can run either way
 
 
-class AuthType(str, Enum):
+class AuthType(StrEnum):
     """Authentication method for external services"""
+
     API_KEY = "api_key"
     OAUTH = "oauth"
     BEARER = "bearer"
@@ -41,6 +43,7 @@ class AuthType(str, Enum):
 @dataclass
 class CredentialField:
     """Defines a credential field required by an external service"""
+
     key: str  # Internal key (e.g., "api_key", "project_url")
     label: str  # Display label (e.g., "API Key", "Project URL")
     type: str = "password"  # Input type: "text", "password", "url"
@@ -52,6 +55,7 @@ class CredentialField:
 @dataclass
 class ServiceDefinition:
     """Defines a draggable service (container, external, or hybrid)"""
+
     slug: str
     name: str
     description: str
@@ -63,34 +67,33 @@ class ServiceDefinition:
 
     # Container configuration (for container and hybrid types)
     docker_image: str = ""
-    default_port: Optional[int] = None
-    internal_port: Optional[int] = None
-    environment_vars: Dict[str, str] = field(default_factory=dict)
-    volumes: List[str] = field(default_factory=list)
-    health_check: Optional[Dict[str, Any]] = None
-    command: Optional[List[str]] = None
+    default_port: int | None = None
+    internal_port: int | None = None
+    environment_vars: dict[str, str] = field(default_factory=dict)
+    volumes: list[str] = field(default_factory=list)
+    health_check: dict[str, Any] | None = None
+    command: list[str] | None = None
 
     # External service configuration
-    credential_fields: List[CredentialField] = field(default_factory=list)
-    auth_type: Optional[AuthType] = None
-    oauth_provider: Optional[str] = None  # For OAuth-based services
-    docs_url: Optional[str] = None
+    credential_fields: list[CredentialField] = field(default_factory=list)
+    auth_type: AuthType | None = None
+    oauth_provider: str | None = None  # For OAuth-based services
+    docs_url: str | None = None
 
     # Connection template - how to generate env vars from credentials
     # Keys are target env var names, values are templates like "{api_key}" or "{project_url}/rest/v1"
-    connection_template: Dict[str, str] = field(default_factory=dict)
+    connection_template: dict[str, str] = field(default_factory=dict)
 
     # Outputs - what this service provides to connected nodes
     # Keys are output names, values are descriptions
-    outputs: Dict[str, str] = field(default_factory=dict)
+    outputs: dict[str, str] = field(default_factory=dict)
 
 
 # Service catalog
-SERVICES: Dict[str, ServiceDefinition] = {
+SERVICES: dict[str, ServiceDefinition] = {
     # ============================================================================
     # CONTAINER SERVICES (run in Docker)
     # ============================================================================
-
     # Databases
     "postgres": ServiceDefinition(
         slug="postgres",
@@ -106,14 +109,14 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "POSTGRES_USER": "postgres",
             "POSTGRES_PASSWORD": "postgres",
             "POSTGRES_DB": "app",
-            "PGDATA": "/var/lib/postgresql/data/pgdata"
+            "PGDATA": "/var/lib/postgresql/data/pgdata",
         },
         volumes=["/var/lib/postgresql/data"],
         health_check={
             "test": ["CMD-SHELL", "pg_isready -U postgres"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 5
+            "retries": 5,
         },
         outputs={
             "DATABASE_URL": "PostgreSQL connection string",
@@ -121,15 +124,14 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "POSTGRES_PORT": "Database port",
             "POSTGRES_USER": "Database user",
             "POSTGRES_PASSWORD": "Database password",
-            "POSTGRES_DB": "Database name"
+            "POSTGRES_DB": "Database name",
         },
         connection_template={
             "DATABASE_URL": "postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{container_name}:{internal_port}/{POSTGRES_DB}",
             "POSTGRES_HOST": "{container_name}",
-            "POSTGRES_PORT": "{internal_port}"
-        }
+            "POSTGRES_PORT": "{internal_port}",
+        },
     ),
-
     "mysql": ServiceDefinition(
         slug="mysql",
         name="MySQL",
@@ -144,27 +146,26 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "MYSQL_ROOT_PASSWORD": "root",
             "MYSQL_DATABASE": "app",
             "MYSQL_USER": "app",
-            "MYSQL_PASSWORD": "password"
+            "MYSQL_PASSWORD": "password",
         },
         volumes=["/var/lib/mysql"],
         health_check={
             "test": ["CMD", "mysqladmin", "ping", "-h", "localhost"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 5
+            "retries": 5,
         },
         outputs={
             "DATABASE_URL": "MySQL connection string",
             "MYSQL_HOST": "Database hostname",
-            "MYSQL_PORT": "Database port"
+            "MYSQL_PORT": "Database port",
         },
         connection_template={
             "DATABASE_URL": "mysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{container_name}:{internal_port}/{MYSQL_DATABASE}",
             "MYSQL_HOST": "{container_name}",
-            "MYSQL_PORT": "{internal_port}"
-        }
+            "MYSQL_PORT": "{internal_port}",
+        },
     ),
-
     "mongodb": ServiceDefinition(
         slug="mongodb",
         name="MongoDB",
@@ -178,25 +179,21 @@ SERVICES: Dict[str, ServiceDefinition] = {
         environment_vars={
             "MONGO_INITDB_ROOT_USERNAME": "root",
             "MONGO_INITDB_ROOT_PASSWORD": "password",
-            "MONGO_INITDB_DATABASE": "app"
+            "MONGO_INITDB_DATABASE": "app",
         },
         volumes=["/data/db"],
         health_check={
             "test": ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 5
+            "retries": 5,
         },
-        outputs={
-            "MONGODB_URL": "MongoDB connection string",
-            "MONGODB_HOST": "Database hostname"
-        },
+        outputs={"MONGODB_URL": "MongoDB connection string", "MONGODB_HOST": "Database hostname"},
         connection_template={
             "MONGODB_URL": "mongodb://{MONGO_INITDB_ROOT_USERNAME}:{MONGO_INITDB_ROOT_PASSWORD}@{container_name}:{internal_port}/{MONGO_INITDB_DATABASE}?authSource=admin",
-            "MONGODB_HOST": "{container_name}"
-        }
+            "MONGODB_HOST": "{container_name}",
+        },
     ),
-
     # Cache
     "redis": ServiceDefinition(
         slug="redis",
@@ -215,20 +212,19 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "test": ["CMD", "redis-cli", "ping"],
             "interval": "5s",
             "timeout": "3s",
-            "retries": 5
+            "retries": 5,
         },
         outputs={
             "REDIS_URL": "Redis connection string",
             "REDIS_HOST": "Redis hostname",
-            "REDIS_PORT": "Redis port"
+            "REDIS_PORT": "Redis port",
         },
         connection_template={
             "REDIS_URL": "redis://{container_name}:{internal_port}",
             "REDIS_HOST": "{container_name}",
-            "REDIS_PORT": "{internal_port}"
-        }
+            "REDIS_PORT": "{internal_port}",
+        },
     ),
-
     # Message Queues
     "rabbitmq": ServiceDefinition(
         slug="rabbitmq",
@@ -240,27 +236,20 @@ SERVICES: Dict[str, ServiceDefinition] = {
         docker_image="rabbitmq:3-management-alpine",
         default_port=5672,
         internal_port=5672,
-        environment_vars={
-            "RABBITMQ_DEFAULT_USER": "admin",
-            "RABBITMQ_DEFAULT_PASS": "password"
-        },
+        environment_vars={"RABBITMQ_DEFAULT_USER": "admin", "RABBITMQ_DEFAULT_PASS": "password"},
         volumes=["/var/lib/rabbitmq"],
         health_check={
             "test": ["CMD", "rabbitmq-diagnostics", "ping"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 5
+            "retries": 5,
         },
-        outputs={
-            "RABBITMQ_URL": "AMQP connection string",
-            "RABBITMQ_HOST": "RabbitMQ hostname"
-        },
+        outputs={"RABBITMQ_URL": "AMQP connection string", "RABBITMQ_HOST": "RabbitMQ hostname"},
         connection_template={
             "RABBITMQ_URL": "amqp://{RABBITMQ_DEFAULT_USER}:{RABBITMQ_DEFAULT_PASS}@{container_name}:{internal_port}",
-            "RABBITMQ_HOST": "{container_name}"
-        }
+            "RABBITMQ_HOST": "{container_name}",
+        },
     ),
-
     # Search
     "elasticsearch": ServiceDefinition(
         slug="elasticsearch",
@@ -275,25 +264,24 @@ SERVICES: Dict[str, ServiceDefinition] = {
         environment_vars={
             "discovery.type": "single-node",
             "xpack.security.enabled": "false",
-            "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
+            "ES_JAVA_OPTS": "-Xms512m -Xmx512m",
         },
         volumes=["/usr/share/elasticsearch/data"],
         health_check={
             "test": ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 5
+            "retries": 5,
         },
         outputs={
             "ELASTICSEARCH_URL": "Elasticsearch URL",
-            "ELASTICSEARCH_HOST": "Elasticsearch hostname"
+            "ELASTICSEARCH_HOST": "Elasticsearch hostname",
         },
         connection_template={
             "ELASTICSEARCH_URL": "http://{container_name}:{internal_port}",
-            "ELASTICSEARCH_HOST": "{container_name}"
-        }
+            "ELASTICSEARCH_HOST": "{container_name}",
+        },
     ),
-
     # Storage
     "minio": ServiceDefinition(
         slug="minio",
@@ -305,30 +293,26 @@ SERVICES: Dict[str, ServiceDefinition] = {
         docker_image="minio/minio:latest",
         default_port=9000,
         internal_port=9000,
-        environment_vars={
-            "MINIO_ROOT_USER": "admin",
-            "MINIO_ROOT_PASSWORD": "password123"
-        },
+        environment_vars={"MINIO_ROOT_USER": "admin", "MINIO_ROOT_PASSWORD": "password123"},
         volumes=["/data"],
         command=["server", "/data", "--console-address", ":9001"],
         health_check={
             "test": ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 5
+            "retries": 5,
         },
         outputs={
             "S3_ENDPOINT": "S3-compatible endpoint URL",
             "S3_ACCESS_KEY": "Access key",
-            "S3_SECRET_KEY": "Secret key"
+            "S3_SECRET_KEY": "Secret key",
         },
         connection_template={
             "S3_ENDPOINT": "http://{container_name}:{internal_port}",
             "S3_ACCESS_KEY": "{MINIO_ROOT_USER}",
-            "S3_SECRET_KEY": "{MINIO_ROOT_PASSWORD}"
-        }
+            "S3_SECRET_KEY": "{MINIO_ROOT_PASSWORD}",
+        },
     ),
-
     # Proxy/Web Server
     "nginx": ServiceDefinition(
         slug="nginx",
@@ -346,20 +330,14 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "test": ["CMD-SHELL", "curl -f http://localhost/ || exit 1"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 3
+            "retries": 3,
         },
-        outputs={
-            "NGINX_URL": "Nginx URL"
-        },
-        connection_template={
-            "NGINX_URL": "http://{container_name}:{internal_port}"
-        }
+        outputs={"NGINX_URL": "Nginx URL"},
+        connection_template={"NGINX_URL": "http://{container_name}:{internal_port}"},
     ),
-
     # ============================================================================
     # EXTERNAL SERVICES (cloud services, no container)
     # ============================================================================
-
     # Supabase - Backend as a Service
     "supabase": ServiceDefinition(
         slug="supabase",
@@ -376,14 +354,14 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Project URL",
                 type="url",
                 placeholder="https://xxxxx.supabase.co",
-                help_text="Your Supabase project URL (found in Project Settings > API)"
+                help_text="Your Supabase project URL (found in Project Settings > API)",
             ),
             CredentialField(
                 key="anon_key",
                 label="Anon/Public Key",
                 type="password",
                 placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-                help_text="Public anonymous key for client-side usage"
+                help_text="Public anonymous key for client-side usage",
             ),
             CredentialField(
                 key="service_role_key",
@@ -391,24 +369,23 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 type="password",
                 required=False,
                 placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-                help_text="Secret service role key for server-side usage (keep secret!)"
+                help_text="Secret service role key for server-side usage (keep secret!)",
             ),
         ],
         outputs={
             "SUPABASE_URL": "Supabase project URL",
             "SUPABASE_ANON_KEY": "Public anonymous key",
             "SUPABASE_SERVICE_ROLE_KEY": "Service role key (server-side only)",
-            "DATABASE_URL": "Direct PostgreSQL connection string"
+            "DATABASE_URL": "Direct PostgreSQL connection string",
         },
         connection_template={
             "SUPABASE_URL": "{project_url}",
             "SUPABASE_ANON_KEY": "{anon_key}",
             "SUPABASE_SERVICE_ROLE_KEY": "{service_role_key}",
             "NEXT_PUBLIC_SUPABASE_URL": "{project_url}",
-            "NEXT_PUBLIC_SUPABASE_ANON_KEY": "{anon_key}"
-        }
+            "NEXT_PUBLIC_SUPABASE_ANON_KEY": "{anon_key}",
+        },
     ),
-
     # PlanetScale - Serverless MySQL
     "planetscale": ServiceDefinition(
         slug="planetscale",
@@ -425,17 +402,12 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Connection String",
                 type="password",
                 placeholder="mysql://user:password@host/database?ssl={'rejectUnauthorized':true}",
-                help_text="Full connection string from PlanetScale dashboard"
+                help_text="Full connection string from PlanetScale dashboard",
             ),
         ],
-        outputs={
-            "DATABASE_URL": "MySQL connection string"
-        },
-        connection_template={
-            "DATABASE_URL": "{connection_string}"
-        }
+        outputs={"DATABASE_URL": "MySQL connection string"},
+        connection_template={"DATABASE_URL": "{connection_string}"},
     ),
-
     # Neon - Serverless PostgreSQL
     "neon": ServiceDefinition(
         slug="neon",
@@ -452,17 +424,12 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Connection String",
                 type="password",
                 placeholder="postgresql://user:password@host/database?sslmode=require",
-                help_text="Full connection string from Neon console"
+                help_text="Full connection string from Neon console",
             ),
         ],
-        outputs={
-            "DATABASE_URL": "PostgreSQL connection string"
-        },
-        connection_template={
-            "DATABASE_URL": "{connection_string}"
-        }
+        outputs={"DATABASE_URL": "PostgreSQL connection string"},
+        connection_template={"DATABASE_URL": "{connection_string}"},
     ),
-
     # Upstash - Serverless Redis/Kafka
     "upstash": ServiceDefinition(
         slug="upstash",
@@ -479,28 +446,27 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Redis REST URL",
                 type="url",
                 placeholder="https://xxxxx.upstash.io",
-                help_text="REST API URL from Upstash console"
+                help_text="REST API URL from Upstash console",
             ),
             CredentialField(
                 key="redis_token",
                 label="Redis REST Token",
                 type="password",
                 placeholder="AXxxxx...",
-                help_text="REST API token for authentication"
+                help_text="REST API token for authentication",
             ),
         ],
         outputs={
             "UPSTASH_REDIS_REST_URL": "Redis REST API URL",
-            "UPSTASH_REDIS_REST_TOKEN": "Redis REST API token"
+            "UPSTASH_REDIS_REST_TOKEN": "Redis REST API token",
         },
         connection_template={
             "UPSTASH_REDIS_REST_URL": "{redis_url}",
             "UPSTASH_REDIS_REST_TOKEN": "{redis_token}",
             "KV_REST_API_URL": "{redis_url}",
-            "KV_REST_API_TOKEN": "{redis_token}"
-        }
+            "KV_REST_API_TOKEN": "{redis_token}",
+        },
     ),
-
     # OpenAI
     "openai": ServiceDefinition(
         slug="openai",
@@ -517,17 +483,12 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="API Key",
                 type="password",
                 placeholder="sk-...",
-                help_text="Your OpenAI API key"
+                help_text="Your OpenAI API key",
             ),
         ],
-        outputs={
-            "OPENAI_API_KEY": "OpenAI API key"
-        },
-        connection_template={
-            "OPENAI_API_KEY": "{api_key}"
-        }
+        outputs={"OPENAI_API_KEY": "OpenAI API key"},
+        connection_template={"OPENAI_API_KEY": "{api_key}"},
     ),
-
     # Anthropic
     "anthropic": ServiceDefinition(
         slug="anthropic",
@@ -544,17 +505,12 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="API Key",
                 type="password",
                 placeholder="sk-ant-...",
-                help_text="Your Anthropic API key"
+                help_text="Your Anthropic API key",
             ),
         ],
-        outputs={
-            "ANTHROPIC_API_KEY": "Anthropic API key"
-        },
-        connection_template={
-            "ANTHROPIC_API_KEY": "{api_key}"
-        }
+        outputs={"ANTHROPIC_API_KEY": "Anthropic API key"},
+        connection_template={"ANTHROPIC_API_KEY": "{api_key}"},
     ),
-
     # Stripe
     "stripe": ServiceDefinition(
         slug="stripe",
@@ -571,14 +527,14 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Secret Key",
                 type="password",
                 placeholder="sk_test_...",
-                help_text="Your Stripe secret key (starts with sk_test_ or sk_live_)"
+                help_text="Your Stripe secret key (starts with sk_test_ or sk_live_)",
             ),
             CredentialField(
                 key="publishable_key",
                 label="Publishable Key",
                 type="text",
                 placeholder="pk_test_...",
-                help_text="Your Stripe publishable key (safe for frontend)"
+                help_text="Your Stripe publishable key (safe for frontend)",
             ),
             CredentialField(
                 key="webhook_secret",
@@ -586,22 +542,21 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 type="password",
                 required=False,
                 placeholder="whsec_...",
-                help_text="Webhook signing secret (optional)"
+                help_text="Webhook signing secret (optional)",
             ),
         ],
         outputs={
             "STRIPE_SECRET_KEY": "Stripe secret key",
             "STRIPE_PUBLISHABLE_KEY": "Stripe publishable key",
-            "STRIPE_WEBHOOK_SECRET": "Webhook signing secret"
+            "STRIPE_WEBHOOK_SECRET": "Webhook signing secret",
         },
         connection_template={
             "STRIPE_SECRET_KEY": "{secret_key}",
             "STRIPE_PUBLISHABLE_KEY": "{publishable_key}",
             "STRIPE_WEBHOOK_SECRET": "{webhook_secret}",
-            "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": "{publishable_key}"
-        }
+            "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": "{publishable_key}",
+        },
     ),
-
     # Resend
     "resend": ServiceDefinition(
         slug="resend",
@@ -618,17 +573,12 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="API Key",
                 type="password",
                 placeholder="re_...",
-                help_text="Your Resend API key"
+                help_text="Your Resend API key",
             ),
         ],
-        outputs={
-            "RESEND_API_KEY": "Resend API key"
-        },
-        connection_template={
-            "RESEND_API_KEY": "{api_key}"
-        }
+        outputs={"RESEND_API_KEY": "Resend API key"},
+        connection_template={"RESEND_API_KEY": "{api_key}"},
     ),
-
     # Clerk
     "clerk": ServiceDefinition(
         slug="clerk",
@@ -645,27 +595,26 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Publishable Key",
                 type="text",
                 placeholder="pk_test_...",
-                help_text="Frontend publishable key"
+                help_text="Frontend publishable key",
             ),
             CredentialField(
                 key="secret_key",
                 label="Secret Key",
                 type="password",
                 placeholder="sk_test_...",
-                help_text="Backend secret key"
+                help_text="Backend secret key",
             ),
         ],
         outputs={
             "CLERK_PUBLISHABLE_KEY": "Clerk publishable key",
-            "CLERK_SECRET_KEY": "Clerk secret key"
+            "CLERK_SECRET_KEY": "Clerk secret key",
         },
         connection_template={
             "CLERK_PUBLISHABLE_KEY": "{publishable_key}",
             "CLERK_SECRET_KEY": "{secret_key}",
-            "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "{publishable_key}"
-        }
+            "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "{publishable_key}",
+        },
     ),
-
     # n8n - Workflow Automation
     "n8n": ServiceDefinition(
         slug="n8n",
@@ -682,14 +631,14 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "N8N_BASIC_AUTH_ACTIVE": "true",
             "N8N_BASIC_AUTH_USER": "admin",
             "N8N_BASIC_AUTH_PASSWORD": "admin",
-            "GENERIC_TIMEZONE": "UTC"
+            "GENERIC_TIMEZONE": "UTC",
         },
         volumes=["/home/node/.n8n"],
         health_check={
             "test": ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"],
             "interval": "30s",
             "timeout": "10s",
-            "retries": 3
+            "retries": 3,
         },
         # External config (n8n cloud)
         auth_type=AuthType.API_KEY,
@@ -700,26 +649,19 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Instance URL",
                 type="url",
                 placeholder="https://your-instance.app.n8n.cloud",
-                help_text="Your n8n cloud instance URL"
+                help_text="Your n8n cloud instance URL",
             ),
             CredentialField(
                 key="api_key",
                 label="API Key",
                 type="password",
                 placeholder="n8n_api_...",
-                help_text="n8n API key for webhook triggers"
+                help_text="n8n API key for webhook triggers",
             ),
         ],
-        outputs={
-            "N8N_URL": "n8n instance URL",
-            "N8N_API_KEY": "n8n API key"
-        },
-        connection_template={
-            "N8N_URL": "{instance_url}",
-            "N8N_API_KEY": "{api_key}"
-        }
+        outputs={"N8N_URL": "n8n instance URL", "N8N_API_KEY": "n8n API key"},
+        connection_template={"N8N_URL": "{instance_url}", "N8N_API_KEY": "{api_key}"},
     ),
-
     # Turso - Edge SQLite
     "turso": ServiceDefinition(
         slug="turso",
@@ -736,27 +678,23 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Database URL",
                 type="url",
                 placeholder="libsql://your-db-name.turso.io",
-                help_text="Your Turso database URL"
+                help_text="Your Turso database URL",
             ),
             CredentialField(
                 key="auth_token",
                 label="Auth Token",
                 type="password",
                 placeholder="eyJhbGciOi...",
-                help_text="Database authentication token"
+                help_text="Database authentication token",
             ),
         ],
-        outputs={
-            "TURSO_DATABASE_URL": "Turso database URL",
-            "TURSO_AUTH_TOKEN": "Auth token"
-        },
+        outputs={"TURSO_DATABASE_URL": "Turso database URL", "TURSO_AUTH_TOKEN": "Auth token"},
         connection_template={
             "TURSO_DATABASE_URL": "{database_url}",
             "TURSO_AUTH_TOKEN": "{auth_token}",
-            "DATABASE_URL": "{database_url}?authToken={auth_token}"
-        }
+            "DATABASE_URL": "{database_url}?authToken={auth_token}",
+        },
     ),
-
     # Pinecone - Vector Database
     "pinecone": ServiceDefinition(
         slug="pinecone",
@@ -773,14 +711,14 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="API Key",
                 type="password",
                 placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-                help_text="Your Pinecone API key"
+                help_text="Your Pinecone API key",
             ),
             CredentialField(
                 key="environment",
                 label="Environment",
                 type="text",
                 placeholder="us-east-1-aws",
-                help_text="Pinecone environment (region)"
+                help_text="Pinecone environment (region)",
             ),
             CredentialField(
                 key="index_name",
@@ -788,21 +726,20 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 type="text",
                 required=False,
                 placeholder="my-index",
-                help_text="Default index name (optional)"
+                help_text="Default index name (optional)",
             ),
         ],
         outputs={
             "PINECONE_API_KEY": "Pinecone API key",
             "PINECONE_ENVIRONMENT": "Pinecone environment",
-            "PINECONE_INDEX": "Default index name"
+            "PINECONE_INDEX": "Default index name",
         },
         connection_template={
             "PINECONE_API_KEY": "{api_key}",
             "PINECONE_ENVIRONMENT": "{environment}",
-            "PINECONE_INDEX": "{index_name}"
-        }
+            "PINECONE_INDEX": "{index_name}",
+        },
     ),
-
     # Qdrant - Vector Database
     "qdrant": ServiceDefinition(
         slug="qdrant",
@@ -821,7 +758,7 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "test": ["CMD-SHELL", "wget -qO- http://localhost:6333/health || exit 1"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 3
+            "retries": 3,
         },
         # External config (Qdrant Cloud)
         auth_type=AuthType.API_KEY,
@@ -832,26 +769,19 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Cluster URL",
                 type="url",
                 placeholder="https://xxxxx.aws.cloud.qdrant.io:6333",
-                help_text="Your Qdrant Cloud cluster URL"
+                help_text="Your Qdrant Cloud cluster URL",
             ),
             CredentialField(
                 key="api_key",
                 label="API Key",
                 type="password",
                 placeholder="xxxxx...",
-                help_text="Qdrant Cloud API key"
+                help_text="Qdrant Cloud API key",
             ),
         ],
-        outputs={
-            "QDRANT_URL": "Qdrant URL",
-            "QDRANT_API_KEY": "Qdrant API key"
-        },
-        connection_template={
-            "QDRANT_URL": "{url}",
-            "QDRANT_API_KEY": "{api_key}"
-        }
+        outputs={"QDRANT_URL": "Qdrant URL", "QDRANT_API_KEY": "Qdrant API key"},
+        connection_template={"QDRANT_URL": "{url}", "QDRANT_API_KEY": "{api_key}"},
     ),
-
     # Replicate - AI Model Hosting
     "replicate": ServiceDefinition(
         slug="replicate",
@@ -868,17 +798,12 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="API Token",
                 type="password",
                 placeholder="r8_...",
-                help_text="Your Replicate API token"
+                help_text="Your Replicate API token",
             ),
         ],
-        outputs={
-            "REPLICATE_API_TOKEN": "Replicate API token"
-        },
-        connection_template={
-            "REPLICATE_API_TOKEN": "{api_token}"
-        }
+        outputs={"REPLICATE_API_TOKEN": "Replicate API token"},
+        connection_template={"REPLICATE_API_TOKEN": "{api_token}"},
     ),
-
     # Cloudinary - Media Management
     "cloudinary": ServiceDefinition(
         slug="cloudinary",
@@ -895,38 +820,37 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="Cloud Name",
                 type="text",
                 placeholder="your-cloud-name",
-                help_text="Your Cloudinary cloud name"
+                help_text="Your Cloudinary cloud name",
             ),
             CredentialField(
                 key="api_key",
                 label="API Key",
                 type="text",
                 placeholder="123456789012345",
-                help_text="Cloudinary API key"
+                help_text="Cloudinary API key",
             ),
             CredentialField(
                 key="api_secret",
                 label="API Secret",
                 type="password",
                 placeholder="xxxxx...",
-                help_text="Cloudinary API secret"
+                help_text="Cloudinary API secret",
             ),
         ],
         outputs={
             "CLOUDINARY_CLOUD_NAME": "Cloud name",
             "CLOUDINARY_API_KEY": "API key",
             "CLOUDINARY_API_SECRET": "API secret",
-            "CLOUDINARY_URL": "Full Cloudinary URL"
+            "CLOUDINARY_URL": "Full Cloudinary URL",
         },
         connection_template={
             "CLOUDINARY_CLOUD_NAME": "{cloud_name}",
             "CLOUDINARY_API_KEY": "{api_key}",
             "CLOUDINARY_API_SECRET": "{api_secret}",
             "CLOUDINARY_URL": "cloudinary://{api_key}:{api_secret}@{cloud_name}",
-            "NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME": "{cloud_name}"
-        }
+            "NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME": "{cloud_name}",
+        },
     ),
-
     # SendGrid - Email
     "sendgrid": ServiceDefinition(
         slug="sendgrid",
@@ -943,7 +867,7 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="API Key",
                 type="password",
                 placeholder="SG.xxxxx...",
-                help_text="Your SendGrid API key"
+                help_text="Your SendGrid API key",
             ),
             CredentialField(
                 key="from_email",
@@ -951,19 +875,18 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 type="text",
                 required=False,
                 placeholder="noreply@yourdomain.com",
-                help_text="Default sender email (optional)"
+                help_text="Default sender email (optional)",
             ),
         ],
         outputs={
             "SENDGRID_API_KEY": "SendGrid API key",
-            "SENDGRID_FROM_EMAIL": "Default sender email"
+            "SENDGRID_FROM_EMAIL": "Default sender email",
         },
         connection_template={
             "SENDGRID_API_KEY": "{api_key}",
-            "SENDGRID_FROM_EMAIL": "{from_email}"
-        }
+            "SENDGRID_FROM_EMAIL": "{from_email}",
+        },
     ),
-
     # Vercel KV (Upstash-based)
     "vercel-kv": ServiceDefinition(
         slug="vercel-kv",
@@ -980,35 +903,34 @@ SERVICES: Dict[str, ServiceDefinition] = {
                 label="KV URL",
                 type="url",
                 placeholder="redis://default:xxxxx@xxx.kv.vercel-storage.com:6379",
-                help_text="Vercel KV Redis URL"
+                help_text="Vercel KV Redis URL",
             ),
             CredentialField(
                 key="kv_rest_api_url",
                 label="REST API URL",
                 type="url",
                 placeholder="https://xxx.kv.vercel-storage.com",
-                help_text="Vercel KV REST API URL"
+                help_text="Vercel KV REST API URL",
             ),
             CredentialField(
                 key="kv_rest_api_token",
                 label="REST API Token",
                 type="password",
                 placeholder="AXxxxx...",
-                help_text="Vercel KV REST API token"
+                help_text="Vercel KV REST API token",
             ),
         ],
         outputs={
             "KV_URL": "Redis URL",
             "KV_REST_API_URL": "REST API URL",
-            "KV_REST_API_TOKEN": "REST API token"
+            "KV_REST_API_TOKEN": "REST API token",
         },
         connection_template={
             "KV_URL": "{kv_url}",
             "KV_REST_API_URL": "{kv_rest_api_url}",
-            "KV_REST_API_TOKEN": "{kv_rest_api_token}"
-        }
+            "KV_REST_API_TOKEN": "{kv_rest_api_token}",
+        },
     ),
-
     # Grafana - Monitoring
     "grafana": ServiceDefinition(
         slug="grafana",
@@ -1023,23 +945,18 @@ SERVICES: Dict[str, ServiceDefinition] = {
         environment_vars={
             "GF_SECURITY_ADMIN_USER": "admin",
             "GF_SECURITY_ADMIN_PASSWORD": "admin",
-            "GF_AUTH_ANONYMOUS_ENABLED": "true"
+            "GF_AUTH_ANONYMOUS_ENABLED": "true",
         },
         volumes=["/var/lib/grafana"],
         health_check={
             "test": ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 3
+            "retries": 3,
         },
-        outputs={
-            "GRAFANA_URL": "Grafana URL"
-        },
-        connection_template={
-            "GRAFANA_URL": "http://{container_name}:{internal_port}"
-        }
+        outputs={"GRAFANA_URL": "Grafana URL"},
+        connection_template={"GRAFANA_URL": "http://{container_name}:{internal_port}"},
     ),
-
     # Prometheus - Metrics
     "prometheus": ServiceDefinition(
         slug="prometheus",
@@ -1058,64 +975,60 @@ SERVICES: Dict[str, ServiceDefinition] = {
             "test": ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"],
             "interval": "10s",
             "timeout": "5s",
-            "retries": 3
+            "retries": 3,
         },
-        outputs={
-            "PROMETHEUS_URL": "Prometheus URL"
-        },
-        connection_template={
-            "PROMETHEUS_URL": "http://{container_name}:{internal_port}"
-        }
+        outputs={"PROMETHEUS_URL": "Prometheus URL"},
+        connection_template={"PROMETHEUS_URL": "http://{container_name}:{internal_port}"},
     ),
 }
 
 
-def get_service(slug: str) -> Optional[ServiceDefinition]:
+def get_service(slug: str) -> ServiceDefinition | None:
     """Get a service definition by slug"""
     return SERVICES.get(slug)
 
 
-def get_services_by_category(category: str) -> List[ServiceDefinition]:
+def get_services_by_category(category: str) -> list[ServiceDefinition]:
     """Get all services in a category"""
     return [s for s in SERVICES.values() if s.category == category]
 
 
-def get_all_services() -> List[ServiceDefinition]:
+def get_all_services() -> list[ServiceDefinition]:
     """Get all available services"""
     return list(SERVICES.values())
 
 
-def get_container_services() -> List[ServiceDefinition]:
+def get_container_services() -> list[ServiceDefinition]:
     """Get all container-based services (run in Docker)"""
     return [s for s in SERVICES.values() if s.service_type == ServiceType.CONTAINER]
 
 
-def get_external_services() -> List[ServiceDefinition]:
+def get_external_services() -> list[ServiceDefinition]:
     """Get all external cloud services (no container)"""
     return [s for s in SERVICES.values() if s.service_type == ServiceType.EXTERNAL]
 
 
-def get_hybrid_services() -> List[ServiceDefinition]:
+def get_hybrid_services() -> list[ServiceDefinition]:
     """Get all hybrid services (can run either way)"""
     return [s for s in SERVICES.values() if s.service_type == ServiceType.HYBRID]
 
 
-def get_services_by_type(service_type: ServiceType) -> List[ServiceDefinition]:
+def get_services_by_type(service_type: ServiceType) -> list[ServiceDefinition]:
     """Get all services of a specific type"""
     return [s for s in SERVICES.values() if s.service_type == service_type]
 
 
-def get_service_categories() -> List[str]:
+def get_service_categories() -> list[str]:
     """Get all unique service categories"""
-    return list(set(s.category for s in SERVICES.values()))
+    return list({s.category for s in SERVICES.values()})
 
 
-def get_services_requiring_credentials() -> List[ServiceDefinition]:
+def get_services_requiring_credentials() -> list[ServiceDefinition]:
     """Get all services that require user credentials"""
     return [s for s in SERVICES.values() if s.credential_fields]
 
 
-def service_to_dict(service: ServiceDefinition) -> Dict[str, Any]:
+def service_to_dict(service: ServiceDefinition) -> dict[str, Any]:
     """Convert a ServiceDefinition to a dictionary for API responses"""
     return {
         "slug": service.slug,
@@ -1138,7 +1051,7 @@ def service_to_dict(service: ServiceDefinition) -> Dict[str, Any]:
                 "type": cf.type,
                 "required": cf.required,
                 "placeholder": cf.placeholder,
-                "help_text": cf.help_text
+                "help_text": cf.help_text,
             }
             for cf in service.credential_fields
         ],
@@ -1146,5 +1059,5 @@ def service_to_dict(service: ServiceDefinition) -> Dict[str, Any]:
         "oauth_provider": service.oauth_provider,
         "docs_url": service.docs_url,
         "connection_template": service.connection_template,
-        "outputs": service.outputs
+        "outputs": service.outputs,
     }

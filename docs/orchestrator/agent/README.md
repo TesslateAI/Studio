@@ -19,10 +19,10 @@ The agent system follows a modular, extensible design:
 │         │ Implementations:                             │
 │    ┌────┴─────┬──────────────┬─────────────┐          │
 │    │          │              │             │          │
-│ ┌──▼───┐  ┌──▼────┐   ┌────▼────┐  ┌─────▼────┐     │
-│ │Stream│  │Iterative│  │ ReAct   │  │ Custom   │     │
-│ │Agent │  │ Agent   │  │ Agent   │  │ Agents   │     │
-│ └──┬───┘  └────┬────┘   └────┬────┘  └──────────┘     │
+│ ┌──▼───┐  ┌──▼────┐   ┌────▼────┐  ┌──────▼──────┐   │
+│ │Stream│  │Iterative│  │ ReAct   │  │  Tesslate   │   │
+│ │Agent │  │ Agent   │  │ Agent   │  │   Agent     │   │
+│ └──┬───┘  └────┬────┘   └────┬────┘  └──────┬──────┘   │
 │    │           │             │                         │
 │    └───────────┴─────────────┘                         │
 │                │                                        │
@@ -106,13 +106,16 @@ The system supports three edit modes for user control:
 
 ## Agent Types Comparison
 
-| Feature | StreamAgent | IterativeAgent | ReActAgent |
-|---------|-------------|----------------|------------|
-| **Use Case** | Simple streaming responses | Complex multi-step tasks | Explicit reasoning tasks |
-| **Tool Support** | No (code blocks only) | Yes (full tool registry) | Yes (full tool registry) |
-| **Execution Loop** | Single LLM call | Think → Act → Observe loop | Thought → Action → Observation |
-| **Error Recovery** | None | Automatic retry on errors | Automatic retry on errors |
-| **Best For** | Quick code generation | File operations, shell commands | Architecture planning, debugging |
+| Feature | StreamAgent | IterativeAgent | ReActAgent | TesslateAgent |
+|---------|-------------|----------------|------------|---------------|
+| **Use Case** | Simple streaming responses | Complex multi-step tasks | Explicit reasoning tasks | Production agent with full capabilities |
+| **Tool Support** | No (code blocks only) | Yes (full tool registry) | Yes (full tool registry) | Yes (native function calling) |
+| **Execution Loop** | Single LLM call | Think → Act → Observe loop | Thought → Action → Observation | Native tool loop with trajectory |
+| **Error Recovery** | None | Automatic retry on errors | Automatic retry on errors | Automatic retry + context compaction |
+| **Planning Mode** | No | No | No | Yes (plan_manager.py) |
+| **Subagents** | No | No | No | Yes (subagent_manager.py) |
+| **Trajectory** | No | No | No | Yes (trajectory.py) |
+| **Best For** | Quick code generation | File operations, shell commands | Architecture planning, debugging | Full-featured development tasks |
 
 ## Tool System Overview
 
@@ -247,6 +250,28 @@ async for event in agent.run("Create a Button component", context):
     print(event)
 ```
 
+## TesslateAgent System
+
+TesslateAgent is the production agent that uses native LLM function calling instead of JSON-in-text parsing. It adds several capabilities on top of the base agent system:
+
+### Native Function Calling
+Uses `tool_converter.py` to transform tool definitions into provider-native format (e.g., Anthropic tool_use, OpenAI function_calling). The LLM returns structured tool calls directly rather than embedding JSON in text.
+
+### Subagent System
+Managed by `subagent_manager.py`, allows the main agent to spawn specialized sub-agents for focused tasks. Subagents are configured per-agent in the marketplace (CRUD via `/api/marketplace/agents/{id}/subagents`).
+
+### Trajectory Recording
+`trajectory.py` and `trajectory_writer.py` record every agent step (tool calls, results, reasoning) for debugging, analytics, and replay. Trajectories are stored persistently.
+
+### Planning Mode
+`plan_manager.py` manages plan state when the agent operates in plan mode — creating structured plans before executing changes.
+
+### Context Compaction
+`compaction.py` handles automatic compaction of long conversation contexts to stay within token limits while preserving essential information.
+
+### Apply Patch
+`apply_patch.py` provides a unified diff-based file editing tool as an alternative to search/replace patches.
+
 ## Key Files
 
 | File | Purpose |
@@ -256,6 +281,15 @@ async for event in agent.run("Create a Button component", context):
 | `orchestrator/app/agent/stream_agent.py` | Simple streaming agent implementation |
 | `orchestrator/app/agent/iterative_agent.py` | Tool-calling agent with think-act-reflect loop |
 | `orchestrator/app/agent/react_agent.py` | ReAct agent with explicit reasoning |
+| `orchestrator/app/agent/tesslate_agent.py` | TesslateAgent with native function calling |
+| `orchestrator/app/agent/subagent_manager.py` | Subagent lifecycle management |
+| `orchestrator/app/agent/trajectory.py` | Trajectory recording |
+| `orchestrator/app/agent/trajectory_writer.py` | Persistent trajectory storage |
+| `orchestrator/app/agent/plan_manager.py` | Planning mode state |
+| `orchestrator/app/agent/compaction.py` | Context compaction |
+| `orchestrator/app/agent/apply_patch.py` | Unified diff-based file editing |
+| `orchestrator/app/agent/tool_converter.py` | Tool-to-native-format conversion |
+| `orchestrator/app/agent/features.py` | Agent feature flags |
 | `orchestrator/app/agent/prompts.py` | System prompt templates and marker substitution |
 | `orchestrator/app/agent/tools/registry.py` | Tool registration and execution |
 | `orchestrator/app/agent/tools/approval_manager.py` | User approval system for ask mode |

@@ -5,9 +5,9 @@ Generates shell scripts for starting development servers based on
 TESSLATE.md configuration. Supports multiple frameworks and architectures.
 """
 
-from typing import Optional
-import os
 import logging
+import os
+
 from .tesslate_parser import TesslateConfig
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class StartupGenerator:
             f"# Port: {config.port}",
             "",
             "cd /app",
-            ""
+            "",
         ]
 
         # Add environment variables if any
@@ -49,9 +49,9 @@ class StartupGenerator:
 
         # Add startup commands
         script_lines.append("# Start Development Server")
-        script_lines.extend(config.start_command.split('\n'))
+        script_lines.extend(config.start_command.split("\n"))
 
-        script_content = '\n'.join(script_lines)
+        script_content = "\n".join(script_lines)
         return script_content
 
     @staticmethod
@@ -70,7 +70,7 @@ class StartupGenerator:
         script_path = os.path.join(project_path, "start.sh")
 
         try:
-            with open(script_path, 'w', encoding='utf-8', newline='\n') as f:
+            with open(script_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(script_content)
 
             # Make executable

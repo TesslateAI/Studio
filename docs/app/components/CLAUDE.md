@@ -496,6 +496,21 @@ useEffect(() => {
 }, [data]);
 ```
 
+## Route Auth Protection
+
+Routes are protected by `PrivateRoute` and `PublicOnlyRoute` guards in `app/src/components/RouteGuards.tsx`, used in `App.tsx`.
+
+**IMPORTANT: When adding a new route to `App.tsx`**, you MUST:
+1. Wrap it with the appropriate guard (`PrivateRoute`, `PublicOnlyRoute`, or none for public)
+2. Add an entry to the `ROUTE_CONFIG` array in `app/src/components/RouteGuards.test.tsx`
+3. Run `npm test` in `app/` to verify the route has correct auth behavior
+
+| Guard | Behavior | Example Routes |
+|-------|----------|----------------|
+| `PrivateRoute` | Redirects to `/login` if not authenticated (preserves intended destination) | `/dashboard`, `/settings/*`, `/project/*` |
+| `PublicOnlyRoute` | Redirects to `/dashboard` (or saved destination) if already authenticated | `/login`, `/register` |
+| None (public) | Always accessible | `/`, `/marketplace/*`, `/forgot-password` |
+
 ## Testing Patterns
 
 ### Component Tests

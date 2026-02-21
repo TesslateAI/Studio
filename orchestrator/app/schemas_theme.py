@@ -9,9 +9,9 @@ Keep in sync with: app/src/types/theme.ts
 
 import logging
 import re
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +49,7 @@ def validate_color(value: str, field_name: str = "color") -> str:
     """Validate a CSS color value."""
     if not CSS_COLOR_PATTERN.match(value):
         raise ValueError(
-            f"{field_name} must be a valid CSS color "
-            "(hex, rgb, rgba, hsl, hsla, or transparent)"
+            f"{field_name} must be a valid CSS color (hex, rgb, rgba, hsl, hsla, or transparent)"
         )
     return value
 
@@ -65,18 +64,14 @@ def validate_rgb_string(value: str, field_name: str = "rgb") -> str:
 def validate_css_size(value: str, field_name: str = "size") -> str:
     """Validate a CSS size value."""
     if not CSS_SIZE_PATTERN.match(value):
-        raise ValueError(
-            f"{field_name} must be a valid CSS size (e.g., '8px', '1rem', '50%')"
-        )
+        raise ValueError(f"{field_name} must be a valid CSS size (e.g., '8px', '1rem', '50%')")
     return value
 
 
 def validate_css_duration(value: str, field_name: str = "duration") -> str:
     """Validate a CSS duration value."""
     if not CSS_DURATION_PATTERN.match(value):
-        raise ValueError(
-            f"{field_name} must be a valid CSS duration (e.g., '150ms', '0.3s')"
-        )
+        raise ValueError(f"{field_name} must be a valid CSS duration (e.g., '150ms', '0.3s')")
     return value
 
 
@@ -224,9 +219,9 @@ class ThemeCreateRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-z0-9-]+$")
     name: str = Field(..., min_length=1, max_length=100)
     mode: Literal["dark", "light"]
-    author: Optional[str] = Field(default="Tesslate", max_length=100)
-    version: Optional[str] = Field(default="1.0.0", max_length=20)
-    description: Optional[str] = Field(default=None, max_length=500)
+    author: str | None = Field(default="Tesslate", max_length=100)
+    version: str | None = Field(default="1.0.0", max_length=20)
+    description: str | None = Field(default=None, max_length=500)
     theme_json: ThemeJsonSchema
     is_default: bool = False
     is_active: bool = True
@@ -236,15 +231,15 @@ class ThemeCreateRequest(BaseModel):
 class ThemeUpdateRequest(BaseModel):
     """Request schema for updating a theme (admin only)."""
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    mode: Optional[Literal["dark", "light"]] = None
-    author: Optional[str] = Field(default=None, max_length=100)
-    version: Optional[str] = Field(default=None, max_length=20)
-    description: Optional[str] = Field(default=None, max_length=500)
-    theme_json: Optional[ThemeJsonSchema] = None
-    is_default: Optional[bool] = None
-    is_active: Optional[bool] = None
-    sort_order: Optional[int] = None
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    mode: Literal["dark", "light"] | None = None
+    author: str | None = Field(default=None, max_length=100)
+    version: str | None = Field(default=None, max_length=20)
+    description: str | None = Field(default=None, max_length=500)
+    theme_json: ThemeJsonSchema | None = None
+    is_default: bool | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
 
 
 # =============================================================================
@@ -252,7 +247,7 @@ class ThemeUpdateRequest(BaseModel):
 # =============================================================================
 
 
-def validate_theme_json(theme_json: dict) -> Tuple[bool, Optional[str], Optional[ThemeJsonSchema]]:
+def validate_theme_json(theme_json: dict) -> tuple[bool, str | None, ThemeJsonSchema | None]:
     """
     Validate theme JSON data and return validation result.
 
@@ -308,7 +303,6 @@ def get_theme_validation_errors(theme_json: dict) -> list[str]:
         # Pydantic v2 provides detailed errors
         if hasattr(e, "errors"):
             return [
-                f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
-                for err in e.errors()
+                f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in e.errors()
             ]
         return [str(e)]

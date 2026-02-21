@@ -1,151 +1,150 @@
 """
 Bash Convenience Tool
 
-Simplified wrapper for one-off command execution.
-Auto-manages shell session lifecycle.
+One-shot command execution using the orchestrator's execute_command method.
+Returns immediately when the command exits — no PTY session, no sleep.
 
-Retry Strategy:
-- Automatically retries on transient failures (ConnectionError, TimeoutError, IOError)
-- Exponential backoff: 1s → 2s → 4s (up to 3 attempts)
+Works identically on Docker and Kubernetes (same orchestrator interface).
 """
 
 import logging
-from typing import Dict, Any
+from typing import Any
 from uuid import UUID
 
+from ..output_formatter import error_output, strip_ansi_codes, success_output
 from ..registry import Tool, ToolCategory
-from .session import shell_open_executor, shell_close_executor
-from .execute import shell_exec_executor
-from ..output_formatter import success_output, error_output
-from ..retry_config import tool_retry
 
 logger = logging.getLogger(__name__)
 
 
-@tool_retry
-async def bash_exec_tool(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+async def bash_exec_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
-    Execute a single command (convenience wrapper).
+    Execute a single command via the orchestrator's one-shot execute_command.
 
-    Reuses shell session within the same agent run for efficiency.
-    Session is stored in context['_bash_session_id'] and reused across calls.
-
-    Retry behavior:
-    - Automatically retries on ConnectionError, TimeoutError, IOError
-    - Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+    Uses asyncio subprocess (Docker) or K8s exec API (Kubernetes) — both return
+    immediately on process exit with stdout+stderr combined. No PTY, no sleep.
 
     Args:
         params: {
-            command: str,  # Command to execute
-            wait_seconds: float  # Optional wait time (default: 2.0)
+            command: str,      # Command to execute
+            timeout: int       # Max seconds to wait (default: 120)
         }
-        context: {user_id: UUID, project_id: str, db: AsyncSession}
+        context: {user_id: UUID, project_id: str, db: AsyncSession, container_name: str?}
 
     Returns:
-        Dict with command output
+        Dict with command output and exit code info
     """
+    from ....services.orchestration import get_orchestrator
+
     command = params.get("command")
-    wait_seconds = params.get("wait_seconds", 2.0)
+    timeout = int(params.get("timeout", 120))
 
     if not command:
         raise ValueError("command parameter is required")
 
-    logger.info(f"[BASH] Starting bash_exec, command: {command[:100]}...")
-    logger.info(f"[BASH] Existing session_id in context: {context.get('_bash_session_id')}")
+    user_id = context["user_id"]
+    project_id = context["project_id"]
+    project_slug = context.get("project_slug", "")
+    container_name = context.get("container_name")
 
-    # Check if we have a reusable session from a previous bash_exec call
-    session_id = context.get("_bash_session_id")
-    session_created = False
+    logger.info(f"[BASH] Executing (one-shot): {command[:100]}...")
 
     try:
-        # 1. Open session only if we don't have one
-        if not session_id:
-            logger.info(f"[BASH] No existing session, calling shell_open_executor...")
-            session_result = await shell_open_executor({}, context)
-            logger.info(f"[BASH] shell_open_executor returned: success={session_result.get('success')}")
-            if not session_result.get("success"):
-                return error_output(
-                    message="Failed to open shell session",
-                    suggestion="Check if the dev container is running",
-                    details={"error": str(session_result)}
-                )
+        orchestrator = get_orchestrator()
 
-            session_id = session_result["session_id"]
-            session_created = True
-            # Store in context for reuse within this agent run
-            context["_bash_session_id"] = session_id
-            logger.info(f"[BASH] Created new session {session_id} for agent run")
-        else:
-            logger.debug(f"[BASH] Reusing existing session {session_id}")
+        # orchestrator.execute_command expects a raw service/directory name
+        # (e.g. "next-js-15") — it builds the full container name internally.
+        # When container_name is None (single-container project), resolve the
+        # default service name from the running project status.
+        if not container_name:
+            status = await orchestrator.get_project_status(project_slug, str(project_id))
+            containers = status.get("containers", {})
+            # Pick the first running service, or first service if none running
+            for svc_name, info in containers.items():
+                if info.get("running"):
+                    container_name = svc_name
+                    break
+            if not container_name and containers:
+                container_name = next(iter(containers.keys()))
+            if not container_name:
+                raise RuntimeError("No containers found. Please start the project first.")
 
-        # 2. Execute command
-        logger.info(f"[BASH] Calling shell_exec_executor with session_id={session_id}, command={command[:50]}...")
-        exec_result = await shell_exec_executor({
-            "session_id": session_id,
-            "command": command,
-            "wait_seconds": wait_seconds
-        }, context)
-        logger.info(f"[BASH] shell_exec_executor returned, output_length={len(exec_result.get('output', ''))}")
+        logger.info(f"[BASH] Resolved container: {container_name}")
 
-        # 3. Return execution result (session stays open for reuse)
+        # The orchestrator's execute_command expects command as a list.
+        # Wrap in /bin/sh -c so the shell interprets pipes, redirects, etc.
+        cmd_list = ["/bin/sh", "-c", command]
+
+        output = await orchestrator.execute_command(
+            user_id=user_id,
+            project_id=UUID(str(project_id)) if not isinstance(project_id, UUID) else project_id,
+            container_name=container_name,
+            command=cmd_list,
+            timeout=timeout,
+        )
+
+        # Strip ANSI control codes from output
+        clean_output = strip_ansi_codes(output) if output else ""
+
+        logger.info(f"[BASH] Command completed, output_length={len(clean_output)}")
+
         return success_output(
             message=f"Executed '{command}'",
-            output=exec_result.get("output", ""),
+            output=clean_output,
             details={
                 "command": command,
-                "exit_code": 0,  # We don't capture exit codes yet
-                "session_reused": not session_created
-            }
+                "exit_code": 0,
+            },
         )
 
     except Exception as e:
-        logger.error(f"[BASH] Exception during bash_exec: {e}", exc_info=True)
-        # On error, close and clear the session so next call creates a fresh one
-        if session_id:
-            try:
-                await shell_close_executor({"session_id": session_id}, context)
-                context.pop("_bash_session_id", None)
-                logger.info(f"[BASH] Closed session {session_id} due to error")
-            except Exception:
-                pass  # Ignore cleanup errors
+        error_msg = str(e)
+        logger.error(f"[BASH] Command failed: {error_msg}")
+
+        # Distinguish timeout from other errors
+        if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
+            return error_output(
+                message=f"Command timed out after {timeout}s: {command}",
+                suggestion="Try a shorter command or increase the timeout parameter",
+                details={"command": command, "timeout": timeout, "error": error_msg},
+            )
 
         return error_output(
-            message=f"Command execution failed: {str(e)}",
-            suggestion="Check your command syntax and try again",
-            details={
-                "command": command,
-                "error": str(e)
-            }
+            message=f"Command execution failed: {error_msg}",
+            suggestion="Check your command syntax and ensure the dev container is running",
+            details={"command": command, "error": error_msg},
         )
 
 
 def register_bash_tools(registry):
     """Register bash convenience tools."""
 
-    registry.register(Tool(
-        name="bash_exec",
-        description="Execute a single bash/sh command (convenience wrapper). Auto-opens shell session, runs command, returns output, and closes session. For multiple commands, use shell_open + shell_exec for better performance.",
-        category=ToolCategory.SHELL,
-        parameters={
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "Command to execute (e.g., 'npm install', 'ls -la')",
+    registry.register(
+        Tool(
+            name="bash_exec",
+            description="Execute a bash/sh command and return its output. The command runs to completion and returns stdout+stderr. For interactive sessions, use shell_open + shell_exec instead.",
+            category=ToolCategory.SHELL,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Command to execute (e.g., 'npm install', 'ls -la', 'cat package.json')",
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum seconds to wait for the command to finish (default: 120)",
+                        "default": 120,
+                    },
                 },
-                "wait_seconds": {
-                    "type": "number",
-                    "description": "Seconds to wait before reading output (default: 2.0)",
-                    "default": 2.0
-                },
+                "required": ["command"],
             },
-            "required": ["command"],
-        },
-        executor=bash_exec_tool,
-        examples=[
-            '{"tool_name": "bash_exec", "parameters": {"command": "npm install"}}',
-            '{"tool_name": "bash_exec", "parameters": {"command": "ls -la", "wait_seconds": 1.0}}'
-        ]
-    ))
+            executor=bash_exec_tool,
+            examples=[
+                '{"tool_name": "bash_exec", "parameters": {"command": "npm install"}}',
+                '{"tool_name": "bash_exec", "parameters": {"command": "ls -la", "timeout": 30}}',
+            ],
+        )
+    )
 
     logger.info("Registered 1 bash convenience tool")

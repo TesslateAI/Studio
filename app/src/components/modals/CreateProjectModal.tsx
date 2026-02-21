@@ -21,13 +21,20 @@ interface CreateProjectModalProps {
 }
 
 // Featured bases shown by default (even if not in user's library)
-const FEATURED_SLUGS = ['nextjs', 'vite', 'fastapi', 'express'];
+// Must match seeded slugs from orchestrator/app/seeds/marketplace_bases.py
+const FEATURED_SLUGS = [
+  'nextjs-16',
+  'nextjs-15',
+  'vite-react-fastapi',
+  'vite-react-go',
+  'expo-default',
+];
 
 export function CreateProjectModal({
   isOpen,
   onClose,
   onConfirm,
-  isLoading = false
+  isLoading = false,
 }: CreateProjectModalProps) {
   const [projectName, setProjectName] = useState('');
   const [selectedBase, setSelectedBase] = useState<MarketplaceBase | null>(null);
@@ -48,7 +55,7 @@ export function CreateProjectModal({
       // Load all bases and user's library in parallel
       const [allBasesRes, userBasesRes] = await Promise.all([
         marketplaceApi.getAllBases({ limit: 50 }),
-        marketplaceApi.getUserBases().catch(() => ({ bases: [] }))
+        marketplaceApi.getUserBases().catch(() => ({ bases: [] })),
       ]);
 
       const bases = allBasesRes.bases || allBasesRes || [];
@@ -57,10 +64,14 @@ export function CreateProjectModal({
       setAllBases(bases);
       setUserBases(userBasesData);
 
-      // Auto-select NextJS as default if available
-      const nextjs = bases.find((b: MarketplaceBase) => b.slug === 'nextjs');
-      if (nextjs && !selectedBase) {
-        setSelectedBase(nextjs);
+      // Auto-select first featured base as default
+      if (!selectedBase) {
+        const defaultBase = FEATURED_SLUGS.map((slug) =>
+          bases.find((b: MarketplaceBase) => b.slug === slug)
+        ).find(Boolean);
+        if (defaultBase) {
+          setSelectedBase(defaultBase);
+        }
       }
     } catch (error) {
       console.error('Failed to load bases:', error);
@@ -72,26 +83,26 @@ export function CreateProjectModal({
   // Combine: featured bases first, then user's added bases (deduplicated)
   const displayBases = useMemo(() => {
     // Get featured bases in order
-    const featured = FEATURED_SLUGS
-      .map(slug => allBases.find(b => b.slug === slug))
-      .filter(Boolean) as MarketplaceBase[];
+    const featured = FEATURED_SLUGS.map((slug) => allBases.find((b) => b.slug === slug)).filter(
+      Boolean
+    ) as MarketplaceBase[];
 
     // Get user bases that aren't already in featured
-    const featuredIds = new Set(featured.map(b => b.id));
-    const userOnly = userBases.filter(b => !featuredIds.has(b.id));
+    const featuredIds = new Set(featured.map((b) => b.id));
+    const userOnly = userBases.filter((b) => !featuredIds.has(b.id));
 
     return [...featured, ...userOnly];
   }, [allBases, userBases]);
 
   // Check if a base is in user's library
   const isInLibrary = (baseId: string) => {
-    return userBases.some(b => b.id === baseId);
+    return userBases.some((b) => b.id === baseId);
   };
 
   // Add base to library (purchase for free) and optionally select it
   const handleAddToLibrary = async (base: MarketplaceBase, andSelect: boolean = false) => {
     try {
-      await marketplaceApi.purchaseBase(Number(base.id));
+      await marketplaceApi.purchaseBase(base.id);
       // Refresh user bases
       const userBasesRes = await marketplaceApi.getUserBases();
       setUserBases(userBasesRes.bases || userBasesRes || []);
@@ -118,9 +129,8 @@ export function CreateProjectModal({
   if (!isOpen) return null;
 
   const handleConfirm = () => {
-    if (!isLoading && projectName.trim()) {
-      onConfirm(projectName.trim(), selectedBase?.id);
-    }
+    if (isLoading || !projectName.trim() || !selectedBase) return;
+    onConfirm(projectName.trim(), selectedBase.id);
   };
 
   const handleClose = () => {
@@ -132,7 +142,7 @@ export function CreateProjectModal({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && projectName.trim() && !isLoading) {
+    if (e.key === 'Enter' && projectName.trim() && selectedBase && !isLoading) {
       handleConfirm();
     } else if (e.key === 'Escape' && !isLoading) {
       handleClose();
@@ -188,7 +198,7 @@ export function CreateProjectModal({
               {/* Horizontal scroll container */}
               <div className="overflow-x-auto pb-2 -mx-6 px-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                 <div className="flex gap-3 min-w-max">
-                  {displayBases.map(base => (
+                  {displayBases.map((base) => (
                     <TemplateCard
                       key={base.id}
                       base={base}
@@ -243,9 +253,7 @@ export function CreateProjectModal({
               transition-all
             "
           />
-          <p className="mt-2 text-xs text-gray-500">
-            {projectName.length}/100 characters
-          </p>
+          <p className="mt-2 text-xs text-gray-500">{projectName.length}/100 characters</p>
         </div>
 
         {/* Actions */}
@@ -259,16 +267,12 @@ export function CreateProjectModal({
           </button>
           <button
             onClick={handleConfirm}
-            disabled={isLoading || !projectName.trim()}
+            disabled={isLoading || !projectName.trim() || !selectedBase}
             className="flex-1 bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold transition-all"
           >
             {isLoading ? (
               <span className="flex items-center justify-center gap-2">
-                <svg
-                  className="w-4 h-4 animate-spin"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                >
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
                   <circle
                     className="opacity-25"
                     cx="12"

@@ -7,10 +7,13 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ChatPositionProvider } from './contexts/ChatPositionContext';
 import { CommandProvider } from './contexts/CommandContext';
 import { DashboardLayout } from './components/DashboardLayout';
+import { PrivateRoute, PublicOnlyRoute } from './components/RouteGuards';
 import Landing from './pages/Landing';
 import NewLandingPage from './pages/NewLandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import Project from './pages/Project';
 import { ProjectGraphCanvas } from './pages/ProjectGraphCanvas';
@@ -39,27 +42,6 @@ import { useTaskNotifications } from './hooks/useTaskNotifications';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import MarketplaceSuccess from './pages/MarketplaceSuccess';
-
-/**
- * PrivateRoute - Protects routes that require authentication
- * Uses the centralized AuthContext for consistent auth state
- */
-function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
-
-  // Loading state - show nothing while checking auth
-  if (isLoading) {
-    return null;
-  }
-
-  // Not authenticated - redirect to login
-  if (!isAuthenticated) {
-    return <Navigate to="/login" />;
-  }
-
-  // Authenticated - show protected content
-  return <>{children}</>;
-}
 
 function AppContent() {
   // Track referrals (must be inside BrowserRouter)
@@ -241,11 +223,13 @@ function AppContent() {
       <Routes>
         <Route path="/" element={<NewLandingPage />} />
         <Route path="/landing-old" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+        <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/logout" element={<Logout />} />
-        <Route path="/referral" element={<Referrals />} />
-        <Route path="/referrals" element={<Referrals />} />
+        <Route path="/referral" element={<PrivateRoute><Referrals /></PrivateRoute>} />
+        <Route path="/referrals" element={<PrivateRoute><Referrals /></PrivateRoute>} />
 
         {/* Marketplace Routes - Adaptive layout based on auth state */}
         {/* Non-blocking: defaults to public view, upgrades to authenticated view if logged in */}

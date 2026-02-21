@@ -2,23 +2,31 @@
 Admin API endpoints for platform metrics and management.
 """
 
-from typing import List, Dict, Any, Optional
-from uuid import UUID
-from datetime import datetime, timedelta, date
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_, distinct
-from sqlalchemy.orm import selectinload
 import logging
+import re
+from datetime import datetime, timedelta
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, distinct, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import (
-    User, Project, Chat, Message, AgentCommandLog,
-    MarketplaceAgent, UserPurchasedAgent, ProjectAgent,
-    MarketplaceBase, UserPurchasedBase
+    Chat,
+    MarketplaceAgent,
+    MarketplaceBase,
+    Message,
+    Project,
+    ProjectAgent,
+    User,
+    UserPurchasedAgent,
+    UserPurchasedBase,
 )
 from ..services.litellm_service import litellm_service
-from ..users import current_active_user, current_superuser
+from ..users import current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -28,12 +36,11 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # User Metrics
 # ============================================================================
 
+
 @router.get("/metrics/users")
 async def get_user_metrics(
-    days: int = 30,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    days: int = 30, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Get comprehensive user metrics including DAU, MAU, growth rate.
     """
@@ -94,14 +101,14 @@ async def get_user_metrics(
         # Get users active in last week (through chats)
         recent_active = select(distinct(Chat.user_id)).where(Chat.created_at >= week_ago)
         recent_users = await db.execute(recent_active)
-        recent_set = set([u[0] for u in recent_users])
+        recent_set = {u[0] for u in recent_users}
 
         # Get users active in previous week
         prev_active = select(distinct(Chat.user_id)).where(
             and_(Chat.created_at >= two_weeks_ago, Chat.created_at < week_ago)
         )
         prev_users = await db.execute(prev_active)
-        prev_set = set([u[0] for u in prev_users])
+        prev_set = {u[0] for u in prev_users}
 
         retained_users = len(recent_set.intersection(prev_set))
         retention_rate = (retained_users / len(prev_set) * 100) if prev_set else 0
@@ -118,10 +125,7 @@ async def get_user_metrics(
             )
             count = await db.scalar(count_query)
 
-            daily_new_users.append({
-                "date": day_start.isoformat(),
-                "count": count
-            })
+            daily_new_users.append({"date": day_start.isoformat(), "count": count})
 
         daily_new_users.reverse()
 
@@ -133,24 +137,23 @@ async def get_user_metrics(
             "growth_rate": round(growth_rate, 2),
             "retention_rate": round(retention_rate, 2),
             "daily_new_users": daily_new_users,
-            "period_days": days
+            "period_days": days,
         }
 
     except Exception as e:
         logger.error(f"Error getting user metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get user metrics")
+        raise HTTPException(status_code=500, detail="Failed to get user metrics") from e
 
 
 # ============================================================================
 # Project Metrics
 # ============================================================================
 
+
 @router.get("/metrics/projects")
 async def get_project_metrics(
-    days: int = 30,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    days: int = 30, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Get project creation and usage metrics.
     """
@@ -168,8 +171,7 @@ async def get_project_metrics(
 
         # Projects per user
         projects_per_user_query = select(
-            func.count(Project.id).label('count'),
-            Project.owner_id
+            func.count(Project.id).label("count"), Project.owner_id
         ).group_by(Project.owner_id)
 
         result = await db.execute(projects_per_user_query)
@@ -189,15 +191,12 @@ async def get_project_metrics(
             )
             count = await db.scalar(count_query)
 
-            daily_projects.append({
-                "date": day_start.isoformat(),
-                "count": count
-            })
+            daily_projects.append({"date": day_start.isoformat(), "count": count})
 
         daily_projects.reverse()
 
         # Project categories (with/without git)
-        git_projects_query = select(func.count(Project.id)).where(Project.has_git_repo == True)
+        git_projects_query = select(func.count(Project.id)).where(Project.has_git_repo)
         git_projects = await db.scalar(git_projects_query)
 
         return {
@@ -206,24 +205,23 @@ async def get_project_metrics(
             "avg_projects_per_user": round(avg_projects_per_user, 2),
             "git_enabled_projects": git_projects,
             "daily_projects": daily_projects,
-            "period_days": days
+            "period_days": days,
         }
 
     except Exception as e:
         logger.error(f"Error getting project metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get project metrics")
+        raise HTTPException(status_code=500, detail="Failed to get project metrics") from e
 
 
 # ============================================================================
 # Session Metrics
 # ============================================================================
 
+
 @router.get("/metrics/sessions")
 async def get_session_metrics(
-    days: int = 30,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    days: int = 30, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Get user session and engagement metrics.
     """
@@ -243,11 +241,11 @@ async def get_session_metrics(
                 "avg_sessions_per_user": 0,
                 "avg_session_duration": 0,
                 "avg_messages_per_session": 0,
-                "period_days": days
+                "period_days": days,
             }
 
         # Unique users with sessions
-        unique_users = len(set(s.user_id for s in sessions))
+        unique_users = len({s.user_id for s in sessions})
 
         # Sessions per user
         avg_sessions_per_user = len(sessions) / unique_users if unique_users > 0 else 0
@@ -258,13 +256,17 @@ async def get_session_metrics(
 
         for session in sessions:
             # Get messages for this session
-            messages_query = select(Message).where(Message.chat_id == session.id).order_by(Message.created_at)
+            messages_query = (
+                select(Message).where(Message.chat_id == session.id).order_by(Message.created_at)
+            )
             result = await db.execute(messages_query)
             messages = result.scalars().all()
 
             if messages and len(messages) > 1:
                 # Duration from first to last message
-                duration = (messages[-1].created_at - messages[0].created_at).total_seconds() / 60  # in minutes
+                duration = (
+                    messages[-1].created_at - messages[0].created_at
+                ).total_seconds() / 60  # in minutes
                 session_durations.append(duration)
                 total_messages += len(messages)
 
@@ -283,10 +285,7 @@ async def get_session_metrics(
             )
             count = await db.scalar(count_query)
 
-            daily_sessions.append({
-                "date": day_start.isoformat(),
-                "count": count
-            })
+            daily_sessions.append({"date": day_start.isoformat(), "count": count})
 
         daily_sessions.reverse()
 
@@ -297,24 +296,23 @@ async def get_session_metrics(
             "avg_session_duration": round(avg_duration, 2),  # in minutes
             "avg_messages_per_session": round(avg_messages, 2),
             "daily_sessions": daily_sessions,
-            "period_days": days
+            "period_days": days,
         }
 
     except Exception as e:
         logger.error(f"Error getting session metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get session metrics")
+        raise HTTPException(status_code=500, detail="Failed to get session metrics") from e
 
 
 # ============================================================================
 # Token Usage Metrics (from LiteLLM)
 # ============================================================================
 
+
 @router.get("/metrics/tokens")
 async def get_token_metrics(
-    days: int = 30,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    days: int = 30, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Get token usage metrics from LiteLLM.
     """
@@ -327,7 +325,7 @@ async def get_token_metrics(
         # Transform global stats to expected format
         global_stats = {
             "spend": global_stats_raw.get("spend", 0),
-            "max_budget": global_stats_raw.get("max_budget", 0)
+            "max_budget": global_stats_raw.get("max_budget", 0),
         }
 
         # Get all users' usage from LiteLLM
@@ -341,44 +339,42 @@ async def get_token_metrics(
 
         for user_usage in all_users_usage:
             # LiteLLM returns 'spend' instead of 'total_cost'
-            user_cost = user_usage.get('spend', 0) or 0
+            user_cost = user_usage.get("spend", 0) or 0
             total_cost += user_cost
 
             # Calculate tokens from model_spend if available
             user_tokens = 0
-            if 'model_spend' in user_usage and user_usage['model_spend']:
-                for model, spend_data in user_usage['model_spend'].items():
+            if "model_spend" in user_usage and user_usage["model_spend"]:
+                for _model, _spend_data in user_usage["model_spend"].items():
                     # model_spend contains cost data, estimate tokens if not available
                     # For now, we'll track cost instead of tokens
                     pass
 
             # Track per-user data
-            user_token_data.append({
-                "user_id": user_usage.get('user_id', 'unknown'),
-                "total_tokens": user_tokens,
-                "total_cost": user_cost,
-                "last_used": user_usage.get('updated_at', None)
-            })
+            user_token_data.append(
+                {
+                    "user_id": user_usage.get("user_id", "unknown"),
+                    "total_tokens": user_tokens,
+                    "total_cost": user_cost,
+                    "last_used": user_usage.get("updated_at", None),
+                }
+            )
 
             # Aggregate by model from model_spend
-            if 'model_spend' in user_usage and user_usage['model_spend']:
-                for model, spend_amount in user_usage['model_spend'].items():
+            if "model_spend" in user_usage and user_usage["model_spend"]:
+                for model, spend_amount in user_usage["model_spend"].items():
                     if model not in tokens_by_model:
-                        tokens_by_model[model] = {
-                            "tokens": 0,
-                            "cost": 0,
-                            "requests": 0
-                        }
+                        tokens_by_model[model] = {"tokens": 0, "cost": 0, "requests": 0}
                     # LiteLLM model_spend is just a dict of model: cost
-                    tokens_by_model[model]['cost'] += spend_amount
-                    tokens_by_model[model]['requests'] += 1  # Estimate
+                    tokens_by_model[model]["cost"] += spend_amount
+                    tokens_by_model[model]["requests"] += 1  # Estimate
 
         # Sort users by cost (since we don't have token counts from LiteLLM)
-        user_token_data.sort(key=lambda x: x['total_cost'], reverse=True)
+        user_token_data.sort(key=lambda x: x["total_cost"], reverse=True)
         top_users = user_token_data[:10]  # Top 10 users
 
         # Calculate averages
-        active_users = len([u for u in user_token_data if u['total_cost'] > 0])
+        active_users = len([u for u in user_token_data if u["total_cost"] > 0])
         avg_tokens_per_user = total_tokens / active_users if active_users > 0 else 0
         avg_cost_per_user = total_cost / active_users if active_users > 0 else 0
 
@@ -397,7 +393,7 @@ async def get_token_metrics(
             "tokens_by_model": tokens_by_model,
             "top_users": top_users,
             "global_stats": global_stats,
-            "period_days": days
+            "period_days": days,
         }
 
     except Exception as e:
@@ -414,7 +410,7 @@ async def get_token_metrics(
             "top_users": [],
             "global_stats": {},
             "period_days": days,
-            "error": "LiteLLM metrics unavailable"
+            "error": "LiteLLM metrics unavailable",
         }
 
 
@@ -422,12 +418,11 @@ async def get_token_metrics(
 # Marketplace Metrics
 # ============================================================================
 
+
 @router.get("/metrics/marketplace")
 async def get_marketplace_metrics(
-    days: int = 30,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    days: int = 30, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Get marketplace performance metrics including agents and bases.
     """
@@ -438,8 +433,8 @@ async def get_marketplace_metrics(
         # ===== AGENTS METRICS =====
         # Total agents (official + published community agents)
         total_agents_query = select(func.count(MarketplaceAgent.id)).where(
-            MarketplaceAgent.is_active == True,
-            (MarketplaceAgent.forked_by_user_id == None) | (MarketplaceAgent.is_published == True)
+            MarketplaceAgent.is_active,
+            (MarketplaceAgent.forked_by_user_id is None) | (MarketplaceAgent.is_published),
         )
         total_agents = await db.scalar(total_agents_query)
 
@@ -454,21 +449,19 @@ async def get_marketplace_metrics(
         recent_agent_purchases = await db.scalar(recent_agent_purchases_query)
 
         # Agent revenue calculations
-        agent_revenue_query = select(UserPurchasedAgent, MarketplaceAgent).join(
-            MarketplaceAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id
-        ).where(UserPurchasedAgent.purchase_date >= start_date)
+        agent_revenue_query = (
+            select(UserPurchasedAgent, MarketplaceAgent)
+            .join(MarketplaceAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
+            .where(UserPurchasedAgent.purchase_date >= start_date)
+        )
 
         result = await db.execute(agent_revenue_query)
         agent_purchases = result.all()
 
         agent_revenue = 0
-        revenue_by_type = {
-            "monthly": 0,
-            "one_time": 0,
-            "usage": 0
-        }
+        revenue_by_type = {"monthly": 0, "one_time": 0, "usage": 0}
 
-        for purchase, agent in agent_purchases:
+        for _purchase, agent in agent_purchases:
             if agent.pricing_type == "monthly":
                 agent_revenue += agent.price / 100  # Convert from cents
                 revenue_by_type["monthly"] += agent.price / 100
@@ -477,16 +470,21 @@ async def get_marketplace_metrics(
                 revenue_by_type["one_time"] += agent.price / 100
 
         # Popular agents by purchases
-        popular_agents_query = select(
-            MarketplaceAgent.name,
-            MarketplaceAgent.slug,
-            MarketplaceAgent.usage_count,
-            func.count(UserPurchasedAgent.id).label('purchase_count')
-        ).join(
-            UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id, isouter=True
-        ).where(
-            MarketplaceAgent.is_active == True
-        ).group_by(MarketplaceAgent.id).order_by(func.count(UserPurchasedAgent.id).desc()).limit(5)
+        popular_agents_query = (
+            select(
+                MarketplaceAgent.name,
+                MarketplaceAgent.slug,
+                MarketplaceAgent.usage_count,
+                func.count(UserPurchasedAgent.id).label("purchase_count"),
+            )
+            .join(
+                UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id, isouter=True
+            )
+            .where(MarketplaceAgent.is_active)
+            .group_by(MarketplaceAgent.id)
+            .order_by(func.count(UserPurchasedAgent.id).desc())
+            .limit(5)
+        )
 
         result = await db.execute(popular_agents_query)
         popular_agents = [
@@ -494,29 +492,22 @@ async def get_marketplace_metrics(
                 "name": r.name,
                 "slug": r.slug,
                 "purchases": r.purchase_count,
-                "usage_count": r.usage_count or 0
+                "usage_count": r.usage_count or 0,
             }
             for r in result
         ]
 
         # Most used agents (by usage_count - messages sent to agent)
-        most_used_query = select(
-            MarketplaceAgent.name,
-            MarketplaceAgent.slug,
-            MarketplaceAgent.usage_count
-        ).where(
-            MarketplaceAgent.is_active == True,
-            MarketplaceAgent.usage_count > 0
-        ).order_by(MarketplaceAgent.usage_count.desc()).limit(5)
+        most_used_query = (
+            select(MarketplaceAgent.name, MarketplaceAgent.slug, MarketplaceAgent.usage_count)
+            .where(MarketplaceAgent.is_active, MarketplaceAgent.usage_count > 0)
+            .order_by(MarketplaceAgent.usage_count.desc())
+            .limit(5)
+        )
 
         result = await db.execute(most_used_query)
         most_used_agents = [
-            {
-                "name": r.name,
-                "slug": r.slug,
-                "usage_count": r.usage_count
-            }
-            for r in result
+            {"name": r.name, "slug": r.slug, "usage_count": r.usage_count} for r in result
         ]
 
         # Agent adoption rate (agents applied to projects)
@@ -527,7 +518,7 @@ async def get_marketplace_metrics(
 
         # ===== BASES METRICS =====
         # Total bases
-        total_bases_query = select(func.count(MarketplaceBase.id)).where(MarketplaceBase.is_active == True)
+        total_bases_query = select(func.count(MarketplaceBase.id)).where(MarketplaceBase.is_active)
         total_bases = await db.scalar(total_bases_query)
 
         # Total base purchases
@@ -541,16 +532,19 @@ async def get_marketplace_metrics(
         recent_base_purchases = await db.scalar(recent_base_purchases_query)
 
         # Popular bases
-        popular_bases_query = select(
-            MarketplaceBase.name,
-            MarketplaceBase.slug,
-            MarketplaceBase.downloads,
-            func.count(UserPurchasedBase.id).label('purchase_count')
-        ).join(
-            UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id, isouter=True
-        ).where(
-            MarketplaceBase.is_active == True
-        ).group_by(MarketplaceBase.id).order_by(func.count(UserPurchasedBase.id).desc()).limit(5)
+        popular_bases_query = (
+            select(
+                MarketplaceBase.name,
+                MarketplaceBase.slug,
+                MarketplaceBase.downloads,
+                func.count(UserPurchasedBase.id).label("purchase_count"),
+            )
+            .join(UserPurchasedBase, UserPurchasedBase.base_id == MarketplaceBase.id, isouter=True)
+            .where(MarketplaceBase.is_active)
+            .group_by(MarketplaceBase.id)
+            .order_by(func.count(UserPurchasedBase.id).desc())
+            .limit(5)
+        )
 
         result = await db.execute(popular_bases_query)
         popular_bases = [
@@ -558,7 +552,7 @@ async def get_marketplace_metrics(
                 "name": r.name,
                 "slug": r.slug,
                 "purchases": r.purchase_count,
-                "downloads": r.downloads
+                "downloads": r.downloads,
             }
             for r in result
         ]
@@ -575,7 +569,6 @@ async def get_marketplace_metrics(
             "recent_purchases": recent_purchases,
             "total_revenue": round(total_revenue, 2),
             "revenue_by_type": revenue_by_type,
-
             # Agent-specific metrics
             "agents": {
                 "total": total_agents,
@@ -583,34 +576,32 @@ async def get_marketplace_metrics(
                 "recent_purchases": recent_agent_purchases,
                 "adoption_rate": round(agent_adoption_rate, 2),
                 "popular": popular_agents,
-                "most_used": most_used_agents
+                "most_used": most_used_agents,
             },
-
             # Base-specific metrics
             "bases": {
                 "total": total_bases,
                 "total_purchases": total_base_purchases,
                 "recent_purchases": recent_base_purchases,
-                "popular": popular_bases
+                "popular": popular_bases,
             },
-
-            "period_days": days
+            "period_days": days,
         }
 
     except Exception as e:
         logger.error(f"Error getting marketplace metrics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get marketplace metrics")
+        raise HTTPException(status_code=500, detail="Failed to get marketplace metrics") from e
 
 
 # ============================================================================
 # Summary Dashboard
 # ============================================================================
 
+
 @router.get("/metrics/summary")
 async def get_metrics_summary(
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Get a summary of all key metrics for the admin dashboard.
     """
@@ -627,49 +618,45 @@ async def get_metrics_summary(
                 "total": user_metrics["total_users"],
                 "dau": user_metrics["dau"],
                 "mau": user_metrics["mau"],
-                "growth_rate": user_metrics["growth_rate"]
+                "growth_rate": user_metrics["growth_rate"],
             },
             "projects": {
                 "total": project_metrics["total_projects"],
                 "new_this_week": project_metrics["new_projects"],
-                "avg_per_user": project_metrics["avg_projects_per_user"]
+                "avg_per_user": project_metrics["avg_projects_per_user"],
             },
             "sessions": {
                 "total_this_week": session_metrics["total_sessions"],
                 "avg_per_user": session_metrics["avg_sessions_per_user"],
-                "avg_duration": session_metrics["avg_session_duration"]
+                "avg_duration": session_metrics["avg_session_duration"],
             },
             "tokens": {
                 "total_this_week": token_metrics["total_tokens"],
                 "total_cost": token_metrics["total_cost"],
-                "avg_per_user": token_metrics["avg_tokens_per_user"]
+                "avg_per_user": token_metrics["avg_tokens_per_user"],
             },
             "marketplace": {
                 "total_items": marketplace_metrics["total_items"],
                 "total_agents": marketplace_metrics["agents"]["total"],
                 "total_bases": marketplace_metrics["bases"]["total"],
                 "total_revenue": marketplace_metrics["total_revenue"],
-                "recent_purchases": marketplace_metrics["recent_purchases"]
-            }
+                "recent_purchases": marketplace_metrics["recent_purchases"],
+            },
         }
 
     except Exception as e:
         logger.error(f"Error getting metrics summary: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get metrics summary")
+        raise HTTPException(status_code=500, detail="Failed to get metrics summary") from e
 
 
 # ============================================================================
 # Agent Management
 # ============================================================================
 
-from pydantic import BaseModel, Field
-from typing import List as TypeList
-import re
-import os
-
 
 class AgentCreate(BaseModel):
     """Schema for creating a new agent."""
+
     name: str = Field(..., min_length=1, max_length=100)
     description: str = Field(..., min_length=1, max_length=500)
     long_description: str = Field(..., min_length=1)
@@ -686,36 +673,37 @@ class AgentCreate(BaseModel):
     source_type: str = Field(..., pattern="^(open|closed)$")
     is_forkable: bool = Field(default=False)
     requires_user_keys: bool = Field(default=False)
-    features: TypeList[str] = Field(default_factory=list)
-    required_models: TypeList[str] = Field(default_factory=list)
-    tags: TypeList[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
+    required_models: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     is_featured: bool = Field(default=False)
     is_active: bool = Field(default=True)
 
 
 class AgentUpdate(BaseModel):
     """Schema for updating an existing agent."""
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    description: Optional[str] = Field(None, min_length=1, max_length=500)
-    long_description: Optional[str] = None
-    category: Optional[str] = None
-    system_prompt: Optional[str] = None
-    mode: Optional[str] = Field(None, pattern="^(stream|agent)$")
-    agent_type: Optional[str] = None
-    model: Optional[str] = None
-    icon: Optional[str] = None
-    pricing_type: Optional[str] = Field(None, pattern="^(free|monthly|api|one_time)$")
-    price: Optional[int] = Field(None, ge=0)
-    api_pricing_input: Optional[float] = Field(None, ge=0)
-    api_pricing_output: Optional[float] = Field(None, ge=0)
-    source_type: Optional[str] = Field(None, pattern="^(open|closed)$")
-    is_forkable: Optional[bool] = None
-    requires_user_keys: Optional[bool] = None
-    features: Optional[TypeList[str]] = None
-    required_models: Optional[TypeList[str]] = None
-    tags: Optional[TypeList[str]] = None
-    is_featured: Optional[bool] = None
-    is_active: Optional[bool] = None
+
+    name: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = Field(None, min_length=1, max_length=500)
+    long_description: str | None = None
+    category: str | None = None
+    system_prompt: str | None = None
+    mode: str | None = Field(None, pattern="^(stream|agent)$")
+    agent_type: str | None = None
+    model: str | None = None
+    icon: str | None = None
+    pricing_type: str | None = Field(None, pattern="^(free|monthly|api|one_time)$")
+    price: int | None = Field(None, ge=0)
+    api_pricing_input: float | None = Field(None, ge=0)
+    api_pricing_output: float | None = Field(None, ge=0)
+    source_type: str | None = Field(None, pattern="^(open|closed)$")
+    is_forkable: bool | None = None
+    requires_user_keys: bool | None = None
+    features: list[str] | None = None
+    required_models: list[str] | None = None
+    tags: list[str] | None = None
+    is_featured: bool | None = None
+    is_active: bool | None = None
 
 
 def can_edit_agent(agent: MarketplaceAgent) -> bool:
@@ -726,18 +714,18 @@ def can_edit_agent(agent: MarketplaceAgent) -> bool:
 def generate_slug(name: str, db_session: AsyncSession = None) -> str:
     """Generate a unique slug from agent name."""
     # Convert to lowercase and replace spaces with hyphens
-    slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug
 
 
 @router.get("/agents")
 async def list_agents(
-    source_type: Optional[str] = None,
-    pricing_type: Optional[str] = None,
-    is_active: Optional[bool] = None,
+    source_type: str | None = None,
+    pricing_type: str | None = None,
+    is_active: bool | None = None,
     admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
     """
     List all agents with optional filters.
     Admins can see all agents including user-created ones.
@@ -745,7 +733,7 @@ async def list_agents(
     try:
         query = select(MarketplaceAgent).options(
             selectinload(MarketplaceAgent.created_by_user),
-            selectinload(MarketplaceAgent.forked_by_user)
+            selectinload(MarketplaceAgent.forked_by_user),
         )
 
         # Apply filters
@@ -785,34 +773,37 @@ async def list_agents(
                     "is_active": agent.is_active,
                     "usage_count": agent.usage_count,
                     "created_at": agent.created_at.isoformat(),
-                    "created_by_tesslate": agent.created_by_user_id is None and agent.forked_by_user_id is None,
-                    "created_by_username": agent.created_by_user.username if agent.created_by_user else None,
-                    "forked_by_username": agent.forked_by_user.username if agent.forked_by_user else None,
-                    "can_edit": can_edit_agent(agent)
+                    "created_by_tesslate": agent.created_by_user_id is None
+                    and agent.forked_by_user_id is None,
+                    "created_by_username": agent.created_by_user.username
+                    if agent.created_by_user
+                    else None,
+                    "forked_by_username": agent.forked_by_user.username
+                    if agent.forked_by_user
+                    else None,
+                    "can_edit": can_edit_agent(agent),
                 }
                 for agent in agents
             ],
-            "total": len(agents)
+            "total": len(agents),
         }
 
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list agents")
+        raise HTTPException(status_code=500, detail="Failed to list agents") from e
 
 
 @router.get("/agents/{agent_id}")
 async def get_agent(
-    agent_id: str,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    agent_id: str, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """Get detailed information about a specific agent."""
     try:
         result = await db.execute(
             select(MarketplaceAgent)
             .options(
                 selectinload(MarketplaceAgent.created_by_user),
-                selectinload(MarketplaceAgent.forked_by_user)
+                selectinload(MarketplaceAgent.forked_by_user),
             )
             .where(MarketplaceAgent.id == agent_id)
         )
@@ -849,25 +840,28 @@ async def get_agent(
             "usage_count": agent.usage_count,
             "created_at": agent.created_at.isoformat(),
             "updated_at": agent.updated_at.isoformat() if agent.updated_at else None,
-            "created_by_tesslate": agent.created_by_user_id is None and agent.forked_by_user_id is None,
-            "created_by_username": agent.created_by_user.username if agent.created_by_user else None,
+            "created_by_tesslate": agent.created_by_user_id is None
+            and agent.forked_by_user_id is None,
+            "created_by_username": agent.created_by_user.username
+            if agent.created_by_user
+            else None,
             "forked_by_username": agent.forked_by_user.username if agent.forked_by_user else None,
-            "can_edit": can_edit_agent(agent)
+            "can_edit": can_edit_agent(agent),
         }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting agent {agent_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get agent")
+        raise HTTPException(status_code=500, detail="Failed to get agent") from e
 
 
 @router.post("/agents")
 async def create_agent(
     agent_data: AgentCreate,
     admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
     """
     Create a new agent.
     All agents created via admin panel are marked as Tesslate-created (created_by_user_id = NULL).
@@ -877,9 +871,7 @@ async def create_agent(
         slug = generate_slug(agent_data.name)
 
         # Check if slug already exists
-        existing = await db.execute(
-            select(MarketplaceAgent).where(MarketplaceAgent.slug == slug)
-        )
+        existing = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.slug == slug))
         if existing.scalar_one_or_none():
             # Add a number suffix if slug exists
             counter = 1
@@ -918,7 +910,7 @@ async def create_agent(
             is_featured=agent_data.is_featured,
             is_active=agent_data.is_active,
             created_by_user_id=None,  # NULL = Tesslate-created
-            forked_by_user_id=None
+            forked_by_user_id=None,
         )
 
         db.add(agent)
@@ -931,13 +923,13 @@ async def create_agent(
             "id": agent.id,
             "name": agent.name,
             "slug": agent.slug,
-            "message": "Agent created successfully"
+            "message": "Agent created successfully",
         }
 
     except Exception as e:
         logger.error(f"Error creating agent: {e}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to create agent")
+        raise HTTPException(status_code=500, detail="Failed to create agent") from e
 
 
 @router.put("/agents/{agent_id}")
@@ -945,16 +937,14 @@ async def update_agent(
     agent_id: str,
     agent_data: AgentUpdate,
     admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
     """
     Update an existing agent.
     Only Tesslate-created agents can be edited. User-forked or custom agents cannot be edited.
     """
     try:
-        result = await db.execute(
-            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-        )
+        result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
         agent = result.scalar_one_or_none()
 
         if not agent:
@@ -964,7 +954,7 @@ async def update_agent(
         if not can_edit_agent(agent):
             raise HTTPException(
                 status_code=403,
-                detail="Cannot edit user-created or forked agents. Only Tesslate-created agents can be edited."
+                detail="Cannot edit user-created or forked agents. Only Tesslate-created agents can be edited.",
             )
 
         # Update fields that were provided
@@ -983,7 +973,7 @@ async def update_agent(
             "id": agent.id,
             "name": agent.name,
             "slug": agent.slug,
-            "message": "Agent updated successfully"
+            "message": "Agent updated successfully",
         }
 
     except HTTPException:
@@ -991,23 +981,19 @@ async def update_agent(
     except Exception as e:
         logger.error(f"Error updating agent {agent_id}: {e}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update agent")
+        raise HTTPException(status_code=500, detail="Failed to update agent") from e
 
 
 @router.delete("/agents/{agent_id}")
 async def delete_agent(
-    agent_id: str,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    agent_id: str, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Delete an agent.
     Only Tesslate-created agents can be deleted. User-created agents can only be removed from marketplace.
     """
     try:
-        result = await db.execute(
-            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-        )
+        result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
         agent = result.scalar_one_or_none()
 
         if not agent:
@@ -1017,7 +1003,7 @@ async def delete_agent(
         if not can_edit_agent(agent):
             raise HTTPException(
                 status_code=403,
-                detail="Cannot delete user-created or forked agents. Use remove-from-marketplace instead."
+                detail="Cannot delete user-created or forked agents. Use remove-from-marketplace instead.",
             )
 
         agent_name = agent.name
@@ -1026,32 +1012,26 @@ async def delete_agent(
 
         logger.info(f"Admin {admin.username} deleted agent: {agent_name} (ID: {agent_id})")
 
-        return {
-            "message": f"Agent '{agent_name}' deleted successfully"
-        }
+        return {"message": f"Agent '{agent_name}' deleted successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting agent {agent_id}: {e}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to delete agent")
+        raise HTTPException(status_code=500, detail="Failed to delete agent") from e
 
 
 @router.patch("/agents/{agent_id}/remove-from-marketplace")
 async def remove_from_marketplace(
-    agent_id: str,
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    agent_id: str, admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Remove an agent from the public marketplace (set is_active = false).
     This can be used on ANY agent, including user-created ones.
     """
     try:
-        result = await db.execute(
-            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-        )
+        result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
         agent = result.scalar_one_or_none()
 
         if not agent:
@@ -1062,12 +1042,14 @@ async def remove_from_marketplace(
 
         await db.commit()
 
-        logger.info(f"Admin {admin.username} removed agent from marketplace: {agent.name} (ID: {agent_id})")
+        logger.info(
+            f"Admin {admin.username} removed agent from marketplace: {agent.name} (ID: {agent_id})"
+        )
 
         return {
             "id": agent.id,
             "name": agent.name,
-            "message": "Agent removed from marketplace successfully"
+            "message": "Agent removed from marketplace successfully",
         }
 
     except HTTPException:
@@ -1075,7 +1057,9 @@ async def remove_from_marketplace(
     except Exception as e:
         logger.error(f"Error removing agent {agent_id} from marketplace: {e}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to remove agent from marketplace")
+        raise HTTPException(
+            status_code=500, detail="Failed to remove agent from marketplace"
+        ) from e
 
 
 @router.patch("/agents/{agent_id}/feature")
@@ -1083,15 +1067,13 @@ async def toggle_featured(
     agent_id: str,
     is_featured: bool,
     admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
     """
     Toggle the featured status of an agent.
     """
     try:
-        result = await db.execute(
-            select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-        )
+        result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
         agent = result.scalar_one_or_none()
 
         if not agent:
@@ -1109,7 +1091,7 @@ async def toggle_featured(
             "id": agent.id,
             "name": agent.name,
             "is_featured": agent.is_featured,
-            "message": f"Agent {status} successfully"
+            "message": f"Agent {status} successfully",
         }
 
     except HTTPException:
@@ -1117,14 +1099,13 @@ async def toggle_featured(
     except Exception as e:
         logger.error(f"Error toggling featured status for agent {agent_id}: {e}")
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to toggle featured status")
+        raise HTTPException(status_code=500, detail="Failed to toggle featured status") from e
 
 
 @router.get("/models")
 async def get_available_models(
-    admin: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db)
-) -> Dict[str, Any]:
+    admin: User = Depends(current_superuser), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
     """
     Get list of available models from LiteLLM.
     Returns model names from your LiteLLM instance.
@@ -1136,11 +1117,12 @@ async def get_available_models(
         litellm_models = await litellm_service.get_available_models()
 
         # Extract model IDs
-        models = [model.get('id') for model in litellm_models if model.get('id')]
+        models = [model.get("id") for model in litellm_models if model.get("id")]
 
         # If no models from LiteLLM, fallback to environment variable
         if not models:
             from ..config import get_settings
+
             settings = get_settings()
             models_str = settings.litellm_default_models
             models = [m.strip() for m in models_str.split(",") if m.strip()]
@@ -1148,17 +1130,14 @@ async def get_available_models(
         if not models:
             models = ["qwen-3-235b-a22b-thinking-2507"]  # Final fallback
 
-        return {
-            "models": models
-        }
+        return {"models": models}
 
     except Exception as e:
         logger.error(f"Error getting available models: {e}")
         # Fallback to environment variable on error
         from ..config import get_settings
+
         settings = get_settings()
         models_str = settings.litellm_default_models
         models = [m.strip() for m in models_str.split(",") if m.strip()]
-        return {
-            "models": models if models else ["qwen-3-235b-a22b-thinking-2507"]
-        }
+        return {"models": models if models else ["qwen-3-235b-a22b-thinking-2507"]}

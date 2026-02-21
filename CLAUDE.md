@@ -570,6 +570,113 @@ kubectl get pvc -n proj-<project-uuid>
 - **EBS Storage**: gp3 volumes with VolumeSnapshot support for project persistence
 - **AWS User**: Always use `<AWS_IAM_USER>` credentials for deployments
 
+### Terraform Deployment & Configuration
+
+Terraform manages AWS infrastructure with environment-specific state files and variables.
+
+**Backend Configuration (Multi-Environment Support):**
+```bash
+# Production and beta use SEPARATE state files in same S3 bucket:
+# - production: s3://<TERRAFORM_STATE_BUCKET>/production/terraform.tfstate
+# - beta:       s3://<TERRAFORM_STATE_BUCKET>/beta/terraform.tfstate
+
+# Use aws-deploy.sh helper script for all terraform operations:
+./scripts/aws-deploy.sh init production     # Initialize with production backend
+./scripts/aws-deploy.sh plan production     # Plan changes
+./scripts/aws-deploy.sh apply production    # Apply changes (requires confirmation)
+./scripts/aws-deploy.sh destroy production  # Destroy infrastructure (requires typing "destroy production")
+
+# For beta environment:
+./scripts/aws-deploy.sh init beta
+./scripts/aws-deploy.sh plan beta
+./scripts/aws-deploy.sh apply beta
+```
+
+**Shared ECR Stack:**
+
+ECR repositories (`tesslate-backend`, `tesslate-frontend`, `tesslate-devserver`) are shared across environments — both push different image tags (`:beta`, `:production`) to the same repos. To prevent state conflicts, ECR is managed by a **dedicated shared stack** (`k8s/terraform/shared/`) with its own state file. Environment stacks reference ECR via computed URL locals.
+
+```bash
+# Manage shared ECR resources
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
+```
+
+**Terraform Secrets Management:**
+
+Terraform tfvars files are stored in **AWS Secrets Manager** (as raw content) and must be downloaded manually before running Terraform. This enables secure team collaboration.
+
+**Key Features:**
+- Manual tfvars management - download when needed
+- No secrets in git (tfvars files are in `.gitignore`)
+- Centralized storage - team downloads from AWS instead of manual sharing
+- Simple workflow - download once, use with standard terraform `-var-file`
+
+**Download tfvars** (required before first terraform run):
+```bash
+# View tfvars content from AWS (default, no local file created)
+./scripts/terraform/secrets.sh production
+
+# Download tfvars from AWS to local file
+./scripts/terraform/secrets.sh download production
+
+# This creates: k8s/terraform/aws/terraform.production.tfvars
+```
+
+**Run terraform** (after downloading):
+```bash
+# Now terraform commands work
+./scripts/aws-deploy.sh plan production
+./scripts/aws-deploy.sh apply production
+```
+
+**Initial upload** (one-time setup):
+```bash
+# Upload existing terraform.{env}.tfvars to AWS
+./scripts/terraform/secrets.sh upload production
+./scripts/terraform/secrets.sh upload beta
+
+# Test viewing
+./scripts/terraform/secrets.sh production
+
+# Team members can now download and use
+# ./scripts/terraform/secrets.sh download production
+```
+
+**Updating secrets**:
+```bash
+# 1. Download latest (to avoid conflicts)
+./scripts/terraform/secrets.sh download production
+
+# 2. Edit local file
+vim k8s/terraform/aws/terraform.production.tfvars
+
+# 3. Upload to AWS
+./scripts/terraform/secrets.sh upload production
+
+# 4. Notify team to re-download: ./scripts/terraform/secrets.sh download production
+```
+
+**View secrets in AWS**:
+```bash
+# View tfvars content from AWS (this is the default)
+./scripts/terraform/secrets.sh production
+# or explicit: ./scripts/terraform/secrets.sh view production
+```
+
+**AWS Secrets Manager Structure:**
+- `tesslate/terraform/production` - Raw content of terraform.production.tfvars
+- `tesslate/terraform/beta` - Raw content of terraform.beta.tfvars
+
+**Required IAM Permissions:**
+- `secretsmanager:GetSecretValue`
+- `secretsmanager:PutSecretValue`
+- `secretsmanager:CreateSecret`
+- `secretsmanager:DescribeSecret`
+
+See [scripts/terraform/README.md](scripts/terraform/README.md) for full documentation.
+
 ### Initial Setup / Login
 
 ```powershell
@@ -581,55 +688,20 @@ kubectl get nodes
 kubectl get pods -n tesslate
 ```
 
-### Quick Deploy (Recommended)
+### Build & Deploy Images (Recommended)
 
-**IMPORTANT**: Always use `--no-cache` when building to ensure your code changes are included. Then delete the pod to force K8s to pull the new image.
+Use `aws-deploy.sh build` to build, push to ECR, and restart pods in one command.
 
-```powershell
-# 1. Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+```bash
+# Build all images (backend, frontend, devserver)
+./scripts/aws-deploy.sh build beta
+./scripts/aws-deploy.sh build production
 
-# 2. Build with --no-cache, tag, and push (pick which image you changed)
+# Build specific image(s)
+./scripts/aws-deploy.sh build production backend
+./scripts/aws-deploy.sh build beta frontend backend
 
-# Frontend changes:
-docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/ && docker tag tesslate-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest && docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-
-# Backend changes:
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/ && docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest && docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-
-# 3. Delete pod to force pull new image (imagePullPolicy is Always)
-kubectl delete pod -n tesslate -l app=tesslate-frontend   # for frontend
-kubectl delete pod -n tesslate -l app=tesslate-backend    # for backend
-
-# 4. Verify new pod is running with correct image
-kubectl get pods -n tesslate
-MSYS_NO_PATHCONV=1 kubectl exec -n tesslate deployment/tesslate-frontend -- ls -la /usr/share/nginx/html/assets/ | grep index
-```
-
-### Full Build & Push (All Images)
-
-```powershell
-# Login to ECR (required before push)
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-
-# Build, tag, and push backend
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
-docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
-
-# Build, tag, and push frontend
-docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
-docker tag tesslate-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
-
-# Build, tag, and push devserver (user project containers)
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
-docker tag tesslate-devserver:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
-
-# Delete all pods to pull new images
-kubectl delete pod -n tesslate -l app=tesslate-frontend
-kubectl delete pod -n tesslate -l app=tesslate-backend
+# What it does: ECR login → docker build --no-cache → push → delete pod → wait for rollout → verify
 ```
 
 ### Deploy / Restart Pods
@@ -648,8 +720,9 @@ kubectl rollout status deployment/tesslate-frontend -n tesslate --timeout=120s
 kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
 
-# Apply all manifests (if changed)
-kubectl apply -k k8s/overlays/aws
+# Apply all manifests with images from terraform (recommended)
+./scripts/aws-deploy.sh deploy-k8s beta        # for beta
+./scripts/aws-deploy.sh deploy-k8s production  # for production
 ```
 
 ### Debugging Commands
@@ -711,16 +784,31 @@ kubectl create secret generic tesslate-secrets -n tesslate \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### AWS EKS Config Settings (k8s/overlays/aws/backend-patch.yaml)
+### AWS EKS Config Settings (k8s/overlays/aws-base/backend-patch.yaml)
 
-| Setting | Value |
-|---------|-------|
-| `K8S_DEVSERVER_IMAGE` | `<ECR_REGISTRY>/tesslate-devserver:latest` |
-| `K8S_IMAGE_PULL_SECRET` | `ecr-credentials` |
-| `K8S_SNAPSHOT_CLASS` | `tesslate-ebs-snapshots` |
-| `K8S_SNAPSHOT_RETENTION_DAYS` | `30` |
-| `COOKIE_DOMAIN` | `.your-domain.com` |
-| `replicas` | `1` (single replica - tasks stored in-memory) |
+| Setting | Beta | Production |
+|---------|------|------------|
+| `K8S_DEVSERVER_IMAGE` | `...tesslate-devserver:beta` | `...tesslate-devserver:production` |
+| `K8S_IMAGE_PULL_SECRET` | `""` | `""` |
+| `APP_DOMAIN` | `your-domain.com` | `your-domain.com` |
+| `COOKIE_DOMAIN` | `.your-domain.com` | `.your-domain.com` |
+| `replicas` | `1` (single replica - tasks stored in-memory) | `1` |
+
+### AWS Overlay: envFrom Auto-Sync Architecture
+
+The AWS backend overlay (`k8s/overlays/aws-base/backend-patch.yaml`) uses a two-part strategy:
+
+1. **`envFrom`** — auto-mounts ALL keys from 3 terraform-managed secrets (`tesslate-app-secrets`, `postgres-secret`, `s3-credentials`). Adding a new key in terraform's `kubernetes.tf` automatically makes it available in the pod — **no manual kustomize sync needed**.
+
+2. **`env` with `$patch: replace`** — replaces the base manifest's env array with ONLY static values (not in any secret) and 1 alias mapping (`K8S_INGRESS_DOMAIN` → `APP_DOMAIN`). The `$patch: replace` prevents stale base entries from merging in.
+
+**When adding new config:**
+- **Secret-based values** (domain, API keys, OAuth, etc.): Add to terraform `kubernetes.tf` secrets → automatically picked up via `envFrom`
+- **Static values** (feature flags, class names, etc.): Add to `backend-patch.yaml` env array
+
+### Frontend Config: API_URL Must NOT Include `/api`
+
+The frontend `api-url` in the `frontend-config` ConfigMap (managed by terraform `kubernetes.tf`) must be the **base domain only** (e.g., `https://your-domain.com`), NOT `https://your-domain.com/api`. All API calls in `app/src/lib/api.ts` already include the `/api` prefix in their paths, so including `/api` in the base URL causes double `/api/api/` paths.
 
 ### Common AWS Issues & Fixes
 

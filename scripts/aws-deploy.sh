@@ -1,0 +1,540 @@
+#!/bin/bash
+# =============================================================================
+# AWS EKS Deployment Helper Script
+# =============================================================================
+# Manages Terraform infrastructure, Docker image builds, and K8s deployments.
+#
+# Usage:
+#   ./scripts/aws-deploy.sh init production       # Initialize production backend
+#   ./scripts/aws-deploy.sh plan production        # Plan production changes
+#   ./scripts/aws-deploy.sh apply production       # Apply production changes
+#   ./scripts/aws-deploy.sh terraform production   # Run init → plan → apply (full deployment)
+#   ./scripts/aws-deploy.sh destroy production     # Destroy production resources
+#   ./scripts/aws-deploy.sh output beta            # Show terraform outputs
+#   ./scripts/aws-deploy.sh deploy-k8s beta        # Apply kustomize manifests for environment
+#   ./scripts/aws-deploy.sh reload production      # Apply manifests + restart pods (pick up new env vars)
+#   ./scripts/aws-deploy.sh build beta                       # Build, push, restart all images
+#   ./scripts/aws-deploy.sh build production backend         # Build only backend
+#   ./scripts/aws-deploy.sh build beta frontend backend      # Build multiple images
+#   ./scripts/aws-deploy.sh build beta --cached              # Build with Docker cache
+#   ./scripts/aws-deploy.sh build beta backend --cached      # Build only backend with cache
+# =============================================================================
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Helper functions
+error() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+warning() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+info() {
+    echo -e "${BLUE}$1${NC}"
+}
+
+# =============================================================================
+# Shared helpers for K8s operations
+# =============================================================================
+
+ensure_kubectl_context() {
+    CLUSTER_NAME="tesslate-${ENVIRONMENT}-eks"
+    CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null || echo "")
+
+    if [[ "$CURRENT_CONTEXT" != *"$CLUSTER_NAME"* ]]; then
+        info "Switching kubectl context to $CLUSTER_NAME..."
+        aws eks update-kubeconfig --region us-east-1 --name "$CLUSTER_NAME" --alias "$CLUSTER_NAME" >/dev/null 2>&1 \
+            || error "Failed to switch kubectl context. Does cluster '$CLUSTER_NAME' exist?"
+        success "✓ kubectl context set to $CLUSTER_NAME"
+    fi
+
+    if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
+        error "Cannot reach cluster $CLUSTER_NAME. Check AWS credentials and VPN."
+    fi
+}
+
+apply_kustomize() {
+    KUSTOMIZE_DIR="$PROJECT_ROOT/k8s/overlays/aws-${ENVIRONMENT}"
+
+    if [ ! -d "$KUSTOMIZE_DIR" ]; then
+        error "Kustomize overlay not found: $KUSTOMIZE_DIR"
+    fi
+
+    info "Applying kustomize manifests from aws-${ENVIRONMENT}..."
+    kubectl apply -k "$KUSTOMIZE_DIR"
+    success "✓ Kustomize manifests applied"
+}
+
+restart_pods() {
+    local deployments=("tesslate-backend" "tesslate-frontend")
+
+    info "Restarting deployments..."
+    for dep in "${deployments[@]}"; do
+        kubectl rollout restart "deployment/${dep}" -n tesslate
+    done
+
+    info "Waiting for rollouts..."
+    local ROLLOUT_PIDS=()
+    local ROLLOUT_NAMES=()
+    for dep in "${deployments[@]}"; do
+        kubectl rollout status "deployment/${dep}" -n tesslate --timeout=120s &
+        ROLLOUT_PIDS+=($!)
+        ROLLOUT_NAMES+=("${dep#tesslate-}")
+    done
+
+    local FAILED=0
+    for i in "${!ROLLOUT_PIDS[@]}"; do
+        if wait "${ROLLOUT_PIDS[$i]}"; then
+            success "[${ROLLOUT_NAMES[$i]}] ✓ Ready"
+        else
+            echo -e "${RED}[${ROLLOUT_NAMES[$i]}] ✗ Rollout failed${NC}"
+            FAILED=1
+        fi
+    done
+
+    if [ "$FAILED" -ne 0 ]; then
+        error "One or more rollouts failed. Check: kubectl get pods -n tesslate"
+    fi
+}
+
+verify_pods() {
+    echo
+    info "Verifying deployment..."
+    kubectl get pods -n tesslate -o wide | grep -v cleanup
+    echo
+}
+
+# Parse arguments
+COMMAND="${1:-}"
+ENVIRONMENT="${2:-}"
+
+# Validate command
+case "$COMMAND" in
+    init|plan|apply|destroy|output|state|terraform|deploy-k8s|build|reload)
+        ;;
+    *)
+        error "Invalid command: $COMMAND\n\nUsage: ./scripts/aws-deploy.sh {init|plan|apply|terraform|destroy|output|state|deploy-k8s|build|reload} {production|beta|shared}"
+        ;;
+esac
+
+# Validate environment
+if [ -z "$ENVIRONMENT" ]; then
+    error "Environment not specified.\n\nUsage: ./scripts/aws-deploy.sh $COMMAND {production|beta|shared}"
+fi
+
+case "$ENVIRONMENT" in
+    production|beta|shared)
+        ;;
+    *)
+        error "Invalid environment: $ENVIRONMENT. Use 'production', 'beta', or 'shared'"
+        ;;
+esac
+
+# Set directory and files based on environment
+if [ "$ENVIRONMENT" = "shared" ]; then
+    TF_DIR="$PROJECT_ROOT/k8s/terraform/shared"
+    BACKEND_CONFIG="backend.hcl"
+    TFVARS_FILE="terraform.shared.tfvars"
+else
+    TF_DIR="$PROJECT_ROOT/k8s/terraform/aws"
+    BACKEND_CONFIG="backend-${ENVIRONMENT}.hcl"
+    TFVARS_FILE="terraform.${ENVIRONMENT}.tfvars"
+fi
+
+# Only cd to terraform dir for terraform commands
+if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+    cd "$TF_DIR"
+fi
+
+# Skip terraform file checks for commands that don't use terraform
+if [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+    # Check if backend config exists
+    if [ ! -f "$BACKEND_CONFIG" ]; then
+        error "Backend config not found: $TF_DIR/$BACKEND_CONFIG"
+    fi
+fi
+
+# Check if tfvars file exists (except for state/output/deploy-k8s commands)
+if [ "$COMMAND" != "state" ] && [ "$COMMAND" != "output" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+    if [ ! -f "$TFVARS_FILE" ]; then
+        warning "tfvars file not found: $TFVARS_FILE"
+        info "Download from AWS Secrets Manager with:"
+        info "  ./scripts/terraform/secrets.sh download $ENVIRONMENT"
+        error "Missing tfvars file"
+    fi
+fi
+
+# Verify correct backend is loaded (skip for init, all, and deploy-k8s which don't need terraform)
+if [ "$COMMAND" != "init" ] && [ "$COMMAND" != "terraform" ] && [ "$COMMAND" != "deploy-k8s" ] && [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ]; then
+    EXPECTED_KEY="${ENVIRONMENT}/terraform.tfstate"
+    TF_STATE_FILE=".terraform/terraform.tfstate"
+    if [ -f "$TF_STATE_FILE" ]; then
+        CURRENT_KEY=$(python3 -c "import json; print(json.load(open('$TF_STATE_FILE')).get('backend',{}).get('config',{}).get('key',''))" 2>/dev/null || echo "")
+        if [ "$CURRENT_KEY" != "$EXPECTED_KEY" ]; then
+            warning "Backend mismatch! Currently loaded: $CURRENT_KEY"
+            warning "Expected for $ENVIRONMENT: $EXPECTED_KEY"
+            info "Auto-reinitializing with correct backend..."
+            terraform init -reconfigure -backend-config="$BACKEND_CONFIG" >/dev/null 2>&1
+            success "✓ Switched to $ENVIRONMENT backend"
+        fi
+    else
+        info "No backend initialized. Running init..."
+        terraform init -reconfigure -backend-config="$BACKEND_CONFIG" >/dev/null 2>&1
+        success "✓ Initialized $ENVIRONMENT backend"
+    fi
+fi
+
+# Display environment info (build/reload/deploy-k8s show their own or minimal summary)
+if [ "$COMMAND" != "build" ] && [ "$COMMAND" != "reload" ] && [ "$COMMAND" != "deploy-k8s" ]; then
+    info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    info "Environment: $ENVIRONMENT"
+    info "Command:     $COMMAND"
+    info "Backend:     $BACKEND_CONFIG"
+    info "Terraform:   $TF_DIR"
+    if [ "$COMMAND" != "state" ] && [ "$COMMAND" != "output" ]; then
+        info "Variables:   $TFVARS_FILE"
+    fi
+    info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo
+fi
+
+# Execute command
+case "$COMMAND" in
+    init)
+        info "Initializing Terraform for $ENVIRONMENT environment..."
+        terraform init -reconfigure -backend-config="$BACKEND_CONFIG"
+        success "✓ Terraform initialized successfully"
+        ;;
+
+    plan)
+        info "Planning changes for $ENVIRONMENT environment..."
+        terraform plan -var-file="$TFVARS_FILE"
+        ;;
+
+    apply)
+        warning "⚠️  This will apply changes to $ENVIRONMENT environment"
+        read -p "Continue? (yes/no): " -r
+        echo
+        if [[ ! $REPLY == "yes" ]]; then
+            info "Cancelled."
+            exit 0
+        fi
+        info "Applying changes to $ENVIRONMENT environment..."
+        terraform apply -var-file="$TFVARS_FILE"
+        success "✓ Changes applied successfully"
+        ;;
+
+    destroy)
+        warning "⚠️  This will DESTROY all resources in $ENVIRONMENT environment"
+        warning "⚠️  This action cannot be undone!"
+        read -p "Type 'destroy $ENVIRONMENT' to confirm: " -r
+        echo
+        if [[ ! $REPLY == "destroy $ENVIRONMENT" ]]; then
+            info "Cancelled."
+            exit 0
+        fi
+        info "Destroying $ENVIRONMENT environment..."
+        terraform destroy -var-file="$TFVARS_FILE"
+        success "✓ Resources destroyed"
+        ;;
+
+    output)
+        terraform output
+        ;;
+
+    state)
+        info "Terraform state commands:"
+        info "  list                    - List resources in state"
+        info "  show <resource>         - Show resource details"
+        info "  rm <resource>           - Remove resource from state"
+        echo
+        read -p "Enter state command (or press Enter to list): " -r
+        echo
+        if [ -z "$REPLY" ]; then
+            terraform state list
+        else
+            terraform state $REPLY
+        fi
+        ;;
+
+    deploy-k8s)
+        if [ "$ENVIRONMENT" = "shared" ]; then
+            error "deploy-k8s is not available for shared environment"
+        fi
+
+        ensure_kubectl_context
+        apply_kustomize
+        echo
+        info "Verify with: kubectl get pods -n tesslate"
+        ;;
+
+    build)
+        # Build is only for production/beta (shared only manages ECR repos)
+        if [ "$ENVIRONMENT" = "shared" ]; then
+            error "Build is not available for shared environment (shared only manages ECR repos)"
+        fi
+
+        # Parse optional image arguments and flags
+        USE_CACHE=false
+        IMAGES=""
+        for arg in "${@:3}"; do
+            if [ "$arg" = "--cached" ]; then
+                USE_CACHE=true
+            else
+                IMAGES="$IMAGES $arg"
+            fi
+        done
+        IMAGES="${IMAGES# }"  # trim leading space
+        : "${IMAGES:=backend frontend devserver}"
+
+        # ECR config
+        ECR_ACCOUNT="<AWS_ACCOUNT_ID>"
+        ECR_REGISTRY="${ECR_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com"
+
+        # Image definitions
+        declare -A DOCKERFILES=(
+            [backend]="orchestrator/Dockerfile"
+            [frontend]="app/Dockerfile.prod"
+            [devserver]="orchestrator/Dockerfile.devserver"
+        )
+        declare -A BUILD_CONTEXTS=(
+            [backend]="orchestrator/"
+            [frontend]="app/"
+            [devserver]="orchestrator/"
+        )
+        declare -A K8S_LABELS=(
+            [backend]="app=tesslate-backend"
+            [frontend]="app=tesslate-frontend"
+        )
+
+        # Validate image names
+        for img in $IMAGES; do
+            case "$img" in
+                backend|frontend|devserver) ;;
+                *) error "Unknown image: $img. Valid: backend, frontend, devserver" ;;
+            esac
+        done
+
+        # Summary
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        info "Environment: $ENVIRONMENT"
+        info "Command:     build"
+        info "Images:      $IMAGES"
+        info "Registry:    $ECR_REGISTRY"
+        info "Tag:         $ENVIRONMENT"
+        if [ "$USE_CACHE" = true ]; then
+            info "Cache:       enabled"
+        else
+            info "Cache:       disabled (use --cached to enable)"
+        fi
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo
+
+        # ECR Login
+        info "Logging into ECR..."
+        aws ecr get-login-password --region us-east-1 \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY" 2>/dev/null
+        success "✓ ECR login successful"
+        echo
+
+        # Build & Push
+        IMAGE_COUNT=$(echo $IMAGES | wc -w)
+
+        if [ "$IMAGE_COUNT" -gt 1 ]; then
+            # Parallel builds
+            BUILD_PIDS=()
+            BUILD_IMGS=()
+            BUILD_LOGS=()
+            BUILD_TMPDIR=$(mktemp -d)
+
+            for img in $IMAGES; do
+                FULL_TAG="${ECR_REGISTRY}/tesslate-${img}:${ENVIRONMENT}"
+                DOCKERFILE="${DOCKERFILES[$img]}"
+                CONTEXT="${BUILD_CONTEXTS[$img]}"
+                LOG_FILE="$BUILD_TMPDIR/${img}.log"
+
+                CACHE_FLAG="--no-cache"
+                if [ "$USE_CACHE" = true ]; then
+                    CACHE_FLAG=""
+                fi
+
+                info "[$img] Starting build ${FULL_TAG}..."
+                (
+                    docker build $CACHE_FLAG -t "$FULL_TAG" \
+                        -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" >>"$LOG_FILE" 2>&1 \
+                    && docker push "$FULL_TAG" >>"$LOG_FILE" 2>&1
+                ) &
+                BUILD_PIDS+=($!)
+                BUILD_IMGS+=("$img")
+                BUILD_LOGS+=("$LOG_FILE")
+            done
+
+            info "Waiting for ${IMAGE_COUNT} parallel builds..."
+            echo
+
+            BUILD_FAILED=0
+            for i in "${!BUILD_PIDS[@]}"; do
+                if wait "${BUILD_PIDS[$i]}"; then
+                    success "[${BUILD_IMGS[$i]}] ✓ Build & push complete"
+                else
+                    echo -e "${RED}[${BUILD_IMGS[$i]}] ✗ Build or push failed. Last 30 lines:${NC}"
+                    tail -30 "${BUILD_LOGS[$i]}" 2>/dev/null || true
+                    BUILD_FAILED=1
+                fi
+            done
+
+            rm -rf "$BUILD_TMPDIR"
+            echo
+
+            if [ "$BUILD_FAILED" -ne 0 ]; then
+                error "One or more builds failed"
+            fi
+        else
+            # Single image — build inline with live output
+            for img in $IMAGES; do
+                FULL_TAG="${ECR_REGISTRY}/tesslate-${img}:${ENVIRONMENT}"
+                DOCKERFILE="${DOCKERFILES[$img]}"
+                CONTEXT="${BUILD_CONTEXTS[$img]}"
+
+                CACHE_FLAG="--no-cache"
+                if [ "$USE_CACHE" = true ]; then
+                    CACHE_FLAG=""
+                fi
+
+                info "[$img] Building ${FULL_TAG}..."
+                docker build $CACHE_FLAG -t "$FULL_TAG" -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT"
+                success "[$img] ✓ Build complete"
+
+                info "[$img] Pushing..."
+                docker push "$FULL_TAG"
+                success "[$img] ✓ Push complete"
+                echo
+            done
+        fi
+
+        # Switch context and restart pods
+        ensure_kubectl_context
+        echo
+
+        info "Restarting pods..."
+        for img in $IMAGES; do
+            LABEL="${K8S_LABELS[$img]:-}"
+            if [ -n "$LABEL" ]; then
+                info "[$img] Deleting pod..."
+                kubectl delete pod -n tesslate -l "$LABEL" 2>/dev/null || true
+            fi
+        done
+
+        # Wait for rollouts in parallel
+        ROLLOUT_PIDS=()
+        ROLLOUT_IMGS=()
+        for img in $IMAGES; do
+            LABEL="${K8S_LABELS[$img]:-}"
+            if [ -n "$LABEL" ]; then
+                info "[$img] Waiting for rollout..."
+                kubectl rollout status "deployment/tesslate-${img}" -n tesslate --timeout=120s &
+                ROLLOUT_PIDS+=($!)
+                ROLLOUT_IMGS+=("$img")
+            fi
+        done
+
+        FAILED=0
+        for i in "${!ROLLOUT_PIDS[@]}"; do
+            if wait "${ROLLOUT_PIDS[$i]}"; then
+                success "[${ROLLOUT_IMGS[$i]}] ✓ Ready"
+            else
+                echo -e "${RED}[${ROLLOUT_IMGS[$i]}] ✗ Rollout failed${NC}"
+                FAILED=1
+            fi
+        done
+
+        if [ "$FAILED" -ne 0 ]; then
+            error "One or more rollouts failed. Check: kubectl get pods -n tesslate"
+        fi
+
+        verify_pods
+        success "✓ Build and deploy complete for $ENVIRONMENT!"
+        ;;
+
+    reload)
+        if [ "$ENVIRONMENT" = "shared" ]; then
+            error "Reload is not available for shared environment"
+        fi
+
+        ensure_kubectl_context
+
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        info "Environment: $ENVIRONMENT"
+        info "Command:     reload"
+        info "Cluster:     tesslate-${ENVIRONMENT}-eks"
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo
+
+        info "Step 1/2: Applying kustomize manifests..."
+        apply_kustomize
+        echo
+
+        info "Step 2/2: Restarting pods..."
+        restart_pods
+        verify_pods
+        success "✓ Reload complete for $ENVIRONMENT!"
+        ;;
+
+    terraform)
+        info "Running full Terraform deployment for $ENVIRONMENT environment..."
+        info "This will: init → plan → apply"
+        echo
+
+        # Step 1: Init
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        info "Step 1/3: Initializing Terraform..."
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        terraform init -reconfigure -backend-config="$BACKEND_CONFIG"
+        success "✓ Initialization complete"
+        echo
+
+        # Step 2: Plan
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        info "Step 2/3: Planning changes..."
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        terraform plan -var-file="$TFVARS_FILE" -out=tfplan
+        echo
+
+        # Step 3: Apply (with confirmation)
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        info "Step 3/3: Apply changes"
+        info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warning "⚠️  Ready to apply changes to $ENVIRONMENT environment"
+        read -p "Continue with apply? (yes/no): " -r
+        echo
+        if [[ ! $REPLY == "yes" ]]; then
+            info "Cancelled. Plan saved to tfplan"
+            info "You can apply later with: cd $TF_DIR && terraform apply tfplan"
+            exit 0
+        fi
+
+        info "Applying changes to $ENVIRONMENT environment..."
+        terraform apply tfplan
+        rm -f tfplan
+        success "✓ Deployment complete!"
+        echo
+        info "Run './scripts/aws-deploy.sh output $ENVIRONMENT' to see outputs"
+        ;;
+esac

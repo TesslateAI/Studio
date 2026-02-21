@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Eye, EyeSlash, Link, ArrowSquareOut } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-interface CredentialField {
+export interface CredentialField {
   key: string;
   label: string;
   type: string;
@@ -11,7 +11,7 @@ interface CredentialField {
   help_text: string;
 }
 
-interface ExternalServiceItem {
+export interface ExternalServiceItem {
   id: string;
   name: string;
   slug: string;
@@ -28,6 +28,7 @@ interface ExternalServiceCredentialModalProps {
   onClose: () => void;
   onSubmit: (credentials: Record<string, string>, externalEndpoint?: string) => void;
   item: ExternalServiceItem;
+  mode?: 'create' | 'edit';
 }
 
 export const ExternalServiceCredentialModal = ({
@@ -35,6 +36,7 @@ export const ExternalServiceCredentialModal = ({
   onClose,
   onSubmit,
   item,
+  mode = 'create',
 }: ExternalServiceCredentialModalProps) => {
   const [credentials, setCredentials] = useState<Record<string, string>>({});
   const [externalEndpoint, setExternalEndpoint] = useState('');
@@ -42,12 +44,23 @@ export const ExternalServiceCredentialModal = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Reset form state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCredentials({});
+      setExternalEndpoint('');
+      setShowSecrets({});
+      setIsSubmitting(false);
+      setErrors({});
+    }
+  }, [isOpen]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validate required fields
     const newErrors: Record<string, string> = {};
-    item.credential_fields?.forEach(field => {
+    item.credential_fields?.forEach((field) => {
       if (field.required && !credentials[field.key]?.trim()) {
         newErrors[field.key] = `${field.label} is required`;
       }
@@ -63,7 +76,7 @@ export const ExternalServiceCredentialModal = ({
   };
 
   const toggleShowSecret = (key: string) => {
-    setShowSecrets(prev => ({ ...prev, [key]: !prev[key] }));
+    setShowSecrets((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   if (!isOpen) return null;
@@ -93,10 +106,12 @@ export const ExternalServiceCredentialModal = ({
               <span className="text-2xl">{item.icon}</span>
               <div>
                 <h2 className="text-lg font-semibold text-[var(--text)]">
-                  Connect {item.name}
+                  {mode === 'edit' ? `Update ${item.name} Credentials` : `Connect ${item.name}`}
                 </h2>
                 <p className="text-xs text-[var(--text)]/60">
-                  {item.service_type === 'hybrid' ? 'External service (no container)' : 'Cloud integration'}
+                  {item.service_type === 'hybrid'
+                    ? 'External service (no container)'
+                    : 'Cloud integration'}
                 </p>
               </div>
             </div>
@@ -153,11 +168,13 @@ export const ExternalServiceCredentialModal = ({
                 </label>
                 <div className="relative">
                   <input
-                    type={field.type === 'password' && !showSecrets[field.key] ? 'password' : 'text'}
+                    type={
+                      field.type === 'password' && !showSecrets[field.key] ? 'password' : 'text'
+                    }
                     value={credentials[field.key] || ''}
                     onChange={(e) => {
-                      setCredentials(prev => ({ ...prev, [field.key]: e.target.value }));
-                      setErrors(prev => ({ ...prev, [field.key]: '' }));
+                      setCredentials((prev) => ({ ...prev, [field.key]: e.target.value }));
+                      setErrors((prev) => ({ ...prev, [field.key]: '' }));
                     }}
                     placeholder={field.placeholder}
                     className={`w-full px-3 py-2 bg-[var(--bg)] border rounded-lg text-[var(--text)] text-sm placeholder:text-[var(--text)]/40 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent pr-10 ${
@@ -177,16 +194,16 @@ export const ExternalServiceCredentialModal = ({
                 {field.help_text && (
                   <p className="text-xs text-[var(--text)]/50">{field.help_text}</p>
                 )}
-                {errors[field.key] && (
-                  <p className="text-xs text-red-400">{errors[field.key]}</p>
-                )}
+                {errors[field.key] && <p className="text-xs text-red-400">{errors[field.key]}</p>}
               </div>
             ))}
 
             {/* Info box */}
             <div className="p-3 bg-[var(--primary)]/10 rounded-lg border border-[var(--primary)]/20">
               <p className="text-xs text-[var(--text)]/80">
-                Your credentials are encrypted and stored securely. They will be used to inject environment variables into connected containers.
+                {mode === 'edit'
+                  ? 'All required fields must be provided. Existing values cannot be retrieved for security.'
+                  : 'Your credentials are encrypted and stored securely. They will be used to inject environment variables into connected containers.'}
               </p>
             </div>
 
@@ -204,7 +221,13 @@ export const ExternalServiceCredentialModal = ({
                 disabled={isSubmitting}
                 className="flex-1 px-4 py-2.5 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSubmitting ? 'Connecting...' : 'Connect Service'}
+                {isSubmitting
+                  ? mode === 'edit'
+                    ? 'Updating...'
+                    : 'Connecting...'
+                  : mode === 'edit'
+                    ? 'Update Credentials'
+                    : 'Connect Service'}
               </button>
             </div>
           </form>

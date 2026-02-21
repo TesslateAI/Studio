@@ -1,27 +1,22 @@
 """
 GitHub integration router for OAuth authentication and repository management.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Response, Request
-from fastapi.responses import RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List, Optional
-import httpx
+
 import logging
 from datetime import datetime
 
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ..database import get_db
-from ..models import User, Project, GitRepository, GitHubCredential
-from ..schemas import (
-    GitHubCredentialResponse,
-    GitRepositoryResponse,
-    CreateGitHubRepoRequest,
-    GitHubOAuthCallbackRequest
-)
+from ..models import GitHubCredential, User
+from ..schemas import CreateGitHubRepoRequest, GitHubCredentialResponse
 from ..services.credential_manager import get_credential_manager
 from ..services.github_client import GitHubClient
 from ..services.github_oauth import get_github_oauth_service
-from ..users import current_active_user, current_superuser
+from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +31,7 @@ oauth_states = {}
 @router.get("/oauth/authorize")
 async def github_oauth_authorize(
     current_user: User = Depends(current_active_user),
-    scope: str = Query(default="repo user:email", description="OAuth scopes to request")
+    scope: str = Query(default="repo user:email", description="OAuth scopes to request"),
 ):
     """
     Initiate GitHub OAuth authorization flow.
@@ -53,14 +48,13 @@ async def github_oauth_authorize(
         oauth_states[state] = {
             "user_id": current_user.id,
             "timestamp": datetime.utcnow(),
-            "scope": scope
+            "scope": scope,
         }
 
         # Clean up old states (older than 10 minutes)
         cutoff = datetime.utcnow()
         expired_states = [
-            s for s, data in oauth_states.items()
-            if (cutoff - data["timestamp"]).seconds > 600
+            s for s, data in oauth_states.items() if (cutoff - data["timestamp"]).seconds > 600
         ]
         for s in expired_states:
             del oauth_states[s]
@@ -70,24 +64,21 @@ async def github_oauth_authorize(
 
         logger.info(f"[GITHUB] User {current_user.id} initiating OAuth flow")
 
-        return {
-            "authorization_url": auth_url,
-            "state": state
-        }
+        return {"authorization_url": auth_url, "state": state}
 
     except Exception as e:
         logger.error(f"[GITHUB] Failed to initiate OAuth: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initiate GitHub OAuth: {str(e)}"
-        )
+            detail=f"Failed to initiate GitHub OAuth: {str(e)}",
+        ) from e
 
 
 @router.get("/oauth/callback")
 async def github_oauth_callback(
     code: str = Query(..., description="Authorization code from GitHub"),
     state: str = Query(..., description="State parameter for CSRF protection"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Handle GitHub OAuth callback.
@@ -101,7 +92,7 @@ async def github_oauth_callback(
             logger.error(f"[GITHUB] Invalid OAuth state: {state}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired OAuth state. Please try connecting again."
+                detail="Invalid or expired OAuth state. Please try connecting again.",
             )
 
         state_data = oauth_states[state]
@@ -117,7 +108,7 @@ async def github_oauth_callback(
         if "access_token" not in token_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to obtain access token from GitHub"
+                detail="Failed to obtain access token from GitHub",
             )
 
         access_token = token_data["access_token"]
@@ -146,7 +137,7 @@ async def github_oauth_callback(
             expires_at=token_data.get("expires_at"),
             github_username=user_info.get("login"),
             github_email=github_email,
-            github_user_id=str(user_info.get("id"))
+            github_user_id=str(user_info.get("id")),
         )
 
         # Also store scope in credentials
@@ -159,14 +150,16 @@ async def github_oauth_callback(
             credential.state = None  # Clear state after successful auth
             await db.commit()
 
-        logger.info(f"[GITHUB] User {user_id} successfully connected GitHub account: {user_info.get('login')}")
+        logger.info(
+            f"[GITHUB] User {user_id} successfully connected GitHub account: {user_info.get('login')}"
+        )
 
         # Return success response that frontend can handle
         return {
             "success": True,
             "github_username": user_info.get("login"),
             "github_email": github_email,
-            "message": "GitHub account connected successfully"
+            "message": "GitHub account connected successfully",
         }
 
     except HTTPException:
@@ -175,14 +168,13 @@ async def github_oauth_callback(
         logger.error(f"[GITHUB] OAuth callback failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to complete GitHub OAuth: {str(e)}"
-        )
+            detail=f"Failed to complete GitHub OAuth: {str(e)}",
+        ) from e
 
 
 @router.post("/oauth/refresh")
 async def refresh_github_token(
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
 ):
     """
     Refresh GitHub OAuth token.
@@ -192,14 +184,13 @@ async def refresh_github_token(
     """
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="GitHub OAuth doesn't support token refresh. Please reconnect your GitHub account."
+        detail="GitHub OAuth doesn't support token refresh. Please reconnect your GitHub account.",
     )
 
 
 @router.get("/status", response_model=GitHubCredentialResponse)
 async def get_github_status(
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
 ):
     """
     Get the current GitHub connection status for the user.
@@ -218,21 +209,20 @@ async def get_github_status(
             github_username=credentials.get("github_username"),
             github_email=credentials.get("github_email"),
             auth_method="oauth",
-            scope=credentials.get("scope")
+            scope=credentials.get("scope"),
         )
 
     except Exception as e:
         logger.error(f"[GITHUB] Failed to get status: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get GitHub status: {str(e)}"
-        )
+            detail=f"Failed to get GitHub status: {str(e)}",
+        ) from e
 
 
 @router.delete("/disconnect")
 async def disconnect_github(
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
 ):
     """
     Disconnect GitHub account and revoke access token.
@@ -260,8 +250,7 @@ async def disconnect_github(
             return {"message": "GitHub account disconnected successfully"}
         else:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No GitHub connection found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="No GitHub connection found"
             )
 
     except HTTPException:
@@ -270,14 +259,13 @@ async def disconnect_github(
         logger.error(f"[GITHUB] Failed to disconnect: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to disconnect GitHub: {str(e)}"
-        )
+            detail=f"Failed to disconnect GitHub: {str(e)}",
+        ) from e
 
 
 @router.get("/repositories")
 async def list_github_repositories(
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
 ):
     """
     List all repositories accessible by the authenticated GitHub account.
@@ -290,7 +278,7 @@ async def list_github_repositories(
         if not access_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="GitHub not connected. Please connect your GitHub account first."
+                detail="GitHub not connected. Please connect your GitHub account first.",
             )
 
         # Create GitHub client
@@ -315,7 +303,7 @@ async def list_github_repositories(
                     "language": repo.get("language"),
                     "size": repo.get("size", 0),
                     "stargazers_count": repo.get("stargazers_count", 0),
-                    "forks_count": repo.get("forks_count", 0)
+                    "forks_count": repo.get("forks_count", 0),
                 }
                 for repo in repos
             ]
@@ -326,12 +314,12 @@ async def list_github_repositories(
             if e.response.status_code == 401:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="GitHub token expired or invalid. Please reconnect your GitHub account."
-                )
+                    detail="GitHub token expired or invalid. Please reconnect your GitHub account.",
+                ) from e
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to fetch repositories from GitHub: {str(e)}"
-            )
+                detail=f"Failed to fetch repositories from GitHub: {str(e)}",
+            ) from e
 
     except HTTPException:
         raise
@@ -339,15 +327,15 @@ async def list_github_repositories(
         logger.error(f"[GITHUB] Failed to list repositories: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list repositories: {str(e)}"
-        )
+            detail=f"Failed to list repositories: {str(e)}",
+        ) from e
 
 
 @router.post("/repositories", status_code=status.HTTP_201_CREATED)
 async def create_github_repository(
     request: CreateGitHubRepoRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Create a new GitHub repository.
@@ -360,7 +348,7 @@ async def create_github_repository(
         if not access_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="GitHub not connected. Please connect your GitHub account first."
+                detail="GitHub not connected. Please connect your GitHub account first.",
             )
 
         # Create GitHub client
@@ -372,7 +360,7 @@ async def create_github_repository(
                 name=request.name,
                 description=request.description,
                 private=request.private,
-                auto_init=request.auto_init
+                auto_init=request.auto_init,
             )
 
             logger.info(f"[GITHUB] User {current_user.id} created repository: {repo['full_name']}")
@@ -383,24 +371,24 @@ async def create_github_repository(
                 "full_name": repo["full_name"],
                 "url": repo["html_url"],
                 "clone_url": repo["clone_url"],
-                "default_branch": repo.get("default_branch", "main")
+                "default_branch": repo.get("default_branch", "main"),
             }
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="GitHub token expired or invalid. Please reconnect your GitHub account."
-                )
+                    detail="GitHub token expired or invalid. Please reconnect your GitHub account.",
+                ) from e
             elif e.response.status_code == 422:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Repository name already exists or is invalid"
-                )
+                    detail="Repository name already exists or is invalid",
+                ) from e
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create repository on GitHub: {str(e)}"
-            )
+                detail=f"Failed to create repository on GitHub: {str(e)}",
+            ) from e
 
     except HTTPException:
         raise
@@ -408,8 +396,8 @@ async def create_github_repository(
         logger.error(f"[GITHUB] Failed to create repository: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create repository: {str(e)}"
-        )
+            detail=f"Failed to create repository: {str(e)}",
+        ) from e
 
 
 @router.get("/repositories/{owner}/{repo}/branches")
@@ -417,7 +405,7 @@ async def list_repository_branches(
     owner: str,
     repo: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     List all branches for a specific GitHub repository.
@@ -430,7 +418,7 @@ async def list_repository_branches(
         if not access_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="GitHub not connected. Please connect your GitHub account first."
+                detail="GitHub not connected. Please connect your GitHub account first.",
             )
 
         # Create GitHub client
@@ -444,10 +432,7 @@ async def list_repository_branches(
                 {
                     "name": branch["name"],
                     "protected": branch.get("protected", False),
-                    "commit": {
-                        "sha": branch["commit"]["sha"],
-                        "url": branch["commit"]["url"]
-                    }
+                    "commit": {"sha": branch["commit"]["sha"], "url": branch["commit"]["url"]},
                 }
                 for branch in branches
             ]
@@ -458,12 +443,12 @@ async def list_repository_branches(
             if e.response.status_code == 404:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Repository {owner}/{repo} not found"
-                )
+                    detail=f"Repository {owner}/{repo} not found",
+                ) from e
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to fetch branches from GitHub: {str(e)}"
-            )
+                detail=f"Failed to fetch branches from GitHub: {str(e)}",
+            ) from e
 
     except HTTPException:
         raise
@@ -471,5 +456,5 @@ async def list_repository_branches(
         logger.error(f"[GITHUB] Failed to list branches: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list branches: {str(e)}"
-        )
+            detail=f"Failed to list branches: {str(e)}",
+        ) from e

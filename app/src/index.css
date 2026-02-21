@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @layer base {
   @keyframes spin {
@@ -11,7 +11,9 @@
   }
 
   @keyframes typing {
-    0%, 60%, 100% {
+    0%,
+    60%,
+    100% {
       transform: translateY(0);
       opacity: 0.5;
     }
@@ -24,10 +26,10 @@
 
 :root {
   /* === BRAND COLORS === */
-  --primary: #F89521;
+  --primary: #f89521;
   --primary-hover: #fa9f35;
   --primary-rgb: 248, 149, 33;
-  --accent: #00D9FF;
+  --accent: #00d9ff;
 
   /* === BACKGROUNDS === */
   --bg: #111113;
@@ -55,7 +57,7 @@
   /* === INPUT === */
   --input-bg: #1a1a1c;
   --input-border: rgba(255, 255, 255, 0.1);
-  --input-border-focus: #F89521;
+  --input-border-focus: #f89521;
   --input-text: #ffffff;
   --input-placeholder: rgba(255, 255, 255, 0.4);
 
@@ -148,7 +150,9 @@ body.light-mode .dark-mode-only {
   box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
   padding: 0;
@@ -191,7 +195,8 @@ body {
 /* Firefox scrollbar styling */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.2)) var(--scrollbar-track, transparent);
+  scrollbar-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.2))
+    var(--scrollbar-track, transparent);
 }
 
 /* Custom scrollbar utilities */
@@ -336,8 +341,14 @@ body {
 }
 
 /* Smooth transitions for interactive elements */
-button, a, input, select, textarea {
-  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+button,
+a,
+input,
+select,
+textarea {
+  transition-property:
+    color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow,
+    transform, filter, backdrop-filter;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 200ms;
 }
@@ -435,18 +446,20 @@ button, a, input, select, textarea {
   background-color: transparent !important;
 }
 
-/* Tiptap Editor Styles */
+/* Tiptap Editor Styles
+   editorProps.attributes.class puts both .tiptap-editor and .ProseMirror on
+   the SAME element, so selectors use .tiptap-editor.ProseMirror (no space). */
 .tiptap-editor {
   color: var(--text);
 }
 
-.tiptap-editor .ProseMirror {
+.tiptap-editor.ProseMirror {
   outline: none;
   min-height: 400px;
   padding: 1rem;
 }
 
-.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+.tiptap-editor.ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
   color: rgba(255, 255, 255, 0.3);
@@ -454,7 +467,7 @@ button, a, input, select, textarea {
   height: 0;
 }
 
-.tiptap-editor .ProseMirror h1 {
+.tiptap-editor.ProseMirror h1 {
   font-size: 2em;
   font-weight: 700;
   margin-top: 1.5rem;
@@ -462,7 +475,7 @@ button, a, input, select, textarea {
   color: var(--text);
 }
 
-.tiptap-editor .ProseMirror h2 {
+.tiptap-editor.ProseMirror h2 {
   font-size: 1.5em;
   font-weight: 700;
   margin-top: 1.25rem;
@@ -470,7 +483,7 @@ button, a, input, select, textarea {
   color: var(--text);
 }
 
-.tiptap-editor .ProseMirror h3 {
+.tiptap-editor.ProseMirror h3 {
   font-size: 1.25em;
   font-weight: 600;
   margin-top: 1rem;
@@ -478,42 +491,42 @@ button, a, input, select, textarea {
   color: var(--text);
 }
 
-.tiptap-editor .ProseMirror p {
+.tiptap-editor.ProseMirror p {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
   line-height: 1.75;
 }
 
-.tiptap-editor .ProseMirror ul,
-.tiptap-editor .ProseMirror ol {
+.tiptap-editor.ProseMirror ul,
+.tiptap-editor.ProseMirror ol {
   padding-left: 1.5rem;
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
 }
 
-.tiptap-editor .ProseMirror ul {
+.tiptap-editor.ProseMirror ul {
   list-style-type: disc;
 }
 
-.tiptap-editor .ProseMirror ol {
+.tiptap-editor.ProseMirror ol {
   list-style-type: decimal;
 }
 
-.tiptap-editor .ProseMirror li {
+.tiptap-editor.ProseMirror li {
   margin-top: 0.25rem;
   margin-bottom: 0.25rem;
 }
 
-.tiptap-editor .ProseMirror code {
+.tiptap-editor.ProseMirror code {
   background-color: var(--code-inline-bg, rgba(248, 149, 33, 0.1));
-  color: var(--code-inline-text, #F89521);
+  color: var(--code-inline-text, #f89521);
   padding: 0.2em 0.4em;
   border-radius: var(--radius-small, 4px);
   font-family: var(--font-family-mono, 'JetBrains Mono', 'Fira Code', 'Consolas', monospace);
   font-size: 0.9em;
 }
 
-.tiptap-editor .ProseMirror pre {
+.tiptap-editor.ProseMirror pre {
   background-color: var(--code-block-bg, rgba(0, 0, 0, 0.4));
   border: 1px solid var(--code-block-border, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-medium, 8px);
@@ -523,7 +536,7 @@ button, a, input, select, textarea {
   overflow-x: auto;
 }
 
-.tiptap-editor .ProseMirror pre code {
+.tiptap-editor.ProseMirror pre code {
   background-color: transparent;
   color: var(--code-block-text, #e2e2e2);
   padding: 0;
@@ -532,7 +545,7 @@ button, a, input, select, textarea {
   line-height: 1.7;
 }
 
-.tiptap-editor .ProseMirror blockquote {
+.tiptap-editor.ProseMirror blockquote {
   border-left: 4px solid var(--primary);
   padding-left: 1rem;
   margin-left: 0;
@@ -542,34 +555,34 @@ button, a, input, select, textarea {
   font-style: italic;
 }
 
-.tiptap-editor .ProseMirror strong {
+.tiptap-editor.ProseMirror strong {
   font-weight: 700;
   color: var(--text);
 }
 
-.tiptap-editor .ProseMirror em {
+.tiptap-editor.ProseMirror em {
   font-style: italic;
 }
 
-.tiptap-editor .ProseMirror a {
+.tiptap-editor.ProseMirror a {
   color: var(--primary);
   text-decoration: underline;
   cursor: pointer;
 }
 
-.tiptap-editor .ProseMirror a:hover {
+.tiptap-editor.ProseMirror a:hover {
   color: #fa9f35;
 }
 
 /* Prevent mobile zoom on input focus while maintaining accessibility */
 /* Mobile browsers zoom if font-size < 16px, so we ensure inputs are at least 16px on mobile */
 @media screen and (max-width: 768px) {
-  input[type="text"],
-  input[type="email"],
-  input[type="password"],
-  input[type="tel"],
-  input[type="search"],
-  input[type="url"],
+  input[type='text'],
+  input[type='email'],
+  input[type='password'],
+  input[type='tel'],
+  input[type='search'],
+  input[type='url'],
   textarea,
   select {
     font-size: 16px !important;

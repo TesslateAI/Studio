@@ -7,6 +7,8 @@ Tests the search/replace functionality and fuzzy matching strategies.
 import os
 import sys
 
+import pytest
+
 # Add parent directory to path to import orchestrator modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "orchestrator"))
 
@@ -17,6 +19,8 @@ from app.utils.code_patching import (
     extract_search_replace_blocks,
     is_search_replace_format,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_extract_search_replace_blocks():

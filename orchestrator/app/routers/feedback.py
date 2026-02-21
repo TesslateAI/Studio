@@ -7,30 +7,29 @@ Provides endpoints for:
 - Adding comments to feedback posts
 - Updating feedback status (admin only)
 """
+
 import uuid
-from typing import Optional, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, desc, asc, or_
-from sqlalchemy.orm import selectinload
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import FeedbackPost, FeedbackUpvote, FeedbackComment
+from ..models import FeedbackComment, FeedbackPost, FeedbackUpvote
 from ..models_auth import User
 from ..schemas_feedback import (
-    FeedbackPostCreate,
-    FeedbackPostRead,
-    FeedbackPostList,
-    FeedbackPostDetail,
-    FeedbackPostUpdate,
     FeedbackCommentCreate,
     FeedbackCommentRead,
+    FeedbackPostCreate,
+    FeedbackPostDetail,
+    FeedbackPostList,
+    FeedbackPostRead,
+    FeedbackPostUpdate,
     UpvoteResponse,
 )
 from ..users import current_active_user, current_superuser
-
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
@@ -39,10 +38,11 @@ router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 # Feedback Post Endpoints
 # ============================================================================
 
+
 @router.get("", response_model=FeedbackPostList)
 async def list_feedback(
-    type: Optional[str] = Query(None, description="Filter by type: 'bug' or 'suggestion'"),
-    status: Optional[str] = Query(None, description="Filter by status"),
+    type: str | None = Query(None, description="Filter by type: 'bug' or 'suggestion'"),
+    status: str | None = Query(None, description="Filter by status"),
     sort: str = Query("upvotes", description="Sort by: 'upvotes', 'date', or 'comments'"),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
@@ -74,7 +74,9 @@ async def list_feedback(
         query = query.order_by(desc(FeedbackPost.created_at))
     elif sort == "comments":
         # Count comments via relationship
-        query = query.order_by(desc(FeedbackPost.created_at))  # We'll sort by comment count in Python
+        query = query.order_by(
+            desc(FeedbackPost.created_at)
+        )  # We'll sort by comment count in Python
 
     # Get total count
     count_query = select(func.count()).select_from(FeedbackPost)
@@ -98,20 +100,22 @@ async def list_feedback(
         # Check if current user has upvoted
         has_upvoted = any(upvote.user_id == current_user.id for upvote in post.upvotes)
 
-        posts_data.append(FeedbackPostRead(
-            id=post.id,
-            user_id=post.user_id,
-            user_name=post.user.name if post.user else "Unknown",
-            type=post.type,
-            title=post.title,
-            description=post.description,
-            status=post.status,
-            upvote_count=post.upvote_count,
-            has_upvoted=has_upvoted,
-            comment_count=len(post.comments),
-            created_at=post.created_at,
-            updated_at=post.updated_at,
-        ))
+        posts_data.append(
+            FeedbackPostRead(
+                id=post.id,
+                user_id=post.user_id,
+                user_name=post.user.name if post.user else "Unknown",
+                type=post.type,
+                title=post.title,
+                description=post.description,
+                status=post.status,
+                upvote_count=post.upvote_count,
+                has_upvoted=has_upvoted,
+                comment_count=len(post.comments),
+                created_at=post.created_at,
+                updated_at=post.updated_at,
+            )
+        )
 
     # Sort by comments if requested (after loading)
     if sort == "comments":
@@ -129,10 +133,14 @@ async def get_feedback(
     """
     Get a single feedback post with all comments.
     """
-    query = select(FeedbackPost).where(FeedbackPost.id == feedback_id).options(
-        selectinload(FeedbackPost.user),
-        selectinload(FeedbackPost.upvotes),
-        selectinload(FeedbackPost.comments).selectinload(FeedbackComment.user),
+    query = (
+        select(FeedbackPost)
+        .where(FeedbackPost.id == feedback_id)
+        .options(
+            selectinload(FeedbackPost.user),
+            selectinload(FeedbackPost.upvotes),
+            selectinload(FeedbackPost.comments).selectinload(FeedbackComment.user),
+        )
     )
 
     result = await db.execute(query)
@@ -231,10 +239,14 @@ async def update_feedback(
     """
     Update feedback post status (admin only).
     """
-    query = select(FeedbackPost).where(FeedbackPost.id == feedback_id).options(
-        selectinload(FeedbackPost.user),
-        selectinload(FeedbackPost.upvotes),
-        selectinload(FeedbackPost.comments),
+    query = (
+        select(FeedbackPost)
+        .where(FeedbackPost.id == feedback_id)
+        .options(
+            selectinload(FeedbackPost.user),
+            selectinload(FeedbackPost.upvotes),
+            selectinload(FeedbackPost.comments),
+        )
     )
 
     result = await db.execute(query)
@@ -246,7 +258,9 @@ async def update_feedback(
     # Validate status
     valid_statuses = ["open", "in_progress", "resolved", "closed"]
     if update.status and update.status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(valid_statuses)}")
+        raise HTTPException(
+            status_code=400, detail=f"Status must be one of: {', '.join(valid_statuses)}"
+        )
 
     # Update fields
     if update.status:
@@ -305,6 +319,7 @@ async def delete_feedback(
 # Upvote Endpoints
 # ============================================================================
 
+
 @router.post("/{feedback_id}/upvote", response_model=UpvoteResponse)
 async def toggle_upvote(
     feedback_id: uuid.UUID,
@@ -360,6 +375,7 @@ async def toggle_upvote(
 # ============================================================================
 # Comment Endpoints
 # ============================================================================
+
 
 @router.post("/{feedback_id}/comments", response_model=FeedbackCommentRead, status_code=201)
 async def create_comment(

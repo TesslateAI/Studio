@@ -2,9 +2,10 @@
 Webhook handlers for external services (Stripe, etc.).
 """
 
-from fastapi import APIRouter, Request, HTTPException, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
 import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..services.stripe_service import stripe_service
@@ -14,10 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/stripe")
-async def stripe_webhook(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
+async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     """
     Handle Stripe webhook events.
 
@@ -31,22 +29,17 @@ async def stripe_webhook(
     if not sig_header:
         logger.error("Missing Stripe signature header")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing stripe-signature header"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Missing stripe-signature header"
         )
 
     # Process the webhook
-    result = await stripe_service.handle_webhook(
-        payload=payload,
-        sig_header=sig_header,
-        db=db
-    )
+    result = await stripe_service.handle_webhook(payload=payload, sig_header=sig_header, db=db)
 
     if not result.get("success"):
         logger.error(f"Webhook processing failed: {result.get('message')}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result.get("message", "Webhook processing failed")
+            detail=result.get("message", "Webhook processing failed"),
         )
 
     return {"received": True, "message": result.get("message")}

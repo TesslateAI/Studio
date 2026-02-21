@@ -3,25 +3,26 @@ Unified Git Providers Router.
 
 Provides OAuth authentication and repository management for GitHub, GitLab, and Bitbucket.
 """
+
+import logging
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List
-from datetime import datetime
-import logging
 
 from ..database import get_db
 from ..models import User
-from ..users import current_active_user
 from ..services.git_providers import (
     GitProviderManager,
     GitProviderType,
     get_git_provider_credential_service,
 )
 from ..services.git_providers.oauth import (
+    get_bitbucket_oauth_service,
     get_github_oauth_service,
     get_gitlab_oauth_service,
-    get_bitbucket_oauth_service,
 )
+from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def get_oauth_service(provider: str):
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {provider}. Valid providers: github, gitlab, bitbucket"
+            detail=f"Invalid provider: {provider}. Valid providers: github, gitlab, bitbucket",
         )
 
 
@@ -54,8 +55,8 @@ def validate_provider(provider: str) -> GitProviderType:
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {provider}. Valid providers: github, gitlab, bitbucket"
-        )
+            detail=f"Invalid provider: {provider}. Valid providers: github, gitlab, bitbucket",
+        ) from None
 
 
 @router.get("/")
@@ -63,15 +64,12 @@ async def list_providers():
     """
     List all available Git providers and their configuration status.
     """
-    return {
-        "providers": GitProviderManager.list_available_providers()
-    }
+    return {"providers": GitProviderManager.list_available_providers()}
 
 
 @router.get("/status")
 async def get_all_provider_status(
-    current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(current_active_user), db: AsyncSession = Depends(get_db)
 ):
     """
     Get connection status for all Git providers.
@@ -86,7 +84,7 @@ async def get_all_provider_status(
                 "connected": True,
                 "provider_username": all_credentials[provider].get("provider_username"),
                 "provider_email": all_credentials[provider].get("provider_email"),
-                "scope": all_credentials[provider].get("scope")
+                "scope": all_credentials[provider].get("scope"),
             }
         else:
             status_response[provider] = {"connected": False}
@@ -98,7 +96,7 @@ async def get_all_provider_status(
 async def get_provider_status(
     provider: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get connection status for a specific Git provider.
@@ -117,28 +115,26 @@ async def get_provider_status(
         "connected": True,
         "provider_username": credentials.get("provider_username"),
         "provider_email": credentials.get("provider_email"),
-        "scope": credentials.get("scope")
+        "scope": credentials.get("scope"),
     }
 
 
 @router.get("/{provider}/oauth/authorize")
 async def initiate_oauth(
-    provider: str,
-    scope: Optional[str] = None,
-    current_user: User = Depends(current_active_user)
+    provider: str, scope: str | None = None, current_user: User = Depends(current_active_user)
 ):
     """
     Initiate OAuth authorization flow for a Git provider.
 
     Returns a redirect URL for the frontend to navigate to the provider's authorization page.
     """
-    provider_type = validate_provider(provider)
+    validate_provider(provider)
     oauth_service = get_oauth_service(provider)
 
     if not oauth_service.is_configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"{provider.title()} OAuth is not configured. Please contact support."
+            detail=f"{provider.title()} OAuth is not configured. Please contact support.",
         )
 
     # Generate state for CSRF protection
@@ -148,14 +144,13 @@ async def initiate_oauth(
     oauth_states[state] = {
         "user_id": current_user.id,
         "provider": provider,
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.utcnow(),
     }
 
     # Clean up old states (older than 10 minutes)
     cutoff = datetime.utcnow()
     expired_states = [
-        s for s, data in oauth_states.items()
-        if (cutoff - data["timestamp"]).seconds > 600
+        s for s, data in oauth_states.items() if (cutoff - data["timestamp"]).seconds > 600
     ]
     for s in expired_states:
         del oauth_states[s]
@@ -165,11 +160,7 @@ async def initiate_oauth(
 
     logger.info(f"[GIT PROVIDERS] User {current_user.id} initiating {provider} OAuth flow")
 
-    return {
-        "authorization_url": auth_url,
-        "state": state,
-        "provider": provider
-    }
+    return {"authorization_url": auth_url, "state": state, "provider": provider}
 
 
 @router.get("/{provider}/oauth/callback")
@@ -177,7 +168,7 @@ async def oauth_callback(
     provider: str,
     code: str = Query(..., description="Authorization code from provider"),
     state: str = Query(..., description="State parameter for CSRF protection"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Handle OAuth callback from Git provider.
@@ -191,7 +182,7 @@ async def oauth_callback(
         logger.error(f"[GIT PROVIDERS] Invalid OAuth state for {provider}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OAuth state. Please try connecting again."
+            detail="Invalid or expired OAuth state. Please try connecting again.",
         )
 
     state_data = oauth_states[state]
@@ -199,8 +190,7 @@ async def oauth_callback(
     # Verify provider matches
     if state_data["provider"] != provider:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provider mismatch in OAuth callback"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Provider mismatch in OAuth callback"
         )
 
     user_id = state_data["user_id"]
@@ -217,14 +207,14 @@ async def oauth_callback(
         logger.error(f"[GIT PROVIDERS] Token exchange failed for {provider}: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to obtain access token from {provider.title()}"
-        )
+            detail=f"Failed to obtain access token from {provider.title()}",
+        ) from e
 
     access_token = token_data.get("access_token")
     if not access_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to obtain access token from {provider.title()}"
+            detail=f"Failed to obtain access token from {provider.title()}",
         )
 
     # Get user info from provider
@@ -234,8 +224,8 @@ async def oauth_callback(
         logger.error(f"[GIT PROVIDERS] Failed to get user info for {provider}: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to get user information from {provider.title()}"
-        )
+            detail=f"Failed to get user information from {provider.title()}",
+        ) from e
 
     # Get user email
     provider_email = None
@@ -278,7 +268,7 @@ async def oauth_callback(
         provider_username=provider_username,
         provider_email=provider_email,
         provider_user_id=provider_user_id,
-        scope=token_data.get("scope", "")
+        scope=token_data.get("scope", ""),
     )
 
     logger.info(f"[GIT PROVIDERS] User {user_id} connected {provider} account: {provider_username}")
@@ -288,7 +278,7 @@ async def oauth_callback(
         "provider": provider,
         "provider_username": provider_username,
         "provider_email": provider_email,
-        "message": f"{provider.title()} account connected successfully"
+        "message": f"{provider.title()} account connected successfully",
     }
 
 
@@ -296,7 +286,7 @@ async def oauth_callback(
 async def disconnect_provider(
     provider: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Disconnect a Git provider and revoke access token.
@@ -324,8 +314,7 @@ async def disconnect_provider(
         return {"message": f"{provider.title()} account disconnected successfully"}
     else:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No {provider.title()} connection found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"No {provider.title()} connection found"
         )
 
 
@@ -333,7 +322,7 @@ async def disconnect_provider(
 async def list_repositories(
     provider: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     List repositories from a Git provider.
@@ -347,7 +336,7 @@ async def list_repositories(
     if not access_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"{provider.title()} not connected. Please connect your {provider.title()} account first."
+            detail=f"{provider.title()} not connected. Please connect your {provider.title()} account first.",
         )
 
     # Get provider client
@@ -357,8 +346,8 @@ async def list_repositories(
         logger.error(f"[GIT PROVIDERS] Failed to create {provider} client: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initialize {provider.title()} client"
-        )
+            detail=f"Failed to initialize {provider.title()} client",
+        ) from e
 
     # List repositories
     try:
@@ -380,7 +369,7 @@ async def list_repositories(
                 "provider": repo.provider.value,
                 "language": repo.language,
                 "stars_count": repo.stars_count,
-                "forks_count": repo.forks_count
+                "forks_count": repo.forks_count,
             }
             for repo in repos
         ]
@@ -394,13 +383,13 @@ async def list_repositories(
         if "401" in str(e) or "unauthorized" in str(e).lower():
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"{provider.title()} token expired or invalid. Please reconnect your account."
-            )
+                detail=f"{provider.title()} token expired or invalid. Please reconnect your account.",
+            ) from e
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch repositories from {provider.title()}"
-        )
+            detail=f"Failed to fetch repositories from {provider.title()}",
+        ) from e
 
 
 @router.get("/{provider}/repositories/{owner}/{repo}/branches")
@@ -409,7 +398,7 @@ async def list_repository_branches(
     owner: str,
     repo: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     List branches for a specific repository.
@@ -423,7 +412,7 @@ async def list_repository_branches(
     if not access_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"{provider.title()} not connected. Please connect your {provider.title()} account first."
+            detail=f"{provider.title()} not connected. Please connect your {provider.title()} account first.",
         )
 
     # Get provider client
@@ -433,8 +422,8 @@ async def list_repository_branches(
         logger.error(f"[GIT PROVIDERS] Failed to create {provider} client: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initialize {provider.title()} client"
-        )
+            detail=f"Failed to initialize {provider.title()} client",
+        ) from e
 
     # List branches
     try:
@@ -445,7 +434,7 @@ async def list_repository_branches(
                 "name": branch.name,
                 "is_default": branch.is_default,
                 "commit_sha": branch.commit_sha,
-                "protected": branch.protected
+                "protected": branch.protected,
             }
             for branch in branches
         ]
@@ -457,14 +446,13 @@ async def list_repository_branches(
 
         if "404" in str(e) or "not found" in str(e).lower():
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Repository {owner}/{repo} not found"
-            )
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} not found"
+            ) from e
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch branches from {provider.title()}"
-        )
+            detail=f"Failed to fetch branches from {provider.title()}",
+        ) from e
 
 
 @router.get("/{provider}/repositories/{owner}/{repo}")
@@ -473,7 +461,7 @@ async def get_repository_info(
     owner: str,
     repo: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get information about a specific repository.
@@ -487,7 +475,7 @@ async def get_repository_info(
     if not access_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"{provider.title()} not connected. Please connect your {provider.title()} account first."
+            detail=f"{provider.title()} not connected. Please connect your {provider.title()} account first.",
         )
 
     # Get provider client
@@ -497,8 +485,8 @@ async def get_repository_info(
         logger.error(f"[GIT PROVIDERS] Failed to create {provider} client: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initialize {provider.title()} client"
-        )
+            detail=f"Failed to initialize {provider.title()} client",
+        ) from e
 
     # Get repository info
     try:
@@ -515,7 +503,7 @@ async def get_repository_info(
             "private": repo_info.private,
             "updated_at": repo_info.updated_at.isoformat() if repo_info.updated_at else None,
             "owner": repo_info.owner,
-            "provider": repo_info.provider.value
+            "provider": repo_info.provider.value,
         }
 
     except Exception as e:
@@ -523,11 +511,10 @@ async def get_repository_info(
 
         if "404" in str(e) or "not found" in str(e).lower():
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Repository {owner}/{repo} not found"
-            )
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Repository {owner}/{repo} not found"
+            ) from e
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch repository information from {provider.title()}"
-        )
+            detail=f"Failed to fetch repository information from {provider.title()}",
+        ) from e

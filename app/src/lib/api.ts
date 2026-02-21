@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type { AgentChatRequest, AgentChatResponse, Agent, AgentCreate } from '../types/agent';
+import { config } from '../config';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = config.API_URL;
 
 const api = axios.create({
   baseURL: API_URL,
@@ -83,12 +84,16 @@ api.interceptors.response.use(
       const isTasksApi = error.config?.url?.includes('/api/tasks/');
       const isMarketplacePage = window.location.pathname.startsWith('/marketplace');
       const isPreferencesApi = error.config?.url?.includes('/api/users/preferences');
+      const isPasswordResetPage =
+        window.location.pathname === '/forgot-password' ||
+        window.location.pathname === '/reset-password';
 
       // Skip redirect for:
       // - Tasks API (transient errors during background operations)
       // - Marketplace pages (public access, 401 is expected for unauthenticated)
       // - Preferences API (optional, fails silently for unauthenticated)
-      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi) {
+      // - Password reset pages (public, no auth required)
+      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi && !isPasswordResetPage) {
         localStorage.removeItem('token');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
@@ -112,12 +117,31 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  // Login with JWT bearer token (fastapi-users endpoint)
+  // Login with email 2FA (custom endpoint — always returns temp_token + requires_2fa)
   login: async (username: string, password: string) => {
     const formData = new URLSearchParams();
     formData.append('username', username);
     formData.append('password', password);
-    const response = await api.post('/api/auth/jwt/login', formData, {
+    const response = await api.post('/api/auth/login', formData, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    return response.data;
+  },
+
+  // Verify 2FA code during login (returns JWT access_token on success)
+  verify2fa: async (tempToken: string, code: string) => {
+    const response = await api.post('/api/auth/2fa/verify', {
+      temp_token: tempToken,
+      code,
+    });
+    return response.data;
+  },
+
+  // Resend 2FA code during login
+  resend2faCode: async (tempToken: string) => {
+    const formData = new URLSearchParams();
+    formData.append('temp_token', tempToken);
+    const response = await api.post('/api/auth/2fa/resend', formData, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
     return response.data;
@@ -168,6 +192,17 @@ export const authApi = {
   getGoogleAuthUrl: async () => {
     const response = await api.get('/api/auth/google/authorize');
     return response.data.authorization_url;
+  },
+
+  // Password reset
+  forgotPassword: async (email: string) => {
+    const response = await api.post('/api/auth/forgot-password', { email });
+    return response.data;
+  },
+
+  resetPassword: async (token: string, password: string) => {
+    const response = await api.post('/api/auth/reset-password', { token, password });
+    return response.data;
   },
 };
 
@@ -250,7 +285,7 @@ export const projectsApi = {
     } = {
       name,
       description,
-      source_type: sourceType || 'template',
+      source_type: sourceType || 'base',
     };
 
     if (sourceType === 'github') {
@@ -324,6 +359,23 @@ export const projectsApi = {
     const response = await api.patch(`/api/projects/${slug}/settings`, { settings });
     return response.data;
   },
+  exportAsTemplate: async (
+    slug: string,
+    data: {
+      name: string;
+      description: string;
+      category: string;
+      visibility?: string;
+      icon?: string;
+      tags?: string[];
+      tech_stack?: string[];
+      features?: string[];
+      long_description?: string;
+    }
+  ) => {
+    const response = await api.post(`/api/projects/${slug}/export-template`, data);
+    return response.data;
+  },
   forkProject: async (id: string) => {
     const response = await api.post(`/api/projects/${id}/fork`);
     return response.data;
@@ -346,7 +398,20 @@ export const projectsApi = {
   },
   startContainer: async (slug: string, containerId: string) => {
     const response = await api.post(`/api/projects/${slug}/containers/${containerId}/start`);
-    const { task_id, already_started } = response.data;
+    const data = response.data;
+
+    // FAST PATH: Container already running (Docker mode returns task_id: null)
+    if (data.already_running && data.url) {
+      return {
+        url: data.url,
+        container_name: data.container_name,
+        message: data.message,
+        task_id: null,
+        already_running: true,
+      };
+    }
+
+    const { task_id, already_started } = data;
 
     if (already_started) {
       console.log('[Container Start] Reusing existing task:', task_id);
@@ -360,7 +425,7 @@ export const projectsApi = {
 
     return {
       ...completedTask.result,
-      message: response.data.message,
+      message: data.message,
       task_id,
     };
   },
@@ -370,6 +435,12 @@ export const projectsApi = {
   },
   getContainersStatus: async (slug: string) => {
     const response = await api.get(`/api/projects/${slug}/containers/status`);
+    return response.data;
+  },
+  downloadTesslateFolder: async (slug: string): Promise<Blob> => {
+    const response = await api.get(`/api/projects/${slug}/download-tesslate`, {
+      responseType: 'blob',
+    });
     return response.data;
   },
   checkContainerHealth: async (
@@ -583,6 +654,7 @@ export const marketplaceApi = {
       tools?: string[];
       tool_configs?: Record<string, { description?: string; examples?: string[] }>;
       avatar_url?: string | null;
+      config?: Record<string, unknown>;
     }
   ) => {
     const response = await api.patch(`/api/marketplace/agents/${agentId}`, data);
@@ -598,6 +670,12 @@ export const marketplaceApi = {
   // Remove agent from library
   removeFromLibrary: async (agentId: string) => {
     const response = await api.delete(`/api/marketplace/agents/${agentId}/library`);
+    return response.data;
+  },
+
+  // Permanently delete a custom/forked agent
+  deleteCustomAgent: async (agentId: string) => {
+    const response = await api.delete(`/api/marketplace/agents/${agentId}`);
     return response.data;
   },
 
@@ -677,7 +755,7 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  purchaseBase: async (baseId: number) => {
+  purchaseBase: async (baseId: string) => {
     const response = await api.post(`/api/marketplace/bases/${baseId}/purchase`);
     return response.data;
   },
@@ -763,6 +841,73 @@ export const marketplaceApi = {
   // Delete user's review for an agent
   deleteAgentReview: async (agentId: string) => {
     const response = await api.delete(`/api/marketplace/agents/${agentId}/review`);
+    return response.data;
+  },
+
+  // Get reviews for a base
+  getBaseReviews: async (baseId: string, params?: { page?: number; limit?: number }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    const response = await api.get(`/api/marketplace/bases/${baseId}/reviews?${queryParams}`);
+    return response.data;
+  },
+
+  // Create or update a review for a base
+  createBaseReview: async (baseId: string, rating: number, comment?: string) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('rating', rating.toString());
+    if (comment) queryParams.append('comment', comment);
+    const response = await api.post(`/api/marketplace/bases/${baseId}/review?${queryParams}`);
+    return response.data;
+  },
+
+  // Delete user's review for a base
+  deleteBaseReview: async (baseId: string) => {
+    const response = await api.delete(`/api/marketplace/bases/${baseId}/review`);
+    return response.data;
+  },
+
+  // Subagent management
+  getSubagents: async (agentId: string) => {
+    const response = await api.get(`/api/marketplace/agents/${agentId}/subagents`);
+    return response.data;
+  },
+
+  createSubagent: async (
+    agentId: string,
+    data: {
+      name: string;
+      description: string;
+      system_prompt: string;
+      tools?: string[];
+      model?: string;
+    }
+  ) => {
+    const response = await api.post(`/api/marketplace/agents/${agentId}/subagents`, data);
+    return response.data;
+  },
+
+  updateSubagent: async (
+    agentId: string,
+    subagentId: string,
+    data: {
+      name?: string;
+      description?: string;
+      system_prompt?: string;
+      tools?: string[];
+      model?: string;
+    }
+  ) => {
+    const response = await api.patch(
+      `/api/marketplace/agents/${agentId}/subagents/${subagentId}`,
+      data
+    );
+    return response.data;
+  },
+
+  deleteSubagent: async (agentId: string, subagentId: string) => {
+    const response = await api.delete(`/api/marketplace/agents/${agentId}/subagents/${subagentId}`);
     return response.data;
   },
 };

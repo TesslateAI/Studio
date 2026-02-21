@@ -50,6 +50,7 @@ Tesslate Studio is an AI-powered web application builder that lets users create,
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │                     External Services                             │   │
 │  │  LiteLLM (AI)   Stripe (billing)   OAuth (GitHub/Google)         │   │
+│  │  SMTP Email (2FA, password reset)                                │   │
 │  │  Vercel/Netlify/Cloudflare (external deployment)                 │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
@@ -77,6 +78,7 @@ The heart of Tesslate Studio. Agents receive user requests, call LLMs with syste
 - **StreamAgent**: Real-time streaming responses
 - **IterativeAgent**: Multi-step tool execution
 - **ReActAgent**: Reasoning + Acting pattern
+- **TesslateAgent**: Production agent with native function calling, trajectory recording, planning mode, subagents, and context compaction
 
 See: [Agent Documentation](orchestrator/agent/README.md)
 
@@ -194,5 +196,5 @@ When adding new documentation:
 
 ## Version
 
-Documentation version: 2026.1
-Last updated: January 2026
+Documentation version: 2026.2
+Last updated: February 2026

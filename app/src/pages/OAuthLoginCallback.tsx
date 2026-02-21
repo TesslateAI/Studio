@@ -24,6 +24,10 @@ export default function OAuthLoginCallback() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOAuthCallback = async () => {
+    // Read and consume saved redirect destination
+    const redirectTo = sessionStorage.getItem('oauth_redirect') || '/dashboard';
+    sessionStorage.removeItem('oauth_redirect');
+
     // Check for errors in URL
     const error = searchParams.get('error');
     const errorDescription = searchParams.get('error_description');
@@ -49,7 +53,7 @@ export default function OAuthLoginCallback() {
       // Refresh CSRF token for the new session, then load theme
       await fetchCsrfToken();
       refreshUserTheme();
-      navigate('/dashboard', { state: { fromLogin: true } });
+      navigate(redirectTo);
       return;
     }
 
@@ -71,7 +75,7 @@ export default function OAuthLoginCallback() {
       refreshUserTheme();
 
       // Successfully authenticated via cookie - redirect immediately
-      navigate('/dashboard', { state: { fromLogin: true } });
+      navigate(redirectTo);
     } catch (err: unknown) {
       const error = err as { message?: string };
       setStatus('error');

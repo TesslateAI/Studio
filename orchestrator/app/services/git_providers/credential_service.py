@@ -4,15 +4,17 @@ Git Provider Credential Service.
 Unified credential storage and retrieval for all Git providers.
 Uses Fernet symmetric encryption for token storage.
 """
-from uuid import UUID
-from cryptography.fernet import Fernet
-from datetime import datetime
-from typing import Optional, Dict, Any
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-import logging
+
 import base64
 import hashlib
+import logging
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from cryptography.fernet import Fernet
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config import get_settings
 from ...models import GitProviderCredential
@@ -28,7 +30,7 @@ class GitProviderCredentialService:
     Supports GitHub, GitLab, and Bitbucket OAuth credentials.
     """
 
-    def __init__(self, encryption_key: Optional[str] = None):
+    def __init__(self, encryption_key: str | None = None):
         """
         Initialize the credential service with an encryption key.
 
@@ -85,12 +87,12 @@ class GitProviderCredentialService:
         user_id: UUID,
         provider: GitProviderType,
         access_token: str,
-        refresh_token: Optional[str] = None,
-        expires_at: Optional[datetime] = None,
+        refresh_token: str | None = None,
+        expires_at: datetime | None = None,
         provider_username: str = "",
-        provider_email: Optional[str] = None,
-        provider_user_id: Optional[str] = None,
-        scope: Optional[str] = None
+        provider_email: str | None = None,
+        provider_user_id: str | None = None,
+        scope: str | None = None,
     ) -> GitProviderCredential:
         """
         Store OAuth credentials for a user and provider (encrypted).
@@ -117,7 +119,7 @@ class GitProviderCredentialService:
             select(GitProviderCredential).where(
                 and_(
                     GitProviderCredential.user_id == user_id,
-                    GitProviderCredential.provider == provider.value
+                    GitProviderCredential.provider == provider.value,
                 )
             )
         )
@@ -137,7 +139,9 @@ class GitProviderCredentialService:
             credential.provider_user_id = provider_user_id or credential.provider_user_id
             credential.scope = scope or credential.scope
             credential.updated_at = datetime.utcnow()
-            logger.info(f"[GIT CREDENTIALS] Updated {provider.value} credentials for user {user_id}")
+            logger.info(
+                f"[GIT CREDENTIALS] Updated {provider.value} credentials for user {user_id}"
+            )
         else:
             # Create new credentials
             credential = GitProviderCredential(
@@ -149,21 +153,20 @@ class GitProviderCredentialService:
                 provider_username=provider_username,
                 provider_email=provider_email,
                 provider_user_id=provider_user_id,
-                scope=scope
+                scope=scope,
             )
             db.add(credential)
-            logger.info(f"[GIT CREDENTIALS] Created {provider.value} credentials for user {user_id}")
+            logger.info(
+                f"[GIT CREDENTIALS] Created {provider.value} credentials for user {user_id}"
+            )
 
         await db.commit()
         await db.refresh(credential)
         return credential
 
     async def get_credential(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        provider: GitProviderType
-    ) -> Optional[Dict[str, Any]]:
+        self, db: AsyncSession, user_id: UUID, provider: GitProviderType
+    ) -> dict[str, Any] | None:
         """
         Get decrypted credentials for a user and provider.
 
@@ -179,7 +182,7 @@ class GitProviderCredentialService:
             select(GitProviderCredential).where(
                 and_(
                     GitProviderCredential.user_id == user_id,
-                    GitProviderCredential.provider == provider.value
+                    GitProviderCredential.provider == provider.value,
                 )
             )
         )
@@ -189,8 +192,12 @@ class GitProviderCredentialService:
             return None
 
         # Decrypt tokens
-        access_token = self.decrypt_token(credential.access_token) if credential.access_token else None
-        refresh_token = self.decrypt_token(credential.refresh_token) if credential.refresh_token else None
+        access_token = (
+            self.decrypt_token(credential.access_token) if credential.access_token else None
+        )
+        refresh_token = (
+            self.decrypt_token(credential.refresh_token) if credential.refresh_token else None
+        )
 
         return {
             "id": str(credential.id),
@@ -203,15 +210,12 @@ class GitProviderCredentialService:
             "provider_user_id": credential.provider_user_id,
             "scope": credential.scope,
             "created_at": credential.created_at,
-            "updated_at": credential.updated_at
+            "updated_at": credential.updated_at,
         }
 
     async def get_access_token(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        provider: GitProviderType
-    ) -> Optional[str]:
+        self, db: AsyncSession, user_id: UUID, provider: GitProviderType
+    ) -> str | None:
         """
         Get the decrypted OAuth access token for a user and provider.
 
@@ -229,10 +233,8 @@ class GitProviderCredentialService:
         return credentials.get("access_token")
 
     async def get_all_credentials(
-        self,
-        db: AsyncSession,
-        user_id: UUID
-    ) -> Dict[str, Dict[str, Any]]:
+        self, db: AsyncSession, user_id: UUID
+    ) -> dict[str, dict[str, Any]]:
         """
         Get all provider credentials for a user.
 
@@ -244,9 +246,7 @@ class GitProviderCredentialService:
             Dictionary mapping provider names to credential info
         """
         result = await db.execute(
-            select(GitProviderCredential).where(
-                GitProviderCredential.user_id == user_id
-            )
+            select(GitProviderCredential).where(GitProviderCredential.user_id == user_id)
         )
         credentials = result.scalars().all()
 
@@ -257,16 +257,13 @@ class GitProviderCredentialService:
                 "provider_username": cred.provider_username,
                 "provider_email": cred.provider_email,
                 "scope": cred.scope,
-                "token_expires_at": cred.token_expires_at
+                "token_expires_at": cred.token_expires_at,
             }
 
         return provider_creds
 
     async def delete_credential(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        provider: GitProviderType
+        self, db: AsyncSession, user_id: UUID, provider: GitProviderType
     ) -> bool:
         """
         Delete credentials for a user and provider.
@@ -283,7 +280,7 @@ class GitProviderCredentialService:
             select(GitProviderCredential).where(
                 and_(
                     GitProviderCredential.user_id == user_id,
-                    GitProviderCredential.provider == provider.value
+                    GitProviderCredential.provider == provider.value,
                 )
             )
         )
@@ -298,10 +295,7 @@ class GitProviderCredentialService:
         return True
 
     async def has_credential(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        provider: GitProviderType
+        self, db: AsyncSession, user_id: UUID, provider: GitProviderType
     ) -> bool:
         """
         Check if a user has stored credentials for a provider.
@@ -318,7 +312,7 @@ class GitProviderCredentialService:
             select(GitProviderCredential).where(
                 and_(
                     GitProviderCredential.user_id == user_id,
-                    GitProviderCredential.provider == provider.value
+                    GitProviderCredential.provider == provider.value,
                 )
             )
         )
@@ -326,11 +320,7 @@ class GitProviderCredentialService:
         return credential is not None
 
     async def is_token_expired(
-        self,
-        db: AsyncSession,
-        user_id: UUID,
-        provider: GitProviderType,
-        buffer_seconds: int = 300
+        self, db: AsyncSession, user_id: UUID, provider: GitProviderType, buffer_seconds: int = 300
     ) -> bool:
         """
         Check if a token is expired or will expire soon.
@@ -350,6 +340,7 @@ class GitProviderCredentialService:
 
         expires_at = credentials["token_expires_at"]
         from datetime import timedelta
+
         return datetime.utcnow() + timedelta(seconds=buffer_seconds) >= expires_at
 
     async def update_tokens(
@@ -358,8 +349,8 @@ class GitProviderCredentialService:
         user_id: UUID,
         provider: GitProviderType,
         access_token: str,
-        refresh_token: Optional[str] = None,
-        expires_at: Optional[datetime] = None
+        refresh_token: str | None = None,
+        expires_at: datetime | None = None,
     ) -> bool:
         """
         Update tokens for an existing credential (used for token refresh).
@@ -379,7 +370,7 @@ class GitProviderCredentialService:
             select(GitProviderCredential).where(
                 and_(
                     GitProviderCredential.user_id == user_id,
-                    GitProviderCredential.provider == provider.value
+                    GitProviderCredential.provider == provider.value,
                 )
             )
         )
@@ -401,7 +392,7 @@ class GitProviderCredentialService:
 
 
 # Global instance
-_git_provider_credential_service: Optional[GitProviderCredentialService] = None
+_git_provider_credential_service: GitProviderCredentialService | None = None
 
 
 def get_git_provider_credential_service() -> GitProviderCredentialService:

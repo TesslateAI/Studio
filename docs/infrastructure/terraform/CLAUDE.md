@@ -74,6 +74,17 @@ terraform output cluster_name
 
 - `main.tf`: Provider configuration
 - `eks.tf`: Cluster and nodes
-- `ecr.tf`: Container registries
+- `ecr.tf`: ECR URL locals (repos managed by shared stack)
 - `s3.tf`: Project storage
-- `terraform.tfvars`: Your values (gitignored)
+- `terraform.{env}.tfvars`: Your values (gitignored, stored in AWS Secrets Manager)
+
+## Shared ECR Stack
+
+ECR repos are managed by a **dedicated shared stack** at `k8s/terraform/shared/`:
+```bash
+./scripts/aws-deploy.sh init shared
+./scripts/aws-deploy.sh plan shared
+./scripts/aws-deploy.sh apply shared
+```
+
+Environment stacks reference ECR via `local.ecr_*_url` locals (computed from account ID + region). See [ecr.md](ecr.md).

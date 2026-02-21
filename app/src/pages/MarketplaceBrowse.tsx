@@ -29,6 +29,7 @@ const ITEMS_PER_PAGE = 20;
 // Category definitions
 const categories = [
   { id: 'all', label: 'All Categories' },
+  { id: 'community', label: 'Community' },
   { id: 'builder', label: 'Builder' },
   { id: 'frontend', label: 'Frontend' },
   { id: 'fullstack', label: 'Fullstack' },
@@ -180,14 +181,16 @@ export default function MarketplaceBrowse() {
         let data: MarketplaceItem[];
 
         if (itemType === 'agent') {
+          // "community" is a creator_type filter, not a database category
+          const isCommunityFilter = category === 'community';
           const result = await marketplaceApi.getAllAgents(
             {
-              category: category !== 'all' ? category : undefined,
+              category: category !== 'all' && !isCommunityFilter ? category : undefined,
               pricing_type: pricing !== 'all' ? pricing : undefined,
               search: search || undefined,
               sort,
               page: pageNum,
-              limit: ITEMS_PER_PAGE,
+              limit: isCommunityFilter ? 100 : ITEMS_PER_PAGE,
             },
             { signal: abortControllerRef.current.signal }
           );
@@ -196,10 +199,15 @@ export default function MarketplaceBrowse() {
             item_type: 'agent' as ItemType,
           }));
 
-          if (pageNum === 1) {
-            setTotalCount(result.total || data.length);
+          // Client-side filter for community agents
+          if (isCommunityFilter) {
+            data = data.filter((item) => item.creator_type === 'community');
           }
-          setHasMore(data.length === ITEMS_PER_PAGE);
+
+          if (pageNum === 1) {
+            setTotalCount(isCommunityFilter ? data.length : result.total || data.length);
+          }
+          setHasMore(!isCommunityFilter && data.length === ITEMS_PER_PAGE);
         } else if (itemType === 'base') {
           // Bases use client-side filtering
           if (basesCache.length === 0) {

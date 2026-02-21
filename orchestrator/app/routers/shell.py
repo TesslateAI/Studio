@@ -5,17 +5,17 @@ REST API endpoints for agent programmatic shell access.
 """
 
 import logging
-from typing import Optional
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import User, ShellSession
+from ..models import ShellSession, User
 from ..services.shell_session_manager import get_shell_session_manager
-from ..users import current_active_user, current_superuser
+from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,10 +23,11 @@ router = APIRouter()
 
 # Request/Response Models
 
+
 class CreateSessionRequest(BaseModel):
     project_id: UUID
     command: str = "/bin/bash"
-    container_name: Optional[str] = None  # For multi-container projects: specify which container
+    container_name: str | None = None  # For multi-container projects: specify which container
 
 
 class CreateSessionResponse(BaseModel):
@@ -69,6 +70,7 @@ class SessionListResponse(BaseModel):
 
 # Endpoints
 
+
 @router.post("/sessions", response_model=CreateSessionResponse)
 async def create_shell_session(
     request: CreateSessionRequest,
@@ -110,25 +112,18 @@ async def write_to_session(
     # Verify ownership
     result = await db.execute(
         select(ShellSession).where(
-            ShellSession.session_id == session_id,
-            ShellSession.user_id == current_user.id
+            ShellSession.session_id == session_id, ShellSession.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     # Write to PTY (with authorization check)
-    data_bytes = request.data.encode('utf-8')
+    data_bytes = request.data.encode("utf-8")
     await session_manager.write_to_session(session_id, data_bytes, db, user_id=current_user.id)
 
-    return WriteResponse(
-        success=True,
-        bytes_written=len(data_bytes)
-    )
+    return WriteResponse(success=True, bytes_written=len(data_bytes))
 
 
 @router.get("/sessions/{session_id}/output", response_model=OutputResponse)
@@ -148,16 +143,12 @@ async def read_session_output(
     # Verify ownership
     result = await db.execute(
         select(ShellSession).where(
-            ShellSession.session_id == session_id,
-            ShellSession.user_id == current_user.id
+            ShellSession.session_id == session_id, ShellSession.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     # Read output (with authorization check)
     output_data = await session_manager.read_output(session_id, db, user_id=current_user.id)
@@ -167,7 +158,7 @@ async def read_session_output(
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_shell_sessions(
-    project_id: Optional[UUID] = None,
+    project_id: UUID | None = None,
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -195,16 +186,12 @@ async def close_shell_session(
     # Verify ownership
     result = await db.execute(
         select(ShellSession).where(
-            ShellSession.session_id == session_id,
-            ShellSession.user_id == current_user.id
+            ShellSession.session_id == session_id, ShellSession.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     await session_manager.close_session(session_id, db)
 
@@ -220,17 +207,13 @@ async def get_shell_session(
     """Get shell session details."""
     result = await db.execute(
         select(ShellSession).where(
-            ShellSession.session_id == session_id,
-            ShellSession.user_id == current_user.id
+            ShellSession.session_id == session_id, ShellSession.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     return {
         "session_id": session.session_id,

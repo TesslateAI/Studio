@@ -7,11 +7,11 @@ adding view-scoping behavior without modifying the base implementation.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any
 
-from .registry import Tool, ToolRegistry, ToolCategory
-from .view_context import ViewContext
 from .providers.base import AbstractToolProvider
+from .registry import Tool, ToolCategory, ToolRegistry
+from .view_context import ViewContext
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class ViewScopedToolRegistry:
     The decorator pattern allows view-scoping without modifying existing tools.
     """
 
-    def __init__(self, base_registry: Optional[ToolRegistry] = None):
+    def __init__(self, base_registry: ToolRegistry | None = None):
         """
         Initialize with optional base registry for core tools.
 
@@ -38,10 +38,11 @@ class ViewScopedToolRegistry:
                           If None, uses global registry.
         """
         from .registry import get_tool_registry
+
         self._base_registry = base_registry or get_tool_registry()
-        self._providers: Dict[ViewContext, AbstractToolProvider] = {}
+        self._providers: dict[ViewContext, AbstractToolProvider] = {}
         self._active_view: ViewContext = ViewContext.BUILDER
-        self._view_tools_cache: Dict[ViewContext, List[Tool]] = {}
+        self._view_tools_cache: dict[ViewContext, list[Tool]] = {}
 
     def register_provider(self, provider: AbstractToolProvider):
         """
@@ -70,7 +71,7 @@ class ViewScopedToolRegistry:
         """Get the currently active view context."""
         return self._active_view
 
-    def get_available_tools(self) -> List[Tool]:
+    def get_available_tools(self) -> list[Tool]:
         """
         Get all tools available in the current view context.
 
@@ -89,16 +90,14 @@ class ViewScopedToolRegistry:
             provider = self._providers[self._active_view]
             view_tools = provider.get_tools()
             tools.extend(view_tools)
-            logger.debug(
-                f"Added {len(view_tools)} tools from {self._active_view.value} provider"
-            )
+            logger.debug(f"Added {len(view_tools)} tools from {self._active_view.value} provider")
 
         # Cache the result
         self._view_tools_cache[self._active_view] = tools
 
         return tools
 
-    def get(self, name: str) -> Optional[Tool]:
+    def get(self, name: str) -> Tool | None:
         """
         Get a tool by name if available in current context.
 
@@ -122,11 +121,7 @@ class ViewScopedToolRegistry:
 
         return None
 
-    def is_tool_available(
-        self,
-        tool_name: str,
-        context: Dict[str, Any]
-    ) -> bool:
+    def is_tool_available(self, tool_name: str, context: dict[str, Any]) -> bool:
         """
         Check if a tool is available in the current view context.
 
@@ -148,7 +143,7 @@ class ViewScopedToolRegistry:
 
         return False
 
-    def list_tools(self, category: Optional[ToolCategory] = None) -> List[Tool]:
+    def list_tools(self, category: ToolCategory | None = None) -> list[Tool]:
         """
         List all available tools, optionally filtered by category.
 
@@ -164,11 +159,8 @@ class ViewScopedToolRegistry:
         return tools
 
     async def execute(
-        self,
-        tool_name: str,
-        parameters: Dict[str, Any],
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, tool_name: str, parameters: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Execute a tool with view-context validation and approval checks.
 
@@ -190,10 +182,10 @@ class ViewScopedToolRegistry:
 
             # Base shell tools excluded from graph view (must use graph_shell_exec instead)
             GRAPH_EXCLUDED_SHELL_TOOLS = {
-                'bash_exec': 'graph_shell_exec',
-                'shell_exec': 'graph_shell_exec',
-                'shell_open': 'graph_shell_open',
-                'shell_close': 'graph_shell_close',
+                "bash_exec": "graph_shell_exec",
+                "shell_exec": "graph_shell_exec",
+                "shell_open": "graph_shell_open",
+                "shell_close": "graph_shell_close",
             }
 
             if self._active_view == ViewContext.GRAPH and tool_name in GRAPH_EXCLUDED_SHELL_TOOLS:
@@ -209,16 +201,12 @@ class ViewScopedToolRegistry:
                 provider = self._providers.get(self._active_view)
                 message = (
                     provider.get_unavailable_message(tool_name)
-                    if provider else
-                    f"Tool '{tool_name}' is not available in {self._active_view.value} view"
+                    if provider
+                    else f"Tool '{tool_name}' is not available in {self._active_view.value} view"
                 )
 
             logger.warning(f"Tool {tool_name} not available in {self._active_view.value} view")
-            return {
-                "success": False,
-                "error": message,
-                "view_context": self._active_view.value
-            }
+            return {"success": False, "error": message, "view_context": self._active_view.value}
 
         # Add view context to execution context
         context["view_context"] = self._active_view.value
@@ -233,46 +221,58 @@ class ViewScopedToolRegistry:
                     # ============================================================
                     # Define dangerous view-specific tools that require approval
                     VIEW_DANGEROUS_TOOLS = {
-                        'graph_shell_exec', 'graph_shell_open',  # Shell operations in containers
-                        'graph_start_container', 'graph_stop_container',  # Container lifecycle
-                        'graph_start_all', 'graph_stop_all',  # Bulk container operations
-                        'graph_add_container', 'graph_remove_item',  # Grid modifications
-                        'graph_add_connection', 'graph_add_browser_preview',  # Grid modifications
+                        "graph_shell_exec",
+                        "graph_shell_open",  # Shell operations in containers
+                        "graph_start_container",
+                        "graph_stop_container",  # Container lifecycle
+                        "graph_start_all",
+                        "graph_stop_all",  # Bulk container operations
+                        "graph_add_container",
+                        "graph_remove_item",  # Grid modifications
+                        "graph_add_connection",
+                        "graph_add_browser_preview",  # Grid modifications
                     }
 
-                    edit_mode = context.get('edit_mode', 'ask')
+                    edit_mode = context.get("edit_mode", "ask")
                     is_dangerous = tool_name in VIEW_DANGEROUS_TOOLS
 
                     # Plan Mode: Block all dangerous operations
-                    if edit_mode == 'plan' and is_dangerous:
+                    if edit_mode == "plan" and is_dangerous:
                         logger.warning(f"[PLAN MODE] Blocked view tool execution: {tool_name}")
                         return {
                             "success": False,
                             "tool": tool_name,
-                            "error": f"Plan mode active - {tool_name} is disabled. Explain what you would do instead."
+                            "error": f"Plan mode active - {tool_name} is disabled. Explain what you would do instead.",
                         }
 
                     # Ask Mode: Check if approval needed
-                    skip_approval = context.get('skip_approval_check', False)
-                    if edit_mode == 'ask' and is_dangerous and not skip_approval:
+                    skip_approval = context.get("skip_approval_check", False)
+                    if edit_mode == "ask" and is_dangerous and not skip_approval:
                         from .approval_manager import get_approval_manager
+
                         approval_mgr = get_approval_manager()
 
-                        session_id = str(context.get('chat_id', 'default'))
+                        session_id = str(context.get("chat_id", "default"))
 
                         if not approval_mgr.is_tool_approved(session_id, tool_name):
-                            logger.info(f"[ASK MODE] Approval required for {tool_name} in session {session_id}")
+                            logger.info(
+                                f"[ASK MODE] Approval required for {tool_name} in session {session_id}"
+                            )
                             return {
                                 "approval_required": True,
                                 "tool": tool_name,
                                 "parameters": parameters,
-                                "session_id": session_id
+                                "session_id": session_id,
                             }
                         else:
-                            logger.info(f"[ASK MODE] Tool {tool_name} already approved for session {session_id}")
+                            logger.info(
+                                f"[ASK MODE] Tool {tool_name} already approved for session {session_id}"
+                            )
 
                     # Execute view-specific tool
-                    logger.info(f"Executing view-specific tool: {tool_name} [edit_mode={edit_mode}]")
+                    logger.info(
+                        f"Executing view-specific tool: {tool_name} [edit_mode={edit_mode}]"
+                    )
                     try:
                         result = await tool.executor(parameters, context)
                         # Return the result directly - don't double-wrap it
@@ -280,10 +280,7 @@ class ViewScopedToolRegistry:
                         return result
                     except Exception as e:
                         logger.error(f"Error executing {tool_name}: {e}", exc_info=True)
-                        return {
-                            "success": False,
-                            "error": str(e)
-                        }
+                        return {"success": False, "error": str(e)}
 
         # Delegate to base registry for base tools (handles edit_mode, approvals, etc.)
         return await self._base_registry.execute(tool_name, parameters, context)
@@ -310,7 +307,7 @@ class ViewScopedToolRegistry:
 
         return "\n".join(sections)
 
-    def invalidate_cache(self, view: Optional[ViewContext] = None):
+    def invalidate_cache(self, view: ViewContext | None = None):
         """
         Invalidate the tools cache.
 
@@ -323,7 +320,7 @@ class ViewScopedToolRegistry:
             self._view_tools_cache.clear()
 
     @property
-    def _tools(self) -> Dict[str, Tool]:
+    def _tools(self) -> dict[str, Tool]:
         """
         Property for compatibility with existing code expecting _tools dict.
 

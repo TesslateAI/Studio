@@ -896,8 +896,8 @@ export default function Marketplace() {
                     <button
                       onClick={() => navigate(`/marketplace/browse/${selectedItemType}`)}
                       className={`
-                        flex items-center gap-1 text-sm font-medium transition-colors
-                        ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}
+                        flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-full transition-colors
+                        ${theme === 'light' ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/10 hover:bg-white/15 text-white/80 hover:text-white'}
                       `}
                     >
                       See All

@@ -11,15 +11,16 @@ Benefits:
 - Configurable per-tool or globally
 """
 
+import logging
+from collections.abc import Callable
+
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception,
-    before_sleep_log,
 )
-import logging
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +29,16 @@ logger = logging.getLogger(__name__)
 # Note: We explicitly exclude FileNotFoundError and PermissionError even though
 # they are subclasses of IOError/OSError, as they indicate permanent problems
 _RETRYABLE_EXCEPTION_TYPES = (
-    ConnectionError,      # Network issues
-    TimeoutError,        # Request timeouts
+    ConnectionError,  # Network issues
+    TimeoutError,  # Request timeouts
 )
 
 # Non-retryable errors even if they're subclasses of retryable ones
 _NON_RETRYABLE_EXCEPTION_TYPES = (
-    FileNotFoundError,   # File doesn't exist (won't resolve with retry)
-    PermissionError,     # Permission denied (won't resolve with retry)
+    FileNotFoundError,  # File doesn't exist (won't resolve with retry)
+    PermissionError,  # Permission denied (won't resolve with retry)
     NotADirectoryError,  # Path is not a directory (won't resolve with retry)
-    IsADirectoryError,   # Path is a directory when file expected (won't resolve with retry)
+    IsADirectoryError,  # Path is a directory when file expected (won't resolve with retry)
 )
 
 # For backward compatibility
@@ -45,11 +46,11 @@ RETRYABLE_EXCEPTIONS = _RETRYABLE_EXCEPTION_TYPES
 
 # Non-retryable errors that indicate configuration or logic problems
 NON_RETRYABLE_EXCEPTIONS = (
-    ValueError,          # Bad parameters
-    TypeError,           # Type mismatch
-    KeyError,            # Missing required field
-    AttributeError,      # Invalid attribute access
-    NotImplementedError, # Feature not implemented
+    ValueError,  # Bad parameters
+    TypeError,  # Type mismatch
+    KeyError,  # Missing required field
+    AttributeError,  # Invalid attribute access
+    NotImplementedError,  # Feature not implemented
 ) + _NON_RETRYABLE_EXCEPTION_TYPES  # Include file system errors
 
 
@@ -80,7 +81,7 @@ def create_retry_decorator(
     max_attempts: int = 3,
     min_wait: float = 1.0,
     max_wait: float = 10.0,
-    exponential_base: float = 2.0
+    exponential_base: float = 2.0,
 ) -> Callable:
     """
     Create a retry decorator for tool execution.
@@ -109,48 +110,27 @@ def create_retry_decorator(
     return retry(
         # Stop after N attempts
         stop=stop_after_attempt(max_attempts),
-
         # Exponential backoff: wait = base^(attempt) * multiplier
         # Bounded by min_wait and max_wait
-        wait=wait_exponential(
-            multiplier=1,
-            min=min_wait,
-            max=max_wait,
-            exp_base=exponential_base
-        ),
-
+        wait=wait_exponential(multiplier=1, min=min_wait, max=max_wait, exp_base=exponential_base),
         # Only retry on transient exceptions (using custom predicate)
         retry=retry_if_exception(_should_retry_exception),
-
         # Log before each retry attempt
         before_sleep=before_sleep_log(logger, logging.WARNING),
-
         # Re-raise the exception if all retries fail
-        reraise=True
+        reraise=True,
     )
 
 
 # Default retry decorator for tool executors
 # Use this for most tools unless you need custom retry behavior
-tool_retry = create_retry_decorator(
-    max_attempts=3,
-    min_wait=1.0,
-    max_wait=10.0
-)
+tool_retry = create_retry_decorator(max_attempts=3, min_wait=1.0, max_wait=10.0)
 
 # Aggressive retry for critical operations (e.g., database writes)
-tool_retry_aggressive = create_retry_decorator(
-    max_attempts=5,
-    min_wait=0.5,
-    max_wait=15.0
-)
+tool_retry_aggressive = create_retry_decorator(max_attempts=5, min_wait=0.5, max_wait=15.0)
 
 # Gentle retry for less critical operations
-tool_retry_gentle = create_retry_decorator(
-    max_attempts=2,
-    min_wait=2.0,
-    max_wait=5.0
-)
+tool_retry_gentle = create_retry_decorator(max_attempts=2, min_wait=2.0, max_wait=5.0)
 
 
 def is_retryable_error(exception: Exception) -> bool:
@@ -180,7 +160,7 @@ def create_custom_retry(
     retryable_exceptions: tuple = RETRYABLE_EXCEPTIONS,
     max_attempts: int = 3,
     min_wait: float = 1.0,
-    max_wait: float = 10.0
+    max_wait: float = 10.0,
 ) -> Callable:
     """
     Create a custom retry decorator with specific exceptions.
@@ -220,5 +200,5 @@ def create_custom_retry(
         wait=wait_exponential(multiplier=1, min=min_wait, max=max_wait),
         retry=retry_if_exception_type(retryable_exceptions),
         before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True
+        reraise=True,
     )

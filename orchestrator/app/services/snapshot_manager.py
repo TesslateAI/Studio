@@ -12,19 +12,18 @@ CRITICAL: Always wait for snapshot.status.readyToUse=true before deleting the so
 Deleting the PVC before the snapshot is ready will result in data corruption.
 """
 
-from kubernetes import client, config
-from kubernetes.client.rest import ApiException
-from datetime import datetime, timedelta, timezone
-from uuid import UUID
-from typing import Optional, Tuple, List
 import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_
 
-from ..models import ProjectSnapshot, Project
 from ..config import get_settings
+from ..models import Project, ProjectSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,7 @@ class SnapshotManager:
 
     def _generate_snapshot_name(self, project_id: str, snapshot_type: str = "hibernation") -> str:
         """Generate a unique snapshot name."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         prefix = "snap" if snapshot_type == "hibernation" else "manual"
         return f"{prefix}-{project_id[:8]}-{timestamp}"
 
@@ -75,9 +74,9 @@ class SnapshotManager:
         user_id: UUID,
         db: AsyncSession,
         snapshot_type: str = "hibernation",
-        label: Optional[str] = None,
-        pvc_name: str = "project-storage"
-    ) -> Tuple[Optional[ProjectSnapshot], Optional[str]]:
+        label: str | None = None,
+        pvc_name: str = "project-storage",
+    ) -> tuple[ProjectSnapshot | None, str | None]:
         """
         Create a VolumeSnapshot from a project's PVC.
 
@@ -100,7 +99,9 @@ class SnapshotManager:
         namespace = self._get_project_namespace(str(project_id))
         snapshot_name = self._generate_snapshot_name(str(project_id), snapshot_type)
 
-        logger.info(f"[SNAPSHOT] Creating {snapshot_type} snapshot for project {project_id}: {snapshot_name}")
+        logger.info(
+            f"[SNAPSHOT] Creating {snapshot_type} snapshot for project {project_id}: {snapshot_name}"
+        )
 
         try:
             # Get PVC size for metadata
@@ -118,15 +119,13 @@ class SnapshotManager:
                         "managed-by": "tesslate-backend",
                         "project-id": str(project_id),
                         "user-id": str(user_id),
-                        "snapshot-type": snapshot_type
-                    }
+                        "snapshot-type": snapshot_type,
+                    },
                 },
                 "spec": {
                     "volumeSnapshotClassName": self.snapshot_class,
-                    "source": {
-                        "persistentVolumeClaimName": pvc_name
-                    }
-                }
+                    "source": {"persistentVolumeClaimName": pvc_name},
+                },
             }
 
             # Create snapshot in Kubernetes
@@ -136,7 +135,7 @@ class SnapshotManager:
                 version=self.snapshot_version,
                 namespace=namespace,
                 plural=self.snapshot_plural,
-                body=snapshot_manifest
+                body=snapshot_manifest,
             )
 
             logger.info(f"[SNAPSHOT] ✅ VolumeSnapshot created: {snapshot_name}")
@@ -162,7 +161,7 @@ class SnapshotManager:
                 snapshot_type=snapshot_type,
                 status="pending",
                 label=label or ("Auto-save" if snapshot_type == "hibernation" else "Manual save"),
-                is_soft_deleted=False
+                is_soft_deleted=False,
             )
             db.add(snapshot_record)
             await db.commit()
@@ -180,11 +179,8 @@ class SnapshotManager:
             return None, error_msg
 
     async def wait_for_snapshot_ready(
-        self,
-        snapshot: ProjectSnapshot,
-        db: AsyncSession,
-        timeout_seconds: Optional[int] = None
-    ) -> Tuple[bool, Optional[str]]:
+        self, snapshot: ProjectSnapshot, db: AsyncSession, timeout_seconds: int | None = None
+    ) -> tuple[bool, str | None]:
         """
         Wait for a VolumeSnapshot to become ready (readyToUse: true).
 
@@ -202,12 +198,14 @@ class SnapshotManager:
         if timeout_seconds is None:
             timeout_seconds = self.settings.k8s_snapshot_ready_timeout_seconds
 
-        logger.info(f"[SNAPSHOT] Waiting for snapshot {snapshot.snapshot_name} to become ready (timeout: {timeout_seconds}s)")
+        logger.info(
+            f"[SNAPSHOT] Waiting for snapshot {snapshot.snapshot_name} to become ready (timeout: {timeout_seconds}s)"
+        )
 
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         while True:
-            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            elapsed = (datetime.now(UTC) - start_time).total_seconds()
             if elapsed >= timeout_seconds:
                 error_msg = f"Snapshot {snapshot.snapshot_name} did not become ready within {timeout_seconds} seconds"
                 logger.error(f"[SNAPSHOT] ❌ {error_msg}")
@@ -226,18 +224,20 @@ class SnapshotManager:
                     version=self.snapshot_version,
                     namespace=snapshot.snapshot_namespace,
                     plural=self.snapshot_plural,
-                    name=snapshot.snapshot_name
+                    name=snapshot.snapshot_name,
                 )
 
                 status = k8s_snapshot.get("status", {})
                 ready_to_use = status.get("readyToUse", False)
 
                 if ready_to_use:
-                    logger.info(f"[SNAPSHOT] ✅ Snapshot {snapshot.snapshot_name} is ready ({elapsed:.1f}s)")
+                    logger.info(
+                        f"[SNAPSHOT] ✅ Snapshot {snapshot.snapshot_name} is ready ({elapsed:.1f}s)"
+                    )
 
                     # Update database record
                     snapshot.status = "ready"
-                    snapshot.ready_at = datetime.now(timezone.utc)
+                    snapshot.ready_at = datetime.now(UTC)
 
                     # Update project's latest_snapshot_id
                     project = await db.get(Project, snapshot.project_id)
@@ -250,7 +250,9 @@ class SnapshotManager:
 
                 # Log progress
                 if int(elapsed) % 5 == 0:
-                    logger.debug(f"[SNAPSHOT] Waiting for {snapshot.snapshot_name}... ({elapsed:.0f}s)")
+                    logger.debug(
+                        f"[SNAPSHOT] Waiting for {snapshot.snapshot_name}... ({elapsed:.0f}s)"
+                    )
 
             except ApiException as e:
                 if e.status == 404:
@@ -270,9 +272,9 @@ class SnapshotManager:
         project_id: UUID,
         user_id: UUID,
         db: AsyncSession,
-        snapshot_id: Optional[UUID] = None,
-        pvc_name: str = "project-storage"
-    ) -> Tuple[bool, Optional[str]]:
+        snapshot_id: UUID | None = None,
+        pvc_name: str = "project-storage",
+    ) -> tuple[bool, str | None]:
         """
         Create a PVC from a VolumeSnapshot for project restore.
 
@@ -304,7 +306,7 @@ class SnapshotManager:
                     and_(
                         ProjectSnapshot.project_id == project_id,
                         ProjectSnapshot.status == "ready",
-                        ProjectSnapshot.is_soft_deleted == False
+                        not ProjectSnapshot.is_soft_deleted,
                     )
                 )
                 .order_by(ProjectSnapshot.created_at.desc())
@@ -315,7 +317,9 @@ class SnapshotManager:
             if not snapshot:
                 return False, f"No ready snapshot found for project {project_id}"
 
-        logger.info(f"[SNAPSHOT] Restoring from snapshot {snapshot.snapshot_name} to PVC {pvc_name}")
+        logger.info(
+            f"[SNAPSHOT] Restoring from snapshot {snapshot.snapshot_name} to PVC {pvc_name}"
+        )
 
         try:
             # First, check if VolumeSnapshot exists in the new namespace
@@ -323,11 +327,11 @@ class SnapshotManager:
             snapshot_exists = await self._ensure_volumesnapshot_exists(
                 snapshot_name=snapshot.snapshot_name,
                 namespace=namespace,
-                original_namespace=snapshot.snapshot_namespace
+                original_namespace=snapshot.snapshot_namespace,
             )
 
             if not snapshot_exists:
-                return False, f"Could not recreate VolumeSnapshot from retained content"
+                return False, "Could not recreate VolumeSnapshot from retained content"
 
             # Create PVC with dataSource pointing to the snapshot
             pvc_manifest = client.V1PersistentVolumeClaim(
@@ -339,8 +343,8 @@ class SnapshotManager:
                         "managed-by": "tesslate-backend",
                         "project-id": str(project_id),
                         "user-id": str(user_id),
-                        "restored-from": snapshot.snapshot_name
-                    }
+                        "restored-from": snapshot.snapshot_name,
+                    },
                 ),
                 spec=client.V1PersistentVolumeClaimSpec(
                     access_modes=[self.settings.k8s_pvc_access_mode],
@@ -351,18 +355,20 @@ class SnapshotManager:
                     data_source=client.V1TypedLocalObjectReference(
                         api_group=self.snapshot_group,
                         kind="VolumeSnapshot",
-                        name=snapshot.snapshot_name
-                    )
-                )
+                        name=snapshot.snapshot_name,
+                    ),
+                ),
             )
 
             await asyncio.to_thread(
                 self.core_v1.create_namespaced_persistent_volume_claim,
                 namespace=namespace,
-                body=pvc_manifest
+                body=pvc_manifest,
             )
 
-            logger.info(f"[SNAPSHOT] ✅ PVC {pvc_name} created from snapshot {snapshot.snapshot_name}")
+            logger.info(
+                f"[SNAPSHOT] ✅ PVC {pvc_name} created from snapshot {snapshot.snapshot_name}"
+            )
             return True, None
 
         except ApiException as e:
@@ -378,10 +384,7 @@ class SnapshotManager:
             return False, error_msg
 
     async def _ensure_volumesnapshot_exists(
-        self,
-        snapshot_name: str,
-        namespace: str,
-        original_namespace: str
+        self, snapshot_name: str, namespace: str, original_namespace: str
     ) -> bool:
         """
         Ensure a VolumeSnapshot exists in the target namespace.
@@ -416,9 +419,11 @@ class SnapshotManager:
                     version=self.snapshot_version,
                     namespace=namespace,
                     plural="volumesnapshots",
-                    name=snapshot_name
+                    name=snapshot_name,
                 )
-                logger.info(f"[SNAPSHOT] VolumeSnapshot {snapshot_name} already exists in {namespace}")
+                logger.info(
+                    f"[SNAPSHOT] VolumeSnapshot {snapshot_name} already exists in {namespace}"
+                )
                 return True
             except ApiException as e:
                 if e.status != 404:
@@ -431,7 +436,7 @@ class SnapshotManager:
                 self.custom_api.list_cluster_custom_object,
                 group=self.snapshot_group,
                 version=self.snapshot_version,
-                plural="volumesnapshotcontents"
+                plural="volumesnapshotcontents",
             )
 
             # Find content that matches our snapshot name and original namespace
@@ -441,10 +446,14 @@ class SnapshotManager:
                 vs_ref = spec.get("volumeSnapshotRef", {})
 
                 # Match by volumeSnapshotRef
-                if (vs_ref.get("name") == snapshot_name and
-                    vs_ref.get("namespace") == original_namespace):
+                if (
+                    vs_ref.get("name") == snapshot_name
+                    and vs_ref.get("namespace") == original_namespace
+                ):
                     retained_vsc = vsc
-                    logger.info(f"[SNAPSHOT] Found retained VolumeSnapshotContent: {vsc.get('metadata', {}).get('name')}")
+                    logger.info(
+                        f"[SNAPSHOT] Found retained VolumeSnapshotContent: {vsc.get('metadata', {}).get('name')}"
+                    )
                     break
 
             if not retained_vsc:
@@ -454,14 +463,16 @@ class SnapshotManager:
             # Extract the EBS snapshot handle from the retained content
             snapshot_handle = retained_vsc.get("status", {}).get("snapshotHandle")
             if not snapshot_handle:
-                logger.error(f"[SNAPSHOT] ❌ No snapshotHandle in retained VolumeSnapshotContent")
+                logger.error("[SNAPSHOT] ❌ No snapshotHandle in retained VolumeSnapshotContent")
                 return False
 
             # Extract other necessary fields
-            restore_size = retained_vsc.get("status", {}).get("restoreSize")
+            retained_vsc.get("status", {}).get("restoreSize")
             driver = retained_vsc.get("spec", {}).get("driver", "ebs.csi.aws.com")
 
-            logger.info(f"[SNAPSHOT] Creating pre-provisioned snapshot from EBS handle: {snapshot_handle}")
+            logger.info(
+                f"[SNAPSHOT] Creating pre-provisioned snapshot from EBS handle: {snapshot_handle}"
+            )
 
             # Create a new pre-provisioned VolumeSnapshotContent with a unique name
             new_vsc_name = f"restored-{snapshot_name}-{namespace[-8:]}"
@@ -474,8 +485,8 @@ class SnapshotManager:
                     "labels": {
                         "app": "tesslate",
                         "managed-by": "tesslate-backend",
-                        "restored-from": snapshot_name
-                    }
+                        "restored-from": snapshot_name,
+                    },
                 },
                 "spec": {
                     "driver": driver,
@@ -484,11 +495,8 @@ class SnapshotManager:
                         "snapshotHandle": snapshot_handle  # Key: pre-provisioned uses snapshotHandle
                     },
                     "volumeSnapshotClassName": self.snapshot_class,
-                    "volumeSnapshotRef": {
-                        "name": snapshot_name,
-                        "namespace": namespace
-                    }
-                }
+                    "volumeSnapshotRef": {"name": snapshot_name, "namespace": namespace},
+                },
             }
 
             await asyncio.to_thread(
@@ -496,10 +504,12 @@ class SnapshotManager:
                 group=self.snapshot_group,
                 version=self.snapshot_version,
                 plural="volumesnapshotcontents",
-                body=new_vsc_manifest
+                body=new_vsc_manifest,
             )
 
-            logger.info(f"[SNAPSHOT] ✅ Created pre-provisioned VolumeSnapshotContent: {new_vsc_name}")
+            logger.info(
+                f"[SNAPSHOT] ✅ Created pre-provisioned VolumeSnapshotContent: {new_vsc_name}"
+            )
 
             # Create VolumeSnapshot that binds to the pre-provisioned content
             vs_manifest = {
@@ -508,16 +518,9 @@ class SnapshotManager:
                 "metadata": {
                     "name": snapshot_name,
                     "namespace": namespace,
-                    "labels": {
-                        "app": "tesslate",
-                        "managed-by": "tesslate-backend"
-                    }
+                    "labels": {"app": "tesslate", "managed-by": "tesslate-backend"},
                 },
-                "spec": {
-                    "source": {
-                        "volumeSnapshotContentName": new_vsc_name
-                    }
-                }
+                "spec": {"source": {"volumeSnapshotContentName": new_vsc_name}},
             }
 
             await asyncio.to_thread(
@@ -526,7 +529,7 @@ class SnapshotManager:
                 version=self.snapshot_version,
                 namespace=namespace,
                 plural="volumesnapshots",
-                body=vs_manifest
+                body=vs_manifest,
             )
 
             logger.info(f"[SNAPSHOT] ✅ Created VolumeSnapshot {snapshot_name} in {namespace}")
@@ -541,7 +544,7 @@ class SnapshotManager:
                         version=self.snapshot_version,
                         namespace=namespace,
                         plural="volumesnapshots",
-                        name=snapshot_name
+                        name=snapshot_name,
                     )
                     if vs.get("status", {}).get("readyToUse"):
                         logger.info(f"[SNAPSHOT] ✅ VolumeSnapshot {snapshot_name} is ready to use")
@@ -560,11 +563,7 @@ class SnapshotManager:
             logger.error(f"[SNAPSHOT] ❌ Error ensuring VolumeSnapshot exists: {e}", exc_info=True)
             return False
 
-    async def soft_delete_project_snapshots(
-        self,
-        project_id: UUID,
-        db: AsyncSession
-    ) -> int:
+    async def soft_delete_project_snapshots(self, project_id: UUID, db: AsyncSession) -> int:
         """
         Mark all snapshots for a project as soft-deleted.
 
@@ -579,25 +578,21 @@ class SnapshotManager:
         Returns:
             Number of snapshots marked as soft-deleted
         """
-        expiry_date = datetime.now(timezone.utc) + timedelta(days=self.settings.k8s_snapshot_retention_days)
+        expiry_date = datetime.now(UTC) + timedelta(days=self.settings.k8s_snapshot_retention_days)
 
         result = await db.execute(
             update(ProjectSnapshot)
             .where(
-                and_(
-                    ProjectSnapshot.project_id == project_id,
-                    ProjectSnapshot.is_soft_deleted == False
-                )
+                and_(ProjectSnapshot.project_id == project_id, not ProjectSnapshot.is_soft_deleted)
             )
-            .values(
-                is_soft_deleted=True,
-                soft_delete_expires_at=expiry_date
-            )
+            .values(is_soft_deleted=True, soft_delete_expires_at=expiry_date)
         )
         await db.commit()
 
         count = result.rowcount
-        logger.info(f"[SNAPSHOT] Soft-deleted {count} snapshots for project {project_id} (expires: {expiry_date})")
+        logger.info(
+            f"[SNAPSHOT] Soft-deleted {count} snapshots for project {project_id} (expires: {expiry_date})"
+        )
         return count
 
     async def cleanup_expired_snapshots(self, db: AsyncSession) -> int:
@@ -612,16 +607,12 @@ class SnapshotManager:
         Returns:
             Number of snapshots deleted
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Find expired snapshots
         result = await db.execute(
-            select(ProjectSnapshot)
-            .where(
-                and_(
-                    ProjectSnapshot.is_soft_deleted == True,
-                    ProjectSnapshot.soft_delete_expires_at < now
-                )
+            select(ProjectSnapshot).where(
+                and_(ProjectSnapshot.is_soft_deleted, ProjectSnapshot.soft_delete_expires_at < now)
             )
         )
         expired_snapshots = result.scalars().all()
@@ -636,12 +627,14 @@ class SnapshotManager:
                     version=self.snapshot_version,
                     namespace=snapshot.snapshot_namespace,
                     plural=self.snapshot_plural,
-                    name=snapshot.snapshot_name
+                    name=snapshot.snapshot_name,
                 )
                 logger.info(f"[SNAPSHOT] Deleted K8s VolumeSnapshot: {snapshot.snapshot_name}")
             except ApiException as e:
                 if e.status != 404:
-                    logger.warning(f"[SNAPSHOT] Failed to delete K8s snapshot {snapshot.snapshot_name}: {e.reason}")
+                    logger.warning(
+                        f"[SNAPSHOT] Failed to delete K8s snapshot {snapshot.snapshot_name}: {e.reason}"
+                    )
 
             # Mark as deleted in database
             snapshot.status = "deleted"
@@ -652,11 +645,8 @@ class SnapshotManager:
         return deleted_count
 
     async def get_project_snapshots(
-        self,
-        project_id: UUID,
-        db: AsyncSession,
-        include_soft_deleted: bool = False
-    ) -> List[ProjectSnapshot]:
+        self, project_id: UUID, db: AsyncSession, include_soft_deleted: bool = False
+    ) -> list[ProjectSnapshot]:
         """
         Get all snapshots for a project (for Timeline UI).
 
@@ -670,7 +660,7 @@ class SnapshotManager:
         """
         conditions = [ProjectSnapshot.project_id == project_id]
         if not include_soft_deleted:
-            conditions.append(ProjectSnapshot.is_soft_deleted == False)
+            conditions.append(not ProjectSnapshot.is_soft_deleted)
 
         result = await db.execute(
             select(ProjectSnapshot)
@@ -694,10 +684,7 @@ class SnapshotManager:
         result = await db.execute(
             select(ProjectSnapshot)
             .where(
-                and_(
-                    ProjectSnapshot.project_id == project_id,
-                    ProjectSnapshot.is_soft_deleted == False
-                )
+                and_(ProjectSnapshot.project_id == project_id, not ProjectSnapshot.is_soft_deleted)
             )
             .order_by(ProjectSnapshot.created_at.asc())
         )
@@ -743,13 +730,17 @@ class SnapshotManager:
                     version=self.snapshot_version,
                     namespace=snapshot.snapshot_namespace,
                     plural=self.snapshot_plural,
-                    name=snapshot.snapshot_name
+                    name=snapshot.snapshot_name,
                 )
                 # Get the bound VolumeSnapshotContent name
-                snapshot_content_name = k8s_snapshot.get("status", {}).get("boundVolumeSnapshotContentName")
+                snapshot_content_name = k8s_snapshot.get("status", {}).get(
+                    "boundVolumeSnapshotContentName"
+                )
             except ApiException as e:
                 if e.status != 404:
-                    logger.warning(f"[SNAPSHOT] Failed to get K8s snapshot {snapshot.snapshot_name}: {e.reason}")
+                    logger.warning(
+                        f"[SNAPSHOT] Failed to get K8s snapshot {snapshot.snapshot_name}: {e.reason}"
+                    )
 
             # Delete the VolumeSnapshot
             await asyncio.to_thread(
@@ -758,12 +749,14 @@ class SnapshotManager:
                 version=self.snapshot_version,
                 namespace=snapshot.snapshot_namespace,
                 plural=self.snapshot_plural,
-                name=snapshot.snapshot_name
+                name=snapshot.snapshot_name,
             )
             logger.info(f"[SNAPSHOT] Deleted K8s VolumeSnapshot: {snapshot.snapshot_name}")
         except ApiException as e:
             if e.status != 404:
-                logger.warning(f"[SNAPSHOT] Failed to delete K8s snapshot {snapshot.snapshot_name}: {e.reason}")
+                logger.warning(
+                    f"[SNAPSHOT] Failed to delete K8s snapshot {snapshot.snapshot_name}: {e.reason}"
+                )
 
         # Also delete the VolumeSnapshotContent (the actual EBS snapshot)
         # This is needed because our VolumeSnapshotClass has deletionPolicy: Retain
@@ -774,23 +767,27 @@ class SnapshotManager:
                     group=self.snapshot_group,
                     version=self.snapshot_version,
                     plural="volumesnapshotcontents",
-                    name=snapshot_content_name
+                    name=snapshot_content_name,
                 )
-                logger.info(f"[SNAPSHOT] Deleted K8s VolumeSnapshotContent: {snapshot_content_name}")
+                logger.info(
+                    f"[SNAPSHOT] Deleted K8s VolumeSnapshotContent: {snapshot_content_name}"
+                )
             except ApiException as e:
                 if e.status != 404:
-                    logger.warning(f"[SNAPSHOT] Failed to delete VolumeSnapshotContent {snapshot_content_name}: {e.reason}")
+                    logger.warning(
+                        f"[SNAPSHOT] Failed to delete VolumeSnapshotContent {snapshot_content_name}: {e.reason}"
+                    )
 
         # Delete from database
         await db.delete(snapshot)
 
-    async def _get_pvc_size_bytes(self, namespace: str, pvc_name: str) -> Optional[int]:
+    async def _get_pvc_size_bytes(self, namespace: str, pvc_name: str) -> int | None:
         """Get the size of a PVC in bytes."""
         try:
             pvc = await asyncio.to_thread(
                 self.core_v1.read_namespaced_persistent_volume_claim,
                 name=pvc_name,
-                namespace=namespace
+                namespace=namespace,
             )
             # Parse storage size (e.g., "5Gi")
             size_str = pvc.spec.resources.requests.get("storage", "0")
@@ -804,17 +801,17 @@ class SnapshotManager:
         size_str = str(size_str).strip()
         multipliers = {
             "Ki": 1024,
-            "Mi": 1024 ** 2,
-            "Gi": 1024 ** 3,
-            "Ti": 1024 ** 4,
+            "Mi": 1024**2,
+            "Gi": 1024**3,
+            "Ti": 1024**4,
             "K": 1000,
-            "M": 1000 ** 2,
-            "G": 1000 ** 3,
-            "T": 1000 ** 4,
+            "M": 1000**2,
+            "G": 1000**3,
+            "T": 1000**4,
         }
         for suffix, multiplier in multipliers.items():
             if size_str.endswith(suffix):
-                return int(float(size_str[:-len(suffix)]) * multiplier)
+                return int(float(size_str[: -len(suffix)]) * multiplier)
         return int(size_str)
 
     async def has_existing_snapshot(self, project_id: UUID, db: AsyncSession) -> bool:
@@ -825,7 +822,7 @@ class SnapshotManager:
                 and_(
                     ProjectSnapshot.project_id == project_id,
                     ProjectSnapshot.status == "ready",
-                    ProjectSnapshot.is_soft_deleted == False
+                    not ProjectSnapshot.is_soft_deleted,
                 )
             )
             .limit(1)
@@ -834,7 +831,7 @@ class SnapshotManager:
 
 
 # Global instance - lazily initialized
-_snapshot_manager_instance: Optional[SnapshotManager] = None
+_snapshot_manager_instance: SnapshotManager | None = None
 
 
 def get_snapshot_manager() -> SnapshotManager:

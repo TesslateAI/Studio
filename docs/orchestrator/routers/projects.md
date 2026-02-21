@@ -59,8 +59,8 @@ Creates a new project with a unique slug. Project setup happens in the backgroun
 {
   "name": "My New App",
   "description": "Optional description",
-  "source_type": "template|github|gitlab|bitbucket|base",
-  "base_id": "uuid-or-builtin",          // For source_type="base"
+  "source_type": "base|github|gitlab|bitbucket",
+  "base_id": "uuid-or-builtin",          // For source_type="base" (default)
   "github_repo_url": "https://...",      // For source_type="github" (legacy)
   "github_branch": "main",               // For source_type="github" (legacy)
   "git_repo_url": "https://...",         // For any Git provider (unified)
@@ -90,11 +90,10 @@ The `_perform_project_setup()` function runs in the background:
    - K8s: Directory creation deferred to container startup
 
 2. **Handle Source Type**:
-   - **Template** (10-90%): Copy default Next.js template
+   - **Base** (10-90%): Clone marketplace base from cache or Git (default)
    - **Git Provider** (10-90%): Clone repository
      - K8s: Create namespace + PVC + file-manager pod, clone directly to PVC
      - Docker: Clone to filesystem
-   - **Base** (10-90%): Clone marketplace base from cache or Git
 
 3. **Complete** (100%): Update project status in database
 
@@ -127,7 +126,13 @@ Returns full project details including containers, files count, and settings.
 POST /api/projects/{project_id}/fork
 ```
 
-Creates a copy of an existing project with all files and containers. The forked project gets a new unique slug.
+Creates a deep copy of an existing project. The forked project gets a new unique slug. Copies include:
+- All project files
+- All containers (status reset to "stopped", new container names generated)
+- All container connections (IDs remapped to new containers)
+- All browser previews (container IDs remapped)
+
+Enforces the same tier-based project limit as `create_project()` via the shared `enforce_project_limit()` helper.
 
 **Request Body**:
 ```json
@@ -1110,6 +1115,14 @@ Background task function that performs project initialization:
 4. Updates task progress throughout
 
 Uses TaskManager for progress tracking visible to the frontend.
+
+### enforce_project_limit()
+
+Shared helper that checks if the user has reached their subscription tier's project limit. Used by both `create_project()` and `fork_project()`. Raises HTTP 403 if the limit is reached.
+
+```python
+await enforce_project_limit(current_user, db)
+```
 
 ## Example Workflows
 

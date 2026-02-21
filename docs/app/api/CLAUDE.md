@@ -158,7 +158,7 @@ const files = await projectsApi.getFiles(slug);
 | `chatApi` | `/api/chat/` | Messages, streaming, approvals |
 | `gitApi` | `/api/projects/{id}/git/` | Version control |
 | `tasksApi` | `/api/tasks/` | Background task status |
-| `marketplaceApi` | `/api/marketplace/` | Agents, bases |
+| `marketplaceApi` | `/api/marketplace/` | Agents, bases, reviews (agent + base) |
 | `billingApi` | `/api/billing/` | Subscriptions, credits |
 | `assetsApi` | `/api/projects/{slug}/assets/` | File uploads |
 | `deploymentsApi` | `/api/deployments/` | External deploys |

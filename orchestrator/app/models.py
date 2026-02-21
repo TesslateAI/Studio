@@ -76,6 +76,9 @@ class Project(Base):
     owner = relationship("User", back_populates="projects")
     files = relationship("ProjectFile", back_populates="project", cascade="all, delete-orphan")
     assets = relationship("ProjectAsset", back_populates="project", cascade="all, delete-orphan")
+    asset_directories = relationship(
+        "ProjectAssetDirectory", back_populates="project", cascade="all, delete-orphan"
+    )
     git_repository = relationship(
         "GitRepository", back_populates="project", uselist=False, cascade="all, delete-orphan"
     )
@@ -241,6 +244,14 @@ class Container(Base):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def env_var_keys(self) -> list:
+        return list((self.environment_vars or {}).keys())
+
+    @property
+    def env_vars_count(self) -> int:
+        return len(self.environment_vars or {})
+
 
 class ContainerConnection(Base):
     """Connections between containers in the React Flow graph (represents dependencies/networking/env vars)."""
@@ -350,6 +361,26 @@ class ProjectAsset(Base):
 
     # Relationships
     project = relationship("Project", back_populates="assets")
+
+
+class ProjectAssetDirectory(Base):
+    """Track user-created asset directories for projects (persists in K8s mode)."""
+
+    __tablename__ = "project_asset_directories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    path = Column(String, nullable=False)  # e.g., "/public/images"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "path", name="uq_project_asset_directory"),
+    )
+
+    # Relationships
+    project = relationship("Project", back_populates="asset_directories")
 
 
 class Chat(Base):
@@ -828,8 +859,16 @@ class MarketplaceBase(Base):
     long_description = Column(Text, nullable=True)
 
     # Git repository for template
-    git_repo_url = Column(String(500), nullable=False)
+    git_repo_url = Column(String(500), nullable=True)
     default_branch = Column(String(100), default="main")
+
+    # Template archive fields (for exported app templates)
+    source_type = Column(String(20), default="git", server_default="git", nullable=False)
+    archive_path = Column(String(500), nullable=True)
+    archive_size_bytes = Column(BigInteger, nullable=True)
+    source_project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Template metadata
     category = Column(String, nullable=False)  # fullstack, frontend, backend, mobile, etc.
@@ -858,8 +897,12 @@ class MarketplaceBase(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # User-submitted bases
-    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    visibility = Column(String, default="public", server_default="public")  # "private" or "public"
+    created_by_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    visibility = Column(
+        String, default="private", server_default="private"
+    )  # "private" or "public"
 
     # Relationships
     created_by_user = relationship("User", foreign_keys=[created_by_user_id])
@@ -1219,7 +1262,7 @@ class UsageLog(Base):
 
 
 class Theme(Base):
-    """UI themes stored as JSON. Loaded from scripts/themes/ and served via API."""
+    """UI themes stored as JSON. Auto-seeded from app/seeds/themes/ on startup."""
 
     __tablename__ = "themes"
 
@@ -1318,3 +1361,24 @@ class FeedbackComment(Base):
     # Relationships
     user = relationship("User", back_populates="feedback_comments")
     feedback_post = relationship("FeedbackPost", back_populates="comments")
+
+
+class EmailVerificationCode(Base):
+    """Email verification codes for 2FA."""
+
+    __tablename__ = "email_verification_codes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code_hash = Column(String, nullable=False)
+    purpose = Column(String(50), nullable=False)  # e.g., "2fa_login"
+    attempts = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=5, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

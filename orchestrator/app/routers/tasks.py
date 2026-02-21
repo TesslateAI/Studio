@@ -2,23 +2,22 @@
 Task Status API
 Endpoints for tracking background operation status and real-time updates.
 """
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from typing import List, Optional
+
 import asyncio
+import contextlib
 import json
 
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+
 from ..models import User
+from ..services.task_manager import Task, TaskStatus, get_task_manager
 from ..users import current_active_user
-from ..services.task_manager import get_task_manager, Task, TaskStatus
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
 @router.get("/{task_id}/status")
-async def get_task_status(
-    task_id: str,
-    current_user: User = Depends(current_active_user)
-):
+async def get_task_status(task_id: str, current_user: User = Depends(current_active_user)):
     """Get status of a specific task"""
     task_manager = get_task_manager()
     task = task_manager.get_task(task_id)
@@ -34,9 +33,7 @@ async def get_task_status(
 
 
 @router.get("/user/active")
-async def get_active_tasks(
-    current_user: User = Depends(current_active_user)
-):
+async def get_active_tasks(current_user: User = Depends(current_active_user)):
     """Get all active tasks for the current user"""
     task_manager = get_task_manager()
     tasks = task_manager.get_user_tasks(current_user.id, active_only=True)
@@ -44,10 +41,7 @@ async def get_active_tasks(
 
 
 @router.get("/user/all")
-async def get_all_tasks(
-    limit: int = 50,
-    current_user: User = Depends(current_active_user)
-):
+async def get_all_tasks(limit: int = 50, current_user: User = Depends(current_active_user)):
     """Get all tasks for the current user (most recent first)"""
     task_manager = get_task_manager()
     tasks = task_manager.get_user_tasks(current_user.id, active_only=False)
@@ -55,10 +49,7 @@ async def get_all_tasks(
 
 
 @router.delete("/{task_id}")
-async def cancel_task(
-    task_id: str,
-    current_user: User = Depends(current_active_user)
-):
+async def cancel_task(task_id: str, current_user: User = Depends(current_active_user)):
     """Cancel a running task"""
     task_manager = get_task_manager()
     task = task_manager.get_task(task_id)
@@ -85,7 +76,7 @@ async def cancel_task(
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: dict[int, List[WebSocket]] = {}
+        self.active_connections: dict[int, list[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: int):
         # Note: websocket.accept() is called by the endpoint before authentication
@@ -105,10 +96,7 @@ class ConnectionManager:
         if user_id not in self.active_connections:
             return
 
-        message = json.dumps({
-            "type": "task_update",
-            "task": task.to_dict()
-        })
+        message = json.dumps({"type": "task_update", "task": task.to_dict()})
 
         # Send to all connections for this user
         dead_connections = []
@@ -127,16 +115,11 @@ class ConnectionManager:
         if user_id not in self.active_connections:
             return
 
-        message = json.dumps({
-            "type": "notification",
-            "notification": notification
-        })
+        message = json.dumps({"type": "notification", "notification": notification})
 
         for connection in self.active_connections[user_id]:
-            try:
+            with contextlib.suppress(Exception):
                 await connection.send_text(message)
-            except Exception:
-                pass
 
 
 # Global connection manager
@@ -156,6 +139,7 @@ async def websocket_endpoint(websocket: WebSocket):
     {"type": "notification", "notification": {...}}
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     await websocket.accept()
@@ -220,7 +204,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"WebSocket error: {e}")
                 break
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("[TASK-WS] Authentication timeout - no token received in 10s")
         await websocket.close(code=1008, reason="Authentication timeout")
     except WebSocketDisconnect:
@@ -228,7 +212,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"[TASK-WS] WebSocket connection error: {e}", exc_info=True)
     finally:
-        if 'user' in locals() and user is not None:
+        if "user" in locals() and user is not None:
             logger.info(f"[TASK-WS] Cleaning up connection for user {user.id}")
             manager.disconnect(websocket, user.id)
 
@@ -248,7 +232,7 @@ async def send_notification_to_user(user_id: int, title: str, message: str, type
         "title": title,
         "message": message,
         "type": type,
-        "timestamp": asyncio.get_event_loop().time()
+        "timestamp": asyncio.get_event_loop().time(),
     }
     await manager.send_notification(user_id, notification)
 

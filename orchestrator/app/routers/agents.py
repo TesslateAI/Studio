@@ -1,19 +1,18 @@
-from typing import List
-from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..agent.tools.registry import get_tool_registry
 from ..database import get_db
 from ..models import MarketplaceAgent, User
-from ..users import current_active_user, current_superuser
-from ..agent.tools.registry import get_tool_registry
+from ..users import current_active_user
 
 router = APIRouter()
 
+
 @router.get("/")
 async def get_agents(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(current_active_user)
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(current_active_user)
 ):
     """
     Get all active marketplace agents.
@@ -22,9 +21,9 @@ async def get_agents(
     All agents go through the unified factory interface.
     """
     result = await db.execute(
-        select(MarketplaceAgent).where(
-            MarketplaceAgent.is_active == True
-        ).order_by(MarketplaceAgent.created_at.asc())
+        select(MarketplaceAgent)
+        .where(MarketplaceAgent.is_active)
+        .order_by(MarketplaceAgent.created_at.asc())
     )
     agents = result.scalars().all()
 
@@ -38,7 +37,7 @@ async def get_agents(
             "agent_type": agent.agent_type,
             "mode": agent.mode,  # Deprecated but kept for compatibility
             "icon": agent.icon,
-            "category": agent.category
+            "category": agent.category,
         }
         for agent in agents
     ]
@@ -48,12 +47,10 @@ async def get_agents(
 async def get_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(current_active_user)
+    current_user: User = Depends(current_active_user),
 ):
     """Get a specific marketplace agent by ID."""
-    result = await db.execute(
-        select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-    )
+    result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
     agent = result.scalar_one_or_none()
 
     if not agent:
@@ -73,7 +70,7 @@ async def get_agent(
         "icon": agent.icon,
         "category": agent.category,
         "features": agent.features,
-        "tags": agent.tags
+        "tags": agent.tags,
     }
 
 
@@ -83,9 +80,7 @@ async def get_agent(
 
 
 @router.get("/tools/available")
-async def get_available_tools(
-    current_user: User = Depends(current_active_user)
-):
+async def get_available_tools(current_user: User = Depends(current_active_user)):
     """
     Get all available tools with their default descriptions and parameters.
 
@@ -102,7 +97,7 @@ async def get_available_tools(
             "category": tool.category.value,
             "parameters": tool.parameters,
             "examples": tool.examples or [],
-            "system_prompt": tool.system_prompt or ""
+            "system_prompt": tool.system_prompt or "",
         }
         for tool in tools_list
     ]

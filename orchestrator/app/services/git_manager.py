@@ -1,14 +1,12 @@
-from uuid import UUID
 """
 Git Manager for executing Git operations in user development environments.
 Works with both Docker and Kubernetes deployments.
 """
-import shlex
-import json
-import re
-from typing import Dict, List, Optional, Any
-from datetime import datetime
+
 import logging
+import shlex
+from typing import Any
+from uuid import UUID
 
 from ..config import get_settings
 from ..utils.resource_naming import get_project_path
@@ -33,11 +31,7 @@ class GitManager:
         # TODO: Update for multi-container system - need to determine which container to run git commands in
         self.container_manager = None
 
-    async def _execute_git_command(
-        self,
-        git_args: List[str],
-        timeout: int = 120
-    ) -> str:
+    async def _execute_git_command(self, git_args: list[str], timeout: int = 120) -> str:
         """
         Execute a Git command in the user's development environment.
 
@@ -55,7 +49,11 @@ class GitManager:
         project_path = "/app"
 
         # Build the full command
-        command = ["/bin/sh", "-c", f"cd {project_path} && git {' '.join(shlex.quote(arg) for arg in git_args)}"]
+        command = [
+            "/bin/sh",
+            "-c",
+            f"cd {project_path} && git {' '.join(shlex.quote(arg) for arg in git_args)}",
+        ]
 
         try:
             # Use the unified orchestrator to execute the command
@@ -67,7 +65,7 @@ class GitManager:
                 project_id=self.project_id,
                 container_name=None,  # Use default container
                 command=command,
-                timeout=timeout
+                timeout=timeout,
             )
 
             return output.strip()
@@ -77,9 +75,7 @@ class GitManager:
             raise RuntimeError(f"Git command failed: {str(e)}") from e
 
     async def initialize_repository(
-        self,
-        remote_url: Optional[str] = None,
-        default_branch: str = "main"
+        self, remote_url: str | None = None, default_branch: str = "main"
     ) -> bool:
         """
         Initialize a Git repository in the project directory.
@@ -95,7 +91,9 @@ class GitManager:
             RuntimeError: If initialization fails
         """
         try:
-            logger.info(f"[GIT] Initializing repository for user {self.user_id}, project {self.project_id}")
+            logger.info(
+                f"[GIT] Initializing repository for user {self.user_id}, project {self.project_id}"
+            )
 
             # Initialize Git repository
             await self._execute_git_command(["init", "-b", default_branch])
@@ -104,7 +102,7 @@ class GitManager:
             # Configure user (use a default for now, can be customized per user)
             await self._execute_git_command(["config", "user.name", "Tesslate User"])
             await self._execute_git_command(["config", "user.email", "user@tesslate.com"])
-            logger.info(f"[GIT] Git config set")
+            logger.info("[GIT] Git config set")
 
             # Add remote if provided
             if remote_url:
@@ -120,9 +118,9 @@ class GitManager:
     async def clone_repository(
         self,
         repo_url: str,
-        branch: Optional[str] = None,
-        auth_token: Optional[str] = None,
-        direct_to_filesystem: bool = False
+        branch: str | None = None,
+        auth_token: str | None = None,
+        direct_to_filesystem: bool = False,
     ) -> bool:
         """
         Clone a repository into the project directory.
@@ -142,7 +140,9 @@ class GitManager:
             RuntimeError: If clone fails
         """
         try:
-            logger.info(f"[GIT] Cloning repository {repo_url} for user {self.user_id}, project {self.project_id}")
+            logger.info(
+                f"[GIT] Cloning repository {repo_url} for user {self.user_id}, project {self.project_id}"
+            )
 
             # Inject auth token into URL if provided
             if auth_token and "github.com" in repo_url:
@@ -152,10 +152,13 @@ class GitManager:
                     repo_url = repo_url.replace("git@github.com:", "https://github.com/")
 
                 # Inject token
-                repo_url = repo_url.replace("https://github.com/", f"https://{auth_token}@github.com/")
+                repo_url = repo_url.replace(
+                    "https://github.com/", f"https://{auth_token}@github.com/"
+                )
 
             # Direct filesystem clone (for Docker mode without container)
             from .orchestration import is_docker_mode
+
             if direct_to_filesystem and is_docker_mode():
                 import asyncio
                 import os
@@ -171,18 +174,20 @@ class GitManager:
                 git_cmd.extend([repo_url, project_path])
 
                 # Execute git clone directly on host
-                logger.info(f"[GIT] Executing direct filesystem clone: {' '.join(git_cmd[:3])} [URL] {project_path}")
+                logger.info(
+                    f"[GIT] Executing direct filesystem clone: {' '.join(git_cmd[:3])} [URL] {project_path}"
+                )
                 process = await asyncio.create_subprocess_exec(
-                    *git_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    *git_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
 
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
 
                 if process.returncode != 0:
                     error_msg = stderr.decode() if stderr else "Unknown error"
-                    raise RuntimeError(f"Git clone failed with exit code {process.returncode}: {error_msg}")
+                    raise RuntimeError(
+                        f"Git clone failed with exit code {process.returncode}: {error_msg}"
+                    )
 
                 logger.info(f"[GIT] Repository cloned successfully to {project_path}")
                 return True
@@ -195,8 +200,10 @@ class GitManager:
             clone_args.extend([repo_url, "/tmp/git-clone"])
 
             # Clone to temp directory first
-            await self._execute_git_command(clone_args, timeout=300)  # 5 minutes timeout for large repos
-            logger.info(f"[GIT] Repository cloned successfully")
+            await self._execute_git_command(
+                clone_args, timeout=300
+            )  # 5 minutes timeout for large repos
+            logger.info("[GIT] Repository cloned successfully")
 
             # Move files from clone to project directory
             # Both Docker and Kubernetes now mount to /app
@@ -204,11 +211,12 @@ class GitManager:
 
             # Use shell command to move contents
             move_command = [
-                "/bin/sh", "-c",
+                "/bin/sh",
+                "-c",
                 f"rm -rf {project_path}/.* {project_path}/* 2>/dev/null || true && "
                 f"mv /tmp/git-clone/.git {project_path}/ && "
                 f"mv /tmp/git-clone/* /tmp/git-clone/.* {project_path}/ 2>/dev/null || true && "
-                "rm -rf /tmp/git-clone"
+                "rm -rf /tmp/git-clone",
             ]
 
             from .orchestration import get_orchestrator
@@ -219,17 +227,17 @@ class GitManager:
                 project_id=self.project_id,
                 container_name=None,  # Use default container
                 command=move_command,
-                timeout=60
+                timeout=60,
             )
 
-            logger.info(f"[GIT] Repository files moved to project directory")
+            logger.info("[GIT] Repository files moved to project directory")
             return True
 
         except Exception as e:
             logger.error(f"[GIT] Failed to clone repository: {e}", exc_info=True)
             raise RuntimeError(f"Failed to clone repository: {str(e)}") from e
 
-    async def get_status(self) -> Dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         """
         Get Git repository status.
 
@@ -255,7 +263,7 @@ class GitManager:
 
             # Parse changed files
             changes = []
-            for line in status_output.split('\n'):
+            for line in status_output.split("\n"):
                 if not line.strip():
                     continue
 
@@ -273,24 +281,25 @@ class GitManager:
                 elif status_code[0] == "M" or status_code[1] == "M":
                     change_type = "modified"
 
-                changes.append({
-                    "path": file_path,
-                    "type": change_type,
-                    "staged": status_code[0] != " " and status_code[0] != "?"
-                })
+                changes.append(
+                    {
+                        "path": file_path,
+                        "type": change_type,
+                        "staged": status_code[0] != " " and status_code[0] != "?",
+                    }
+                )
 
             # Get ahead/behind count if tracking remote
             ahead, behind = 0, 0
             try:
                 rev_list_output = await self._execute_git_command(
-                    ["rev-list", "--left-right", "--count", f"origin/{branch}...HEAD"],
-                    timeout=30
+                    ["rev-list", "--left-right", "--count", f"origin/{branch}...HEAD"], timeout=30
                 )
                 parts = rev_list_output.strip().split()
                 if len(parts) == 2:
                     behind = int(parts[0])
                     ahead = int(parts[1])
-            except:
+            except Exception:
                 # No remote tracking or fetch hasn't been done
                 pass
 
@@ -311,20 +320,19 @@ class GitManager:
             last_commit = None
             try:
                 commit_output = await self._execute_git_command(
-                    ["log", "-1", "--pretty=format:%H|%an|%ae|%s|%ct"],
-                    timeout=30
+                    ["log", "-1", "--pretty=format:%H|%an|%ae|%s|%ct"], timeout=30
                 )
                 if commit_output:
-                    parts = commit_output.split('|')
+                    parts = commit_output.split("|")
                     if len(parts) >= 5:
                         last_commit = {
                             "sha": parts[0],
                             "author_name": parts[1],
                             "author_email": parts[2],
                             "message": parts[3],
-                            "timestamp": int(parts[4])
+                            "timestamp": int(parts[4]),
                         }
-            except:
+            except Exception:
                 # No commits yet
                 pass
 
@@ -335,18 +343,14 @@ class GitManager:
                 "changes_count": len(changes),
                 "ahead": ahead,
                 "behind": behind,
-                "last_commit": last_commit
+                "last_commit": last_commit,
             }
 
         except Exception as e:
             logger.error(f"[GIT] Failed to get status: {e}", exc_info=True)
             raise RuntimeError(f"Failed to get Git status: {str(e)}") from e
 
-    async def commit(
-        self,
-        message: str,
-        files: Optional[List[str]] = None
-    ) -> str:
+    async def commit(self, message: str, files: list[str] | None = None) -> str:
         """
         Create a Git commit.
 
@@ -386,10 +390,7 @@ class GitManager:
             raise RuntimeError(f"Failed to create commit: {str(e)}") from e
 
     async def push(
-        self,
-        branch: Optional[str] = None,
-        remote: str = "origin",
-        force: bool = False
+        self, branch: str | None = None, remote: str = "origin", force: bool = False
     ) -> bool:
         """
         Push commits to remote repository.
@@ -419,18 +420,14 @@ class GitManager:
                 push_args.insert(1, "--force")
 
             await self._execute_git_command(push_args, timeout=300)  # 5 minutes for large pushes
-            logger.info(f"[GIT] Push completed successfully")
+            logger.info("[GIT] Push completed successfully")
             return True
 
         except Exception as e:
             logger.error(f"[GIT] Failed to push: {e}", exc_info=True)
             raise RuntimeError(f"Failed to push to remote: {str(e)}") from e
 
-    async def pull(
-        self,
-        branch: Optional[str] = None,
-        remote: str = "origin"
-    ) -> Dict[str, Any]:
+    async def pull(self, branch: str | None = None, remote: str = "origin") -> dict[str, Any]:
         """
         Pull changes from remote repository.
 
@@ -460,18 +457,14 @@ class GitManager:
 
             # Attempt pull
             try:
-                pull_output = await self._execute_git_command(["pull", remote, branch], timeout=300)
-                logger.info(f"[GIT] Pull completed successfully")
-                return {
-                    "success": True,
-                    "conflicts": [],
-                    "message": "Pull completed successfully"
-                }
+                await self._execute_git_command(["pull", remote, branch], timeout=300)
+                logger.info("[GIT] Pull completed successfully")
+                return {"success": True, "conflicts": [], "message": "Pull completed successfully"}
             except Exception as pull_error:
                 # Check if it's a merge conflict
                 status_output = await self._execute_git_command(["status", "--porcelain"])
                 conflicts = []
-                for line in status_output.split('\n'):
+                for line in status_output.split("\n"):
                     if line.startswith("UU ") or line.startswith("AA ") or line.startswith("DD "):
                         file_path = line[3:].strip()
                         conflicts.append(file_path)
@@ -481,7 +474,7 @@ class GitManager:
                     return {
                         "success": False,
                         "conflicts": conflicts,
-                        "message": f"Pull completed with {len(conflicts)} conflicts"
+                        "message": f"Pull completed with {len(conflicts)} conflicts",
                     }
                 else:
                     raise pull_error
@@ -491,10 +484,8 @@ class GitManager:
             raise RuntimeError(f"Failed to pull from remote: {str(e)}") from e
 
     async def get_commit_history(
-        self,
-        limit: int = 50,
-        branch: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, limit: int = 50, branch: str | None = None
+    ) -> list[dict[str, Any]]:
         """
         Get commit history.
 
@@ -510,30 +501,28 @@ class GitManager:
         """
         try:
             # Build log command
-            log_args = [
-                "log",
-                f"-{limit}",
-                "--pretty=format:%H|%an|%ae|%s|%ct"
-            ]
+            log_args = ["log", f"-{limit}", "--pretty=format:%H|%an|%ae|%s|%ct"]
             if branch:
                 log_args.append(branch)
 
             log_output = await self._execute_git_command(log_args, timeout=60)
 
             commits = []
-            for line in log_output.split('\n'):
+            for line in log_output.split("\n"):
                 if not line.strip():
                     continue
 
-                parts = line.split('|')
+                parts = line.split("|")
                 if len(parts) >= 5:
-                    commits.append({
-                        "sha": parts[0],
-                        "author_name": parts[1],
-                        "author_email": parts[2],
-                        "message": parts[3],
-                        "timestamp": int(parts[4])
-                    })
+                    commits.append(
+                        {
+                            "sha": parts[0],
+                            "author_name": parts[1],
+                            "author_email": parts[2],
+                            "message": parts[3],
+                            "timestamp": int(parts[4]),
+                        }
+                    )
 
             logger.info(f"[GIT] Retrieved {len(commits)} commits")
             return commits
@@ -542,7 +531,7 @@ class GitManager:
             logger.error(f"[GIT] Failed to get commit history: {e}", exc_info=True)
             raise RuntimeError(f"Failed to get commit history: {str(e)}") from e
 
-    async def list_branches(self) -> List[Dict[str, Any]]:
+    async def list_branches(self) -> list[dict[str, Any]]:
         """
         List all branches.
 
@@ -559,12 +548,12 @@ class GitManager:
             branches = []
             current_branch = None
 
-            for line in branch_output.split('\n'):
+            for line in branch_output.split("\n"):
                 if not line.strip():
                     continue
 
-                is_current = line.startswith('*')
-                line = line.lstrip('* ').strip()
+                is_current = line.startswith("*")
+                line = line.lstrip("* ").strip()
 
                 # Parse branch info
                 parts = line.split()
@@ -578,15 +567,11 @@ class GitManager:
                     continue
 
                 # Determine if remote branch
-                is_remote = branch_name.startswith('remotes/')
+                is_remote = branch_name.startswith("remotes/")
                 if is_remote:
-                    branch_name = branch_name.replace('remotes/', '')
+                    branch_name = branch_name.replace("remotes/", "")
 
-                branches.append({
-                    "name": branch_name,
-                    "current": is_current,
-                    "remote": is_remote
-                })
+                branches.append({"name": branch_name, "current": is_current, "remote": is_remote})
 
                 if is_current:
                     current_branch = branch_name
@@ -650,11 +635,7 @@ class GitManager:
             logger.error(f"[GIT] Failed to switch branch: {e}", exc_info=True)
             raise RuntimeError(f"Failed to switch branch: {str(e)}") from e
 
-    async def get_diff(
-        self,
-        file_path: Optional[str] = None,
-        staged: bool = False
-    ) -> str:
+    async def get_diff(self, file_path: str | None = None, staged: bool = False) -> str:
         """
         Get diff of changes.
 

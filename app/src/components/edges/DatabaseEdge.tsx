@@ -1,13 +1,10 @@
 import { memo } from 'react';
 import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+import { EdgeDeleteButton } from './EdgeDeleteButton';
 
-// Static style object - defined once at module scope to prevent re-renders
 const EDGE_STYLE = { stroke: '#22c55e', strokeWidth: 2 };
+const SELECTED_EDGE_STYLE = { stroke: '#22c55e', strokeWidth: 3 };
 
-/**
- * DatabaseEdge - Lightweight edge for database connections
- * Performance optimized: No labels, minimal rendering, static style
- */
 const DatabaseEdgeComponent = ({
   id,
   sourceX,
@@ -16,8 +13,9 @@ const DatabaseEdgeComponent = ({
   targetY,
   sourcePosition,
   targetPosition,
+  selected,
 }: EdgeProps) => {
-  const [edgePath] = getSmoothStepPath({
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
     sourcePosition,
@@ -27,11 +25,15 @@ const DatabaseEdgeComponent = ({
   });
 
   return (
-    <BaseEdge
-      id={id}
-      path={edgePath}
-      style={EDGE_STYLE}
-    />
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={selected ? SELECTED_EDGE_STYLE : EDGE_STYLE}
+        interactionWidth={20}
+      />
+      <EdgeDeleteButton id={id} labelX={labelX} labelY={labelY} selected={selected} />
+    </>
   );
 };
 

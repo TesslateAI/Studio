@@ -7,9 +7,11 @@ can be dynamically instantiated and executed.
 """
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Dict, Any, Optional
-from .tools.registry import ToolRegistry
+from collections.abc import AsyncIterator
+from typing import Any
+
 from .prompts import substitute_markers
+from .tools.registry import ToolRegistry
 
 
 class AbstractAgent(ABC):
@@ -23,7 +25,7 @@ class AbstractAgent(ABC):
     3. Accept user requests and context for execution
     """
 
-    def __init__(self, system_prompt: str, tools: Optional[ToolRegistry] = None):
+    def __init__(self, system_prompt: str, tools: ToolRegistry | None = None):
         """
         Initialize the agent.
 
@@ -35,7 +37,7 @@ class AbstractAgent(ABC):
         self.system_prompt = system_prompt
         self.tools = tools
 
-    def get_processed_system_prompt(self, context: Dict[str, Any]) -> str:
+    def get_processed_system_prompt(self, context: dict[str, Any]) -> str:
         """
         Get the system prompt with markers substituted based on runtime context.
 
@@ -54,10 +56,8 @@ class AbstractAgent(ABC):
 
     @abstractmethod
     async def run(
-        self,
-        user_request: str,
-        context: Dict[str, Any]
-    ) -> AsyncIterator[Dict[str, Any]]:
+        self, user_request: str, context: dict[str, Any]
+    ) -> AsyncIterator[dict[str, Any]]:
         """
         Run the agent's logic. This is an async generator that yields events.
 

@@ -40,16 +40,16 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
   }
 
-  # Uncomment and configure for remote state storage
-  # backend "s3" {
-  #   bucket         = "<TERRAFORM_STATE_BUCKET>"
-  #   key            = "eks/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   encrypt        = true
-  #   dynamodb_table = "<AWS_IAM_USER>-locks"
-  # }
+  # Backend configuration is provided via -backend-config flag at init time
+  # Production: terraform init -backend-config=backend-production.hcl
+  # Beta:       terraform init -backend-config=backend-beta.hcl
+  backend "s3" {}
 }
 
 # -----------------------------------------------------------------------------
@@ -145,6 +145,22 @@ resource "random_id" "suffix" {
 # -----------------------------------------------------------------------------
 locals {
   cluster_name = "${var.project_name}-${var.environment}-eks"
+
+  # Image tag defaults to environment name (e.g., "beta", "production")
+  image_tag = var.image_tag != "" ? var.image_tag : var.environment
+
+  # Cloudflare zone name for cert-manager DNS01 challenges
+  # Defaults to domain_name (works when domain == zone, e.g., your-domain.com)
+  # Must be explicitly set when domain is a subdomain (e.g., your-domain.com → tesslate.com)
+  cloudflare_zone_name = var.cloudflare_zone_name != "" ? var.cloudflare_zone_name : var.domain_name
+
+  # DNS subdomain relative to Cloudflare zone (e.g., "studio" for "your-domain.com" in zone "tesslate.com")
+  # When domain == zone (e.g., your-domain.com), subdomain is "@" (zone apex)
+  dns_subdomain = (
+    local.cloudflare_zone_name == var.domain_name
+    ? "@"
+    : trimsuffix(trimsuffix(var.domain_name, local.cloudflare_zone_name), ".")
+  )
 
   common_tags = {
     Project     = var.project_name

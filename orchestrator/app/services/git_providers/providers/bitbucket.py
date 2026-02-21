@@ -3,15 +3,17 @@ Bitbucket provider implementation.
 
 Uses Bitbucket Cloud REST API 2.0.
 """
+
+import contextlib
 import re
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from ..base import (
     BaseGitProvider,
     GitProviderType,
-    NormalizedRepository,
     NormalizedBranch,
+    NormalizedRepository,
     NormalizedUser,
 )
 
@@ -29,12 +31,12 @@ class BitbucketProvider(BaseGitProvider):
     OAUTH_TOKEN_URL = "https://bitbucket.org/site/oauth2/access_token"
     API_BASE_URL = "https://api.bitbucket.org/2.0"
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Build Bitbucket-specific HTTP headers."""
         return {
             "Authorization": f"Bearer {self.access_token}",
             "Accept": "application/json",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
     async def get_user_info(self) -> NormalizedUser:
@@ -46,10 +48,10 @@ class BitbucketProvider(BaseGitProvider):
             username=data["username"],
             email=None,  # Bitbucket requires separate call for emails
             display_name=data.get("display_name"),
-            avatar_url=data.get("links", {}).get("avatar", {}).get("href")
+            avatar_url=data.get("links", {}).get("avatar", {}).get("href"),
         )
 
-    async def get_user_emails(self) -> List[str]:
+    async def get_user_emails(self) -> list[str]:
         """Get user email addresses from Bitbucket."""
         try:
             # Bitbucket returns emails via /user/emails endpoint
@@ -65,10 +67,8 @@ class BitbucketProvider(BaseGitProvider):
             return []
 
     async def list_repositories(
-        self,
-        visibility: str = "all",
-        sort: str = "updated"
-    ) -> List[NormalizedRepository]:
+        self, visibility: str = "all", sort: str = "updated"
+    ) -> list[NormalizedRepository]:
         """
         List repositories for the authenticated Bitbucket user.
 
@@ -84,17 +84,10 @@ class BitbucketProvider(BaseGitProvider):
             workspace_slug = workspace["slug"]
 
             # Map sort parameter to Bitbucket's sort field
-            sort_map = {
-                "updated": "-updated_on",
-                "created": "-created_on",
-                "name": "name"
-            }
+            sort_map = {"updated": "-updated_on", "created": "-created_on", "name": "name"}
             sort_field = sort_map.get(sort, "-updated_on")
 
-            params = {
-                "sort": sort_field,
-                "pagelen": 100
-            }
+            params = {"sort": sort_field, "pagelen": 100}
 
             # Add privacy filter if not "all"
             if visibility == "private":
@@ -104,9 +97,7 @@ class BitbucketProvider(BaseGitProvider):
 
             try:
                 repos_data = await self._request(
-                    "GET",
-                    f"/repositories/{workspace_slug}",
-                    params=params
+                    "GET", f"/repositories/{workspace_slug}", params=params
                 )
 
                 for repo in repos_data.get("values", []):
@@ -117,11 +108,7 @@ class BitbucketProvider(BaseGitProvider):
 
         return all_repos
 
-    async def get_repository(
-        self,
-        owner: str,
-        repo: str
-    ) -> NormalizedRepository:
+    async def get_repository(self, owner: str, repo: str) -> NormalizedRepository:
         """
         Get information about a specific Bitbucket repository.
 
@@ -132,17 +119,11 @@ class BitbucketProvider(BaseGitProvider):
         data = await self._request("GET", f"/repositories/{owner}/{repo}")
         return self._normalize_repository(data)
 
-    async def list_branches(
-        self,
-        owner: str,
-        repo: str
-    ) -> List[NormalizedBranch]:
+    async def list_branches(self, owner: str, repo: str) -> list[NormalizedBranch]:
         """List branches for a Bitbucket repository."""
         # Get branches
         branches_data = await self._request(
-            "GET",
-            f"/repositories/{owner}/{repo}/refs/branches",
-            params={"pagelen": 100}
+            "GET", f"/repositories/{owner}/{repo}/refs/branches", params={"pagelen": 100}
         )
 
         # Get repo info for default branch
@@ -151,25 +132,23 @@ class BitbucketProvider(BaseGitProvider):
 
         branches = []
         for branch in branches_data.get("values", []):
-            branches.append(NormalizedBranch(
-                name=branch["name"],
-                is_default=(branch["name"] == default_branch),
-                commit_sha=branch.get("target", {}).get("hash", ""),
-                protected=False  # Bitbucket has branch restrictions, not simple protected flag
-            ))
+            branches.append(
+                NormalizedBranch(
+                    name=branch["name"],
+                    is_default=(branch["name"] == default_branch),
+                    commit_sha=branch.get("target", {}).get("hash", ""),
+                    protected=False,  # Bitbucket has branch restrictions, not simple protected flag
+                )
+            )
 
         return branches
 
-    async def get_default_branch(
-        self,
-        owner: str,
-        repo: str
-    ) -> str:
+    async def get_default_branch(self, owner: str, repo: str) -> str:
         """Get the default branch name for a Bitbucket repository."""
         repo_info = await self._request("GET", f"/repositories/{owner}/{repo}")
         return repo_info.get("mainbranch", {}).get("name", "main")
 
-    def _normalize_repository(self, data: Dict[str, Any]) -> NormalizedRepository:
+    def _normalize_repository(self, data: dict[str, Any]) -> NormalizedRepository:
         """Convert Bitbucket API response to normalized repository format."""
         # Bitbucket uses full_name which is workspace/repo_slug
         full_name = data.get("full_name", "")
@@ -177,10 +156,8 @@ class BitbucketProvider(BaseGitProvider):
 
         updated_at = None
         if data.get("updated_on"):
-            try:
+            with contextlib.suppress(ValueError, AttributeError):
                 updated_at = datetime.fromisoformat(data["updated_on"].replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                pass
 
         # Get clone URLs from links
         clone_url = ""
@@ -210,11 +187,11 @@ class BitbucketProvider(BaseGitProvider):
             language=data.get("language"),
             size=data.get("size", 0),
             stars_count=0,  # Bitbucket doesn't have stars
-            forks_count=0   # Would need separate API call
+            forks_count=0,  # Would need separate API call
         )
 
     @staticmethod
-    def parse_repo_url(repo_url: str) -> Optional[Dict[str, str]]:
+    def parse_repo_url(repo_url: str) -> dict[str, str] | None:
         """
         Parse a Bitbucket repository URL to extract workspace and repo slug.
 
@@ -247,11 +224,7 @@ class BitbucketProvider(BaseGitProvider):
         return None
 
     @staticmethod
-    def format_clone_url(
-        owner: str,
-        repo: str,
-        access_token: Optional[str] = None
-    ) -> str:
+    def format_clone_url(owner: str, repo: str, access_token: str | None = None) -> str:
         """
         Format a Bitbucket clone URL with optional authentication.
 
@@ -268,7 +241,7 @@ class BitbucketProvider(BaseGitProvider):
             return f"https://x-token-auth:{access_token}@bitbucket.org/{owner}/{repo}.git"
         return f"https://bitbucket.org/{owner}/{repo}.git"
 
-    async def get_workspaces(self) -> List[Dict[str, Any]]:
+    async def get_workspaces(self) -> list[dict[str, Any]]:
         """Get all workspaces the user has access to."""
         data = await self._request("GET", "/workspaces")
         return data.get("values", [])

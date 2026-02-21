@@ -20,6 +20,8 @@ from app.agent.resource_limits import (
     reset_resource_limits,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestBasicResourceTracking:
     """Test basic resource tracking functionality."""
@@ -136,16 +138,16 @@ class TestResourceLimits:
         with pytest.raises(ResourceLimitExceeded, match="Global cost limit exceeded"):
             limits.add_cost(0.03)
 
-    def test_global_iteration_limit_exceeded(self):
-        """Test that global iteration limit is enforced."""
-        limits = ResourceLimits(max_iterations=5)
+    def test_per_run_iteration_limit_exceeded(self):
+        """Test that per-run iteration limit is enforced."""
+        limits = ResourceLimits(max_iterations_per_run=5)
 
         for _ in range(5):
-            limits.add_iteration()
+            limits.add_iteration(run_id="run1")
 
-        # This should exceed the limit
-        with pytest.raises(ResourceLimitExceeded, match="Global iteration limit exceeded"):
-            limits.add_iteration()
+        # This should exceed the per-run limit
+        with pytest.raises(ResourceLimitExceeded, match="Per-message iteration limit exceeded"):
+            limits.add_iteration(run_id="run1")
 
     def test_per_run_cost_limit_exceeded(self):
         """Test that per-run cost limit is enforced."""
@@ -208,14 +210,14 @@ class TestStatistics:
         assert stats["global"]["cost_utilization"] == 25.0
 
     def test_iteration_utilization(self):
-        """Test iteration utilization percentage calculation."""
-        limits = ResourceLimits(max_iterations=10)
+        """Test per-run iteration utilization percentage calculation."""
+        limits = ResourceLimits(max_iterations_per_run=10)
 
         for _ in range(5):
-            limits.add_iteration()
+            limits.add_iteration(run_id="run1")
 
-        stats = limits.get_stats()
-        assert stats["global"]["iteration_utilization"] == 50.0
+        stats = limits.get_stats(run_id="run1")
+        assert stats["run"]["iteration_utilization"] == 50.0
 
     def test_per_run_utilization(self):
         """Test per-run utilization calculation."""

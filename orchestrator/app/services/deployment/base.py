@@ -5,16 +5,15 @@ This module defines the abstract base class that all deployment providers must i
 along with Pydantic models for deployment configuration and results.
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
-import asyncio
 import os
-from pathlib import Path
+from abc import ABC, abstractmethod
+
+from pydantic import BaseModel, Field
 
 
 class DeploymentFile(BaseModel):
     """Represents a file to be deployed."""
+
     path: str = Field(..., description="Relative path of the file")
     content: bytes = Field(..., description="File content as bytes")
     encoding: str = Field(default="utf-8", description="File encoding")
@@ -25,24 +24,30 @@ class DeploymentFile(BaseModel):
 
 class DeploymentConfig(BaseModel):
     """Configuration for a deployment."""
+
     project_id: str = Field(..., description="Unique project identifier")
     project_name: str = Field(..., description="Human-readable project name")
     framework: str = Field(..., description="Framework type (vite, nextjs, react, etc.)")
-    deployment_mode: str = Field(default="pre-built", description="Deployment mode: 'source' or 'pre-built'")
-    build_command: Optional[str] = Field(None, description="Custom build command override")
-    start_command: Optional[str] = Field(None, description="Custom start command for server frameworks")
-    env_vars: Dict[str, str] = Field(default_factory=dict, description="Environment variables")
-    custom_domain: Optional[str] = Field(None, description="Custom domain for deployment")
+    deployment_mode: str = Field(
+        default="pre-built", description="Deployment mode: 'source' or 'pre-built'"
+    )
+    build_command: str | None = Field(None, description="Custom build command override")
+    start_command: str | None = Field(
+        None, description="Custom start command for server frameworks"
+    )
+    env_vars: dict[str, str] = Field(default_factory=dict, description="Environment variables")
+    custom_domain: str | None = Field(None, description="Custom domain for deployment")
 
 
 class DeploymentResult(BaseModel):
     """Result of a deployment operation."""
+
     success: bool = Field(..., description="Whether deployment succeeded")
-    deployment_id: Optional[str] = Field(None, description="Provider's deployment identifier")
-    deployment_url: Optional[str] = Field(None, description="URL where the deployment is accessible")
-    logs: List[str] = Field(default_factory=list, description="Deployment logs")
-    error: Optional[str] = Field(None, description="Error message if deployment failed")
-    metadata: Dict = Field(default_factory=dict, description="Provider-specific metadata")
+    deployment_id: str | None = Field(None, description="Provider's deployment identifier")
+    deployment_url: str | None = Field(None, description="URL where the deployment is accessible")
+    logs: list[str] = Field(default_factory=list, description="Deployment logs")
+    error: str | None = Field(None, description="Error message if deployment failed")
+    metadata: dict = Field(default_factory=dict, description="Provider-specific metadata")
 
 
 class BaseDeploymentProvider(ABC):
@@ -53,7 +58,7 @@ class BaseDeploymentProvider(ABC):
     and implement the required abstract methods.
     """
 
-    def __init__(self, credentials: Dict[str, str]):
+    def __init__(self, credentials: dict[str, str]):
         """
         Initialize the provider with credentials.
 
@@ -74,7 +79,7 @@ class BaseDeploymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def test_credentials(self) -> Dict:
+    async def test_credentials(self) -> dict:
         """
         Test if credentials are valid by making a real API call to the provider.
 
@@ -90,9 +95,7 @@ class BaseDeploymentProvider(ABC):
 
     @abstractmethod
     async def deploy(
-        self,
-        files: List[DeploymentFile],
-        config: DeploymentConfig
+        self, files: list[DeploymentFile], config: DeploymentConfig
     ) -> DeploymentResult:
         """
         Deploy application files to the provider.
@@ -107,7 +110,7 @@ class BaseDeploymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_deployment_status(self, deployment_id: str) -> Dict:
+    async def get_deployment_status(self, deployment_id: str) -> dict:
         """
         Get the current status of a deployment.
 
@@ -133,7 +136,7 @@ class BaseDeploymentProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_deployment_logs(self, deployment_id: str) -> List[str]:
+    async def get_deployment_logs(self, deployment_id: str) -> list[str]:
         """
         Fetch deployment logs from the provider.
 
@@ -146,10 +149,8 @@ class BaseDeploymentProvider(ABC):
         pass
 
     async def collect_files_from_container(
-        self,
-        project_path: str,
-        build_output_dir: str = "dist"
-    ) -> List[DeploymentFile]:
+        self, project_path: str, build_output_dir: str = "dist"
+    ) -> list[DeploymentFile]:
         """
         Collect built files from project directory.
 
@@ -174,24 +175,23 @@ class BaseDeploymentProvider(ABC):
 
         for root, dirs, filenames in os.walk(build_path):
             # Skip common directories that shouldn't be deployed
-            dirs[:] = [d for d in dirs if d not in {'.git', 'node_modules', '__pycache__', '.DS_Store'}]
+            dirs[:] = [
+                d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".DS_Store"}
+            ]
 
             for filename in filenames:
                 file_path = os.path.join(root, filename)
                 relative_path = os.path.relpath(file_path, build_path)
 
                 # Read file content
-                with open(file_path, 'rb') as f:
+                with open(file_path, "rb") as f:
                     content = f.read()
 
-                files.append(DeploymentFile(
-                    path=relative_path,
-                    content=content
-                ))
+                files.append(DeploymentFile(path=relative_path, content=content))
 
         return files
 
-    def get_framework_config(self, framework: str) -> Dict:
+    def get_framework_config(self, framework: str) -> dict:
         """
         Get framework-specific deployment configuration.
 
@@ -206,53 +206,56 @@ class BaseDeploymentProvider(ABC):
                 "build_command": "npm run build",
                 "output_dir": "dist",
                 "install_command": "npm install",
-                "dev_command": "npm run dev"
+                "dev_command": "npm run dev",
             },
             "nextjs": {
                 "build_command": "npm run build",
                 "output_dir": ".next",
                 "install_command": "npm install",
                 "dev_command": "npm run dev",
-                "requires_server": True
+                "requires_server": True,
             },
             "react": {
                 "build_command": "npm run build",
                 "output_dir": "build",
                 "install_command": "npm install",
-                "dev_command": "npm start"
+                "dev_command": "npm start",
             },
             "vue": {
                 "build_command": "npm run build",
                 "output_dir": "dist",
                 "install_command": "npm install",
-                "dev_command": "npm run serve"
+                "dev_command": "npm run serve",
             },
             "svelte": {
                 "build_command": "npm run build",
                 "output_dir": "dist",
                 "install_command": "npm install",
-                "dev_command": "npm run dev"
+                "dev_command": "npm run dev",
             },
             "go": {
                 "build_command": "go build -o main",
                 "output_dir": ".",
                 "install_command": "go mod download",
-                "requires_server": True
+                "requires_server": True,
             },
             "python": {
                 "build_command": None,  # No build needed for Python apps
                 "output_dir": ".",
                 "install_command": "pip install -r requirements.txt",
-                "requires_server": True
-            }
+                "requires_server": True,
+            },
         }
 
-        return configs.get(framework.lower(), {
-            "build_command": "npm run build",
-            "output_dir": "dist",
-            "install_command": "npm install",
-            "dev_command": "npm run dev"
-        })
+        return configs.get(
+            framework.lower(),
+            {
+                "build_command": "npm run build",
+                "output_dir": "dist",
+                "install_command": "npm install",
+                "dev_command": "npm run dev",
+            },
+        )
 
     def _sanitize_name(self, name: str) -> str:
         """
@@ -265,11 +268,12 @@ class BaseDeploymentProvider(ABC):
             Sanitized name (lowercase, alphanumeric + hyphens, max 63 chars)
         """
         import re
+
         # Convert to lowercase and replace spaces/underscores with hyphens
-        name = name.lower().replace('_', '-').replace(' ', '-')
+        name = name.lower().replace("_", "-").replace(" ", "-")
         # Remove invalid characters
-        name = re.sub(r'[^a-z0-9-]', '', name)
+        name = re.sub(r"[^a-z0-9-]", "", name)
         # Remove leading/trailing hyphens
-        name = name.strip('-')
+        name = name.strip("-")
         # Limit length (DNS label limit)
         return name[:63]

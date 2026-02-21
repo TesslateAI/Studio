@@ -1,9 +1,10 @@
 """
 Git provider implementations.
 """
+
+from .bitbucket import BitbucketProvider
 from .github import GitHubProvider
 from .gitlab import GitLabProvider
-from .bitbucket import BitbucketProvider
 
 __all__ = [
     "GitHubProvider",

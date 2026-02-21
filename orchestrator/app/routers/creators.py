@@ -1,11 +1,12 @@
 """
 Creator/Author profile API endpoints for the marketplace.
 """
-from typing import Optional, List
+
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
 
 from ..database import get_db
 from ..models import MarketplaceAgent, MarketplaceBase
@@ -15,22 +16,17 @@ router = APIRouter(prefix="/api/creators", tags=["creators"])
 
 
 @router.get("/{user_id}")
-async def get_creator_profile(
-    user_id: str,
-    db: AsyncSession = Depends(get_db)
-):
+async def get_creator_profile(user_id: str, db: AsyncSession = Depends(get_db)):
     """
     Get a creator's public profile and their published extensions.
     """
     try:
         creator_uuid = UUID(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid user ID format")
+        raise HTTPException(status_code=400, detail="Invalid user ID format") from None
 
     # Get user
-    user_result = await db.execute(
-        select(User).where(User.id == creator_uuid)
-    )
+    user_result = await db.execute(select(User).where(User.id == creator_uuid))
     user = user_result.scalar_one_or_none()
 
     if not user:
@@ -38,36 +34,43 @@ async def get_creator_profile(
 
     # Get published agents by this creator
     agents_result = await db.execute(
-        select(MarketplaceAgent).where(
+        select(MarketplaceAgent)
+        .where(
             or_(
                 MarketplaceAgent.created_by_user_id == creator_uuid,
-                MarketplaceAgent.forked_by_user_id == creator_uuid
+                MarketplaceAgent.forked_by_user_id == creator_uuid,
             ),
-            MarketplaceAgent.is_published == True,
-            MarketplaceAgent.is_active == True
-        ).order_by(MarketplaceAgent.downloads.desc())
+            MarketplaceAgent.is_published,
+            MarketplaceAgent.is_active,
+        )
+        .order_by(MarketplaceAgent.downloads.desc())
     )
     agents = agents_result.scalars().all()
 
     # Get published (public) bases by this creator
     bases_result = await db.execute(
-        select(MarketplaceBase).where(
+        select(MarketplaceBase)
+        .where(
             MarketplaceBase.created_by_user_id == creator_uuid,
             MarketplaceBase.visibility == "public",
-            MarketplaceBase.is_active == True,
-        ).order_by(MarketplaceBase.downloads.desc())
+            MarketplaceBase.is_active,
+        )
+        .order_by(MarketplaceBase.downloads.desc())
     )
     bases = bases_result.scalars().all()
 
     # Calculate total downloads (agents + bases)
-    total_downloads = sum(agent.downloads or 0 for agent in agents) + sum(base.downloads or 0 for base in bases)
+    total_downloads = sum(agent.downloads or 0 for agent in agents) + sum(
+        base.downloads or 0 for base in bases
+    )
 
     # Calculate average rating
     rated_agents = [a for a in agents if a.rating and a.reviews_count]
     avg_rating = (
-        sum(a.rating * a.reviews_count for a in rated_agents) /
-        sum(a.reviews_count for a in rated_agents)
-        if rated_agents else 5.0
+        sum(a.rating * a.reviews_count for a in rated_agents)
+        / sum(a.reviews_count for a in rated_agents)
+        if rated_agents
+        else 5.0
     )
 
     return {
@@ -83,7 +86,7 @@ async def get_creator_profile(
         "stats": {
             "extensions_count": len(agents) + len(bases),
             "total_downloads": total_downloads,
-            "average_rating": round(avg_rating, 1)
+            "average_rating": round(avg_rating, 1),
         },
         "extensions": [
             {
@@ -106,7 +109,7 @@ async def get_creator_profile(
                 "usage_count": agent.usage_count or 0,
                 "features": agent.features or [],
                 "tags": agent.tags or [],
-                "is_featured": agent.is_featured
+                "is_featured": agent.is_featured,
             }
             for agent in agents
         ],
@@ -134,10 +137,7 @@ async def get_creator_profile(
 
 @router.get("/{user_id}/agents")
 async def get_creator_agents(
-    user_id: str,
-    page: int = 1,
-    limit: int = 20,
-    db: AsyncSession = Depends(get_db)
+    user_id: str, page: int = 1, limit: int = 20, db: AsyncSession = Depends(get_db)
 ):
     """
     Get paginated list of a creator's published agents.
@@ -145,7 +145,7 @@ async def get_creator_agents(
     try:
         creator_uuid = UUID(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid user ID format")
+        raise HTTPException(status_code=400, detail="Invalid user ID format") from None
 
     offset = (page - 1) * limit
 
@@ -154,24 +154,26 @@ async def get_creator_agents(
         select(func.count(MarketplaceAgent.id)).where(
             or_(
                 MarketplaceAgent.created_by_user_id == creator_uuid,
-                MarketplaceAgent.forked_by_user_id == creator_uuid
+                MarketplaceAgent.forked_by_user_id == creator_uuid,
             ),
-            MarketplaceAgent.is_published == True,
-            MarketplaceAgent.is_active == True
+            MarketplaceAgent.is_published,
+            MarketplaceAgent.is_active,
         )
     )
     total = count_result.scalar() or 0
 
     # Get paginated agents
     agents_result = await db.execute(
-        select(MarketplaceAgent).where(
+        select(MarketplaceAgent)
+        .where(
             or_(
                 MarketplaceAgent.created_by_user_id == creator_uuid,
-                MarketplaceAgent.forked_by_user_id == creator_uuid
+                MarketplaceAgent.forked_by_user_id == creator_uuid,
             ),
-            MarketplaceAgent.is_published == True,
-            MarketplaceAgent.is_active == True
-        ).order_by(MarketplaceAgent.downloads.desc())
+            MarketplaceAgent.is_published,
+            MarketplaceAgent.is_active,
+        )
+        .order_by(MarketplaceAgent.downloads.desc())
         .offset(offset)
         .limit(limit)
     )
@@ -199,38 +201,35 @@ async def get_creator_agents(
                 "usage_count": agent.usage_count or 0,
                 "features": agent.features or [],
                 "tags": agent.tags or [],
-                "is_featured": agent.is_featured
+                "is_featured": agent.is_featured,
             }
             for agent in agents
         ],
         "total": total,
         "page": page,
         "limit": limit,
-        "pages": (total + limit - 1) // limit
+        "pages": (total + limit - 1) // limit,
     }
 
 
 @router.get("/{user_id}/stats")
-async def get_creator_stats(
-    user_id: str,
-    db: AsyncSession = Depends(get_db)
-):
+async def get_creator_stats(user_id: str, db: AsyncSession = Depends(get_db)):
     """
     Get aggregated stats for a creator.
     """
     try:
         creator_uuid = UUID(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid user ID format")
+        raise HTTPException(status_code=400, detail="Invalid user ID format") from None
 
     # Get all agents by this creator
     agents_result = await db.execute(
         select(MarketplaceAgent).where(
             or_(
                 MarketplaceAgent.created_by_user_id == creator_uuid,
-                MarketplaceAgent.forked_by_user_id == creator_uuid
+                MarketplaceAgent.forked_by_user_id == creator_uuid,
             ),
-            MarketplaceAgent.is_published == True
+            MarketplaceAgent.is_published,
         )
     )
     agents = agents_result.scalars().all()
@@ -240,7 +239,7 @@ async def get_creator_stats(
         select(MarketplaceBase).where(
             MarketplaceBase.created_by_user_id == creator_uuid,
             MarketplaceBase.visibility == "public",
-            MarketplaceBase.is_active == True,
+            MarketplaceBase.is_active,
         )
     )
     bases = bases_result.scalars().all()
@@ -252,19 +251,22 @@ async def get_creator_stats(
             "total_downloads": 0,
             "total_usage": 0,
             "average_rating": 5.0,
-            "total_reviews": 0
+            "total_reviews": 0,
         }
 
-    total_downloads = sum(agent.downloads or 0 for agent in agents) + sum(base.downloads or 0 for base in bases)
+    total_downloads = sum(agent.downloads or 0 for agent in agents) + sum(
+        base.downloads or 0 for base in bases
+    )
     total_usage = sum(agent.usage_count or 0 for agent in agents)
-    total_reviews = sum(agent.reviews_count or 0 for agent in agents) + sum(base.reviews_count or 0 for base in bases)
+    total_reviews = sum(agent.reviews_count or 0 for agent in agents) + sum(
+        base.reviews_count or 0 for base in bases
+    )
 
     # Calculate weighted average rating
     rated_agents = [a for a in agents if a.rating and a.reviews_count]
     if rated_agents:
-        avg_rating = (
-            sum(a.rating * a.reviews_count for a in rated_agents) /
-            sum(a.reviews_count for a in rated_agents)
+        avg_rating = sum(a.rating * a.reviews_count for a in rated_agents) / sum(
+            a.reviews_count for a in rated_agents
         )
     else:
         avg_rating = 5.0
@@ -275,5 +277,5 @@ async def get_creator_stats(
         "total_downloads": total_downloads,
         "total_usage": total_usage,
         "average_rating": round(avg_rating, 1),
-        "total_reviews": total_reviews
+        "total_reviews": total_reviews,
     }

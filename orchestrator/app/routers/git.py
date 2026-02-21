@@ -1,62 +1,53 @@
 """
 Git operations router for project version control.
 """
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import Optional
+
 import logging
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import User, Project, GitRepository
+from ..models import GitRepository, Project, User
 from ..schemas import (
-    GitCloneRequest,
-    GitInitRequest,
-    GitCommitRequest,
-    GitPushRequest,
-    GitPullRequest,
-    GitBranchRequest,
-    GitSwitchBranchRequest,
-    GitStatusResponse,
-    GitCommitResponse,
-    GitPushResponse,
-    GitPullResponse,
-    GitHistoryResponse,
     GitBranchesResponse,
-    GitRepositoryResponse,
+    GitBranchInfo,
+    GitBranchRequest,
+    GitCloneRequest,
     GitCommitInfo,
-    GitBranchInfo
+    GitCommitRequest,
+    GitCommitResponse,
+    GitHistoryResponse,
+    GitInitRequest,
+    GitPullRequest,
+    GitPullResponse,
+    GitPushRequest,
+    GitPushResponse,
+    GitRepositoryResponse,
+    GitStatusResponse,
+    GitSwitchBranchRequest,
 )
-from ..services.git_manager import GitManager
 from ..services.credential_manager import get_credential_manager
+from ..services.git_manager import GitManager
 from ..services.github_client import GitHubClient
-from ..users import current_active_user, current_superuser
+from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/git", tags=["git"])
 
 
-async def verify_project_access(
-    project_id: UUID,
-    current_user: User,
-    db: AsyncSession
-) -> Project:
+async def verify_project_access(project_id: UUID, current_user: User, db: AsyncSession) -> Project:
     """Verify that the user has access to the project."""
     result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
+        select(Project).where(Project.id == project_id, Project.owner_id == current_user.id)
     )
     project = result.scalar_one_or_none()
 
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     return project
 
@@ -66,7 +57,7 @@ async def initialize_repository(
     project_id: str,
     request: GitInitRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Initialize a Git repository in the project.
@@ -78,8 +69,7 @@ async def initialize_repository(
         # Initialize Git repository
         git_manager = GitManager(current_user.id, str(project_id))
         await git_manager.initialize_repository(
-            remote_url=request.remote_url,
-            default_branch=request.default_branch
+            remote_url=request.remote_url, default_branch=request.default_branch
         )
 
         # Update project
@@ -95,10 +85,10 @@ async def initialize_repository(
                 project_id=project_id,
                 user_id=current_user.id,
                 repo_url=request.remote_url,
-                repo_name=repo_info['repo'] if repo_info else None,
-                repo_owner=repo_info['owner'] if repo_info else None,
+                repo_name=repo_info["repo"] if repo_info else None,
+                repo_owner=repo_info["owner"] if repo_info else None,
                 default_branch=request.default_branch,
-                auth_method='oauth'
+                auth_method="oauth",
             )
             db.add(git_repo)
 
@@ -113,8 +103,8 @@ async def initialize_repository(
         logger.error(f"[GIT] Failed to initialize repository: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initialize repository: {str(e)}"
-        )
+            detail=f"Failed to initialize repository: {str(e)}",
+        ) from e
 
 
 @router.post("/clone")
@@ -122,7 +112,7 @@ async def clone_repository(
     project_id: str,
     request: GitCloneRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Clone a GitHub repository into the project.
@@ -140,15 +130,14 @@ async def clone_repository(
         if not access_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="GitHub not connected. Please connect your GitHub account first."
+                detail="GitHub not connected. Please connect your GitHub account first.",
             )
 
         # Parse repository info
         repo_info = GitHubClient.parse_repo_url(request.repo_url)
         if not repo_info:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid GitHub repository URL"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid GitHub repository URL"
             )
 
         # Get default branch if not specified
@@ -156,16 +145,16 @@ async def clone_repository(
         if not branch:
             github_client = GitHubClient(access_token)
             try:
-                branch = await github_client.get_default_branch(repo_info['owner'], repo_info['repo'])
-            except:
+                branch = await github_client.get_default_branch(
+                    repo_info["owner"], repo_info["repo"]
+                )
+            except Exception:
                 branch = "main"  # Fallback
 
         # Clone repository
         git_manager = GitManager(current_user.id, str(project_id))
         await git_manager.clone_repository(
-            repo_url=request.repo_url,
-            branch=branch,
-            auth_token=access_token
+            repo_url=request.repo_url, branch=branch, auth_token=access_token
         )
 
         # Update project
@@ -180,18 +169,18 @@ async def clone_repository(
 
         if git_repo:
             git_repo.repo_url = request.repo_url
-            git_repo.repo_name = repo_info['repo']
-            git_repo.repo_owner = repo_info['owner']
+            git_repo.repo_name = repo_info["repo"]
+            git_repo.repo_owner = repo_info["owner"]
             git_repo.default_branch = branch
         else:
             git_repo = GitRepository(
                 project_id=project_id,
                 user_id=current_user.id,
                 repo_url=request.repo_url,
-                repo_name=repo_info['repo'],
-                repo_owner=repo_info['owner'],
+                repo_name=repo_info["repo"],
+                repo_owner=repo_info["owner"],
                 default_branch=branch,
-                auth_method='oauth'
+                auth_method="oauth",
             )
             db.add(git_repo)
 
@@ -201,7 +190,7 @@ async def clone_repository(
         return {
             "message": "Repository cloned successfully",
             "branch": branch,
-            "repo_name": repo_info['repo']
+            "repo_name": repo_info["repo"],
         }
 
     except HTTPException:
@@ -210,15 +199,15 @@ async def clone_repository(
         logger.error(f"[GIT] Failed to clone repository: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to clone repository: {str(e)}"
-        )
+            detail=f"Failed to clone repository: {str(e)}",
+        ) from e
 
 
 @router.get("/status", response_model=GitStatusResponse)
 async def get_git_status(
     project_id: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get the current Git status of the project.
@@ -236,7 +225,7 @@ async def get_git_status(
         if not git_repo:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No Git repository connected to this project"
+                detail="No Git repository connected to this project",
             )
 
         # Get Git status
@@ -251,8 +240,8 @@ async def get_git_status(
         logger.error(f"[GIT] Failed to get status: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get Git status: {str(e)}"
-        )
+            detail=f"Failed to get Git status: {str(e)}",
+        ) from e
 
 
 @router.post("/commit", response_model=GitCommitResponse)
@@ -260,7 +249,7 @@ async def create_commit(
     project_id: str,
     request: GitCommitRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Create a new commit with the specified changes.
@@ -271,10 +260,7 @@ async def create_commit(
 
         # Create commit
         git_manager = GitManager(current_user.id, str(project_id))
-        commit_sha = await git_manager.commit(
-            message=request.message,
-            files=request.files
-        )
+        commit_sha = await git_manager.commit(message=request.message, files=request.files)
 
         # Update git_repository record
         result = await db.execute(
@@ -295,8 +281,8 @@ async def create_commit(
         logger.error(f"[GIT] Failed to create commit: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create commit: {str(e)}"
-        )
+            detail=f"Failed to create commit: {str(e)}",
+        ) from e
 
 
 @router.post("/push", response_model=GitPushResponse)
@@ -304,7 +290,7 @@ async def push_commits(
     project_id: str,
     request: GitPushRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Push commits to the remote repository.
@@ -316,9 +302,7 @@ async def push_commits(
         # Push commits
         git_manager = GitManager(current_user.id, str(project_id))
         success = await git_manager.push(
-            branch=request.branch,
-            remote=request.remote,
-            force=request.force
+            branch=request.branch, remote=request.remote, force=request.force
         )
 
         # Update git_repository record
@@ -329,15 +313,13 @@ async def push_commits(
 
         if git_repo:
             from datetime import datetime
+
             git_repo.last_sync_at = datetime.utcnow()
-            git_repo.sync_status = 'synced'
+            git_repo.sync_status = "synced"
             await db.commit()
 
         logger.info(f"[GIT] Pushed commits from project {project_id}")
-        return GitPushResponse(
-            success=success,
-            message="Commits pushed successfully"
-        )
+        return GitPushResponse(success=success, message="Commits pushed successfully")
 
     except HTTPException:
         raise
@@ -345,8 +327,8 @@ async def push_commits(
         logger.error(f"[GIT] Failed to push: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to push commits: {str(e)}"
-        )
+            detail=f"Failed to push commits: {str(e)}",
+        ) from e
 
 
 @router.post("/pull", response_model=GitPullResponse)
@@ -354,7 +336,7 @@ async def pull_changes(
     project_id: str,
     request: GitPullRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Pull changes from the remote repository.
@@ -365,10 +347,7 @@ async def pull_changes(
 
         # Pull changes
         git_manager = GitManager(current_user.id, str(project_id))
-        result = await git_manager.pull(
-            branch=request.branch,
-            remote=request.remote
-        )
+        result = await git_manager.pull(branch=request.branch, remote=request.remote)
 
         # Update git_repository record
         db_result = await db.execute(
@@ -378,8 +357,9 @@ async def pull_changes(
 
         if git_repo:
             from datetime import datetime
+
             git_repo.last_sync_at = datetime.utcnow()
-            git_repo.sync_status = 'synced' if result['success'] else 'conflict'
+            git_repo.sync_status = "synced" if result["success"] else "conflict"
             await db.commit()
 
         logger.info(f"[GIT] Pulled changes into project {project_id}")
@@ -391,17 +371,17 @@ async def pull_changes(
         logger.error(f"[GIT] Failed to pull: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to pull changes: {str(e)}"
-        )
+            detail=f"Failed to pull changes: {str(e)}",
+        ) from e
 
 
 @router.get("/commits", response_model=GitHistoryResponse)
 async def get_commit_history(
     project_id: str,
     limit: int = 50,
-    branch: Optional[str] = None,
+    branch: str | None = None,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get commit history for the project.
@@ -414,9 +394,7 @@ async def get_commit_history(
         git_manager = GitManager(current_user.id, str(project_id))
         commits = await git_manager.get_commit_history(limit=limit, branch=branch)
 
-        return GitHistoryResponse(
-            commits=[GitCommitInfo(**commit) for commit in commits]
-        )
+        return GitHistoryResponse(commits=[GitCommitInfo(**commit) for commit in commits])
 
     except HTTPException:
         raise
@@ -424,15 +402,15 @@ async def get_commit_history(
         logger.error(f"[GIT] Failed to get commit history: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get commit history: {str(e)}"
-        )
+            detail=f"Failed to get commit history: {str(e)}",
+        ) from e
 
 
 @router.get("/branches", response_model=GitBranchesResponse)
 async def list_branches(
     project_id: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     List all branches in the project.
@@ -445,11 +423,10 @@ async def list_branches(
         git_manager = GitManager(current_user.id, str(project_id))
         branches = await git_manager.list_branches()
 
-        current_branch = next((b['name'] for b in branches if b['current']), None)
+        current_branch = next((b["name"] for b in branches if b["current"]), None)
 
         return GitBranchesResponse(
-            branches=[GitBranchInfo(**branch) for branch in branches],
-            current_branch=current_branch
+            branches=[GitBranchInfo(**branch) for branch in branches], current_branch=current_branch
         )
 
     except HTTPException:
@@ -458,8 +435,8 @@ async def list_branches(
         logger.error(f"[GIT] Failed to list branches: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list branches: {str(e)}"
-        )
+            detail=f"Failed to list branches: {str(e)}",
+        ) from e
 
 
 @router.post("/branches")
@@ -467,7 +444,7 @@ async def create_branch(
     project_id: str,
     request: GitBranchRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Create a new branch in the project.
@@ -478,15 +455,12 @@ async def create_branch(
 
         # Create branch
         git_manager = GitManager(current_user.id, str(project_id))
-        success = await git_manager.create_branch(
-            name=request.name,
-            checkout=request.checkout
-        )
+        await git_manager.create_branch(name=request.name, checkout=request.checkout)
 
         logger.info(f"[GIT] Created branch '{request.name}' in project {project_id}")
         return {
             "message": f"Branch '{request.name}' created successfully",
-            "checked_out": request.checkout
+            "checked_out": request.checkout,
         }
 
     except HTTPException:
@@ -495,8 +469,8 @@ async def create_branch(
         logger.error(f"[GIT] Failed to create branch: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create branch: {str(e)}"
-        )
+            detail=f"Failed to create branch: {str(e)}",
+        ) from e
 
 
 @router.put("/branches/switch")
@@ -504,7 +478,7 @@ async def switch_branch(
     project_id: str,
     request: GitSwitchBranchRequest,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Switch to a different branch.
@@ -515,7 +489,7 @@ async def switch_branch(
 
         # Switch branch
         git_manager = GitManager(current_user.id, str(project_id))
-        success = await git_manager.switch_branch(name=request.name)
+        await git_manager.switch_branch(name=request.name)
 
         logger.info(f"[GIT] Switched to branch '{request.name}' in project {project_id}")
         return {"message": f"Switched to branch '{request.name}' successfully"}
@@ -526,15 +500,15 @@ async def switch_branch(
         logger.error(f"[GIT] Failed to switch branch: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to switch branch: {str(e)}"
-        )
+            detail=f"Failed to switch branch: {str(e)}",
+        ) from e
 
 
-@router.get("/info", response_model=Optional[GitRepositoryResponse])
+@router.get("/info", response_model=GitRepositoryResponse | None)
 async def get_repository_info(
     project_id: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get Git repository information for the project.
@@ -560,15 +534,15 @@ async def get_repository_info(
         logger.error(f"[GIT] Failed to get repository info: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get repository info: {str(e)}"
-        )
+            detail=f"Failed to get repository info: {str(e)}",
+        ) from e
 
 
 @router.delete("/disconnect")
 async def disconnect_repository(
     project_id: str,
     current_user: User = Depends(current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Disconnect the project from its Git repository.
@@ -603,5 +577,5 @@ async def disconnect_repository(
         logger.error(f"[GIT] Failed to disconnect repository: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to disconnect repository: {str(e)}"
-        )
+            detail=f"Failed to disconnect repository: {str(e)}",
+        ) from e

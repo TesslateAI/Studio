@@ -5,16 +5,18 @@ Manages available tools for the agent and handles tool execution.
 Each tool is defined with name, description, parameters schema, and executor function.
 """
 
-from dataclasses import dataclass
-from typing import Callable, Dict, Any, List, Optional
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class ToolCategory(Enum):
     """Tool categories for organization."""
+
     FILE_OPS = "file_operations"
     SHELL = "shell_commands"
     PROJECT = "project_management"
@@ -36,13 +38,14 @@ class Tool:
         examples: Example usage patterns
         system_prompt: Optional additional instructions for this tool
     """
+
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     executor: Callable
     category: ToolCategory
-    examples: Optional[List[str]] = None
-    system_prompt: Optional[str] = None
+    examples: list[str] | None = None
+    system_prompt: str | None = None
 
     def to_prompt_format(self) -> str:
         """Convert tool to format suitable for LLM system prompt."""
@@ -79,7 +82,7 @@ class ToolRegistry:
     """
 
     def __init__(self):
-        self._tools: Dict[str, Tool] = {}
+        self._tools: dict[str, Tool] = {}
         logger.info("ToolRegistry initialized")
 
     def register(self, tool: Tool):
@@ -89,11 +92,11 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         logger.info(f"Registered tool: {tool.name} (category: {tool.category.value})")
 
-    def get(self, name: str) -> Optional[Tool]:
+    def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)
 
-    def list_tools(self, category: Optional[ToolCategory] = None) -> List[Tool]:
+    def list_tools(self, category: ToolCategory | None = None) -> list[Tool]:
         """
         List all tools, optionally filtered by category.
 
@@ -127,11 +130,8 @@ class ToolRegistry:
         return "\n".join(sections)
 
     async def execute(
-        self,
-        tool_name: str,
-        parameters: Dict[str, Any],
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, tool_name: str, parameters: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Execute a tool with given parameters.
 
@@ -149,41 +149,47 @@ class ToolRegistry:
             logger.error(f"Unknown tool: {tool_name}")
             return {
                 "success": False,
-                "error": f"Unknown tool '{tool_name}'. Available tools: {', '.join(self._tools.keys())}"
+                "error": f"Unknown tool '{tool_name}'. Available tools: {', '.join(self._tools.keys())}",
             }
 
         # ============================================================================
         # Edit Mode Control - Applies to ALL agents
         # ============================================================================
-        edit_mode = context.get('edit_mode', 'ask')  # Default to 'ask' mode
+        edit_mode = context.get("edit_mode", "ask")  # Default to 'ask' mode
 
         # Define dangerous tools that require special handling
         DANGEROUS_TOOLS = {
-            'write_file', 'patch_file', 'multi_edit',  # File modifications
-            'bash_exec', 'shell_exec', 'shell_open',   # Shell operations
-            'web_fetch',                                # Web operations (can leak data)
-            # 'todo_write' excluded - safe planning operation
+            "write_file",
+            "patch_file",
+            "multi_edit",  # File modifications
+            "apply_patch",  # Codex-style unified patches
+            "bash_exec",
+            "shell_exec",
+            "shell_open",  # Shell operations
+            "web_fetch",  # Web operations (can leak data)
+            # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
         }
 
         is_dangerous = tool_name in DANGEROUS_TOOLS
 
         # Plan Mode: Block all dangerous operations
-        if edit_mode == 'plan' and is_dangerous:
+        if edit_mode == "plan" and is_dangerous:
             logger.warning(f"[PLAN MODE] Blocked tool execution: {tool_name}")
             return {
                 "success": False,
                 "tool": tool_name,
-                "error": f"Plan mode active - {tool_name} is disabled. You can only read files and gather information. Explain what changes you would make instead."
+                "error": f"Plan mode active - {tool_name} is disabled. You can only read files and gather information. Explain what changes you would make instead.",
             }
 
         # Ask Mode: Check if approval needed (unless explicitly skipped)
-        skip_approval = context.get('skip_approval_check', False)
-        if edit_mode == 'ask' and is_dangerous and not skip_approval:
+        skip_approval = context.get("skip_approval_check", False)
+        if edit_mode == "ask" and is_dangerous and not skip_approval:
             from .approval_manager import get_approval_manager
+
             approval_mgr = get_approval_manager()
 
             # Get session_id from context (use chat_id)
-            session_id = context.get('chat_id', 'default')
+            session_id = context.get("chat_id", "default")
 
             # Check if tool type already approved for this session
             if not approval_mgr.is_tool_approved(session_id, tool_name):
@@ -193,15 +199,19 @@ class ToolRegistry:
                     "approval_required": True,
                     "tool": tool_name,
                     "parameters": parameters,
-                    "session_id": session_id
+                    "session_id": session_id,
                 }
             else:
-                logger.info(f"[ASK MODE] Tool {tool_name} already approved for session {session_id}")
-        elif edit_mode == 'ask' and is_dangerous and skip_approval:
+                logger.info(
+                    f"[ASK MODE] Tool {tool_name} already approved for session {session_id}"
+                )
+        elif edit_mode == "ask" and is_dangerous and skip_approval:
             logger.info(f"[ASK MODE] Skipping approval check for {tool_name} (approval granted)")
 
         try:
-            logger.info(f"[TOOL-EXEC] Starting tool: {tool_name} with params: {parameters} [edit_mode={edit_mode}]")
+            logger.info(
+                f"[TOOL-EXEC] Starting tool: {tool_name} with params: {parameters} [edit_mode={edit_mode}]"
+            )
 
             # Execute the tool
             result = await tool.executor(parameters, context)
@@ -213,25 +223,21 @@ class ToolRegistry:
             if tool_succeeded:
                 logger.info(f"[TOOL-EXEC] Completed tool: {tool_name}, success=True")
             else:
-                logger.warning(f"[TOOL-EXEC] Completed tool: {tool_name}, success=False, error: {result.get('message', 'Unknown error')}")
+                logger.warning(
+                    f"[TOOL-EXEC] Completed tool: {tool_name}, success=False, error: {result.get('message', 'Unknown error')}"
+                )
 
-            return {
-                "success": tool_succeeded,
-                "tool": tool_name,
-                "result": result
-            }
+            return {"success": tool_succeeded, "tool": tool_name, "result": result}
 
         except Exception as e:
-            logger.error(f"[TOOL-EXEC] Tool {tool_name} execution FAILED with exception: {e}", exc_info=True)
-            return {
-                "success": False,
-                "tool": tool_name,
-                "error": str(e)
-            }
+            logger.error(
+                f"[TOOL-EXEC] Tool {tool_name} execution FAILED with exception: {e}", exc_info=True
+            )
+            return {"success": False, "tool": tool_name, "error": str(e)}
 
 
 # Global registry instance
-_registry: Optional[ToolRegistry] = None
+_registry: ToolRegistry | None = None
 
 
 def get_tool_registry() -> ToolRegistry:
@@ -247,24 +253,23 @@ def get_tool_registry() -> ToolRegistry:
 def _register_all_tools(registry: ToolRegistry):
     """Register all essential tools from modular structure."""
     from .file_ops import register_all_file_tools
-    from .shell_ops import register_all_shell_tools
-    from .project_ops import register_all_project_tools
     from .planning_ops import register_all_planning_tools
+    from .project_ops import register_all_project_tools
+    from .shell_ops import register_all_shell_tools
     from .web_ops import register_all_web_tools
 
     # Register essential tools (use bash_exec for file listing, globbing, grepping)
-    register_all_file_tools(registry)      # 4 tools: read_file, write_file, patch_file, multi_edit
-    register_all_shell_tools(registry)     # 4 tools: bash_exec, shell_open, shell_exec, shell_close
-    register_all_project_tools(registry)   # 1 tool: get_project_info
+    register_all_file_tools(registry)  # 4 tools: read_file, write_file, patch_file, multi_edit
+    register_all_shell_tools(registry)  # 4 tools: bash_exec, shell_open, shell_exec, shell_close
+    register_all_project_tools(registry)  # 1 tool: get_project_info
     register_all_planning_tools(registry)  # 2 tools: todo_read, todo_write
-    register_all_web_tools(registry)       # 1 tool: web_fetch
+    register_all_web_tools(registry)  # 1 tool: web_fetch
 
     logger.info(f"Registered {len(registry._tools)} essential tools total")
 
 
 def create_scoped_tool_registry(
-    tool_names: List[str],
-    tool_configs: Optional[Dict[str, Dict[str, Any]]] = None
+    tool_names: list[str], tool_configs: dict[str, dict[str, Any]] | None = None
 ) -> ToolRegistry:
     """
     Create a ToolRegistry containing only the specified tools with optional custom configurations.
@@ -307,7 +312,7 @@ def create_scoped_tool_registry(
                     tool,
                     description=custom_description,
                     examples=custom_examples,
-                    system_prompt=custom_system_prompt
+                    system_prompt=custom_system_prompt,
                 )
                 scoped_registry.register(custom_tool)
                 logger.info(f"Registered tool '{name}' with custom configuration")

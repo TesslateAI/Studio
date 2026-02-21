@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
+import { ModelSelector } from './ModelSelector';
 import { EditModeStatus, type EditMode } from './EditModeStatus';
 import { Gear } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
+import { type ChatAgent } from '../../types/chat';
 
 // Width thresholds for responsive collapse
 // Below VERY_COMPACT: Only essential icons (agent icon, send button)
@@ -12,24 +14,15 @@ import JSZip from 'jszip';
 const VERY_COMPACT_WIDTH_THRESHOLD = 300;
 const COMPACT_WIDTH_THRESHOLD = 380;
 
-interface Agent {
-  id: string;
-  name: string;
-  icon: string; // Emoji string from backend
-  active?: boolean;
-  backendId?: number; // Link to backend agent ID
-  mode?: 'stream' | 'agent';
-}
-
 interface ProjectFile {
   file_path: string;
   content: string;
 }
 
 interface ChatInputProps {
-  agents: Agent[];
-  currentAgent: Agent;
-  onSelectAgent: (agent: Agent) => void;
+  agents: ChatAgent[];
+  currentAgent: ChatAgent;
+  onSelectAgent: (agent: ChatAgent) => void;
   onSendMessage: (message: string) => void;
   projectFiles?: ProjectFile[];
   projectName?: string;
@@ -42,6 +35,7 @@ interface ChatInputProps {
   editMode?: EditMode;
   onModeChange?: (mode: EditMode) => void;
   onPlanMode?: () => void;
+  onModelChange?: (model: string) => void;
   isDocked?: boolean; // When true, removes rounded corners at bottom
 }
 
@@ -62,6 +56,7 @@ export function ChatInput({
   editMode = 'allow',
   onModeChange,
   onPlanMode,
+  onModelChange,
   isDocked = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
@@ -383,6 +378,17 @@ export function ChatInput({
               compact={isCompact}
             />
           </div>
+
+          {/* Model selector - hidden when very compact */}
+          {onModelChange && !isVeryCompact && (
+            <div className="flex-shrink-0 min-w-0">
+              <ModelSelector
+                currentAgent={currentAgent}
+                onModelChange={onModelChange}
+                compact={isCompact}
+              />
+            </div>
+          )}
 
           {/* Spacer */}
           <div className="flex-1 min-w-0" />

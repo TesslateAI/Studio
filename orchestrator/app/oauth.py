@@ -6,9 +6,11 @@ Supports:
 - GitHub OAuth
 - Graceful degradation if credentials not configured
 """
-from typing import Any, List, Optional, cast
-from httpx_oauth.clients.google import GoogleOAuth2
+
+from typing import Any, cast
+
 from httpx_oauth.clients.github import GitHubOAuth2
+from httpx_oauth.clients.google import GoogleOAuth2
 from httpx_oauth.exceptions import GetIdEmailError, GetProfileError
 
 from .config import get_settings
@@ -20,6 +22,7 @@ settings = get_settings()
 # Custom Google OAuth2 Client
 # ============================================================================
 
+
 class CustomGoogleOAuth2(GoogleOAuth2):
     """
     Custom Google OAuth2 client that uses the OpenID Connect userinfo endpoint.
@@ -29,7 +32,7 @@ class CustomGoogleOAuth2(GoogleOAuth2):
     endpoint that works with openid, email, and profile scopes.
     """
 
-    async def get_id_email(self, token: str) -> tuple[str, Optional[str]]:
+    async def get_id_email(self, token: str) -> tuple[str, str | None]:
         """
         Get user ID and email using OpenID Connect userinfo endpoint.
 
@@ -61,7 +64,8 @@ class CustomGoogleOAuth2(GoogleOAuth2):
 # OAuth Clients Configuration
 # ============================================================================
 
-def get_google_oauth_client() -> Optional[CustomGoogleOAuth2]:
+
+def get_google_oauth_client() -> CustomGoogleOAuth2 | None:
     """
     Get Google OAuth client if configured, otherwise return None.
 
@@ -86,7 +90,7 @@ def get_google_oauth_client() -> Optional[CustomGoogleOAuth2]:
         return None
 
 
-def get_github_oauth_client() -> Optional[GitHubOAuth2]:
+def get_github_oauth_client() -> GitHubOAuth2 | None:
     """
     Get GitHub OAuth client if configured, otherwise return None.
 
@@ -111,6 +115,7 @@ def get_github_oauth_client() -> Optional[GitHubOAuth2]:
 # ============================================================================
 # OAuth Provider Registry
 # ============================================================================
+
 
 def get_available_oauth_clients() -> dict:
     """
@@ -139,7 +144,7 @@ def get_available_oauth_clients() -> dict:
     return clients
 
 
-def get_oauth_client_names() -> List[str]:
+def get_oauth_client_names() -> list[str]:
     """Get list of available OAuth provider names."""
     return list(get_available_oauth_clients().keys())
 
@@ -152,6 +157,7 @@ OAUTH_CLIENTS = get_available_oauth_clients()
 # OAuth Configuration Helpers
 # ============================================================================
 
+
 def is_google_oauth_enabled() -> bool:
     """Check if Google OAuth is enabled and configured."""
     return "google" in OAUTH_CLIENTS
@@ -162,7 +168,7 @@ def is_github_oauth_enabled() -> bool:
     return "github" in OAUTH_CLIENTS
 
 
-def get_oauth_redirect_url(provider: str) -> Optional[str]:
+def get_oauth_redirect_url(provider: str) -> str | None:
     """
     Get the redirect URL for the given OAuth provider.
 

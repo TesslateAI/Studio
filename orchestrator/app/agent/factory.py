@@ -11,33 +11,30 @@ The factory:
 """
 
 import logging
-from typing import Dict, Type, Optional
 
+from ..models import MarketplaceAgent as MarketplaceAgentModel
 from .base import AbstractAgent
-from .stream_agent import StreamAgent
+from .features import Features
 from .iterative_agent import IterativeAgent
 from .react_agent import ReActAgent
+from .stream_agent import StreamAgent
+from .tesslate_agent import TesslateAgent
 from .tools.registry import create_scoped_tool_registry, get_tool_registry
-from ..models import MarketplaceAgent as MarketplaceAgentModel
 
 logger = logging.getLogger(__name__)
 
 
 # Map agent_type string from DB to Python class
-AGENT_CLASS_MAP: Dict[str, Type[AbstractAgent]] = {
+AGENT_CLASS_MAP: dict[str, type[AbstractAgent]] = {
     "StreamAgent": StreamAgent,
     "IterativeAgent": IterativeAgent,
     "ReActAgent": ReActAgent,
-    # Add new agent types here as you create them!
-    # Example:
-    # "PlannerAgent": PlannerAgent,
+    "TesslateAgent": TesslateAgent,
 }
 
 
 async def create_agent_from_db_model(
-    agent_model: MarketplaceAgentModel,
-    model_adapter=None,
-    tools_override=None
+    agent_model: MarketplaceAgentModel, model_adapter=None, tools_override=None
 ) -> AbstractAgent:
     """
     Factory function to create an agent instance from its database model.
@@ -81,8 +78,7 @@ async def create_agent_from_db_model(
     if not AgentClass:
         available_types = ", ".join(AGENT_CLASS_MAP.keys())
         raise ValueError(
-            f"Unknown agent type '{agent_type_str}'. "
-            f"Available types: {available_types}"
+            f"Unknown agent type '{agent_type_str}'. Available types: {available_types}"
         )
 
     logger.info(f"[AgentFactory] Creating agent '{agent_model.name}' of type '{agent_type_str}'")
@@ -93,17 +89,19 @@ async def create_agent_from_db_model(
     if tools_override is not None:
         # Use the provided tool registry (e.g., ViewScopedToolRegistry)
         tools = tools_override
-        logger.info(f"[AgentFactory] Using provided tools_override registry")
+        logger.info("[AgentFactory] Using provided tools_override registry")
     elif agent_model.tools:
         logger.info(f"[AgentFactory] Creating scoped tool registry with tools: {agent_model.tools}")
         # Pass custom tool configurations if available
-        tool_configs = agent_model.tool_configs if hasattr(agent_model, 'tool_configs') else None
+        tool_configs = agent_model.tool_configs if hasattr(agent_model, "tool_configs") else None
         if tool_configs:
-            logger.info(f"[AgentFactory] Applying custom tool configurations for {len(tool_configs)} tools")
+            logger.info(
+                f"[AgentFactory] Applying custom tool configurations for {len(tool_configs)} tools"
+            )
         tools = create_scoped_tool_registry(agent_model.tools, tool_configs)
     else:
-        # For IterativeAgent and ReActAgent, use global registry if no specific tools defined
-        if agent_type_str in ["IterativeAgent", "ReActAgent"]:
+        # For tool-calling agents, use global registry if no specific tools defined
+        if agent_type_str in ["IterativeAgent", "ReActAgent", "TesslateAgent"]:
             logger.info(f"[AgentFactory] Using global tool registry for {agent_type_str}")
             tools = get_tool_registry()
 
@@ -112,26 +110,33 @@ async def create_agent_from_db_model(
     if agent_type_str == "StreamAgent":
         agent = StreamAgent(
             system_prompt=agent_model.system_prompt,
-            tools=tools  # StreamAgent doesn't use tools, but we pass it for consistency
+            tools=tools,  # StreamAgent doesn't use tools, but we pass it for consistency
         )
     elif agent_type_str == "IterativeAgent":
         agent = IterativeAgent(
             system_prompt=agent_model.system_prompt,
             tools=tools,
-            model=model_adapter  # IterativeAgent needs a model adapter
+            model=model_adapter,  # IterativeAgent needs a model adapter
         )
     elif agent_type_str == "ReActAgent":
         agent = ReActAgent(
             system_prompt=agent_model.system_prompt,
             tools=tools,
-            model=model_adapter  # ReActAgent needs a model adapter
+            model=model_adapter,  # ReActAgent needs a model adapter
+        )
+    elif agent_type_str == "TesslateAgent":
+        # Build feature flags from agent config (Library UI toggles write here)
+        agent_config = agent_model.config if hasattr(agent_model, "config") else None
+        features = Features.from_config(agent_config)
+        agent = TesslateAgent(
+            system_prompt=agent_model.system_prompt,
+            tools=tools,
+            model=model_adapter,
+            features=features,
         )
     else:
         # Generic instantiation for future agent types
-        agent = AgentClass(
-            system_prompt=agent_model.system_prompt,
-            tools=tools
-        )
+        agent = AgentClass(system_prompt=agent_model.system_prompt, tools=tools)
 
     logger.info(
         f"[AgentFactory] Successfully created {agent_type_str} "
@@ -144,7 +149,7 @@ async def create_agent_from_db_model(
     return agent
 
 
-def register_agent_type(agent_type: str, agent_class: Type[AbstractAgent]):
+def register_agent_type(agent_type: str, agent_class: type[AbstractAgent]):
     """
     Register a new agent type in the factory.
 
@@ -176,7 +181,7 @@ def get_available_agent_types() -> list[str]:
     return list(AGENT_CLASS_MAP.keys())
 
 
-def get_agent_class(agent_type: str) -> Optional[Type[AbstractAgent]]:
+def get_agent_class(agent_type: str) -> type[AbstractAgent] | None:
     """
     Get the agent class for a given agent type.
 

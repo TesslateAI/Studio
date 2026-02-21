@@ -19,7 +19,7 @@ export type ThemePreset = Theme;
 // ============================================================================
 
 // In-memory cache of loaded themes
-let themesCache: Map<string, Theme> = new Map();
+const themesCache: Map<string, Theme> = new Map();
 let themesLoaded = false;
 let themesLoading: Promise<void> | null = null;
 

@@ -3,13 +3,15 @@ Bitbucket OAuth Service.
 
 Handles OAuth2 authentication flow with Bitbucket Cloud.
 """
-import secrets
-import httpx
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
-from urllib.parse import urlencode
+
 import base64
 import logging
+import secrets
+from datetime import datetime, timedelta
+from typing import Any
+from urllib.parse import urlencode
+
+import httpx
 
 from ....config import get_settings
 
@@ -52,11 +54,7 @@ class BitbucketOAuthService:
         """
         # Note: Bitbucket OAuth2 doesn't use scope in the authorization URL
         # Scopes are configured in the OAuth consumer settings on Bitbucket
-        params = {
-            "client_id": self.client_id,
-            "response_type": "code",
-            "state": state
-        }
+        params = {"client_id": self.client_id, "response_type": "code", "state": state}
 
         # Add redirect_uri if configured
         if self.redirect_uri:
@@ -70,7 +68,7 @@ class BitbucketOAuthService:
         encoded = base64.b64encode(credentials.encode()).decode()
         return f"Basic {encoded}"
 
-    async def exchange_code_for_token(self, code: str) -> Dict[str, Any]:
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
         """
         Exchange authorization code for access token.
 
@@ -88,15 +86,12 @@ class BitbucketOAuthService:
                 # Bitbucket requires Basic auth for token exchange
                 response = await client.post(
                     self.OAUTH_TOKEN_URL,
-                    data={
-                        "grant_type": "authorization_code",
-                        "code": code
-                    },
+                    data={"grant_type": "authorization_code", "code": code},
                     headers={
                         "Authorization": self._get_basic_auth_header(),
-                        "Content-Type": "application/x-www-form-urlencoded"
+                        "Content-Type": "application/x-www-form-urlencoded",
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
 
                 response.raise_for_status()
@@ -120,7 +115,7 @@ class BitbucketOAuthService:
                 logger.error(f"[BITBUCKET OAuth] Failed to exchange code for token: {e}")
                 raise
 
-    async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
+    async def refresh_token(self, refresh_token: str) -> dict[str, Any]:
         """
         Refresh an expired access token.
 
@@ -136,15 +131,12 @@ class BitbucketOAuthService:
             try:
                 response = await client.post(
                     self.OAUTH_TOKEN_URL,
-                    data={
-                        "grant_type": "refresh_token",
-                        "refresh_token": refresh_token
-                    },
+                    data={"grant_type": "refresh_token", "refresh_token": refresh_token},
                     headers={
                         "Authorization": self._get_basic_auth_header(),
-                        "Content-Type": "application/x-www-form-urlencoded"
+                        "Content-Type": "application/x-www-form-urlencoded",
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
 
                 response.raise_for_status()
@@ -163,7 +155,7 @@ class BitbucketOAuthService:
                 logger.error(f"[BITBUCKET OAuth] Failed to refresh token: {e}")
                 raise
 
-    async def get_user_info(self, access_token: str) -> Dict[str, Any]:
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
         """
         Get Bitbucket user information using access token.
 
@@ -176,10 +168,8 @@ class BitbucketOAuthService:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/user",
-                headers={
-                    "Authorization": f"Bearer {access_token}"
-                },
-                timeout=30.0
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=30.0,
             )
             response.raise_for_status()
             return response.json()
@@ -198,10 +188,8 @@ class BitbucketOAuthService:
             try:
                 response = await client.get(
                     f"{self.API_BASE_URL}/user/emails",
-                    headers={
-                        "Authorization": f"Bearer {access_token}"
-                    },
-                    timeout=30.0
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=30.0,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -224,7 +212,9 @@ class BitbucketOAuthService:
         """
         # Bitbucket doesn't support programmatic token revocation
         # Users must revoke access from their Bitbucket account settings
-        logger.warning("[BITBUCKET OAuth] Token revocation not supported. User must revoke manually.")
+        logger.warning(
+            "[BITBUCKET OAuth] Token revocation not supported. User must revoke manually."
+        )
         return True
 
     def validate_state(self, state: str, stored_state: str) -> bool:
@@ -242,7 +232,7 @@ class BitbucketOAuthService:
 
 
 # Singleton instance
-_bitbucket_oauth_service: Optional[BitbucketOAuthService] = None
+_bitbucket_oauth_service: BitbucketOAuthService | None = None
 
 
 def get_bitbucket_oauth_service() -> BitbucketOAuthService:

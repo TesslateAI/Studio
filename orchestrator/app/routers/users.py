@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -25,6 +25,9 @@ class UserPreferencesResponse(BaseModel):
     chat_position: str | None = None
 
 
+AVATAR_URL_MAX_LENGTH = 512_000  # 500KB - generous limit for base64 data URIs
+
+
 class UserProfileUpdate(BaseModel):
     name: str | None = None
     avatar_url: str | None = None
@@ -32,6 +35,15 @@ class UserProfileUpdate(BaseModel):
     twitter_handle: str | None = None
     github_username: str | None = None
     website_url: str | None = None
+
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url_length(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > AVATAR_URL_MAX_LENGTH:
+            raise ValueError(
+                f"avatar_url exceeds maximum length of {AVATAR_URL_MAX_LENGTH} characters"
+            )
+        return v
 
 
 @router.get("/preferences", response_model=UserPreferencesResponse)

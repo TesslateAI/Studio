@@ -7,12 +7,8 @@ import {
   CaretRight,
   Monitor,
   Code,
-  Folder,
-  Cube,
   GitBranch,
   BookOpen,
-  Sun,
-  Moon,
   Image,
   Storefront,
   Gear,
@@ -39,7 +35,6 @@ import { DiscordSupport } from '../components/DiscordSupport';
 import { useContainerStartup } from '../hooks/useContainerStartup';
 import {
   GitHubPanel,
-  ArchitecturePanel,
   NotesPanel,
   SettingsPanel,
   AssetsPanel,
@@ -51,24 +46,16 @@ import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector } from '../components/ContainerSelector';
 import { projectsApi, marketplaceApi, authApi } from '../lib/api';
-import { useTheme } from '../theme/ThemeContext';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
 import toast from 'react-hot-toast';
 import { fileEvents } from '../utils/fileEvents';
 import { motion } from 'framer-motion';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { type ChatAgent } from '../types/chat';
 
-type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
+type PanelType = 'github' | 'notes' | 'settings' | 'marketplace' | null;
 type MainViewType = 'preview' | 'code' | 'kanban' | 'assets' | 'terminal';
-
-interface UIAgent {
-  id: string;
-  name: string;
-  icon: string;
-  backendId: number;
-  mode: 'stream' | 'agent';
-}
 
 export default function Project() {
   const { slug } = useParams<{ slug: string }>();
@@ -76,14 +63,14 @@ export default function Project() {
   const [searchParams] = useSearchParams();
   const containerId = searchParams.get('container');
 
-  const { theme, toggleTheme } = useTheme();
   const { chatPosition } = useChatPosition();
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [files, setFiles] = useState<Array<Record<string, unknown>>>([]);
   const [container, setContainer] = useState<Record<string, unknown> | null>(null);
   const [containers, setContainers] = useState<Array<Record<string, unknown>>>([]);
-  const [agents, setAgents] = useState<UIAgent[]>([]);
+  const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [activeView, setActiveView] = useState<MainViewType>('preview');
+  const [kanbanMounted, setKanbanMounted] = useState(false);
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
@@ -107,6 +94,7 @@ export default function Project() {
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const isPointerOverPreviewRef = useRef(false);
 
   // Track if we need to start the container (for the startup hook)
   const [needsContainerStart, setNeedsContainerStart] = useState(false);
@@ -237,15 +225,6 @@ export default function Project() {
     (e) => {
       e.preventDefault();
       togglePanel('settings');
-    },
-    { enableOnFormTags: false }
-  );
-
-  useHotkeys(
-    'mod+shift+a',
-    (e) => {
-      e.preventDefault();
-      togglePanel('architecture');
     },
     { enableOnFormTags: false }
   );
@@ -442,6 +421,13 @@ export default function Project() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, slug, container]); // Include container to use correct filter
 
+  // Lazily mount KanbanPanel on first visit to preserve state across tab switches
+  useEffect(() => {
+    if (activeView === 'kanban' && !kanbanMounted) {
+      setKanbanMounted(true);
+    }
+  }, [activeView, kanbanMounted]);
+
   const loadProject = async () => {
     if (!slug) return;
     try {
@@ -515,10 +501,21 @@ export default function Project() {
         // Check if container is already running before starting
         try {
           const status = await projectsApi.getContainersStatus(slug);
-          const containerDir =
-            foundContainer.directory ||
-            foundContainer.name?.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-          const containerStatus = status?.containers?.[containerDir];
+          // Match the backend's _sanitize_service_name(container.name) which is used
+          // as the key in docker compose status. directory="." means root project dir,
+          // not a valid service name — so fall through to container name.
+          const rawDir = foundContainer.directory;
+          const serviceKey = (rawDir && rawDir !== '.' ? rawDir : foundContainer.name)
+            ?.toLowerCase()
+            .replace(/[\s_.]/g, '-')
+            .replace(/[^a-z0-9-]/g, '')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
+          const containerStatus = status?.containers?.[serviceKey];
+
+          console.log('[loadContainer] status response:', JSON.stringify(status));
+          console.log('[loadContainer] rawDir:', rawDir, 'serviceKey:', serviceKey);
+          console.log('[loadContainer] containerStatus:', JSON.stringify(containerStatus));
 
           // Check for hibernation - only explicit hibernated status, not just stopped
           if (
@@ -534,17 +531,23 @@ export default function Project() {
 
           if (containerStatus?.running && containerStatus?.url) {
             // Container already running - just set the URL without starting
+            console.log('[loadContainer] FAST PATH: container running at', containerStatus.url);
+            // Reset any in-flight startup state from a previously loading container
+            containerStartup.reset();
+            setNeedsContainerStart(false);
             setDevServerUrl(containerStatus.url);
             setDevServerUrlWithAuth(containerStatus.url);
             setCurrentPreviewUrl(containerStatus.url);
             return;
           }
+          console.log('[loadContainer] SLOW PATH: container not detected as running');
         } catch (statusError) {
           // Status check failed, proceed with start anyway
           console.warn('Failed to check container status, will attempt start:', statusError);
         }
 
         // Container not running - use the startup hook to start it with real-time logs
+        console.log('[loadContainer] Starting container via startup hook');
         const containerIdToStart = foundContainer.id as string;
         currentContainerIdRef.current = containerIdToStart;
         setNeedsContainerStart(true);
@@ -571,6 +574,10 @@ export default function Project() {
         icon: (agent.icon as string) || '🤖',
         backendId: agent.id as string,
         mode: agent.mode as string,
+        model: agent.model as string | undefined,
+        selectedModel: agent.selected_model as string | null | undefined,
+        sourceType: agent.source_type as 'open' | 'closed' | undefined,
+        isCustom: agent.is_custom as boolean | undefined,
       }));
 
       setAgents(uiAgents);
@@ -764,30 +771,9 @@ export default function Project() {
       onClick: () => setActiveView('terminal'),
       active: activeView === 'terminal',
     },
-    {
-      icon: <Folder size={18} />,
-      title: 'Files',
-      onClick: () => toast('File tree feature coming soon!', { icon: '📁' }),
-    },
-    {
-      icon: <Cube size={18} />,
-      title: 'Components',
-      onClick: () => toast('Components library coming soon!', { icon: '🧩' }),
-    },
-    {
-      icon: <FlowArrow size={18} />,
-      title: 'Architecture',
-      onClick: () => togglePanel('architecture'),
-      active: activePanel === 'architecture',
-    },
   ];
 
   const rightSidebarItems = [
-    {
-      icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
-      title: 'Toggle Theme',
-      onClick: toggleTheme,
-    },
     {
       icon: <BookOpen size={18} />,
       title: 'Notes',
@@ -803,7 +789,7 @@ export default function Project() {
     {
       icon: <Storefront size={18} />,
       title: 'Agents',
-      onClick: () => navigate('/marketplace'),
+      onClick: () => window.open('/marketplace', '_blank'),
     },
     {
       icon: <Article size={18} />,
@@ -1126,6 +1112,7 @@ export default function Project() {
                         projectName={project?.name}
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
+                        isPointerOverPreviewRef={isPointerOverPreviewRef}
                       />
                     </Panel>
                     <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
@@ -1198,7 +1185,15 @@ export default function Project() {
                               <ArrowsClockwise size={16} />
                             </button>
                           </div>
-                          <div className="w-full h-[calc(100%-50px)] bg-white">
+                          <div
+                            className="w-full h-[calc(100%-50px)] bg-white"
+                            onMouseEnter={() => {
+                              isPointerOverPreviewRef.current = true;
+                            }}
+                            onMouseLeave={() => {
+                              isPointerOverPreviewRef.current = false;
+                            }}
+                          >
                             <iframe
                               ref={iframeRef}
                               id="preview-iframe"
@@ -1228,9 +1223,13 @@ export default function Project() {
                   </div>
 
                   {/* Kanban View */}
-                  <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-                    <KanbanPanel projectId={project?.id} />
-                  </div>
+                  {kanbanMounted && project?.id && (
+                    <div
+                      className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}
+                    >
+                      <KanbanPanel projectId={project.id as string} />
+                    </div>
+                  )}
 
                   {/* Assets View */}
                   <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
@@ -1268,6 +1267,7 @@ export default function Project() {
                         projectName={project?.name}
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
+                        isPointerOverPreviewRef={isPointerOverPreviewRef}
                       />
                     </Panel>
                   </>
@@ -1340,7 +1340,15 @@ export default function Project() {
                             <ArrowsClockwise size={16} />
                           </button>
                         </div>
-                        <div className="w-full h-[calc(100%-50px)] bg-white">
+                        <div
+                          className="w-full h-[calc(100%-50px)] bg-white"
+                          onMouseEnter={() => {
+                            isPointerOverPreviewRef.current = true;
+                          }}
+                          onMouseLeave={() => {
+                            isPointerOverPreviewRef.current = false;
+                          }}
+                        >
                           <iframe
                             ref={iframeRef}
                             id="preview-iframe"
@@ -1370,9 +1378,11 @@ export default function Project() {
                 </div>
 
                 {/* Kanban View */}
-                <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-                  <KanbanPanel projectId={project?.id} />
-                </div>
+                {kanbanMounted && project?.id && (
+                  <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                    <KanbanPanel projectId={project.id as string} />
+                  </div>
+                )}
 
                 {/* Assets View */}
                 <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
@@ -1423,9 +1433,11 @@ export default function Project() {
             </div>
 
             {/* Kanban View */}
-            <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
-              <KanbanPanel projectId={project?.id} />
-            </div>
+            {kanbanMounted && project?.id && (
+              <div className={`w-full h-full ${activeView === 'kanban' ? 'block' : 'hidden'}`}>
+                <KanbanPanel projectId={project.id as string} />
+              </div>
+            )}
 
             {/* Assets View */}
             <div className={`w-full h-full ${activeView === 'assets' ? 'block' : 'hidden'}`}>
@@ -1446,19 +1458,9 @@ export default function Project() {
         icon={<GitBranch size={20} />}
         isOpen={activePanel === 'github'}
         onClose={() => setActivePanel(null)}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
       >
         <GitHubPanel projectId={project?.id} />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="Architecture"
-        icon={<FlowArrow size={20} />}
-        isOpen={activePanel === 'architecture'}
-        onClose={() => setActivePanel(null)}
-        defaultSize={{ width: 900, height: 700 }}
-        defaultPosition={{ x: 200, y: 100 }}
-      >
-        <ArchitecturePanel projectSlug={slug!} />
       </FloatingPanel>
 
       <FloatingPanel
@@ -1466,6 +1468,7 @@ export default function Project() {
         icon={<BookOpen size={20} />}
         isOpen={activePanel === 'notes'}
         onClose={() => setActivePanel(null)}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
       >
         <NotesPanel projectSlug={slug!} />
       </FloatingPanel>
@@ -1475,6 +1478,7 @@ export default function Project() {
         icon={<Gear size={20} />}
         isOpen={activePanel === 'settings'}
         onClose={() => setActivePanel(null)}
+        defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
       >
         <SettingsPanel projectSlug={slug!} />
       </FloatingPanel>
@@ -1494,6 +1498,7 @@ export default function Project() {
             projectFiles={files}
             projectName={project?.name}
             sidebarExpanded={isLeftSidebarExpanded}
+            isPointerOverPreviewRef={isPointerOverPreviewRef}
           />
         </div>
       )}

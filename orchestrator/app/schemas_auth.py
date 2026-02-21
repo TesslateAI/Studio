@@ -91,3 +91,20 @@ class UserPreferences(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class LoginResponse(BaseModel):
+    """Response for login endpoint — either a JWT or a 2FA challenge."""
+
+    access_token: str | None = None
+    token_type: str = "bearer"
+    requires_2fa: bool = False
+    temp_token: str | None = None
+    method: str | None = None  # "email" when 2FA is required
+
+
+class TwoFAVerifyRequest(BaseModel):
+    """Request body for verifying a 2FA code during login."""
+
+    temp_token: str = Field(..., description="Temporary token from login response")
+    code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")
