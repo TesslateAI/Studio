@@ -303,25 +303,79 @@ case "$COMMAND" in
         echo
 
         # Build & Push
-        for img in $IMAGES; do
-            FULL_TAG="${ECR_REGISTRY}/tesslate-${img}:${ENVIRONMENT}"
-            DOCKERFILE="${DOCKERFILES[$img]}"
-            CONTEXT="${BUILD_CONTEXTS[$img]}"
+        IMAGE_COUNT=$(echo $IMAGES | wc -w)
 
-            CACHE_FLAG="--no-cache"
-            if [ "$USE_CACHE" = true ]; then
-                CACHE_FLAG=""
-            fi
+        if [ "$IMAGE_COUNT" -gt 1 ]; then
+            # Parallel builds
+            BUILD_PIDS=()
+            BUILD_IMGS=()
+            BUILD_LOGS=()
+            BUILD_TMPDIR=$(mktemp -d)
 
-            info "[$img] Building ${FULL_TAG}..."
-            docker build $CACHE_FLAG -t "$FULL_TAG" -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT"
-            success "[$img] ✓ Build complete"
+            for img in $IMAGES; do
+                FULL_TAG="${ECR_REGISTRY}/tesslate-${img}:${ENVIRONMENT}"
+                DOCKERFILE="${DOCKERFILES[$img]}"
+                CONTEXT="${BUILD_CONTEXTS[$img]}"
+                LOG_FILE="$BUILD_TMPDIR/${img}.log"
 
-            info "[$img] Pushing..."
-            docker push "$FULL_TAG"
-            success "[$img] ✓ Push complete"
+                CACHE_FLAG="--no-cache"
+                if [ "$USE_CACHE" = true ]; then
+                    CACHE_FLAG=""
+                fi
+
+                info "[$img] Starting build ${FULL_TAG}..."
+                (
+                    docker build $CACHE_FLAG -t "$FULL_TAG" \
+                        -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" >>"$LOG_FILE" 2>&1 \
+                    && docker push "$FULL_TAG" >>"$LOG_FILE" 2>&1
+                ) &
+                BUILD_PIDS+=($!)
+                BUILD_IMGS+=("$img")
+                BUILD_LOGS+=("$LOG_FILE")
+            done
+
+            info "Waiting for ${IMAGE_COUNT} parallel builds..."
             echo
-        done
+
+            BUILD_FAILED=0
+            for i in "${!BUILD_PIDS[@]}"; do
+                if wait "${BUILD_PIDS[$i]}"; then
+                    success "[${BUILD_IMGS[$i]}] ✓ Build & push complete"
+                else
+                    echo -e "${RED}[${BUILD_IMGS[$i]}] ✗ Build or push failed. Last 30 lines:${NC}"
+                    tail -30 "${BUILD_LOGS[$i]}" 2>/dev/null || true
+                    BUILD_FAILED=1
+                fi
+            done
+
+            rm -rf "$BUILD_TMPDIR"
+            echo
+
+            if [ "$BUILD_FAILED" -ne 0 ]; then
+                error "One or more builds failed"
+            fi
+        else
+            # Single image — build inline with live output
+            for img in $IMAGES; do
+                FULL_TAG="${ECR_REGISTRY}/tesslate-${img}:${ENVIRONMENT}"
+                DOCKERFILE="${DOCKERFILES[$img]}"
+                CONTEXT="${BUILD_CONTEXTS[$img]}"
+
+                CACHE_FLAG="--no-cache"
+                if [ "$USE_CACHE" = true ]; then
+                    CACHE_FLAG=""
+                fi
+
+                info "[$img] Building ${FULL_TAG}..."
+                docker build $CACHE_FLAG -t "$FULL_TAG" -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT"
+                success "[$img] ✓ Build complete"
+
+                info "[$img] Pushing..."
+                docker push "$FULL_TAG"
+                success "[$img] ✓ Push complete"
+                echo
+            done
+        fi
 
         # Switch kubectl context
         CLUSTER_NAME="tesslate-${ENVIRONMENT}-eks"

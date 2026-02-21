@@ -10,7 +10,7 @@
 #   ./scripts/terraform/secrets.sh upload production
 #   ./scripts/terraform/secrets.sh view production
 #
-# Short form (defaults to download):
+# Short form (defaults to view):
 #   ./scripts/terraform/secrets.sh production
 # =============================================================================
 
@@ -50,8 +50,8 @@ if [[ "$FIRST_ARG" =~ ^(upload|download|view)$ ]]; then
   COMMAND="$FIRST_ARG"
   ENVIRONMENT="$SECOND_ARG"
 else
-  # First arg is environment, default to download
-  COMMAND="download"
+  # First arg is environment, default to view
+  COMMAND="view"
   ENVIRONMENT="$FIRST_ARG"
 fi
 
@@ -60,16 +60,16 @@ if [ -z "$ENVIRONMENT" ]; then
   echo "Usage: $0 [command] {production|beta|shared}"
   echo ""
   echo "Commands:"
-  echo "  download  - Download tfvars from AWS to local file (default)"
+  echo "  view      - View tfvars content from AWS (default)"
+  echo "  download  - Download tfvars from AWS to local file"
   echo "  upload    - Upload local tfvars to AWS Secrets Manager"
-  echo "  view      - View tfvars content from AWS (without downloading)"
   echo ""
   echo "Examples:"
-  echo "  $0 production                 # Download (short form)"
-  echo "  $0 download production        # Download (explicit)"
-  echo "  $0 upload production          # Upload local file to AWS"
+  echo "  $0 production                 # View (short form)"
   echo "  $0 view production            # View content in AWS"
-  echo "  $0 shared                     # Download shared stack tfvars"
+  echo "  $0 download production        # Download to local file"
+  echo "  $0 upload production          # Upload local file to AWS"
+  echo "  $0 shared                     # View shared stack tfvars"
   exit 1
 fi
 
@@ -213,8 +213,6 @@ cmd_upload() {
   echo
   info "Team members can now download with:"
   info "  $0 download $ENVIRONMENT"
-  info "Or shorter:"
-  info "  $0 $ENVIRONMENT"
   echo
 }
 

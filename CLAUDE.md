@@ -615,9 +615,11 @@ Terraform tfvars files are stored in **AWS Secrets Manager** (as raw content) an
 
 **Download tfvars** (required before first terraform run):
 ```bash
-# Download tfvars from AWS to local file
+# View tfvars content from AWS (default, no local file created)
 ./scripts/terraform/secrets.sh production
-# or explicit: ./scripts/terraform/secrets.sh download production
+
+# Download tfvars from AWS to local file
+./scripts/terraform/secrets.sh download production
 
 # This creates: k8s/terraform/aws/terraform.production.tfvars
 ```
@@ -635,16 +637,17 @@ Terraform tfvars files are stored in **AWS Secrets Manager** (as raw content) an
 ./scripts/terraform/secrets.sh upload production
 ./scripts/terraform/secrets.sh upload beta
 
-# Test downloading
+# Test viewing
 ./scripts/terraform/secrets.sh production
 
 # Team members can now download and use
+# ./scripts/terraform/secrets.sh download production
 ```
 
 **Updating secrets**:
 ```bash
 # 1. Download latest (to avoid conflicts)
-./scripts/terraform/secrets.sh production
+./scripts/terraform/secrets.sh download production
 
 # 2. Edit local file
 vim k8s/terraform/aws/terraform.production.tfvars
@@ -652,13 +655,14 @@ vim k8s/terraform/aws/terraform.production.tfvars
 # 3. Upload to AWS
 ./scripts/terraform/secrets.sh upload production
 
-# 4. Notify team to re-download: ./scripts/terraform/secrets.sh production
+# 4. Notify team to re-download: ./scripts/terraform/secrets.sh download production
 ```
 
 **View secrets in AWS**:
 ```bash
-# View tfvars content from AWS without downloading
-./scripts/terraform/secrets.sh view production
+# View tfvars content from AWS (this is the default)
+./scripts/terraform/secrets.sh production
+# or explicit: ./scripts/terraform/secrets.sh view production
 ```
 
 **AWS Secrets Manager Structure:**
