@@ -65,6 +65,7 @@ export default function MarketplaceDetail() {
   const [relatedItems, setRelatedItems] = useState<MarketplaceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
   const [forking, setForking] = useState(false);
 
   // Review state
@@ -78,9 +79,21 @@ export default function MarketplaceDetail() {
 
   useEffect(() => {
     if (slug) {
+      setLoading(true);
       loadItemDetails();
     }
   }, [slug]);
+
+  // Reload agent details when returning to this page (e.g., after removing from Library)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (slug && item) {
+        loadItemDetails();
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [slug, item?.id]);
 
   const loadItemDetails = async () => {
     try {
@@ -165,6 +178,22 @@ export default function MarketplaceDetail() {
       toast.error('Failed to add to library');
     } finally {
       setInstalling(false);
+    }
+  };
+
+  const handleUninstall = async () => {
+    if (!item) return;
+
+    setUninstalling(true);
+    try {
+      await marketplaceApi.removeFromLibrary(item.id);
+      toast.success(`${item.name} removed from your library`);
+      setItem({ ...item, is_purchased: false });
+    } catch (error) {
+      console.error('Failed to uninstall:', error);
+      toast.error('Failed to remove from library');
+    } finally {
+      setUninstalling(false);
     }
   };
 
@@ -488,13 +517,38 @@ export default function MarketplaceDetail() {
               {/* Install Button */}
               <div className="flex items-center gap-4">
                 {item.is_purchased ? (
-                  <button
-                    disabled
-                    className="flex items-center gap-2 px-6 py-3 bg-green-500/15 text-green-500 rounded-xl text-sm font-semibold"
-                  >
-                    <Check size={18} weight="bold" />
-                    Installed
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-2 px-6 py-3 bg-green-500/15 text-green-500 rounded-xl text-sm font-semibold">
+                      <Check size={18} weight="bold" />
+                      Installed
+                    </span>
+                    {item.item_type === 'agent' && (
+                      <button
+                        onClick={handleUninstall}
+                        disabled={uninstalling}
+                        className={`
+                          flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all
+                          ${
+                            theme === 'light'
+                              ? 'bg-red-500/10 hover:bg-red-500/20 text-red-600 border border-red-500/20'
+                              : 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20'
+                          }
+                        `}
+                      >
+                        {uninstalling ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-red-400/30 border-t-red-400 rounded-full animate-spin" />
+                            Removing...
+                          </>
+                        ) : (
+                          <>
+                            <Trash size={18} weight="bold" />
+                            Uninstall
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <button
                     onClick={handleInstall}

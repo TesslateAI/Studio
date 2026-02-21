@@ -1720,14 +1720,17 @@ async def remove_agent_from_library(
     if not purchase:
         raise HTTPException(status_code=404, detail="Agent not in your library")
 
-    # Check if agent is assigned to any projects
+    # Check if agent is assigned to any of the current user's projects
     project_assignments_result = await db.execute(
-        select(ProjectAgent).where(ProjectAgent.agent_id == agent_id)
+        select(ProjectAgent).where(
+            ProjectAgent.agent_id == agent_id,
+            ProjectAgent.user_id == current_user.id,
+        )
     )
     project_assignments = project_assignments_result.scalars().all()
 
     if project_assignments:
-        # Remove from all projects first
+        # Remove from all of this user's projects first
         for assignment in project_assignments:
             await db.delete(assignment)
 

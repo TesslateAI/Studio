@@ -879,7 +879,7 @@ function AgentsTab({
         message={
           deleteAction === 'delete'
             ? `Permanently delete "${agentToDelete?.name}"? This will remove the agent entirely and cannot be undone.`
-            : `Remove "${agentToDelete?.name}" from your library? This cannot be undone.`
+            : `Remove "${agentToDelete?.name}" from your library? You can re-install it from the Marketplace at any time.`
         }
         confirmText={deleteAction === 'delete' ? 'Delete Permanently' : 'Remove'}
         cancelText="Cancel"
