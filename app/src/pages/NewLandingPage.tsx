@@ -1,16 +1,35 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowUpIcon, Sparkles, X, Github, BookOpen, Code2, Boxes,
-  Check, Star, Users, Zap, Globe, MessageSquare,
-  TrendingUp, ChevronDown, PlayCircle, ArrowRight,
-  Package, Settings, Share2, Shield
+  ArrowUpIcon,
+  Sparkles,
+  X,
+  Github,
+  BookOpen,
+  Code2,
+  Boxes,
+  Check,
+  Star,
+  Users,
+  Zap,
+  Globe,
+  MessageSquare,
+  TrendingUp,
+  ChevronDown,
+  PlayCircle,
+  ArrowRight,
+  Package,
+  Settings,
+  Share2,
+  Shield,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '../lib/utils';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function NewLandingPage() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [message, setMessage] = useState('');
   const [showBanner, setShowBanner] = useState(true);
   const [expandedFAQ, setExpandedFAQ] = useState<number | null>(null);
@@ -29,15 +48,14 @@ export default function NewLandingPage() {
 
     // Site color scheme - orange based
     const WARP_COLORS = [
-      [249, 115, 22],  // Primary orange #f97316
-      [234, 88, 12],   // Darker orange
-      [251, 146, 60],  // Lighter orange
+      [249, 115, 22], // Primary orange #f97316
+      [234, 88, 12], // Darker orange
+      [251, 146, 60], // Lighter orange
       [255, 255, 255], // White
       [253, 186, 116], // Pale orange
     ];
 
-    const randomInRange = (min: number, max: number) =>
-      Math.random() * (max - min) + min;
+    const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
     class Star {
       x: number;
@@ -196,8 +214,13 @@ export default function NewLandingPage() {
       let element: HTMLElement | null = target;
       while (element && element !== heroContainer) {
         const tagName = element.tagName;
-        if (tagName === 'BUTTON' || tagName === 'A' || tagName === 'INPUT' ||
-            tagName === 'TEXTAREA' || tagName === 'SELECT') {
+        if (
+          tagName === 'BUTTON' ||
+          tagName === 'A' ||
+          tagName === 'INPUT' ||
+          tagName === 'TEXTAREA' ||
+          tagName === 'SELECT'
+        ) {
           return true;
         }
         // Also check if element has click handlers
@@ -324,7 +347,7 @@ export default function NewLandingPage() {
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
-      textarea.style.height = "auto";
+      textarea.style.height = 'auto';
       const newHeight = Math.min(textarea.scrollHeight, 200);
       textarea.style.height = `${newHeight}px`;
     }
@@ -345,51 +368,60 @@ export default function NewLandingPage() {
     }
   }, [message, navigate]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  }, [handleSubmit]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    },
+    [handleSubmit]
+  );
 
-  const hasContent = message.trim() !== "";
+  const hasContent = message.trim() !== '';
 
   const faqs = [
     {
-      question: "Is Tesslate really open source?",
-      answer: "Yes! Tesslate is fully open-source under the Apache 2.0 license. You can view, modify, and fork our entire codebase on GitHub. Everything from the core platform to individual agents is transparent and community-driven."
+      question: 'Is Tesslate really open source?',
+      answer:
+        'Yes! Tesslate is fully open-source under the Apache 2.0 license. You can view, modify, and fork our entire codebase on GitHub. Everything from the core platform to individual agents is transparent and community-driven.',
     },
     {
-      question: "Can I self-host?",
-      answer: "Absolutely. Tesslate supports local hosting, VPC deployment, on-prem infrastructure, or cloud hosting. Run it on your laptop, GPU rig, or enterprise servers—you have complete control."
+      question: 'Can I self-host?',
+      answer:
+        'Absolutely. Tesslate supports local hosting, VPC deployment, on-prem infrastructure, or cloud hosting. Run it on your laptop, GPU rig, or enterprise servers—you have complete control.',
     },
     {
-      question: "Can I use my own models?",
-      answer: "Yes! Tesslate works with any LLM—OpenAI, Anthropic, Mistral, Llama, Qwen, or your custom fine-tuned models. You're not locked into any single provider."
+      question: 'Can I use my own models?',
+      answer:
+        "Yes! Tesslate works with any LLM—OpenAI, Anthropic, Mistral, Llama, Qwen, or your custom fine-tuned models. You're not locked into any single provider.",
     },
     {
-      question: "Do I keep my code?",
-      answer: "100%. All generated code is yours—no strings attached. Export to GitHub, Docker, Kubernetes, or any runtime. No vendor lock-in, no black boxes."
+      question: 'Do I keep my code?',
+      answer:
+        '100%. All generated code is yours—no strings attached. Export to GitHub, Docker, Kubernetes, or any runtime. No vendor lock-in, no black boxes.',
     },
     {
-      question: "Is this safe for enterprises?",
-      answer: "Yes. We offer private runners, full audit logs, RBAC, SSO integration, and ensure no data leaves your environment. Perfect for compliance-heavy industries."
+      question: 'Is this safe for enterprises?',
+      answer:
+        'Yes. We offer private runners, full audit logs, RBAC, SSO integration, and ensure no data leaves your environment. Perfect for compliance-heavy industries.',
     },
     {
-      question: "How does monetization work?",
-      answer: "Publish agents to the Tesslate Marketplace and earn recurring income. You can monetize them publicly or share them privately within your enterprise teams."
-    }
+      question: 'How does monetization work?',
+      answer:
+        'Publish agents to the Tesslate Marketplace and earn recurring income. You can monetize them publicly or share them privately within your enterprise teams.',
+    },
   ];
 
   return (
     <div
-        className="relative w-full min-h-screen flex flex-col items-center font-['DM_Sans'] overflow-x-hidden"
-        style={{
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-          WebkitOverflowScrolling: 'touch'
-        }}
-      >
+      className="relative w-full min-h-screen flex flex-col items-center font-['DM_Sans'] overflow-x-hidden"
+      style={{
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+        WebkitOverflowScrolling: 'touch',
+      }}
+    >
       <style>{`
         .relative.w-full.min-h-screen::-webkit-scrollbar {
           display: none;
@@ -419,7 +451,11 @@ export default function NewLandingPage() {
       `}</style>
 
       {/* HERO SECTION - WITH HYPERSPACE JUMP EFFECT */}
-      <div ref={heroRef} className="relative w-full bg-black overflow-hidden" style={{ minHeight: '100vh', cursor: 'pointer' }}>
+      <div
+        ref={heroRef}
+        className="relative w-full bg-black overflow-hidden"
+        style={{ minHeight: '100vh', cursor: 'pointer' }}
+      >
         {/* Hyperspace canvas - ONLY IN HERO */}
         <canvas
           ref={canvasRef}
@@ -457,22 +493,42 @@ export default function NewLandingPage() {
           )}
 
           {/* Tesslate Logo in top left */}
-          <div className="fixed top-4 left-4 sm:top-8 sm:left-8 z-40" style={{ marginTop: showBanner ? '44px' : '0' }}>
+          <div
+            className="fixed top-4 left-4 sm:top-8 sm:left-8 z-40"
+            style={{ marginTop: showBanner ? '44px' : '0' }}
+          >
             <div className="flex items-center gap-2 sm:gap-3">
-              <svg className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
-                <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-                <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-                <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+              <svg
+                className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]"
+                viewBox="0 0 161.9 126.66"
+              >
+                <path
+                  d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"
+                  fill="currentColor"
+                />
+                <path
+                  d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"
+                  fill="currentColor"
+                />
+                <path
+                  d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"
+                  fill="currentColor"
+                />
               </svg>
               <div>
-                <h2 className="text-base sm:text-xl font-bold text-white drop-shadow-lg">Tesslate</h2>
+                <h2 className="text-base sm:text-xl font-bold text-white drop-shadow-lg">
+                  Tesslate
+                </h2>
                 <p className="text-[10px] sm:text-xs text-gray-400">Build beyond limits</p>
               </div>
             </div>
           </div>
 
           {/* Login and GitHub buttons in top right */}
-          <div className="fixed top-4 right-4 sm:top-8 sm:right-8 z-40 flex items-center gap-2 sm:gap-3" style={{ marginTop: showBanner ? '44px' : '0' }}>
+          <div
+            className="fixed top-4 right-4 sm:top-8 sm:right-8 z-40 flex items-center gap-2 sm:gap-3"
+            style={{ marginTop: showBanner ? '44px' : '0' }}
+          >
             <a
               href="https://github.com/TesslateAI/Studio"
               target="_blank"
@@ -484,25 +540,28 @@ export default function NewLandingPage() {
               <span className="hidden sm:inline">Star us</span>
             </a>
             <button
-              onClick={() => navigate('/login')}
+              onClick={() => navigate(isAuthenticated ? '/dashboard' : '/login')}
               className="px-4 sm:px-6 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white transition-colors shadow-lg shadow-[rgba(var(--primary-rgb),0.3)]"
             >
-              Sign In
+              {isAuthenticated ? 'Dashboard' : 'Sign In'}
             </button>
           </div>
 
           {/* Centered Title and Input Section */}
-          <div className="flex-1 w-full flex flex-col items-center justify-center px-4 gap-3 sm:gap-5 md:gap-8 py-20 sm:py-6 md:py-8" style={{ paddingTop: showBanner ? '120px' : '100px', minHeight: '70vh' }}>
+          <div
+            className="flex-1 w-full flex flex-col items-center justify-center px-4 gap-3 sm:gap-5 md:gap-8 py-20 sm:py-6 md:py-8"
+            style={{ paddingTop: showBanner ? '120px' : '100px', minHeight: '70vh' }}
+          >
             <header className="text-center space-y-1.5 sm:space-y-3 md:space-y-4">
               <pre
                 className="text-[8px] sm:text-xs md:text-sm lg:text-base xl:text-lg leading-tight overflow-x-auto"
                 style={{
                   color: '#f97316',
                   fontFamily: 'monospace',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
                 }}
               >
-{`████████╗███████╗███████╗███████╗██╗      █████╗ ████████╗███████╗
+                {`████████╗███████╗███████╗███████╗██╗      █████╗ ████████╗███████╗
 ╚══██╔══╝██╔════╝██╔════╝██╔════╝██║     ██╔══██╗╚══██╔══╝██╔════╝
    ██║   █████╗  ███████╗███████╗██║     ███████║   ██║   █████╗
    ██║   ██╔══╝  ╚════██║╚════██║██║     ██╔══██║   ██║   ██╔══╝
@@ -513,7 +572,8 @@ export default function NewLandingPage() {
                 Your open source AI product team
               </h1>
               <p className="text-xs sm:text-base md:text-lg text-[var(--primary)] font-medium max-w-5xl mx-auto px-4">
-                Build full-stack apps 10× faster with complete control—deploy locally or in your cloud, use any model, ensure data privacy, and enjoy zero vendor lock-in.
+                Build full-stack apps 10× faster with complete control—deploy locally or in your
+                cloud, use any model, ensure data privacy, and enjoy zero vendor lock-in.
               </p>
             </header>
 
@@ -530,7 +590,8 @@ export default function NewLandingPage() {
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = '#f97316';
-                  e.currentTarget.style.boxShadow = '0 15px 50px rgba(249, 115, 22, 0.3), 0 0 80px rgba(249, 115, 22, 0.15)';
+                  e.currentTarget.style.boxShadow =
+                    '0 15px 50px rgba(249, 115, 22, 0.3), 0 0 80px rgba(249, 115, 22, 0.15)';
                   e.currentTarget.style.transform = 'translateY(-2px)';
                 }}
                 onMouseLeave={(e) => {
@@ -547,8 +608,8 @@ export default function NewLandingPage() {
                   onKeyDown={handleKeyDown}
                   placeholder="Describe what you want to build..."
                   className={cn(
-                    "w-full resize-none border-0 bg-transparent p-3 sm:p-4 text-base sm:text-lg text-white",
-                    "placeholder:text-gray-400 focus:ring-0 focus:outline-none focus-visible:outline-none focus:border-0 min-h-14"
+                    'w-full resize-none border-0 bg-transparent p-3 sm:p-4 text-base sm:text-lg text-white',
+                    'placeholder:text-gray-400 focus:ring-0 focus:outline-none focus-visible:outline-none focus:border-0 min-h-14'
                   )}
                   style={{
                     scrollbarWidth: 'thin',
@@ -566,17 +627,19 @@ export default function NewLandingPage() {
                         onClick={handleSubmit}
                         disabled={!hasContent}
                         className={cn(
-                          "flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full text-sm font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 disabled:pointer-events-none touch-manipulation",
-                          hasContent
-                            ? "text-white scale-100 hover:scale-110"
-                            : "text-gray-400"
+                          'flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full text-sm font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 disabled:pointer-events-none touch-manipulation',
+                          hasContent ? 'text-white scale-100 hover:scale-110' : 'text-gray-400'
                         )}
-                        style={hasContent ? {
-                          backgroundColor: 'rgb(249, 115, 22)',
-                          boxShadow: '0 4px 20px rgba(249, 115, 22, 0.6)',
-                        } : {
-                          backgroundColor: '#515151',
-                        }}
+                        style={
+                          hasContent
+                            ? {
+                                backgroundColor: 'rgb(249, 115, 22)',
+                                boxShadow: '0 4px 20px rgba(249, 115, 22, 0.6)',
+                              }
+                            : {
+                                backgroundColor: '#515151',
+                              }
+                        }
                         onMouseEnter={(e) => {
                           if (hasContent) {
                             e.currentTarget.style.backgroundColor = 'rgb(234, 88, 12)';
@@ -695,7 +758,8 @@ export default function NewLandingPage() {
                           All Tesslate Apps
                         </h3>
                         <p className="text-xs sm:text-sm text-gray-400 leading-tight">
-                          Agent orchestration, Designer, Forge, Wise, and more open source frameworks
+                          Agent orchestration, Designer, Forge, Wise, and more open source
+                          frameworks
                         </p>
                       </div>
                     </div>
@@ -789,13 +853,26 @@ export default function NewLandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-10 mb-8">
               {/* HuggingFace VibeCoded Models */}
               <div className="text-center">
-                <a href="https://huggingface.co/Tesslate" target="_blank" rel="noopener" className="block group">
+                <a
+                  href="https://huggingface.co/Tesslate"
+                  target="_blank"
+                  rel="noopener"
+                  className="block group"
+                >
                   <div className="inline-block mb-4 opacity-70 group-hover:opacity-100 transition-all group-hover:scale-105 brightness-0 invert">
-                    <img src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg" alt="Hugging Face" className="h-8 sm:h-10 mx-auto" />
+                    <img
+                      src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg"
+                      alt="Hugging Face"
+                      className="h-8 sm:h-10 mx-auto"
+                    />
                   </div>
                   <div className="mb-3">
-                    <p className="text-3xl sm:text-4xl font-bold text-[var(--primary)] mb-1">60K+</p>
-                    <p className="text-sm text-gray-300 font-semibold">Downloads on the models we've trained</p>
+                    <p className="text-3xl sm:text-4xl font-bold text-[var(--primary)] mb-1">
+                      60K+
+                    </p>
+                    <p className="text-sm text-gray-300 font-semibold">
+                      Downloads on the models we've trained
+                    </p>
                   </div>
                   <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--primary)] text-white group-hover:bg-[var(--primary-hover)] transition-colors">
                     <span>Try Our Models</span>
@@ -806,17 +883,29 @@ export default function NewLandingPage() {
 
               {/* GitHub Community */}
               <div className="text-center">
-                <a href="https://github.com/TesslateAI" target="_blank" rel="noopener" className="block group">
+                <a
+                  href="https://github.com/TesslateAI"
+                  target="_blank"
+                  rel="noopener"
+                  className="block group"
+                >
                   <div className="inline-block mb-4 opacity-70 group-hover:opacity-100 transition-all group-hover:scale-105">
                     <Github className="h-9 sm:h-11 w-9 sm:w-11 text-gray-300 mx-auto" />
                   </div>
                   <div className="mb-3">
-                    <p className="text-3xl sm:text-4xl font-bold text-[var(--primary)] mb-1">1,000+</p>
-                    <p className="text-sm text-gray-300 font-semibold">Developers Building with Tesslate</p>
+                    <p className="text-3xl sm:text-4xl font-bold text-[var(--primary)] mb-1">
+                      1,000+
+                    </p>
+                    <p className="text-sm text-gray-300 font-semibold">
+                      Developers Building with Tesslate
+                    </p>
                   </div>
                   <div className="flex items-center justify-center gap-1">
                     {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-[var(--primary)] text-[var(--primary)]" />
+                      <Star
+                        key={i}
+                        className="w-4 h-4 fill-[var(--primary)] text-[var(--primary)]"
+                      />
                     ))}
                   </div>
                 </a>
@@ -824,9 +913,18 @@ export default function NewLandingPage() {
 
               {/* KPMG Accelerator */}
               <div className="text-center">
-                <a href="https://kpmg.com/us/en/media/news/introducing-launch-powered-by-kpmg.html" target="_blank" rel="noopener" className="block group">
+                <a
+                  href="https://kpmg.com/us/en/media/news/introducing-launch-powered-by-kpmg.html"
+                  target="_blank"
+                  rel="noopener"
+                  className="block group"
+                >
                   <div className="inline-block mb-4 opacity-70 group-hover:opacity-100 transition-all group-hover:scale-105">
-                    <img src="https://tesslate.com/images/kpmg.png" alt="KPMG Logo" className="h-9 sm:h-11 mx-auto brightness-0 invert" />
+                    <img
+                      src="https://tesslate.com/images/kpmg.png"
+                      alt="KPMG Logo"
+                      className="h-9 sm:h-11 mx-auto brightness-0 invert"
+                    />
                   </div>
                   <div className="mb-3">
                     <p className="text-sm text-gray-300 font-semibold">Selected for</p>
@@ -848,54 +946,152 @@ export default function NewLandingPage() {
             <div className="marquee-container w-full relative overflow-hidden">
               <div className="marquee-content flex flex-nowrap items-center">
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://www.nvidia.com/en-us/startups/" title="Nvidia Inception Program" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/nvidia.png" alt="Nvidia" className="h-8 sm:h-10" style={{ height: '40px' }} />
+                  <a
+                    href="https://www.nvidia.com/en-us/startups/"
+                    title="Nvidia Inception Program"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/nvidia.png"
+                      alt="Nvidia"
+                      className="h-8 sm:h-10"
+                      style={{ height: '40px' }}
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://startup.google.com/" title="Google for Startups" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/CloudforStartups-3.png" alt="Google for Startups" className="h-16 sm:h-20" style={{ height: '80px' }} />
+                  <a
+                    href="https://startup.google.com/"
+                    title="Google for Startups"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/CloudforStartups-3.png"
+                      alt="Google for Startups"
+                      className="h-16 sm:h-20"
+                      style={{ height: '80px' }}
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://aws.amazon.com/activate/activate-landing/" title="AWS Activate" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/aws.png" alt="AWS Activate" className="h-8 sm:h-10" />
+                  <a
+                    href="https://aws.amazon.com/activate/activate-landing/"
+                    title="AWS Activate"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/aws.png"
+                      alt="AWS Activate"
+                      className="h-8 sm:h-10"
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://www.microsoft.com/en-us/startups" title="Microsoft for Startups" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/microsoft.png" alt="Microsoft" className="h-10 sm:h-12" style={{ height: '50px' }} />
+                  <a
+                    href="https://www.microsoft.com/en-us/startups"
+                    title="Microsoft for Startups"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/microsoft.png"
+                      alt="Microsoft"
+                      className="h-10 sm:h-12"
+                      style={{ height: '50px' }}
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://community.ibm.com/community/user/groups/community-home?CommunityKey=4ddd8881-1445-4366-8d9f-01951486d421" title="IBM Build Partners" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/ibm.png" alt="IBM" className="h-8 sm:h-9" style={{ height: '35px' }} />
+                  <a
+                    href="https://community.ibm.com/community/user/groups/community-home?CommunityKey=4ddd8881-1445-4366-8d9f-01951486d421"
+                    title="IBM Build Partners"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/ibm.png"
+                      alt="IBM"
+                      className="h-8 sm:h-9"
+                      style={{ height: '35px' }}
+                    />
                   </a>
                 </div>
                 {/* Duplicate for seamless loop */}
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://www.nvidia.com/en-us/startups/" title="Nvidia Inception Program" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/nvidia.png" alt="Nvidia" className="h-8 sm:h-10" style={{ height: '40px' }} />
+                  <a
+                    href="https://www.nvidia.com/en-us/startups/"
+                    title="Nvidia Inception Program"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/nvidia.png"
+                      alt="Nvidia"
+                      className="h-8 sm:h-10"
+                      style={{ height: '40px' }}
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://startup.google.com/" title="Google for Startups" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/CloudforStartups-3.png" alt="Google for Startups" className="h-16 sm:h-20" style={{ height: '80px' }} />
+                  <a
+                    href="https://startup.google.com/"
+                    title="Google for Startups"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/CloudforStartups-3.png"
+                      alt="Google for Startups"
+                      className="h-16 sm:h-20"
+                      style={{ height: '80px' }}
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://aws.amazon.com/activate/activate-landing/" title="AWS Activate" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/aws.png" alt="AWS Activate" className="h-8 sm:h-10" />
+                  <a
+                    href="https://aws.amazon.com/activate/activate-landing/"
+                    title="AWS Activate"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/aws.png"
+                      alt="AWS Activate"
+                      className="h-8 sm:h-10"
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://www.microsoft.com/en-us/startups" title="Microsoft for Startups" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/microsoft.png" alt="Microsoft" className="h-10 sm:h-12" style={{ height: '50px' }} />
+                  <a
+                    href="https://www.microsoft.com/en-us/startups"
+                    title="Microsoft for Startups"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/microsoft.png"
+                      alt="Microsoft"
+                      className="h-10 sm:h-12"
+                      style={{ height: '50px' }}
+                    />
                   </a>
                 </div>
                 <div className="startup-logo flex-shrink-0 px-6 sm:px-8 py-2">
-                  <a href="https://community.ibm.com/community/user/groups/community-home?CommunityKey=4ddd8881-1445-4366-8d9f-01951486d421" title="IBM Build Partners" target="_blank" rel="noreferrer">
-                    <img src="https://tesslate.com/images/ibm.png" alt="IBM" className="h-8 sm:h-9" style={{ height: '35px' }} />
+                  <a
+                    href="https://community.ibm.com/community/user/groups/community-home?CommunityKey=4ddd8881-1445-4366-8d9f-01951486d421"
+                    title="IBM Build Partners"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src="https://tesslate.com/images/ibm.png"
+                      alt="IBM"
+                      className="h-8 sm:h-9"
+                      style={{ height: '35px' }}
+                    />
                   </a>
                 </div>
               </div>
@@ -910,18 +1106,21 @@ export default function NewLandingPage() {
               <h3 className="text-white text-lg sm:text-xl font-semibold mb-2">
                 Trusted by 1,000+ developers and teams
               </h3>
-              <p className="text-gray-400 text-sm">
-                Building the future with open-source AI
-              </p>
+              <p className="text-gray-400 text-sm">Building the future with open-source AI</p>
             </div>
           </div>
         </section>
 
         {/* INTEGRATIONS SECTION */}
-        <section className="py-16 sm:py-24 border-t overflow-hidden" style={{ borderColor: '#1a1a1a', backgroundColor: '#0a0a0a' }}>
+        <section
+          className="py-16 sm:py-24 border-t overflow-hidden"
+          style={{ borderColor: '#1a1a1a', backgroundColor: '#0a0a0a' }}
+        >
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-12 sm:mb-16">
-              <p className="text-[var(--primary)] text-sm font-semibold uppercase tracking-wider mb-3">Integrations</p>
+              <p className="text-[var(--primary)] text-sm font-semibold uppercase tracking-wider mb-3">
+                Integrations
+              </p>
               <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4">
                 Connect to Everything
               </h2>
@@ -935,46 +1134,75 @@ export default function NewLandingPage() {
           <div className="relative mb-6">
             <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-[#0a0a0a] to-transparent z-10" />
             <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-[#0a0a0a] to-transparent z-10" />
-            <div className="integration-marquee flex items-center gap-8" style={{ animation: 'scroll-left 40s linear infinite' }}>
+            <div
+              className="integration-marquee flex items-center gap-8"
+              style={{ animation: 'scroll-left 40s linear infinite' }}
+            >
               {/* PostgreSQL */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg" alt="PostgreSQL" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg"
+                    alt="PostgreSQL"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">PostgreSQL</span>
                 </div>
               </div>
               {/* Supabase */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/supabase/supabase-original.svg" alt="Supabase" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/supabase/supabase-original.svg"
+                    alt="Supabase"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">Supabase</span>
                 </div>
               </div>
               {/* OpenAI */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="white"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="white">
+                    <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+                  </svg>
                   <span className="text-white font-medium">OpenAI</span>
                 </div>
               </div>
               {/* Redis */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/redis/redis-original.svg" alt="Redis" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/redis/redis-original.svg"
+                    alt="Redis"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">Redis</span>
                 </div>
               </div>
               {/* Stripe */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <svg className="w-8 h-8" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#635BFF"/><path fillRule="evenodd" clipRule="evenodd" d="M13.3 11.046c0-.632.52-.874 1.38-.874 1.233 0 2.79.373 4.023 1.04V7.54c-1.348-.534-2.68-.747-4.023-.747-3.29 0-5.477 1.717-5.477 4.586 0 4.476 6.163 3.763 6.163 5.695 0 .747-.65.988-1.558.988-1.348 0-3.07-.555-4.432-1.303v3.725c1.51.65 3.037.927 4.432.927 3.37 0 5.684-1.665 5.684-4.572-.016-4.83-6.192-3.975-6.192-5.792z" fill="#fff"/></svg>
+                  <svg className="w-8 h-8" viewBox="0 0 28 28" fill="none">
+                    <rect width="28" height="28" rx="6" fill="#635BFF" />
+                    <path
+                      fillRule="evenodd"
+                      clipRule="evenodd"
+                      d="M13.3 11.046c0-.632.52-.874 1.38-.874 1.233 0 2.79.373 4.023 1.04V7.54c-1.348-.534-2.68-.747-4.023-.747-3.29 0-5.477 1.717-5.477 4.586 0 4.476 6.163 3.763 6.163 5.695 0 .747-.65.988-1.558.988-1.348 0-3.07-.555-4.432-1.303v3.725c1.51.65 3.037.927 4.432.927 3.37 0 5.684-1.665 5.684-4.572-.016-4.83-6.192-3.975-6.192-5.792z"
+                      fill="#fff"
+                    />
+                  </svg>
                   <span className="text-white font-medium">Stripe</span>
                 </div>
               </div>
               {/* MongoDB */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mongodb/mongodb-original.svg" alt="MongoDB" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mongodb/mongodb-original.svg"
+                    alt="MongoDB"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">MongoDB</span>
                 </div>
               </div>
@@ -999,37 +1227,63 @@ export default function NewLandingPage() {
               {/* Duplicate set for seamless loop */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg" alt="PostgreSQL" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/postgresql/postgresql-original.svg"
+                    alt="PostgreSQL"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">PostgreSQL</span>
                 </div>
               </div>
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/supabase/supabase-original.svg" alt="Supabase" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/supabase/supabase-original.svg"
+                    alt="Supabase"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">Supabase</span>
                 </div>
               </div>
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="white"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>
+                  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="white">
+                    <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+                  </svg>
                   <span className="text-white font-medium">OpenAI</span>
                 </div>
               </div>
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/redis/redis-original.svg" alt="Redis" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/redis/redis-original.svg"
+                    alt="Redis"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">Redis</span>
                 </div>
               </div>
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <svg className="w-8 h-8" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#635BFF"/><path fillRule="evenodd" clipRule="evenodd" d="M13.3 11.046c0-.632.52-.874 1.38-.874 1.233 0 2.79.373 4.023 1.04V7.54c-1.348-.534-2.68-.747-4.023-.747-3.29 0-5.477 1.717-5.477 4.586 0 4.476 6.163 3.763 6.163 5.695 0 .747-.65.988-1.558.988-1.348 0-3.07-.555-4.432-1.303v3.725c1.51.65 3.037.927 4.432.927 3.37 0 5.684-1.665 5.684-4.572-.016-4.83-6.192-3.975-6.192-5.792z" fill="#fff"/></svg>
+                  <svg className="w-8 h-8" viewBox="0 0 28 28" fill="none">
+                    <rect width="28" height="28" rx="6" fill="#635BFF" />
+                    <path
+                      fillRule="evenodd"
+                      clipRule="evenodd"
+                      d="M13.3 11.046c0-.632.52-.874 1.38-.874 1.233 0 2.79.373 4.023 1.04V7.54c-1.348-.534-2.68-.747-4.023-.747-3.29 0-5.477 1.717-5.477 4.586 0 4.476 6.163 3.763 6.163 5.695 0 .747-.65.988-1.558.988-1.348 0-3.07-.555-4.432-1.303v3.725c1.51.65 3.037.927 4.432.927 3.37 0 5.684-1.665 5.684-4.572-.016-4.83-6.192-3.975-6.192-5.792z"
+                      fill="#fff"
+                    />
+                  </svg>
                   <span className="text-white font-medium">Stripe</span>
                 </div>
               </div>
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mongodb/mongodb-original.svg" alt="MongoDB" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mongodb/mongodb-original.svg"
+                    alt="MongoDB"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">MongoDB</span>
                 </div>
               </div>
@@ -1056,7 +1310,10 @@ export default function NewLandingPage() {
           <div className="relative">
             <div className="absolute left-0 top-0 bottom-0 w-32 bg-gradient-to-r from-[#0a0a0a] to-transparent z-10" />
             <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-[#0a0a0a] to-transparent z-10" />
-            <div className="integration-marquee-reverse flex items-center gap-8" style={{ animation: 'scroll-right 40s linear infinite' }}>
+            <div
+              className="integration-marquee-reverse flex items-center gap-8"
+              style={{ animation: 'scroll-right 40s linear infinite' }}
+            >
               {/* Clerk */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
@@ -1069,7 +1326,11 @@ export default function NewLandingPage() {
               {/* MySQL */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg" alt="MySQL" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg"
+                    alt="MySQL"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">MySQL</span>
                 </div>
               </div>
@@ -1085,7 +1346,11 @@ export default function NewLandingPage() {
               {/* Grafana */}
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg" alt="Grafana" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg"
+                    alt="Grafana"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">Grafana</span>
                 </div>
               </div>
@@ -1136,7 +1401,11 @@ export default function NewLandingPage() {
               </div>
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg" alt="MySQL" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg"
+                    alt="MySQL"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">MySQL</span>
                 </div>
               </div>
@@ -1150,7 +1419,11 @@ export default function NewLandingPage() {
               </div>
               <div className="flex-shrink-0 group">
                 <div className="flex items-center gap-3 px-6 py-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] group-hover:border-[var(--primary)]/50 transition-all">
-                  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg" alt="Grafana" className="w-8 h-8" />
+                  <img
+                    src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/grafana/grafana-original.svg"
+                    alt="Grafana"
+                    className="w-8 h-8"
+                  />
                   <span className="text-white font-medium">Grafana</span>
                 </div>
               </div>
@@ -1194,7 +1467,10 @@ export default function NewLandingPage() {
             <p className="text-gray-500 text-sm mb-6">
               + Elasticsearch, RabbitMQ, SendGrid, Cloudinary, n8n, Vercel KV, Prometheus & more
             </p>
-            <a href="/register" className="inline-flex items-center gap-2 px-8 py-4 rounded-xl text-base font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors shadow-lg shadow-[var(--primary)]/25">
+            <a
+              href="/register"
+              className="inline-flex items-center gap-2 px-8 py-4 rounded-xl text-base font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors shadow-lg shadow-[var(--primary)]/25"
+            >
               <span>Start Building for Free</span>
               <ArrowRight className="w-5 h-5" />
             </a>
@@ -1221,29 +1497,39 @@ export default function NewLandingPage() {
         <section className="py-16 sm:py-24" aria-labelledby="features-heading">
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-12 sm:mb-16">
-              <h2 id="features-heading" className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4">
+              <h2
+                id="features-heading"
+                className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4"
+              >
                 Why Developers Choose Tesslate
               </h2>
             </div>
 
             <div className="grid md:grid-cols-3 gap-6 sm:gap-8">
               {/* Feature 1 */}
-              <div style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Code2 className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-4">
                   Full-Stack AI Builder (Open Source)
                 </h3>
                 <p className="text-gray-400 mb-4">
-                  Generate production-ready frontend, backend, and database layers using open-source agents. Edit everything. Fork everything. Deploy anywhere.
+                  Generate production-ready frontend, backend, and database layers using open-source
+                  agents. Edit everything. Fork everything. Deploy anywhere.
                 </p>
                 <ul className="space-y-2">
                   {[
                     'Full code, no black boxes',
                     'React / Next.js / FastAPI / Node / Mongo / Postgres targets',
                     'Deterministic & auditable builds',
-                    'Zero lock-in'
+                    'Zero lock-in',
                   ].map((benefit, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-gray-400">
                       <Check className="w-4 h-4 text-[var(--primary)] flex-shrink-0 mt-0.5" />
@@ -1254,22 +1540,29 @@ export default function NewLandingPage() {
               </div>
 
               {/* Feature 2 */}
-              <div style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Settings className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-4">
                   Customize How Your Agents Think
                 </h3>
                 <p className="text-gray-400 mb-4">
-                  Every agent is fully inspectable and modifiable—system prompts, skills, tools, workflows, memory, architecture.
+                  Every agent is fully inspectable and modifiable—system prompts, skills, tools,
+                  workflows, memory, architecture.
                 </p>
                 <ul className="space-y-2">
                   {[
                     'Tune agent behavior to your standards',
                     'Add custom tools and integrations',
                     'Use your own models (local or cloud)',
-                    'Perfect for enterprise compliance'
+                    'Perfect for enterprise compliance',
                   ].map((benefit, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-gray-400">
                       <Check className="w-4 h-4 text-[var(--primary)] flex-shrink-0 mt-0.5" />
@@ -1280,22 +1573,29 @@ export default function NewLandingPage() {
               </div>
 
               {/* Feature 3 */}
-              <div style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Share2 className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-4">
                   Sell and Share Your Agents
                 </h3>
                 <p className="text-gray-400 mb-4">
-                  Publish agents you create to the Tesslate Marketplace. Monetize them or open-source them for the community.
+                  Publish agents you create to the Tesslate Marketplace. Monetize them or
+                  open-source them for the community.
                 </p>
                 <ul className="space-y-2">
                   {[
                     'Earn recurring income',
                     'Build a public portfolio',
                     'Distribute private agents internally',
-                    'Enterprise teams can share agents across departments'
+                    'Enterprise teams can share agents across departments',
                   ].map((benefit, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-gray-400">
                       <Check className="w-4 h-4 text-[var(--primary)] flex-shrink-0 mt-0.5" />
@@ -1309,10 +1609,17 @@ export default function NewLandingPage() {
         </section>
 
         {/* TESSLATE ECOSYSTEM - OTHER PRODUCTS */}
-        <section className="py-16 sm:py-24" style={{ backgroundColor: '#0a0a0a' }} aria-labelledby="ecosystem-heading">
+        <section
+          className="py-16 sm:py-24"
+          style={{ backgroundColor: '#0a0a0a' }}
+          aria-labelledby="ecosystem-heading"
+        >
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
             <div className="text-center mb-12 sm:mb-16">
-              <h2 id="ecosystem-heading" className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4">
+              <h2
+                id="ecosystem-heading"
+                className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4"
+              >
                 The Tesslate Ecosystem
               </h2>
               <p className="text-xl text-gray-400 max-w-3xl mx-auto">
@@ -1322,105 +1629,190 @@ export default function NewLandingPage() {
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
               {/* Agent Builder */}
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Boxes className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-3">Agent Builder</h3>
                 <p className="text-gray-400 mb-4 flex-1">
-                  Visual workflow builder to create and connect AI agents seamlessly. Deploy workflows as web apps.
+                  Visual workflow builder to create and connect AI agents seamlessly. Deploy
+                  workflows as web apps.
                 </p>
                 <div className="flex gap-3">
-                  <a href="https://github.com/TesslateAI/Agent-Builder" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors">
+                  <a
+                    href="https://github.com/TesslateAI/Agent-Builder"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
+                  >
                     GitHub
                   </a>
-                  <a href="https://agent.tesslate.com" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors">
+                  <a
+                    href="https://agent.tesslate.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors"
+                  >
                     Try It
                   </a>
                 </div>
               </div>
 
               {/* Designer */}
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Package className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-3">Designer</h3>
                 <p className="text-gray-400 mb-4 flex-1">
-                  Instant canvas environment. Prompt AI agents to build decks, workflows, wireframes, and prototypes.
+                  Instant canvas environment. Prompt AI agents to build decks, workflows,
+                  wireframes, and prototypes.
                 </p>
                 <div className="flex gap-3">
-                  <a href="https://github.com/TesslateAI/Designer" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors">
+                  <a
+                    href="https://github.com/TesslateAI/Designer"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
+                  >
                     GitHub
                   </a>
-                  <a href="https://designer.tesslate.com" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors">
+                  <a
+                    href="https://designer.tesslate.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors"
+                  >
                     Try It
                   </a>
                 </div>
               </div>
 
               {/* TframeX */}
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Code2 className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-3">TframeX Agents</h3>
                 <p className="text-gray-400 mb-4 flex-1">
-                  Open-source architecture powering Tesslate. Build modular, embeddable AI agents with local memory.
+                  Open-source architecture powering Tesslate. Build modular, embeddable AI agents
+                  with local memory.
                 </p>
                 <div className="flex gap-3">
-                  <a href="https://github.com/TesslateAI/TFrameX" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors">
+                  <a
+                    href="https://github.com/TesslateAI/TFrameX"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
+                  >
                     GitHub
                   </a>
-                  <a href="https://tframex.tesslate.com" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors">
+                  <a
+                    href="https://tframex.tesslate.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors"
+                  >
                     Docs
                   </a>
                 </div>
               </div>
 
               {/* UIGen Eval */}
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <TrendingUp className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-3">UIGen Eval</h3>
                 <p className="text-gray-400 mb-4 flex-1">
-                  Open benchmark for evaluating AI-generated UIs. Assess quality, prompt adherence, and responsive design.
+                  Open benchmark for evaluating AI-generated UIs. Assess quality, prompt adherence,
+                  and responsive design.
                 </p>
                 <div className="flex gap-3">
-                  <a href="https://uigeneval.tesslate.com" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors">
+                  <a
+                    href="https://uigeneval.tesslate.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors"
+                  >
                     Leaderboards
                   </a>
                 </div>
               </div>
 
               {/* Late */}
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 hover:border-[var(--primary)] transition-all duration-300 flex flex-col"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Zap className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-3">Late</h3>
                 <p className="text-gray-400 mb-4 flex-1">
-                  Training library for AMD GPUs. Batch and train fine-tuned models with optimized performance.
+                  Training library for AMD GPUs. Batch and train fine-tuned models with optimized
+                  performance.
                 </p>
                 <div className="flex gap-3">
-                  <a href="https://github.com/TesslateAI/Late" target="_blank" rel="noopener noreferrer" className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors">
+                  <a
+                    href="https://github.com/TesslateAI/Late"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold border-2 border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
+                  >
                     GitHub
                   </a>
                 </div>
               </div>
 
               {/* Forge & Wise - Coming Soon */}
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 sm:p-8 opacity-60 flex flex-col">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}>
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 opacity-60 flex flex-col"
+              >
+                <div
+                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center mb-6"
+                  style={{ backgroundColor: 'rgba(249, 115, 22, 0.1)' }}
+                >
                   <Settings className="w-6 h-6 sm:w-8 sm:h-8 text-[var(--primary)]" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-3">Forge &amp; Wise</h3>
                 <p className="text-gray-400 mb-4 flex-1">
-                  Model training & context engine. Train custom models and provide real-time codebase understanding for agents.
+                  Model training & context engine. Train custom models and provide real-time
+                  codebase understanding for agents.
                 </p>
                 <div className="flex gap-3">
-                  <button disabled className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-gray-700 text-gray-400 cursor-not-allowed">
+                  <button
+                    disabled
+                    className="flex-1 text-center px-4 py-2 rounded-xl text-sm font-semibold bg-gray-700 text-gray-400 cursor-not-allowed"
+                  >
                     Coming Soon
                   </button>
                 </div>
@@ -1443,30 +1835,36 @@ export default function NewLandingPage() {
                 {
                   step: '1',
                   title: 'Build an Agent',
-                  description: 'Use Tesslate Studio to create coding agents with custom logic, tools, and models.',
-                  icon: Package
+                  description:
+                    'Use Tesslate Studio to create coding agents with custom logic, tools, and models.',
+                  icon: Package,
                 },
                 {
                   step: '2',
                   title: 'Generate Full-Stack Apps',
-                  description: 'Agents produce complete codebases that you can run, modify, or export.',
-                  icon: Code2
+                  description:
+                    'Agents produce complete codebases that you can run, modify, or export.',
+                  icon: Code2,
                 },
                 {
                   step: '3',
                   title: 'Run Anywhere',
                   description: 'Local, VPC, self-hosted GPU, cloud, or on-prem.',
-                  icon: Globe
+                  icon: Globe,
                 },
                 {
                   step: '4',
                   title: 'Monetize or Deploy',
-                  description: 'Publish agents to the marketplace or deploy their outputs to production.',
-                  icon: TrendingUp
-                }
+                  description:
+                    'Publish agents to the marketplace or deploy their outputs to production.',
+                  icon: TrendingUp,
+                },
               ].map((item, i) => (
                 <div key={i} className="relative">
-                  <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-2xl p-6 hover:border-[var(--primary)] transition-all duration-300">
+                  <div
+                    style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                    className="rounded-2xl p-6 hover:border-[var(--primary)] transition-all duration-300"
+                  >
                     <div className="flex items-center gap-4 mb-4">
                       <div className="w-12 h-12 rounded-full bg-[var(--primary)] flex items-center justify-center text-white font-bold text-xl">
                         {item.step}
@@ -1485,7 +1883,10 @@ export default function NewLandingPage() {
         {/* DEEP VALUE SECTION - ENTERPRISE */}
         <section className="py-16 sm:py-24">
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <div style={{ backgroundColor: '#0a0a0a', border: '1px solid #2a2a2a' }} className="rounded-3xl p-8 sm:p-12">
+            <div
+              style={{ backgroundColor: '#0a0a0a', border: '1px solid #2a2a2a' }}
+              className="rounded-3xl p-8 sm:p-12"
+            >
               <div className="grid lg:grid-cols-2 gap-8 sm:gap-12 items-center">
                 <div>
                   <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-6">
@@ -1495,7 +1896,8 @@ export default function NewLandingPage() {
                     Your infrastructure. Your models. Your code.
                   </p>
                   <p className="text-gray-400 mb-8">
-                    Tesslate gives engineering teams an AI-native way to build software 10× faster—without giving up control.
+                    Tesslate gives engineering teams an AI-native way to build software 10×
+                    faster—without giving up control.
                   </p>
                   <button
                     onClick={() => navigate('/register')}
@@ -1513,7 +1915,7 @@ export default function NewLandingPage() {
                       'No data leaves your environment',
                       'Export to GitHub, Docker, Kubernetes, or any runtime',
                       'Custom workflow automations',
-                      'Build once → reuse across teams'
+                      'Build once → reuse across teams',
                     ].map((item, i) => (
                       <li key={i} className="flex items-start gap-3 text-gray-300">
                         <Shield className="w-5 h-5 text-[var(--primary)] flex-shrink-0 mt-1" />
@@ -1543,30 +1945,34 @@ export default function NewLandingPage() {
               {[
                 {
                   title: 'Apache 2.0 license',
-                  description: 'Fully open-source and free to use'
+                  description: 'Fully open-source and free to use',
                 },
                 {
                   title: 'Modify every layer',
-                  description: 'Prompts, tools, build targets'
+                  description: 'Prompts, tools, build targets',
                 },
                 {
                   title: 'Contribute agents or build your own',
-                  description: 'Open ecosystem'
+                  description: 'Open ecosystem',
                 },
                 {
                   title: 'Active Discord & GitHub community',
-                  description: 'Get help, share ideas'
+                  description: 'Get help, share ideas',
                 },
                 {
                   title: 'Works on laptops or GPU rigs',
-                  description: 'No cloud required'
+                  description: 'No cloud required',
                 },
                 {
                   title: 'Deploy locally or in your cloud',
-                  description: 'Complete infrastructure control'
-                }
+                  description: 'Complete infrastructure control',
+                },
               ].map((item, i) => (
-                <div key={i} style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-xl p-6 hover:border-[var(--primary)] transition-all duration-300">
+                <div
+                  key={i}
+                  style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                  className="rounded-xl p-6 hover:border-[var(--primary)] transition-all duration-300"
+                >
                   <h3 className="text-lg font-bold text-white mb-2">{item.title}</h3>
                   <p className="text-gray-400 text-sm">{item.description}</p>
                 </div>
@@ -1608,9 +2014,13 @@ export default function NewLandingPage() {
                 'UI/UX layout agents',
                 'Data processing agents',
                 'Infrastructure agents',
-                'Finetune-ready model agents'
+                'Finetune-ready model agents',
               ].map((category, i) => (
-                <div key={i} style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }} className="rounded-xl p-6 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105">
+                <div
+                  key={i}
+                  style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+                  className="rounded-xl p-6 hover:border-[var(--primary)] transition-all duration-300 hover:transform hover:scale-105"
+                >
                   <Boxes className="w-8 h-8 text-[var(--primary)] mb-3" />
                   <h3 className="text-white font-semibold">{category}</h3>
                 </div>
@@ -1640,7 +2050,10 @@ export default function NewLandingPage() {
               </p>
             </div>
 
-            <div className="relative rounded-2xl overflow-hidden aspect-video max-w-5xl mx-auto" style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}>
+            <div
+              className="relative rounded-2xl overflow-hidden aspect-video max-w-5xl mx-auto"
+              style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+            >
               <iframe
                 src="https://www.youtube.com/embed/W-jgef-cdmg?controls=0&modestbranding=1&rel=0&autoplay=0"
                 title="Tesslate Demo"
@@ -1667,7 +2080,10 @@ export default function NewLandingPage() {
 
             <div className="grid md:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
               {/* Free Plan */}
-              <div style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }} className="rounded-2xl p-8">
+              <div
+                style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-8"
+              >
                 <h3 className="text-2xl font-bold text-white mb-2">Free</h3>
                 <p className="text-gray-400 mb-6">(Open Source)</p>
                 <div className="text-4xl font-bold text-white mb-6">$0</div>
@@ -1677,7 +2093,7 @@ export default function NewLandingPage() {
                     'Agent builder & editor',
                     'Web interface access',
                     'Self-hosting',
-                    'Community agents'
+                    'Community agents',
                   ].map((feature, i) => (
                     <li key={i} className="flex items-start gap-2 text-gray-300">
                       <Check className="w-5 h-5 text-[var(--primary)] flex-shrink-0 mt-0.5" />
@@ -1694,7 +2110,10 @@ export default function NewLandingPage() {
               </div>
 
               {/* Pro Plan */}
-              <div className="rounded-2xl p-8 transform scale-105 relative" style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}>
+              <div
+                className="rounded-2xl p-8 transform scale-105 relative"
+                style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}
+              >
                 <div className="absolute top-0 right-0 bg-white text-black px-3 py-1 rounded-bl-xl rounded-tr-xl text-sm font-bold">
                   Popular
                 </div>
@@ -1708,7 +2127,7 @@ export default function NewLandingPage() {
                     'Priority builds',
                     'GPU-accelerated workflows',
                     'Marketplace publishing',
-                    'Collaborative projects'
+                    'Collaborative projects',
                   ].map((feature, i) => (
                     <li key={i} className="flex items-start gap-2 text-white">
                       <Check className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -1725,7 +2144,10 @@ export default function NewLandingPage() {
               </div>
 
               {/* Enterprise Plan */}
-              <div style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }} className="rounded-2xl p-8">
+              <div
+                style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-8"
+              >
                 <h3 className="text-2xl font-bold text-white mb-2">Enterprise</h3>
                 <p className="text-gray-400 mb-6">Custom solutions</p>
                 <div className="text-4xl font-bold text-white mb-6">Custom</div>
@@ -1736,7 +2158,7 @@ export default function NewLandingPage() {
                     'RBAC & audit logs',
                     'SSO & private agent repos',
                     'Dedicated support',
-                    'On-prem deployment'
+                    'On-prem deployment',
                   ].map((feature, i) => (
                     <li key={i} className="flex items-start gap-2 text-gray-300">
                       <Check className="w-5 h-5 text-[var(--primary)] flex-shrink-0 mt-0.5" />
@@ -1790,13 +2212,19 @@ export default function NewLandingPage() {
                 <p className="text-gray-400 text-sm">Join the conversation</p>
               </a>
 
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-xl p-6 text-center">
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-xl p-6 text-center"
+              >
                 <Users className="w-12 h-12 text-[var(--primary)] mx-auto mb-4" />
                 <h3 className="text-white font-semibold mb-2">Contributors</h3>
                 <p className="text-gray-400 text-sm">Join the team</p>
               </div>
 
-              <div style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }} className="rounded-xl p-6 text-center">
+              <div
+                style={{ backgroundColor: '#000000', border: '1px solid #2a2a2a' }}
+                className="rounded-xl p-6 text-center"
+              >
                 <BookOpen className="w-12 h-12 text-[var(--primary)] mx-auto mb-4" />
                 <h3 className="text-white font-semibold mb-2">Updates</h3>
                 <p className="text-gray-400 text-sm">Weekly releases</p>
@@ -1857,7 +2285,10 @@ export default function NewLandingPage() {
         </section>
 
         {/* FINAL CTA */}
-        <section className="py-16 sm:py-24" style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}>
+        <section
+          className="py-16 sm:py-24"
+          style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}
+        >
           <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-6">
               Build your next app in minutes, not months
@@ -1906,9 +2337,18 @@ export default function NewLandingPage() {
               <div className="md:col-span-2">
                 <div className="flex items-center gap-3 mb-4">
                   <svg className="w-8 h-8 text-[var(--primary)]" viewBox="0 0 161.9 126.66">
-                    <path d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z" fill="currentColor"/>
-                    <path d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z" fill="currentColor"/>
-                    <path d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z" fill="currentColor"/>
+                    <path
+                      d="m13.45,46.48h54.06c10.21,0,16.68-10.94,11.77-19.89l-9.19-16.75c-2.36-4.3-6.87-6.97-11.77-6.97H22.41c-4.95,0-9.5,2.73-11.84,7.09L1.61,26.71c-4.79,8.95,1.69,19.77,11.84,19.77Z"
+                      fill="currentColor"
+                    />
+                    <path
+                      d="m61.05,119.93l26.95-46.86c5.09-8.85-1.17-19.91-11.37-20.12l-19.11-.38c-4.9-.1-9.47,2.48-11.91,6.73l-17.89,31.12c-2.47,4.29-2.37,9.6.25,13.8l10.05,16.13c5.37,8.61,17.98,8.39,23.04-.41Z"
+                      fill="currentColor"
+                    />
+                    <path
+                      d="m148.46,0h-54.06c-10.21,0-16.68,10.94-11.77,19.89l9.19,16.75c2.36,4.3,6.87,6.97,11.77,6.97h35.9c4.95,0,9.5-2.73,11.84-7.09l8.97-16.75C165.08,10.82,158.6,0,148.46,0Z"
+                      fill="currentColor"
+                    />
                   </svg>
                   <div>
                     <h3 className="text-xl font-bold text-white">Tesslate</h3>
@@ -1923,40 +2363,128 @@ export default function NewLandingPage() {
               <div>
                 <h4 className="font-bold text-white mb-4">Product</h4>
                 <div className="space-y-2">
-                  <a href="https://github.com/TesslateAI" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">GitHub</a>
-                  <a href="https://docs.tesslate.com" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Docs</a>
-                  <button onClick={() => navigate('/marketplace')} className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Marketplace</button>
-                  <a href="https://discord.gg/WgXabcN2r2" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Community</a>
+                  <a
+                    href="https://github.com/TesslateAI"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    GitHub
+                  </a>
+                  <a
+                    href="https://docs.tesslate.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Docs
+                  </a>
+                  <button
+                    onClick={() => navigate('/marketplace')}
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Marketplace
+                  </button>
+                  <a
+                    href="https://discord.gg/WgXabcN2r2"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Community
+                  </a>
                 </div>
               </div>
 
               <div>
                 <h4 className="font-bold text-white mb-4">Resources</h4>
                 <div className="space-y-2">
-                  <a href="https://docs.tesslate.com" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Documentation</a>
-                  <a href="https://github.com/TesslateAI/Studio" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Studio</a>
-                  <a href="https://github.com/TesslateAI/Agent-Builder" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Agent Builder</a>
-                  <a href="https://github.com/TesslateAI/Designer" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Designer</a>
+                  <a
+                    href="https://docs.tesslate.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Documentation
+                  </a>
+                  <a
+                    href="https://github.com/TesslateAI/Studio"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Studio
+                  </a>
+                  <a
+                    href="https://github.com/TesslateAI/Agent-Builder"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Agent Builder
+                  </a>
+                  <a
+                    href="https://github.com/TesslateAI/Designer"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Designer
+                  </a>
                 </div>
               </div>
 
               <div>
                 <h4 className="font-bold text-white mb-4">Company</h4>
                 <div className="space-y-2">
-                  <a href="https://discord.gg/WgXabcN2r2" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Privacy</a>
-                  <a href="https://discord.gg/WgXabcN2r2" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Terms</a>
-                  <a href="https://discord.gg/WgXabcN2r2" target="_blank" rel="noopener noreferrer" className="block text-gray-400 hover:text-[var(--primary)] transition-colors">Careers</a>
+                  <a
+                    href="https://discord.gg/WgXabcN2r2"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Privacy
+                  </a>
+                  <a
+                    href="https://discord.gg/WgXabcN2r2"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Terms
+                  </a>
+                  <a
+                    href="https://discord.gg/WgXabcN2r2"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-gray-400 hover:text-[var(--primary)] transition-colors"
+                  >
+                    Careers
+                  </a>
                 </div>
               </div>
             </div>
 
-            <div style={{ borderTop: '1px solid #1a1a1a' }} className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div
+              style={{ borderTop: '1px solid #1a1a1a' }}
+              className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4"
+            >
               <p className="text-gray-400 text-sm">© 2025 Tesslate. All rights reserved.</p>
               <div className="flex items-center gap-4">
-                <a href="https://github.com/TesslateAI" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-[var(--primary)] transition-colors">
+                <a
+                  href="https://github.com/TesslateAI"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-gray-400 hover:text-[var(--primary)] transition-colors"
+                >
                   <Github className="w-5 h-5" />
                 </a>
-                <a href="https://discord.gg/WgXabcN2r2" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-[var(--primary)] transition-colors">
+                <a
+                  href="https://discord.gg/WgXabcN2r2"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-gray-400 hover:text-[var(--primary)] transition-colors"
+                >
                   <MessageSquare className="w-5 h-5" />
                 </a>
               </div>
