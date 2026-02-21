@@ -31,7 +31,7 @@ locals {
 # Base domain CNAME → NLB (e.g., your-domain.com → NLB)
 # -----------------------------------------------------------------------------
 resource "cloudflare_record" "domain" {
-  count = var.cloudflare_zone_id != "" && local.nlb_hostname != "" ? 1 : 0
+  count = var.cloudflare_zone_id != "" ? 1 : 0
 
   zone_id         = var.cloudflare_zone_id
   name            = local.dns_subdomain
@@ -41,6 +41,13 @@ resource "cloudflare_record" "domain" {
   ttl             = 1      # Auto TTL
   comment         = "Managed by Terraform (${var.environment})"
   allow_overwrite = true
+
+  lifecycle {
+    precondition {
+      condition     = local.nlb_hostname != ""
+      error_message = "NLB hostname not yet available. Deploy nginx ingress first."
+    }
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -48,7 +55,7 @@ resource "cloudflare_record" "domain" {
 # Required for user project subdomains
 # -----------------------------------------------------------------------------
 resource "cloudflare_record" "wildcard" {
-  count = var.cloudflare_zone_id != "" && local.nlb_hostname != "" ? 1 : 0
+  count = var.cloudflare_zone_id != "" ? 1 : 0
 
   zone_id         = var.cloudflare_zone_id
   name            = local.dns_subdomain == "@" ? "*" : "*.${local.dns_subdomain}"
@@ -58,4 +65,11 @@ resource "cloudflare_record" "wildcard" {
   ttl             = 1
   comment         = "Managed by Terraform (${var.environment})"
   allow_overwrite = true
+
+  lifecycle {
+    precondition {
+      condition     = local.nlb_hostname != ""
+      error_message = "NLB hostname not yet available. Deploy nginx ingress first."
+    }
+  }
 }
