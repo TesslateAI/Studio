@@ -1149,7 +1149,7 @@ export function ChatContainer({
         ref={containerRef}
         className={`
           chat-container
-          flex flex-col
+          flex flex-col min-h-0
           bg-[var(--bg-dark)]
           ${
             isDocked
@@ -1231,7 +1231,7 @@ export function ChatContainer({
           ref={messagesContainerRef}
           className={`
           chat-messages
-          flex-1 overflow-y-auto px-3
+          flex-1 min-h-0 overflow-y-auto px-3
           transition-all duration-300
           ${effectiveIsExpanded ? 'pointer-events-auto' : 'pointer-events-none'}
           ${
