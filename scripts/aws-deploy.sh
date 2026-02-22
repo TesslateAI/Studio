@@ -12,7 +12,10 @@
 #   ./scripts/aws-deploy.sh destroy production     # Destroy production resources
 #   ./scripts/aws-deploy.sh output beta            # Show terraform outputs
 #   ./scripts/aws-deploy.sh deploy-k8s beta        # Apply kustomize manifests for environment
-#   ./scripts/aws-deploy.sh reload production      # Apply manifests + restart pods (pick up new env vars)
+#   ./scripts/aws-deploy.sh reload production               # Apply manifests + restart all pods
+#   ./scripts/aws-deploy.sh reload production backend      # Restart only backend
+#   ./scripts/aws-deploy.sh reload production litellm      # Restart only litellm (+ sync config)
+#   ./scripts/aws-deploy.sh reload production backend litellm  # Restart multiple pods
 #   ./scripts/aws-deploy.sh build beta                       # Build, push, restart all images
 #   ./scripts/aws-deploy.sh build production backend         # Build only backend
 #   ./scripts/aws-deploy.sh build beta frontend backend      # Build multiple images
@@ -83,9 +86,13 @@ apply_kustomize() {
 }
 
 restart_pods() {
-    local deployments=("tesslate-backend" "tesslate-frontend")
+    # Accept deployment names as arguments, default to backend + frontend
+    local deployments=("${@:-tesslate-backend tesslate-frontend}")
+    if [ $# -eq 0 ]; then
+        deployments=("tesslate-backend" "tesslate-frontend")
+    fi
 
-    info "Restarting deployments..."
+    info "Restarting deployments: ${deployments[*]}..."
     for dep in "${deployments[@]}"; do
         kubectl rollout restart "deployment/${dep}" -n tesslate
     done
@@ -96,7 +103,7 @@ restart_pods() {
     for dep in "${deployments[@]}"; do
         kubectl rollout status "deployment/${dep}" -n tesslate --timeout=120s &
         ROLLOUT_PIDS+=($!)
-        ROLLOUT_NAMES+=("${dep#tesslate-}")
+        ROLLOUT_NAMES+=("$dep")
     done
 
     local FAILED=0
@@ -112,6 +119,31 @@ restart_pods() {
     if [ "$FAILED" -ne 0 ]; then
         error "One or more rollouts failed. Check: kubectl get pods -n tesslate"
     fi
+}
+
+# Map short names to K8s deployment names
+resolve_deployment_name() {
+    case "$1" in
+        backend)    echo "tesslate-backend" ;;
+        frontend)   echo "tesslate-frontend" ;;
+        litellm)    echo "litellm" ;;
+        postgres)   echo "postgres" ;;
+        litellm-postgres) echo "litellm-postgres" ;;
+        *)          echo "$1" ;;
+    esac
+}
+
+sync_litellm_config() {
+    local CONFIG_FILE="$PROJECT_ROOT/k8s/litellm/config.yaml"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        warning "LiteLLM config not found at $CONFIG_FILE, skipping ConfigMap sync"
+        return
+    fi
+    info "Syncing LiteLLM ConfigMap from k8s/litellm/config.yaml..."
+    kubectl create configmap litellm-config -n tesslate \
+        --from-file=config.yaml="$CONFIG_FILE" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    success "✓ LiteLLM ConfigMap updated"
 }
 
 verify_pods() {
@@ -478,21 +510,67 @@ case "$COMMAND" in
             error "Reload is not available for shared environment"
         fi
 
+        # Parse target pods from remaining args
+        TARGETS=""
+        for arg in "${@:3}"; do
+            TARGETS="$TARGETS $arg"
+        done
+        TARGETS="${TARGETS# }"
+
         ensure_kubectl_context
 
+        # Resolve short names to deployment names
+        DEPLOYMENTS=()
+        SYNC_LITELLM=false
+        if [ -z "$TARGETS" ]; then
+            # No specific targets — reload all (apply manifests + restart backend/frontend)
+            DEPLOYMENTS=("tesslate-backend" "tesslate-frontend")
+            APPLY_MANIFESTS=true
+        else
+            APPLY_MANIFESTS=false
+            for target in $TARGETS; do
+                dep=$(resolve_deployment_name "$target")
+                DEPLOYMENTS+=("$dep")
+                if [ "$target" = "litellm" ]; then
+                    SYNC_LITELLM=true
+                fi
+            done
+        fi
+
+        DISPLAY_TARGETS="${TARGETS:-all}"
         info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         info "Environment: $ENVIRONMENT"
         info "Command:     reload"
+        info "Targets:     $DISPLAY_TARGETS"
         info "Cluster:     tesslate-${ENVIRONMENT}-eks"
         info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo
 
-        info "Step 1/2: Applying kustomize manifests..."
-        apply_kustomize
-        echo
+        STEP=1
+        TOTAL_STEPS=1
+        if [ "$APPLY_MANIFESTS" = true ]; then
+            TOTAL_STEPS=$((TOTAL_STEPS + 1))
+        fi
+        if [ "$SYNC_LITELLM" = true ]; then
+            TOTAL_STEPS=$((TOTAL_STEPS + 1))
+        fi
 
-        info "Step 2/2: Restarting pods..."
-        restart_pods
+        if [ "$APPLY_MANIFESTS" = true ]; then
+            info "Step ${STEP}/${TOTAL_STEPS}: Applying kustomize manifests..."
+            apply_kustomize
+            echo
+            STEP=$((STEP + 1))
+        fi
+
+        if [ "$SYNC_LITELLM" = true ]; then
+            info "Step ${STEP}/${TOTAL_STEPS}: Syncing LiteLLM config..."
+            sync_litellm_config
+            echo
+            STEP=$((STEP + 1))
+        fi
+
+        info "Step ${STEP}/${TOTAL_STEPS}: Restarting pods..."
+        restart_pods "${DEPLOYMENTS[@]}"
         verify_pods
         success "✓ Reload complete for $ENVIRONMENT!"
         ;;
