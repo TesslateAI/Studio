@@ -395,6 +395,11 @@ async def startup():
     asyncio.create_task(container_cleanup_loop())
     asyncio.create_task(stats_flush_loop())
 
+    # Start model health check loop (non-blocking, tests each LiteLLM model every 10 min)
+    from .services.model_health import model_health_check_loop
+
+    asyncio.create_task(model_health_check_loop())
+
     # Initialize base cache (Docker mode only - async - doesn't block startup)
     if is_docker_mode():
         from .services.base_cache_manager import get_base_cache_manager

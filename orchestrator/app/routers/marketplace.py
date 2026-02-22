@@ -67,6 +67,14 @@ async def _get_cached_litellm_models() -> list[dict[str, Any]]:
     return models
 
 
+async def _get_cached_model_health() -> dict[str, dict]:
+    """Get cached per-model health results. Returns {} before first check completes."""
+    from ..services.model_health import CACHE_KEY as HEALTH_CACHE_KEY
+
+    cached = await cache.get(HEALTH_CACHE_KEY)
+    return cached if cached is not None else {}
+
+
 async def _get_cached_model_pricing() -> dict[str, dict[str, float]]:
     """
     Build a model-id → {input, output} pricing map from LiteLLM /model/info.
@@ -123,12 +131,12 @@ async def get_available_models(
     from ..agent.models import BUILTIN_PROVIDERS
     from ..models import UserAPIKey, UserCustomModel, UserProvider
 
-    # Get models and pricing from LiteLLM in parallel (both cached independently)
-    litellm_models, pricing_map = await asyncio.gather(
-        _get_cached_litellm_models(), _get_cached_model_pricing()
+    # Get models, pricing, and health from LiteLLM in parallel (all cached independently)
+    litellm_models, pricing_map, health_map = await asyncio.gather(
+        _get_cached_litellm_models(), _get_cached_model_pricing(), _get_cached_model_health()
     )
 
-    # Convert LiteLLM models to response format with pricing
+    # Convert LiteLLM models to response format with pricing and health
     system_models = [
         {
             "id": model.get("id"),
@@ -137,6 +145,7 @@ async def get_available_models(
             "provider": "internal",
             "pricing": pricing_map.get(model.get("id", ""), {"input": 0.0, "output": 0.0}),
             "available": True,
+            "health": health_map.get(model.get("id", ""), {}).get("status"),
         }
         for model in litellm_models
         if model.get("id")
@@ -169,6 +178,7 @@ async def get_available_models(
             "pricing": {"input": model.pricing_input or 0.0, "output": model.pricing_output or 0.0},
             "available": True,
             "custom_id": model.id,
+            "health": None,
         }
         for model in custom_models
     ]
@@ -196,6 +206,7 @@ async def get_available_models(
                     "provider_name": provider_name,
                     "pricing": None,
                     "available": True,
+                    "health": None,
                 }
             )
 
@@ -221,6 +232,7 @@ async def get_available_models(
                     "provider_name": cp.name,
                     "pricing": None,
                     "available": cp.slug in user_providers_set,
+                    "health": None,
                 }
             )
 
@@ -247,6 +259,7 @@ async def get_available_models(
                 "provider": "internal",
                 "pricing": pricing_map.get(m.strip(), {"input": 0.0, "output": 0.0}),
                 "available": True,
+                "health": health_map.get(m.strip(), {}).get("status"),
             }
             for m in models_str.split(",")
             if m.strip()

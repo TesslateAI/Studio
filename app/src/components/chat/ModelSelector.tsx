@@ -10,6 +10,7 @@ interface ModelInfo {
   provider?: string;
   provider_name?: string;
   pricing: { input: number; output: number } | null;
+  health?: 'healthy' | 'unhealthy' | 'timeout' | null;
 }
 
 interface ModelSelectorProps {
@@ -66,6 +67,7 @@ export function ModelSelector({
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
+  const lastFetchedAt = useRef<number>(0);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -115,8 +117,12 @@ export function ModelSelector({
 
     setIsOpen(true);
 
-    if (!hasFetched) {
-      setIsLoading(true);
+    // Refetch if never fetched or if data is stale (>5 min)
+    const STALE_MS = 5 * 60 * 1000;
+    const isStale = Date.now() - lastFetchedAt.current > STALE_MS;
+
+    if (!hasFetched || isStale) {
+      if (!hasFetched) setIsLoading(true);
       try {
         const data = await marketplaceApi.getAvailableModels();
         const raw: unknown[] = Array.isArray(data) ? data : data.models || [];
@@ -129,17 +135,19 @@ export function ModelSelector({
             return id
               ? {
                   id,
-                  name: (obj.name as string) || undefined,
-                  source: (obj.source as string) || undefined,
-                  provider: (obj.provider as string) || undefined,
-                  provider_name: (obj.provider_name as string) || undefined,
+                  name: (obj.name as string) ?? undefined,
+                  source: (obj.source as string) ?? undefined,
+                  provider: (obj.provider as string) ?? undefined,
+                  provider_name: (obj.provider_name as string) ?? undefined,
                   pricing,
+                  health: (obj.health as ModelInfo['health']) ?? undefined,
                 }
               : null;
           })
           .filter((m): m is ModelInfo => m !== null);
         setModels(modelList);
         setHasFetched(true);
+        lastFetchedAt.current = Date.now();
       } catch (error) {
         console.error('Failed to fetch models:', error);
       } finally {
@@ -382,7 +390,15 @@ function ModelRow({
       `}
     >
       <div
-        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isActive ? 'bg-[var(--primary)]' : 'bg-white/15 group-hover:bg-white/25'}`}
+        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+          model.health === 'unhealthy' || model.health === 'timeout'
+            ? 'bg-red-400/70'
+            : model.health === 'healthy'
+              ? 'bg-emerald-400/70'
+              : isActive
+                ? 'bg-[var(--primary)]'
+                : 'bg-white/15 group-hover:bg-white/25'
+        }`}
       />
 
       <div className="flex-1 text-left min-w-0">
