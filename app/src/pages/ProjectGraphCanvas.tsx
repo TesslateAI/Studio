@@ -490,6 +490,9 @@ export const ProjectGraphCanvas = () => {
     async (connection) => {
       if (!connection.source || !connection.target) return;
 
+      // Prevent self-connections
+      if (connection.source === connection.target) return;
+
       // Check if target is a browser preview node
       const targetNode = nodesRef.current.find((n) => n.id === connection.target);
       const sourceNode = nodesRef.current.find((n) => n.id === connection.source);
