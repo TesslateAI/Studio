@@ -25,12 +25,6 @@ interface SavedEnvVar {
   pendingValue: string;
 }
 
-interface InjectedEnvVar {
-  key: string;
-  source_container_name: string;
-  source_container_id: string;
-}
-
 interface ContainerPropertiesPanelProps {
   containerId: string;
   containerName: string;
@@ -53,7 +47,6 @@ export const ContainerPropertiesPanel = ({
   port,
 }: ContainerPropertiesPanelProps) => {
   const [savedEnvVars, setSavedEnvVars] = useState<SavedEnvVar[]>([]);
-  const [injectedEnvVars, setInjectedEnvVars] = useState<InjectedEnvVar[]>([]);
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
   const [newEnvKey, setNewEnvKey] = useState('');
@@ -64,6 +57,7 @@ export const ContainerPropertiesPanel = ({
   const [isRenamingContainer, setIsRenamingContainer] = useState(false);
   const [deploymentMode, setDeploymentMode] = useState<string>('container');
   const [serviceSlug, setServiceSlug] = useState<string | null>(null);
+  const [serviceOutputs, setServiceOutputs] = useState<Record<string, string> | null>(null);
   const [isCredentialModalOpen, setIsCredentialModalOpen] = useState(false);
   const [credentialServiceItem, setCredentialServiceItem] = useState<ExternalServiceItem | null>(
     null
@@ -77,9 +71,9 @@ export const ContainerPropertiesPanel = ({
       const response = await api.get(`/api/projects/${projectSlug}/containers/${containerId}`);
       const keys: string[] = response.data.env_var_keys || [];
       setSavedEnvVars(keys.map((key) => ({ key, isEditing: false, pendingValue: '' })));
-      setInjectedEnvVars(response.data.injected_env_vars || []);
       setDeploymentMode(response.data.deployment_mode || 'container');
       setServiceSlug(response.data.service_slug || null);
+      setServiceOutputs(response.data.service_outputs || null);
     } catch (error: unknown) {
       console.error('Failed to fetch container details:', error);
       if ((error as { response?: { status?: number } }).response?.status === 404) {
@@ -459,23 +453,24 @@ export const ContainerPropertiesPanel = ({
             </div>
           ) : (
             <div className="space-y-2">
-              {/* Injected environment variables (non-editable, from connections) */}
-              {injectedEnvVars.length > 0 && (
+              {/* Service-provided env vars (what this service gives to connected containers) */}
+              {serviceOutputs && Object.keys(serviceOutputs).length > 0 && (
                 <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-purple-400/80">
-                    Injected from connections
+                  <p className="text-xs font-medium text-blue-400/80">
+                    Provides to connected containers
                   </p>
-                  {injectedEnvVars.map((envVar) => (
+                  {Object.entries(serviceOutputs).map(([key, description]) => (
                     <div
-                      key={`injected-${envVar.key}`}
-                      className="flex gap-1.5 items-center min-w-0 px-2 py-1.5 bg-purple-500/5 border border-purple-500/15 rounded"
+                      key={`output-${key}`}
+                      className="flex gap-1.5 items-center min-w-0 px-2 py-1.5 bg-blue-500/5 border border-blue-500/15 rounded"
+                      title={description}
                     >
-                      <Lock size={12} className="text-purple-400/60 flex-shrink-0" />
-                      <span className="text-xs font-mono text-purple-300/90 truncate flex-1 min-w-0">
-                        {envVar.key}
+                      <Lock size={12} className="text-blue-400/60 flex-shrink-0" />
+                      <span className="text-xs font-mono text-blue-300/90 truncate flex-1 min-w-0">
+                        {key}
                       </span>
-                      <span className="text-[10px] text-purple-400/50 truncate max-w-[80px]">
-                        {envVar.source_container_name}
+                      <span className="text-[10px] text-blue-400/50 truncate max-w-[80px]">
+                        {description}
                       </span>
                     </div>
                   ))}

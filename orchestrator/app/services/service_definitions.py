@@ -130,6 +130,9 @@ SERVICES: dict[str, ServiceDefinition] = {
             "DATABASE_URL": "postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{container_name}:{internal_port}/{POSTGRES_DB}",
             "POSTGRES_HOST": "{container_name}",
             "POSTGRES_PORT": "{internal_port}",
+            "POSTGRES_USER": "{POSTGRES_USER}",
+            "POSTGRES_PASSWORD": "{POSTGRES_PASSWORD}",
+            "POSTGRES_DB": "{POSTGRES_DB}",
         },
     ),
     "mysql": ServiceDefinition(

@@ -64,6 +64,7 @@ from ..schemas import Project as ProjectSchema
 from ..schemas import ProjectFile as ProjectFileSchema
 from ..services.secret_codec import decode_secret_map, encode_secret_map
 from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
+from ..services.service_definitions import get_service
 from ..services.task_manager import Task, get_task_manager
 from ..users import current_active_user, current_optional_user, current_superuser
 from ..utils.async_fileio import makedirs_async, read_file_async, walk_directory_async
@@ -3886,7 +3887,7 @@ async def get_project_containers(
     result = await db.execute(select(Container).where(Container.project_id == project.id))
     containers = result.scalars().all()
 
-    return containers
+    return [_container_response(c) for c in containers]
 
 
 @router.post("/{project_slug}/containers")
@@ -4666,6 +4667,9 @@ def _container_response(container, injected_env_vars: list | None = None) -> dic
     data["env_var_keys"] = container.env_var_keys
     data["env_vars_count"] = container.env_vars_count
     data["injected_env_vars"] = injected_env_vars
+    # Attach service outputs if this is a service container
+    service_def = get_service(container.service_slug) if container.service_slug else None
+    data["service_outputs"] = service_def.outputs if service_def and service_def.outputs else None
     return data
 
 

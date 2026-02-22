@@ -227,6 +227,7 @@ class Container(ContainerBase):
     external_endpoint: str | None = None
     credentials_id: UUID | None = None
     injected_env_vars: list[InjectedEnvVar] | None = None
+    service_outputs: dict[str, str] | None = None
     position_x: float
     position_y: float
     status: str

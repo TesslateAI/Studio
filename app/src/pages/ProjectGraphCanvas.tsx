@@ -84,6 +84,7 @@ interface Container {
   position_y: number;
   status: 'stopped' | 'starting' | 'running' | 'failed';
   port?: number;
+  container_type?: string;
 }
 
 interface ContainerConnection {
