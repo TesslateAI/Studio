@@ -4,7 +4,6 @@ import {
   Package,
   Pencil,
   Power,
-  Cpu,
   GitFork,
   LockSimpleOpen,
   LockKey,
@@ -13,12 +12,10 @@ import {
   XCircle,
   Rocket,
   Key,
-  ChartLine,
   Plus,
   Trash,
   Eye,
   EyeSlash,
-  Circle,
   CheckCircle,
   File,
   FileText,
@@ -40,8 +37,10 @@ import {
   Robot,
   ToggleLeft,
   ToggleRight,
+  Plugs,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
+import { ModelSelector } from '../components/chat/ModelSelector';
 import {
   MobileMenu,
   MarkerEditor,
@@ -50,9 +49,14 @@ import {
   type MarkerEditorHandle,
 } from '../components/ui';
 import { ConfirmDialog, SubmitBaseModal } from '../components/modals';
+import {
+  CustomProviderCard,
+  CustomProviderModal,
+  type CustomProvider,
+} from '../components/settings/CustomProviderComponents';
 import { ToolManagement } from '../components/ToolManagement';
 import { ImageUpload } from '../components/ImageUpload';
-import { marketplaceApi, secretsApi, usersApi, billingApi, authApi } from '../lib/api';
+import { marketplaceApi, secretsApi, billingApi, authApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
 
@@ -92,34 +96,13 @@ interface LibraryAgent {
   usage_count?: number;
 }
 
-interface Model {
-  id: string;
-  name: string;
-  source: string;
-  provider: string;
-  pricing: {
-    input: number;
-    output: number;
-  };
-  available: boolean;
-  custom_id?: number;
-}
-
-interface ExternalProvider {
-  provider: string;
-  name: string;
-  description: string;
-  has_key: boolean;
-  setup_required: boolean;
-  models_count: string;
-}
-
 interface ApiKey {
   id: string;
   provider: string;
   auth_type: string;
   key_name: string | null;
   key_preview: string;
+  base_url: string | null;
   created_at: string;
   last_used_at: string | null;
 }
@@ -131,9 +114,11 @@ interface Provider {
   auth_type: string;
   website: string;
   requires_key: boolean;
+  base_url?: string;
+  api_type?: string;
 }
 
-type TabType = 'agents' | 'bases' | 'models' | 'api-keys' | 'subscriptions';
+type TabType = 'agents' | 'bases' | 'api-keys' | 'subscriptions';
 
 interface LibraryBase {
   id: string;
@@ -205,8 +190,6 @@ export default function Library() {
   const [activeTab, setActiveTab] = useState<TabType>(tabParam || 'agents');
   const [agents, setAgents] = useState<LibraryAgent[]>([]);
   const [bases, setBases] = useState<LibraryBase[]>([]);
-  const [models, setModels] = useState<Model[]>([]);
-  const [externalProviders, setExternalProviders] = useState<ExternalProvider[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
   const [editingBase, setEditingBase] = useState<LibraryBase | null>(null);
@@ -270,8 +253,8 @@ export default function Library() {
     ],
   };
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [customProviders, setCustomProviders] = useState<CustomProvider[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modelsLoading, setModelsLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
 
   useEffect(() => {
@@ -298,15 +281,10 @@ export default function Library() {
     setLoading(true);
     try {
       if (activeTab === 'agents') {
-        // Progressive loading: show agents immediately, load models in background
         await loadLibraryAgents();
         setLoading(false);
-        loadModelsInBackground();
       } else if (activeTab === 'bases') {
         await loadCreatedBases();
-        setLoading(false);
-      } else if (activeTab === 'models') {
-        await loadModels();
         setLoading(false);
       } else if (activeTab === 'api-keys') {
         await loadApiKeys();
@@ -361,34 +339,6 @@ export default function Library() {
     }
   };
 
-  const loadModels = async () => {
-    setModelsLoading(true);
-    try {
-      const data = await marketplaceApi.getAvailableModels();
-      setModels(data.models || []);
-      setExternalProviders(data.external_providers || []);
-    } catch (error) {
-      console.error('Failed to load models:', error);
-      toast.error('Failed to load models');
-    } finally {
-      setModelsLoading(false);
-    }
-  };
-
-  const loadModelsInBackground = async () => {
-    setModelsLoading(true);
-    try {
-      const data = await marketplaceApi.getAvailableModels();
-      setModels(data.models || []);
-      setExternalProviders(data.external_providers || []);
-    } catch (error) {
-      console.error('Failed to load models:', error);
-      // Graceful degradation - no toast, just log (agents still work without models)
-    } finally {
-      setModelsLoading(false);
-    }
-  };
-
   const loadApiKeys = async () => {
     try {
       const data = await secretsApi.listApiKeys();
@@ -401,8 +351,12 @@ export default function Library() {
 
   const loadProviders = async () => {
     try {
-      const data = await secretsApi.getProviders();
-      setProviders(data.providers || []);
+      const [provData, customData] = await Promise.all([
+        secretsApi.getProviders(),
+        secretsApi.listCustomProviders(),
+      ]);
+      setProviders(provData.providers || []);
+      setCustomProviders(customData.providers || []);
     } catch (error) {
       console.error('Failed to load providers:', error);
     }
@@ -527,17 +481,6 @@ export default function Library() {
               Bases ({bases.length})
             </button>
             <button
-              onClick={() => setActiveTab('models')}
-              className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
-                activeTab === 'models'
-                  ? 'bg-[var(--primary)] text-white'
-                  : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-              }`}
-            >
-              <Cpu size={16} weight={activeTab === 'models' ? 'fill' : 'regular'} />
-              Model Management
-            </button>
-            <button
               onClick={() => setActiveTab('api-keys')}
               className={`px-3 py-1.5 text-xs font-medium transition-all rounded-lg flex items-center gap-2 whitespace-nowrap ${
                 activeTab === 'api-keys'
@@ -569,8 +512,6 @@ export default function Library() {
           {activeTab === 'agents' && (
             <AgentsTab
               agents={agents}
-              models={models}
-              modelsLoading={modelsLoading}
               onToggleEnable={handleToggleEnable}
               onEdit={setEditingAgent}
               onTogglePublish={handleTogglePublish}
@@ -596,16 +537,14 @@ export default function Library() {
             />
           )}
 
-          {activeTab === 'models' && (
-            <ModelsTab
-              models={models}
-              externalProviders={externalProviders}
-              onSetupProvider={() => setActiveTab('api-keys')}
-            />
-          )}
-
           {activeTab === 'api-keys' && (
-            <ApiKeysTab apiKeys={apiKeys} providers={providers} onReload={loadApiKeys} />
+            <ApiKeysTab
+              apiKeys={apiKeys}
+              providers={providers}
+              customProviders={customProviders}
+              onReload={loadApiKeys}
+              onReloadProviders={loadProviders}
+            />
           )}
 
           {activeTab === 'subscriptions' && <SubscriptionsTab />}
@@ -616,7 +555,6 @@ export default function Library() {
       {editingAgent && (
         <EditAgentModal
           agent={editingAgent}
-          availableModels={[...new Set(models.map((m) => m.id))]}
           onClose={() => setEditingAgent(null)}
           onSave={async (updatedData) => {
             try {
@@ -629,7 +567,7 @@ export default function Library() {
                   system_prompt: updatedData.system_prompt || '',
                   mode: 'agent',
                   agent_type: 'IterativeAgent',
-                  model: updatedData.model || (models.length > 0 ? models[0].id : ''),
+                  model: updatedData.model || '',
                 };
                 response = await marketplaceApi.createCustomAgent(createData);
 
@@ -697,8 +635,6 @@ export default function Library() {
 // Agents Tab Component
 function AgentsTab({
   agents,
-  models,
-  modelsLoading,
   onToggleEnable,
   onEdit,
   onTogglePublish,
@@ -706,8 +642,6 @@ function AgentsTab({
   onReload,
 }: {
   agents: LibraryAgent[];
-  models: Model[];
-  modelsLoading: boolean;
   onToggleEnable: (agent: LibraryAgent) => void;
   onEdit: (agent: LibraryAgent) => void;
   onTogglePublish: (agent: LibraryAgent) => void;
@@ -811,7 +745,7 @@ function AgentsTab({
               category: 'general',
               mode: 'agent',
               agent_type: 'IterativeAgent',
-              model: models.length > 0 ? models[0].id : '',
+              model: '',
               source_type: 'open',
               is_forkable: false,
               icon: '🤖',
@@ -832,20 +766,10 @@ function AgentsTab({
             };
             onEdit(newAgent);
           }}
-          disabled={modelsLoading}
-          className={`px-4 py-2 ${modelsLoading ? 'bg-[var(--primary)]/50 cursor-wait' : 'bg-[var(--primary)] hover:bg-[var(--primary)]/90'} text-white rounded-lg transition-colors flex items-center gap-2`}
+          className="px-4 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 text-white rounded-lg transition-colors flex items-center gap-2"
         >
-          {modelsLoading ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Loading Models...
-            </>
-          ) : (
-            <>
-              <Plus size={18} />
-              Create New Agent
-            </>
-          )}
+          <Plus size={18} />
+          Create New Agent
         </button>
       </div>
 
@@ -855,8 +779,6 @@ function AgentsTab({
           <AgentCard
             key={agent.id}
             agent={agent}
-            availableModels={[...new Set(models.map((m) => m.id))]}
-            modelsLoading={modelsLoading}
             onToggleEnable={() => onToggleEnable(agent)}
             onEdit={() => onEdit(agent)}
             onTogglePublish={() => onTogglePublish(agent)}
@@ -1069,498 +991,33 @@ function BasesTab({
   );
 }
 
-// Models Tab Component
-function ModelsTab({
-  models,
-  externalProviders,
-  onSetupProvider,
-}: {
-  models: Model[];
-  externalProviders: ExternalProvider[];
-  onSetupProvider: (provider: string) => void;
-}) {
-  const [showAddCustomModel, setShowAddCustomModel] = useState(false);
-  const [showAddApiKey, setShowAddApiKey] = useState(false);
-  const [customModels, setCustomModels] = useState<Model[]>([]);
-  const [systemModels, setSystemModels] = useState<Model[]>([]);
-  const [diagramModel, setDiagramModel] = useState<string>('');
-  const [loadingPreferences, setLoadingPreferences] = useState(true);
-  const [openRouterKeys, setOpenRouterKeys] = useState<ApiKey[]>([]);
-  const [loadingKeys, setLoadingKeys] = useState(true);
-  const [providers, setProviders] = useState<Provider[]>([]);
-
-  useEffect(() => {
-    // Separate custom and system models
-    setCustomModels(models.filter((m) => m.source === 'custom'));
-    setSystemModels(models.filter((m) => m.source !== 'custom'));
-  }, [models]);
-
-  useEffect(() => {
-    // Load user preferences
-    loadUserPreferences();
-    loadOpenRouterKeys();
-    loadProviders();
-  }, []);
-
-  const loadUserPreferences = async () => {
-    try {
-      const prefs = await usersApi.getPreferences();
-      setDiagramModel(prefs.diagram_model || '');
-    } catch (error) {
-      console.error('Failed to load preferences:', error);
-    } finally {
-      setLoadingPreferences(false);
-    }
-  };
-
-  const loadOpenRouterKeys = async () => {
-    try {
-      const data = await secretsApi.listApiKeys('openrouter');
-      setOpenRouterKeys(data.api_keys || []);
-    } catch (error) {
-      console.error('Failed to load OpenRouter keys:', error);
-    } finally {
-      setLoadingKeys(false);
-    }
-  };
-
-  const loadProviders = async () => {
-    try {
-      const data = await secretsApi.getProviders();
-      setProviders(data.providers || []);
-    } catch (error) {
-      console.error('Failed to load providers:', error);
-    }
-  };
-
-  const handleDiagramModelChange = async (modelId: string) => {
-    try {
-      await usersApi.updatePreferences({ diagram_model: modelId });
-      setDiagramModel(modelId);
-      toast.success('Diagram generation model updated');
-    } catch (error: unknown) {
-      console.error('Failed to update diagram model:', error);
-      const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to update diagram model');
-    }
-  };
-
-  const handleDeleteCustomModel = async (modelId: number) => {
-    try {
-      await marketplaceApi.deleteCustomModel(modelId);
-      toast.success('Custom model deleted');
-      // Reload models
-      window.location.reload();
-    } catch (error) {
-      console.error('Delete custom model failed:', error);
-      toast.error('Failed to delete custom model');
-    }
-  };
-
-  const openRouterProvider = externalProviders.find((p) => p.provider === 'openrouter');
-  const hasOpenRouterKey = openRouterProvider?.has_key || openRouterKeys.length > 0;
-
-  return (
-    <div className="space-y-8">
-      {/* BYOK (Bring Your Own Key) Section */}
-      <div className="bg-gradient-to-r from-[var(--status-info)]/10 to-[var(--accent)]/10 border border-[var(--status-info)]/20 rounded-xl p-6">
-        <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-[var(--status-info)]/20 rounded-lg">
-            <Key size={24} className="text-[var(--status-info)]" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <h2 className="text-xl font-bold text-[var(--text)]">Bring Your Own Key</h2>
-                <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
-                  FREE (Limited Time)
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowAddApiKey(true)}
-                  className="px-4 py-2 bg-[var(--status-info)]/10 hover:bg-[var(--status-info)]/20 border border-[var(--status-info)]/20 text-[var(--status-info)] rounded-lg transition-colors flex items-center gap-2"
-                >
-                  <Plus size={16} />
-                  Add API Key
-                </button>
-                {hasOpenRouterKey && (
-                  <button
-                    onClick={() => setShowAddCustomModel(true)}
-                    className="px-4 py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 border border-[var(--primary)]/20 text-[var(--primary)] rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <Plus size={16} />
-                    Add Custom Model
-                  </button>
-                )}
-              </div>
-            </div>
-            <p className="text-[var(--text)]/60 text-sm mb-4">
-              Add your own API keys to use models from OpenRouter, OpenAI, Anthropic, Groq, and
-              more.{' '}
-              <span className="text-[var(--primary)] font-medium">
-                Currently free for all users
-              </span>{' '}
-              — this will become a premium subscription feature in the future.
-            </p>
-
-            {/* API Keys List */}
-            {loadingKeys ? (
-              <div className="px-4 py-3 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)]/40">
-                Loading keys...
-              </div>
-            ) : openRouterKeys.length > 0 ? (
-              <div className="space-y-2">
-                {openRouterKeys.map((key) => (
-                  <div
-                    key={key.id}
-                    className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-3 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-[var(--status-success)]/10 rounded-lg">
-                        <CheckCircle
-                          size={16}
-                          className="text-[var(--status-success)]"
-                          weight="fill"
-                        />
-                      </div>
-                      <div>
-                        {key.key_name && (
-                          <div className="text-sm font-medium text-[var(--text)]">
-                            {key.key_name}
-                          </div>
-                        )}
-                        <div className="text-xs text-[var(--text)]/40 font-mono">
-                          {key.key_preview}
-                        </div>
-                        <div className="text-xs text-[var(--text)]/40 mt-0.5">
-                          Added {new Date(key.created_at).toLocaleDateString()}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await secretsApi.deleteApiKey(key.id);
-                          toast.success('API key removed');
-                          loadOpenRouterKeys();
-                        } catch (error) {
-                          console.error('Delete failed:', error);
-                          toast.error('Failed to delete API key');
-                        }
-                      }}
-                      className="p-2 hover:bg-[var(--status-error)]/10 rounded-lg text-[var(--status-error)] transition-colors"
-                    >
-                      <Trash size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="px-4 py-3 bg-[var(--primary)]/10 border border-[var(--primary)]/20 rounded-lg flex items-center gap-2">
-                <Circle size={16} className="text-[var(--primary)]" />
-                <span className="text-sm text-[var(--primary)]">
-                  No API key configured. Add one to get started.
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Diagram Model Selection */}
-      <div className="bg-gradient-to-r from-[var(--primary)]/10 to-[var(--accent)]/10 border border-[var(--primary)]/20 rounded-xl p-6">
-        <div className="flex items-start gap-4 mb-4">
-          <div className="p-3 bg-[var(--primary)]/20 rounded-lg">
-            <ChartLine size={24} className="text-[var(--primary)]" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
-              <h2 className="text-xl font-bold text-[var(--text)]">
-                Architecture Diagram Generation
-              </h2>
-              <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
-                FREE (Limited Time)
-              </span>
-            </div>
-            <p className="text-[var(--text)]/60 text-sm mb-4">
-              Select which AI model to use for generating architecture diagrams of your projects.
-              This model will analyze your code and create Mermaid diagrams showing component
-              relationships.{' '}
-              <span className="text-[var(--primary)] font-medium">
-                Currently free for all users
-              </span>{' '}
-              — this feature will become paid in the future.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-[var(--text)] mb-2">
-            Diagram Generation Model
-          </label>
-          {loadingPreferences ? (
-            <div className="px-4 py-3 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)]/40">
-              Loading preferences...
-            </div>
-          ) : (
-            <select
-              value={diagramModel}
-              onChange={(e) => handleDiagramModelChange(e.target.value)}
-              className="w-full px-4 py-3 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 transition-colors [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-            >
-              <option value="">Select a model...</option>
-              {[...systemModels, ...customModels].map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name} ({model.provider})
-                </option>
-              ))}
-            </select>
-          )}
-          {diagramModel && (
-            <div className="mt-3 px-3 py-2 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 rounded-lg flex items-center gap-2">
-              <CheckCircle size={16} className="text-[var(--status-success)]" weight="fill" />
-              <span className="text-xs text-[var(--status-success)]">
-                Diagram generation configured with{' '}
-                {models.find((m) => m.id === diagramModel)?.name || diagramModel}
-              </span>
-            </div>
-          )}
-          {!diagramModel && !loadingPreferences && (
-            <p className="mt-2 text-xs text-[var(--text)]/40">
-              You must select a model before you can generate architecture diagrams
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Custom Models */}
-      {customModels.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-2xl font-bold text-[var(--text)] mb-1">Your Custom Models</h2>
-              <p className="text-[var(--text)]/60">OpenRouter models you've added</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {customModels.map((model) => (
-              <div
-                key={model.id}
-                className="bg-[var(--surface)] border border-[var(--primary)]/20 rounded-lg p-4 hover:border-[var(--primary)]/40 transition-all"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3 flex-1">
-                    <div className="p-2 bg-[var(--primary)]/10 rounded-lg">
-                      <Cpu size={24} className="text-[var(--primary)]" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-[var(--text)] truncate">{model.name}</h3>
-                        <span className="px-2 py-0.5 bg-[var(--primary)]/20 text-[var(--primary)] text-xs rounded shrink-0">
-                          Custom
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-[var(--text)]/40 capitalize">
-                          {model.provider}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => model.custom_id && handleDeleteCustomModel(model.custom_id)}
-                    className="p-2 hover:bg-[var(--status-error)]/10 rounded-lg text-[var(--status-error)] transition-colors shrink-0"
-                  >
-                    <Trash size={18} />
-                  </button>
-                </div>
-
-                {/* Pricing */}
-                <div className="grid grid-cols-2 gap-3 pt-3 border-t border-[var(--text)]/15">
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs text-[var(--text)]/60">Input:</div>
-                    <div className="text-sm font-semibold text-[var(--text)]">
-                      ${model.pricing.input.toFixed(2)}/1M
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs text-[var(--text)]/60">Output:</div>
-                    <div className="text-sm font-semibold text-[var(--text)]">
-                      ${model.pricing.output.toFixed(2)}/1M
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Available Models */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h2 className="text-2xl font-bold text-[var(--text)]">Available Models</h2>
-              <span className="px-2.5 py-1 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 text-[var(--status-success)] text-xs font-semibold rounded-full">
-                FREE (Limited Time)
-              </span>
-            </div>
-            <p className="text-[var(--text)]/60">
-              <span className="text-[var(--primary)] font-medium">
-                Currently free for all users
-              </span>{' '}
-              — these models will become paid features in the future. Use them now while they're
-              complimentary!
-            </p>
-          </div>
-          <div className="text-sm text-[var(--text)]/40">
-            {systemModels.length} models available
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {systemModels.map((model) => (
-            <div
-              key={model.id}
-              className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4 hover:border-[var(--primary)]/30 transition-all"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-[var(--status-info)]/10 rounded-lg">
-                    <Cpu size={24} className="text-[var(--status-info)]" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-[var(--text)]">{model.name}</h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-[var(--text)]/40 capitalize">
-                        {model.provider}
-                      </span>
-                      {model.pricing.input === 0 && model.pricing.output === 0 && (
-                        <span className="px-2 py-0.5 bg-[var(--status-success)]/20 text-[var(--status-success)] text-xs rounded">
-                          Free
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Pricing */}
-              <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-[var(--text)]/15">
-                <div className="flex items-center gap-2">
-                  <div className="text-xs text-[var(--text)]/60">Input:</div>
-                  <div className="text-sm font-semibold text-[var(--text)]">
-                    ${model.pricing.input.toFixed(2)}/1M
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-xs text-[var(--text)]/60">Output:</div>
-                  <div className="text-sm font-semibold text-[var(--text)]">
-                    ${model.pricing.output.toFixed(2)}/1M
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* External Providers */}
-      {externalProviders.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-2xl font-bold text-[var(--text)] mb-1">External Providers</h2>
-              <p className="text-[var(--text)]/60">Add API keys to unlock more models</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {externalProviders.map((provider) => (
-              <div
-                key={provider.provider}
-                className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="font-semibold text-[var(--text)] mb-1">{provider.name}</h3>
-                    <p className="text-xs text-[var(--text)]/60 mb-2">{provider.description}</p>
-                    <div className="text-xs text-[var(--primary)]">
-                      {provider.models_count} models
-                    </div>
-                  </div>
-                  {provider.has_key ? (
-                    <CheckCircle size={20} className="text-[var(--status-success)]" weight="fill" />
-                  ) : (
-                    <Circle size={20} className="text-[var(--text)]/20" />
-                  )}
-                </div>
-
-                {provider.setup_required && (
-                  <button
-                    onClick={() => onSetupProvider(provider.provider)}
-                    className="w-full mt-3 px-4 py-2 bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 border border-[var(--primary)]/20 text-[var(--primary)] rounded-lg transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Key size={16} />
-                    Add API Key
-                  </button>
-                )}
-
-                {provider.has_key && (
-                  <div className="mt-3 px-3 py-2 bg-[var(--status-success)]/10 border border-[var(--status-success)]/20 rounded-lg flex items-center justify-center gap-2">
-                    <CheckCircle size={16} className="text-[var(--status-success)]" weight="fill" />
-                    <span className="text-xs text-[var(--status-success)]">Configured</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Add API Key Modal - Shows all LLM providers */}
-      {showAddApiKey && (
-        <AddApiKeyModal
-          providers={providers.filter((p) => p.requires_key)}
-          onClose={() => setShowAddApiKey(false)}
-          onSuccess={() => {
-            setShowAddApiKey(false);
-            loadOpenRouterKeys();
-            // Reload to update all provider statuses
-            window.location.reload();
-          }}
-        />
-      )}
-
-      {/* Add Custom Model Modal */}
-      {showAddCustomModel && (
-        <AddCustomModelModal
-          onClose={() => setShowAddCustomModel(false)}
-          onSuccess={() => {
-            setShowAddCustomModel(false);
-            toast.success('Custom model added successfully');
-            window.location.reload();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
 // API Keys Tab Component
 function ApiKeysTab({
   apiKeys,
   providers,
+  customProviders,
   onReload,
+  onReloadProviders,
 }: {
   apiKeys: ApiKey[];
   providers: Provider[];
+  customProviders: CustomProvider[];
   onReload: () => void;
+  onReloadProviders: () => void;
 }) {
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showProviderModal, setShowProviderModal] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<CustomProvider | null>(null);
+
+  const handleDeleteProvider = async (providerId: string) => {
+    try {
+      await secretsApi.deleteCustomProvider(providerId);
+      toast.success('Custom provider deleted');
+      onReloadProviders();
+    } catch {
+      toast.error('Failed to delete provider');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1599,22 +1056,76 @@ function ApiKeysTab({
         </div>
       )}
 
+      {/* Custom Providers */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--text)]">Custom Providers</h3>
+            <p className="text-sm text-[var(--text)]/50 mt-0.5">
+              Connect Ollama, vLLM, or any OpenAI-compatible API
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setEditingProvider(null);
+              setShowProviderModal(true);
+            }}
+            className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm text-[var(--text)]/70 hover:text-[var(--text)] transition-colors flex items-center gap-2"
+          >
+            <Plus size={16} />
+            Add Provider
+          </button>
+        </div>
+
+        {customProviders.length === 0 ? (
+          <div className="text-center py-10 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg">
+            <Plugs size={36} className="mx-auto mb-3 text-[var(--text)]/20" />
+            <p className="text-sm text-[var(--text)]/60 mb-1">No custom providers</p>
+            <p className="text-xs text-[var(--text)]/40">
+              Add a provider to use your own model endpoints
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {customProviders.map((cp) => (
+              <CustomProviderCard
+                key={cp.id}
+                provider={cp}
+                onEdit={() => {
+                  setEditingProvider(cp);
+                  setShowProviderModal(true);
+                }}
+                onDelete={handleDeleteProvider}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Supported Providers Info */}
       <div className="mt-8">
         <h3 className="text-lg font-semibold text-[var(--text)] mb-4">Supported Providers</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {providers.map((provider) => (
-            <div
-              key={provider.id}
-              className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4"
-            >
-              <h4 className="font-semibold text-[var(--text)] mb-1">{provider.name}</h4>
-              <p className="text-xs text-[var(--text)]/60 mb-2">{provider.description}</p>
-              <div className="flex items-center gap-2 text-xs text-[var(--text)]/40">
-                <span className="capitalize">{provider.auth_type.replace('_', ' ')}</span>
+          {providers.map((provider) => {
+            const hasKey = apiKeys.some((k) => k.provider === provider.id);
+            return (
+              <div
+                key={provider.id}
+                className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg p-4"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <div
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${hasKey ? 'bg-green-500' : 'bg-[var(--text)]/20'}`}
+                  />
+                  <h4 className="font-semibold text-[var(--text)]">{provider.name}</h4>
+                </div>
+                <p className="text-xs text-[var(--text)]/60 mb-2">{provider.description}</p>
+                <div className="flex items-center gap-2 text-xs text-[var(--text)]/40">
+                  <span className="capitalize">{provider.auth_type.replace('_', ' ')}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -1622,10 +1133,27 @@ function ApiKeysTab({
       {showAddModal && (
         <AddApiKeyModal
           providers={providers}
+          customProviders={customProviders}
           onClose={() => setShowAddModal(false)}
           onSuccess={() => {
             setShowAddModal(false);
             onReload();
+          }}
+        />
+      )}
+
+      {/* Custom Provider Modal */}
+      {showProviderModal && (
+        <CustomProviderModal
+          existing={editingProvider}
+          onClose={() => {
+            setShowProviderModal(false);
+            setEditingProvider(null);
+          }}
+          onSuccess={() => {
+            setShowProviderModal(false);
+            setEditingProvider(null);
+            onReloadProviders();
           }}
         />
       )}
@@ -1660,6 +1188,9 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
             <div className="text-sm text-[var(--text)]/60">{apiKey.key_name}</div>
           )}
           <div className="text-xs text-[var(--text)]/40 font-mono mt-1">{apiKey.key_preview}</div>
+          {apiKey.base_url && (
+            <div className="text-xs text-[var(--text)]/40 font-mono mt-0.5">{apiKey.base_url}</div>
+          )}
           <div className="text-xs text-[var(--text)]/40 mt-1">
             Added {new Date(apiKey.created_at).toLocaleDateString()}
           </div>
@@ -1706,18 +1237,24 @@ function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void
 // Add API Key Modal Component
 function AddApiKeyModal({
   providers,
+  customProviders = [],
   onClose,
   onSuccess,
 }: {
   providers: Provider[];
+  customProviders?: CustomProvider[];
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const [provider, setProvider] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [keyName, setKeyName] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const selectedCustomProvider = customProviders.find((p) => p.slug === provider);
+  const isCustomProvider = !!selectedCustomProvider;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1728,6 +1265,7 @@ function AddApiKeyModal({
         provider,
         api_key: apiKey,
         key_name: keyName || undefined,
+        base_url: baseUrl || undefined,
       });
       toast.success('API key added successfully');
       onSuccess();
@@ -1763,13 +1301,24 @@ function AddApiKeyModal({
               required
             >
               <option value="">Select a provider...</option>
-              {providers
-                .filter((p) => p.requires_key)
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
+              <optgroup label="Built-in Providers">
+                {providers
+                  .filter((p) => p.requires_key)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+              </optgroup>
+              {customProviders.length > 0 && (
+                <optgroup label="Custom Providers">
+                  {customProviders.map((p) => (
+                    <option key={p.slug} value={p.slug}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
 
@@ -1810,6 +1359,24 @@ function AddApiKeyModal({
             </p>
           </div>
 
+          {isCustomProvider && (
+            <div>
+              <label className="block text-sm font-medium text-[var(--text)] mb-2">
+                Base URL (Optional)
+              </label>
+              <input
+                type="url"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
+                placeholder={selectedCustomProvider?.base_url || 'https://api.example.com/v1'}
+              />
+              <p className="mt-1 text-xs text-[var(--text)]/40">
+                Override the provider's default base URL for this key
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
             <button
               type="button"
@@ -1840,19 +1407,8 @@ function AddApiKeyModal({
   );
 }
 
-// Agent Card Component (keeping original)
-function AgentCardModelSkeleton() {
-  return (
-    <div className="w-full px-3 py-2 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 rounded-lg animate-pulse">
-      <div className="h-4 bg-[var(--status-info)]/20 rounded w-3/4"></div>
-    </div>
-  );
-}
-
 function AgentCard({
   agent,
-  availableModels,
-  modelsLoading,
   onToggleEnable,
   onEdit,
   onTogglePublish,
@@ -1861,8 +1417,6 @@ function AgentCard({
   onDelete,
 }: {
   agent: LibraryAgent;
-  availableModels: string[];
-  modelsLoading: boolean;
   onToggleEnable: () => void;
   onEdit: () => void;
   onTogglePublish: () => void;
@@ -1871,8 +1425,6 @@ function AgentCard({
   onDelete: () => void;
 }) {
   const canEdit = agent.source_type === 'open' || agent.is_custom;
-  const canChangeModel = agent.source_type === 'open' || agent.is_custom;
-  const currentModel = agent.selected_model || agent.model;
 
   return (
     <div
@@ -1943,51 +1495,18 @@ function AgentCard({
 
       {/* Model Selection */}
       <div className="mb-4">
-        {canChangeModel ? (
-          modelsLoading ? (
-            <AgentCardModelSkeleton />
-          ) : (
-            <div className="relative">
-              <select
-                value={currentModel}
-                onChange={(e) => onModelChange(e.target.value)}
-                className="w-full px-3 py-2 pl-8 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 rounded-lg text-[var(--status-info)] text-xs font-medium focus:outline-none focus:border-[var(--status-info)]/40 hover:bg-[var(--status-info)]/15 transition-colors cursor-pointer appearance-none pr-8 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-              >
-                {availableModels.length > 0 ? (
-                  availableModels.map((modelName) => (
-                    <option key={modelName} value={modelName}>
-                      {modelName}
-                    </option>
-                  ))
-                ) : (
-                  <option value={currentModel}>{currentModel}</option>
-                )}
-              </select>
-              <Cpu
-                size={14}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--status-info)] pointer-events-none"
-              />
-              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--status-info)]">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path
-                    d="M3 4.5L6 7.5L9 4.5"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-            </div>
-          )
-        ) : (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 rounded-lg w-fit">
-            <Cpu size={14} className="text-[var(--status-info)]" />
-            <span className="text-xs text-[var(--status-info)] font-medium">
-              {currentModel || 'Model not disclosed (closed source)'}
-            </span>
-          </div>
-        )}
+        <ModelSelector
+          currentAgent={{
+            id: agent.id,
+            name: agent.name,
+            icon: agent.icon || '',
+            model: agent.model,
+            selectedModel: agent.selected_model,
+            sourceType: agent.source_type,
+            isCustom: agent.is_custom,
+          }}
+          onModelChange={onModelChange}
+        />
       </div>
 
       {/* Tools */}
@@ -2133,12 +1652,10 @@ interface SubagentItem {
 // Edit Agent Modal Component
 function EditAgentModal({
   agent,
-  availableModels,
   onClose,
   onSave,
 }: {
   agent: LibraryAgent;
-  availableModels: string[];
   onClose: () => void;
   onSave: (data: {
     name?: string;
@@ -2338,22 +1855,19 @@ function EditAgentModal({
 
               <div>
                 <label className="block text-sm font-medium text-[var(--text)] mb-2">Model</label>
-                <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
-                  disabled={agent.source_type !== 'open' && !agent.is_custom}
-                >
-                  {availableModels.length > 0 ? (
-                    availableModels.map((modelName) => (
-                      <option key={modelName} value={modelName}>
-                        {modelName}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={model}>{model}</option>
-                  )}
-                </select>
+                <ModelSelector
+                  currentAgent={{
+                    id: agent.id,
+                    name: agent.name,
+                    icon: agent.icon || '',
+                    model: agent.model,
+                    selectedModel: model,
+                    sourceType: agent.source_type,
+                    isCustom: agent.is_custom,
+                  }}
+                  onModelChange={setModel}
+                  dropUp={false}
+                />
                 {agent.source_type !== 'open' && !agent.is_custom && (
                   <p className="mt-1 text-xs text-[var(--text)]/40">
                     Model can only be changed for open source agents
@@ -2448,7 +1962,6 @@ function EditAgentModal({
                     setTools(newTools);
                     setToolConfigs(newConfigs);
                   }}
-                  availableModels={availableModels}
                 />
               </div>
 
@@ -2657,144 +2170,6 @@ function EditAgentModal({
             >
               <Check size={18} />
               Save Changes
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Add Custom Model Modal Component
-function AddCustomModelModal({
-  onClose,
-  onSuccess,
-}: {
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [modelId, setModelId] = useState('');
-  const [modelName, setModelName] = useState('');
-  const [pricingInput, setPricingInput] = useState('');
-  const [pricingOutput, setPricingOutput] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      await marketplaceApi.addCustomModel({
-        model_id: modelId,
-        model_name: modelName,
-        pricing_input: pricingInput ? parseFloat(pricingInput) : undefined,
-        pricing_output: pricingOutput ? parseFloat(pricingOutput) : undefined,
-      });
-      onSuccess();
-    } catch (error: unknown) {
-      console.error('Add custom model failed:', error);
-      const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to add custom model');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-[var(--text)] flex items-center gap-2">
-            <Plus size={24} />
-            Add Custom OpenRouter Model
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text)]/60"
-          >
-            ✕
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">Model ID</label>
-            <input
-              type="text"
-              value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
-              placeholder="openrouter/model-name"
-              required
-            />
-            <p className="mt-1 text-xs text-[var(--text)]/40">Find model IDs at openrouter.ai</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[var(--text)] mb-2">
-              Display Name
-            </label>
-            <input
-              type="text"
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
-              placeholder="My Custom Model"
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                Input Price ($/1M tokens)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={pricingInput}
-                onChange={(e) => setPricingInput(e.target.value)}
-                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
-                placeholder="0.00"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-[var(--text)] mb-2">
-                Output Price ($/1M tokens)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={pricingOutput}
-                onChange={(e) => setPricingOutput(e.target.value)}
-                className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50"
-                placeholder="0.00"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/15">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 transition-colors"
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? (
-                <>Adding...</>
-              ) : (
-                <>
-                  <Plus size={18} />
-                  Add Model
-                </>
-              )}
             </button>
           </div>
         </form>

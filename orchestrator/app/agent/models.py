@@ -48,6 +48,41 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {"HTTP-Referer": "https://tesslate.com", "X-Title": "Tesslate Studio"},
         "website": "https://openrouter.ai",
         "requires_key": True,
+        "default_models": [
+            "openai/gpt-5.2",
+            "openai/gpt-5.2-codex",
+            "openai/gpt-oss-120b",
+            "anthropic/claude-sonnet-4.6",
+            "anthropic/claude-opus-4.6",
+            "deepseek/deepseek-r1",
+            "deepseek/deepseek-v3.2",
+            "qwen/qwen3-coder",
+            "z-ai/glm-5",
+            "moonshotai/kimi-k2.5",
+            "minimax/minimax-m2.5",
+        ],
+    },
+    "nano-gpt": {
+        "name": "NanoGPT",
+        "description": "Pay-per-prompt access to 200+ AI models",
+        "base_url": "https://nano-gpt.com/api/v1",
+        "api_type": "openai",
+        "default_headers": {},
+        "website": "https://nano-gpt.com",
+        "requires_key": True,
+        "default_models": [
+            "openai/gpt-5.2",
+            "openai/gpt-5.2-codex",
+            "openai/gpt-oss-120b",
+            "anthropic/claude-sonnet-4.6",
+            "anthropic/claude-opus-4.6",
+            "deepseek-r1",
+            "deepseek/deepseek-v3.2",
+            "qwen/qwen3-coder",
+            "zai-org/glm-5",
+            "moonshotai/kimi-k2.5",
+            "minimax/minimax-m2.5",
+        ],
     },
     "openai": {
         "name": "OpenAI",
@@ -57,24 +92,45 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://platform.openai.com",
         "requires_key": True,
+        "default_models": [
+            "gpt-5.2",
+            "gpt-5.2-codex",
+            "gpt-5-mini",
+            "gpt-4.1",
+            "o3",
+            "o4-mini",
+        ],
     },
     "anthropic": {
         "name": "Anthropic",
-        "description": "Claude 3.5, Claude 3, and other Anthropic models",
+        "description": "Claude Opus 4.6, Sonnet 4.6, and other Anthropic models",
         "base_url": "https://api.anthropic.com/v1",
         "api_type": "anthropic",
         "default_headers": {},
         "website": "https://console.anthropic.com",
         "requires_key": True,
+        "default_models": [
+            "claude-opus-4-6",
+            "claude-opus-4-5",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5",
+        ],
     },
     "groq": {
         "name": "Groq",
-        "description": "Ultra-fast inference with Llama, Mixtral, and more",
+        "description": "Ultra-fast inference with Llama, GPT-OSS, and more",
         "base_url": "https://api.groq.com/openai/v1",
         "api_type": "openai",
         "default_headers": {},
         "website": "https://console.groq.com",
         "requires_key": True,
+        "default_models": [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-120b",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+        ],
     },
     "together": {
         "name": "Together AI",
@@ -84,15 +140,25 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://api.together.xyz",
         "requires_key": True,
+        "default_models": [
+            "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+            "deepseek-ai/DeepSeek-R1",
+            "deepseek-ai/DeepSeek-V3.1",
+            "Qwen/Qwen3-235B-A22B-Instruct-2507-tput",
+        ],
     },
     "deepseek": {
         "name": "DeepSeek",
-        "description": "DeepSeek-V3 and other DeepSeek models",
+        "description": "DeepSeek-V3.2 and other DeepSeek models",
         "base_url": "https://api.deepseek.com/v1",
         "api_type": "openai",
         "default_headers": {},
         "website": "https://platform.deepseek.com",
         "requires_key": True,
+        "default_models": [
+            "deepseek-reasoner",
+            "deepseek-chat",
+        ],
     },
     "fireworks": {
         "name": "Fireworks AI",
@@ -102,6 +168,12 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://fireworks.ai",
         "requires_key": True,
+        "default_models": [
+            "accounts/fireworks/models/deepseek-r1",
+            "accounts/fireworks/models/deepseek-v3p1",
+            "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
+            "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        ],
     },
 }
 
@@ -111,9 +183,11 @@ def get_builtin_provider_config(provider_slug: str) -> dict[str, Any] | None:
     return BUILTIN_PROVIDERS.get(provider_slug)
 
 
-async def get_user_api_key(user_id: UUID, provider_slug: str, db: AsyncSession) -> str:
+async def get_user_api_key(
+    user_id: UUID, provider_slug: str, db: AsyncSession
+) -> dict[str, str | None]:
     """
-    Get user's API key for a specific provider.
+    Get user's API key and optional base URL override for a specific provider.
 
     Args:
         user_id: The user ID
@@ -121,7 +195,7 @@ async def get_user_api_key(user_id: UUID, provider_slug: str, db: AsyncSession) 
         db: Database session
 
     Returns:
-        Decrypted API key string
+        Dict with "key" (decrypted API key) and "base_url" (optional override)
 
     Raises:
         ValueError: If no API key configured for the provider
@@ -145,7 +219,10 @@ async def get_user_api_key(user_id: UUID, provider_slug: str, db: AsyncSession) 
             f"Please add your {provider_name} API key in Library → API Keys."
         )
 
-    return decode_key(api_key_record.encrypted_value)
+    return {
+        "key": decode_key(api_key_record.encrypted_value),
+        "base_url": api_key_record.base_url,
+    }
 
 
 async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> AsyncOpenAI:
@@ -213,13 +290,14 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
 
         logger.info(f"Using {provider_config['name']} API for model: {model_name}")
 
-        # Get user's API key for this provider
-        api_key = await get_user_api_key(user_id, provider_slug, db)
+        # Get user's API key and optional base URL override for this provider
+        user_key_data = await get_user_api_key(user_id, provider_slug, db)
+        effective_base_url = user_key_data["base_url"] or provider_config["base_url"]
 
         # Return client configured for the provider
         return AsyncOpenAI(
-            api_key=api_key,
-            base_url=provider_config["base_url"],
+            api_key=user_key_data["key"],
+            base_url=effective_base_url,
             default_headers=provider_config.get("default_headers", {}),
         )
     else:
@@ -317,7 +395,6 @@ class OpenAIAdapter(ModelAdapter):
         self.client = client
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.is_openrouter = model_name.startswith("openrouter/")
 
         logger.info(f"OpenAIAdapter initialized - model: {model_name}")
 
@@ -335,27 +412,14 @@ class OpenAIAdapter(ModelAdapter):
         _ = kwargs.get("temperature", self.temperature)  # Reserved for future use
         max_tokens = kwargs.get("max_tokens", self.max_tokens)
 
-        # Strip openrouter/ prefix if present (OpenRouter API expects just the model ID)
-        model_id = (
-            self.model_name.removeprefix("openrouter/") if self.is_openrouter else self.model_name
-        )
-
         request_params = {
-            "model": model_id,
+            "model": self.model_name,
             "messages": messages,
             "stream": True,  # Enable streaming
         }
 
         if max_tokens:
             request_params["max_tokens"] = max_tokens
-
-        # Add OpenRouter-specific parameters
-        if self.is_openrouter:
-            # Add extra_headers for OpenRouter rankings and referrals
-            request_params["extra_headers"] = {
-                "HTTP-Referer": "https://tesslate.com",  # Your app URL
-                "X-Title": "Tesslate Studio",  # Your app name
-            }
 
         try:
             logger.debug(
@@ -390,13 +454,8 @@ class OpenAIAdapter(ModelAdapter):
         Accumulates tool call deltas from the stream and yields structured events.
         Follows the exact message format required by the OpenAI API.
         """
-        # Strip openrouter/ prefix if present
-        model_id = (
-            self.model_name.removeprefix("openrouter/") if self.is_openrouter else self.model_name
-        )
-
         request_params = {
-            "model": model_id,
+            "model": self.model_name,
             "messages": messages,
             "tools": tools,
             "tool_choice": tool_choice,
@@ -408,12 +467,6 @@ class OpenAIAdapter(ModelAdapter):
 
         # Enable parallel tool calls if supported
         request_params["parallel_tool_calls"] = True
-
-        if self.is_openrouter:
-            request_params["extra_headers"] = {
-                "HTTP-Referer": "https://tesslate.com",
-                "X-Title": "Tesslate Studio",
-            }
 
         try:
             logger.debug(
@@ -629,7 +682,13 @@ async def create_model_adapter(
         # Get configured client using centralized routing
         client = await get_llm_client(user_id, model_name, db)
 
+        # Strip provider slug prefix from model name before passing to adapter
+        # e.g. "openai/gpt-5.2" → "gpt-5.2", "asdf/zai-org/glm-5" → "zai-org/glm-5"
+        api_model_name = model_name
+        if "/" in model_name:
+            api_model_name = model_name.split("/", 1)[1]
+
         # Create adapter with the configured client
-        return OpenAIAdapter(model_name=model_name, client=client, **kwargs)
+        return OpenAIAdapter(model_name=api_model_name, client=client, **kwargs)
     else:
         raise ValueError(f"Unsupported provider: {provider}")

@@ -973,6 +973,7 @@ export const secretsApi = {
     api_key: string;
     key_name?: string;
     auth_type?: string;
+    base_url?: string;
     provider_metadata?: Record<string, unknown>;
   }) => {
     const response = await api.post('/api/secrets/api-keys', data);
@@ -985,6 +986,7 @@ export const secretsApi = {
     data: {
       api_key?: string;
       key_name?: string;
+      base_url?: string;
       provider_metadata?: Record<string, unknown>;
     }
   ) => {
@@ -1025,6 +1027,7 @@ export const secretsApi = {
     base_url: string;
     api_type?: string;
     default_headers?: Record<string, string>;
+    available_models?: string[];
   }) => {
     const response = await api.post('/api/secrets/providers/custom', data);
     return response.data;
@@ -1038,6 +1041,7 @@ export const secretsApi = {
       base_url?: string;
       api_type?: string;
       default_headers?: Record<string, string>;
+      available_models?: string[];
     }
   ) => {
     const response = await api.put(`/api/secrets/providers/custom/${providerId}`, data);

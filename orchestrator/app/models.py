@@ -375,9 +375,7 @@ class ProjectAssetDirectory(Base):
     path = Column(String, nullable=False)  # e.g., "/public/images"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (
-        UniqueConstraint("project_id", "path", name="uq_project_asset_directory"),
-    )
+    __table_args__ = (UniqueConstraint("project_id", "path", name="uq_project_asset_directory"),)
 
     # Relationships
     project = relationship("Project", back_populates="asset_directories")
@@ -1034,6 +1032,9 @@ class UserAPIKey(Base):
     provider_metadata = Column(
         JSON, default={}
     )  # Provider-specific: refresh_token, scopes, token_type, etc.
+    base_url = Column(
+        String, nullable=True
+    )  # Optional custom base URL override (e.g., Azure OpenAI endpoint)
     is_active = Column(Boolean, default=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
@@ -1085,6 +1086,7 @@ class UserProvider(Base):
     base_url = Column(String, nullable=False)  # API endpoint (e.g., "http://localhost:11434/v1")
     api_type = Column(String, default="openai")  # "openai" or "anthropic" (API compatibility)
     default_headers = Column(JSON, default={})  # Optional extra headers to send
+    available_models = Column(JSON, nullable=True)  # List of model IDs available on this provider
 
     # Status
     is_active = Column(Boolean, default=True)

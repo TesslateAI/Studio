@@ -370,7 +370,7 @@ export function ChatInput({
         {/* Second row: Agent selector and buttons */}
         <div className="flex items-center gap-1.5 px-2 py-1.5 w-full min-w-0">
           {/* Agent selector */}
-          <div className="flex-shrink-0 min-w-0">
+          <div className="min-w-0 shrink">
             <AgentSelector
               agents={agents}
               currentAgent={currentAgent}
@@ -381,7 +381,7 @@ export function ChatInput({
 
           {/* Model selector - hidden when very compact */}
           {onModelChange && !isVeryCompact && (
-            <div className="flex-shrink-0 min-w-0">
+            <div className="min-w-0 shrink">
               <ModelSelector
                 currentAgent={currentAgent}
                 onModelChange={onModelChange}

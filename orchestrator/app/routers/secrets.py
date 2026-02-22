@@ -77,6 +77,7 @@ async def list_api_keys(
                 "key_preview": decode_key(key.encrypted_value)[:8] + "..."
                 if key.encrypted_value
                 else None,
+                "base_url": key.base_url,
                 "provider_metadata": key.provider_metadata,
                 "expires_at": key.expires_at.isoformat() if key.expires_at else None,
                 "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
@@ -95,6 +96,7 @@ async def add_api_key(
     api_key: str = Body(..., description="The API key value"),
     auth_type: str = Body(default="api_key", description="Authentication type"),
     key_name: str | None = Body(None, description="Optional name for this key"),
+    base_url: str | None = Body(None, description="Optional custom base URL override"),
     provider_metadata: dict | None = Body(default={}, description="Provider-specific metadata"),
     expires_at: str | None = Body(None, description="Optional expiration date"),
     current_user: User = Depends(current_active_user),
@@ -103,6 +105,13 @@ async def add_api_key(
     """
     Add a new API key for a provider.
     """
+    # Default key_name to provider display name if not provided
+    if not key_name:
+        from ..agent.models import BUILTIN_PROVIDERS
+
+        provider_config = BUILTIN_PROVIDERS.get(provider)
+        key_name = provider_config["name"] if provider_config else provider.title()
+
     # Check if key with same provider and name already exists
     existing_query = select(UserAPIKey).where(
         UserAPIKey.user_id == current_user.id,
@@ -123,6 +132,7 @@ async def add_api_key(
         else:
             # Reactivate existing key
             existing_key.encrypted_value = encode_key(api_key)
+            existing_key.base_url = base_url or None
             existing_key.is_active = True
             existing_key.provider_metadata = provider_metadata
             existing_key.expires_at = datetime.fromisoformat(expires_at) if expires_at else None
@@ -137,6 +147,7 @@ async def add_api_key(
         provider=provider,
         auth_type=auth_type,
         key_name=key_name,
+        base_url=base_url or None,
         encrypted_value=encode_key(api_key),
         provider_metadata=provider_metadata or {},
         expires_at=datetime.fromisoformat(expires_at) if expires_at else None,
@@ -160,6 +171,9 @@ async def update_api_key(
     key_id: str,
     api_key: str | None = Body(None, description="New API key value"),
     key_name: str | None = Body(None, description="New name for this key"),
+    base_url: str | None = Body(
+        None, description="Custom base URL override (empty string clears it)"
+    ),
     provider_metadata: dict | None = Body(None, description="Updated metadata"),
     expires_at: str | None = Body(None, description="Updated expiration date"),
     current_user: User = Depends(current_active_user),
@@ -180,6 +194,8 @@ async def update_api_key(
         key_record.encrypted_value = encode_key(api_key)
     if key_name is not None:
         key_record.key_name = key_name
+    if base_url is not None:
+        key_record.base_url = base_url or None  # Empty string clears it
     if provider_metadata is not None:
         key_record.provider_metadata = provider_metadata
     if expires_at is not None:
@@ -241,6 +257,7 @@ async def get_api_key(
         "provider": key_record.provider,
         "auth_type": key_record.auth_type,
         "key_name": key_record.key_name,
+        "base_url": key_record.base_url,
         "key_value": decoded_key if reveal else None,
         "key_preview": decoded_key[:8] + "..." if decoded_key and not reveal else None,
         "provider_metadata": key_record.provider_metadata,
@@ -332,6 +349,7 @@ async def list_custom_providers(
                 "base_url": p.base_url,
                 "api_type": p.api_type,
                 "default_headers": p.default_headers,
+                "available_models": p.available_models or [],
                 "created_at": p.created_at.isoformat(),
             }
             for p in providers
@@ -348,6 +366,9 @@ async def create_custom_provider(
         default="openai", description="API compatibility: 'openai' or 'anthropic'"
     ),
     default_headers: dict | None = Body(default={}, description="Optional extra headers"),
+    available_models: list[str] | None = Body(
+        default=None, description="List of model IDs available on this provider"
+    ),
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -398,6 +419,7 @@ async def create_custom_provider(
             existing_provider.base_url = base_url
             existing_provider.api_type = api_type
             existing_provider.default_headers = default_headers or {}
+            existing_provider.available_models = available_models
             existing_provider.is_active = True
             existing_provider.updated_at = datetime.now(UTC)
             await db.commit()
@@ -417,6 +439,7 @@ async def create_custom_provider(
         base_url=base_url,
         api_type=api_type,
         default_headers=default_headers or {},
+        available_models=available_models,
         is_active=True,
     )
 
@@ -439,6 +462,9 @@ async def update_custom_provider(
     base_url: str | None = Body(None, description="New API endpoint URL"),
     api_type: str | None = Body(None, description="New API type"),
     default_headers: dict | None = Body(None, description="New default headers"),
+    available_models: list[str] | None = Body(
+        None, description="Updated list of available model IDs"
+    ),
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -467,6 +493,8 @@ async def update_custom_provider(
         provider.api_type = api_type
     if default_headers is not None:
         provider.default_headers = default_headers
+    if available_models is not None:
+        provider.available_models = available_models
 
     provider.updated_at = datetime.now(UTC)
 

@@ -120,7 +120,8 @@ async def get_available_models(
     Includes both system models and models from user's configured providers.
     Returns models that users can select for open source agents.
     """
-    from ..models import UserAPIKey, UserCustomModel
+    from ..agent.models import BUILTIN_PROVIDERS
+    from ..models import UserAPIKey, UserCustomModel, UserProvider
 
     # Get models and pricing from LiteLLM in parallel (both cached independently)
     litellm_models, pricing_map = await asyncio.gather(
@@ -149,7 +150,7 @@ async def get_available_models(
     user_keys = result.scalars().all()
 
     # Map of providers user has keys for
-    user_providers = {key.provider for key in user_keys}
+    user_providers_set = {key.provider for key in user_keys}
 
     # Get user's custom models
     custom_models_query = select(UserCustomModel).where(
@@ -172,14 +173,65 @@ async def get_available_models(
         for model in custom_models
     ]
 
+    # Build provider models from BYOK providers the user has keys for
+    # Each provider's models are prefixed with provider slug for routing
+    provider_models: list[dict] = []
+
+    for provider_slug in user_providers_set:
+        builtin_config = BUILTIN_PROVIDERS.get(provider_slug)
+        if not builtin_config:
+            continue  # custom providers handled below
+
+        provider_name = builtin_config["name"]
+        known_models = builtin_config.get("default_models", [])
+
+        for model_id in known_models:
+            full_id = f"{provider_slug}/{model_id}"
+            provider_models.append(
+                {
+                    "id": full_id,
+                    "name": model_id,
+                    "source": "provider",
+                    "provider": provider_slug,
+                    "provider_name": provider_name,
+                    "pricing": None,
+                    "available": True,
+                }
+            )
+
+    # Custom user providers with available_models
+    custom_providers_query = select(UserProvider).where(
+        UserProvider.user_id == current_user.id,
+        UserProvider.is_active.is_(True),
+    )
+    result = await db.execute(custom_providers_query)
+    user_custom_providers = result.scalars().all()
+
+    for cp in user_custom_providers:
+        if not cp.available_models:
+            continue
+        for model_id in cp.available_models:
+            full_id = f"{cp.slug}/{model_id}"
+            provider_models.append(
+                {
+                    "id": full_id,
+                    "name": model_id,
+                    "source": "provider",
+                    "provider": cp.slug,
+                    "provider_name": cp.name,
+                    "pricing": None,
+                    "available": cp.slug in user_providers_set,
+                }
+            )
+
     # Add information about available external providers
     external_providers = [
         {
             "provider": "openrouter",
             "name": "OpenRouter",
             "description": "Access 200+ models through OpenRouter",
-            "has_key": "openrouter" in user_providers,
-            "setup_required": "openrouter" not in user_providers,
+            "has_key": "openrouter" in user_providers_set,
+            "setup_required": "openrouter" not in user_providers_set,
             "models_count": "200+",
         }
     ]
@@ -200,15 +252,15 @@ async def get_available_models(
             if m.strip()
         ]
 
-    # Combine system models and custom models
-    all_models = system_models + custom_models_data
+    # Combine all model sources
+    all_models = system_models + provider_models + custom_models_data
 
     return {
         "models": all_models,
         "default": system_models[0]["id"] if system_models else None,
         "count": len(all_models),
         "external_providers": external_providers,
-        "user_providers": list(user_providers),
+        "user_providers": list(user_providers_set),
         "custom_models": custom_models_data,
     }
 
