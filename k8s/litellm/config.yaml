@@ -758,3 +758,38 @@ model_list:
   #     api_key: "os.environ/AZURE_API_KEY"
   #     api_base: "os.environ/AZURE_API_BASE"
   #     api_version: "os.environ/AZURE_API_VERSION"
+
+  # ===========================================================================
+  # NanoGPT (OpenAI-compatible gateway)
+  # ===========================================================================
+  # Auth: API key via NANOGPT_API_KEY env var
+  # Endpoint: https://nano-gpt.com/api/v1 (OpenAI-compatible)
+  # ===========================================================================
+
+  # --- MiniMax ---
+
+  - model_name: "minimax-m2.5"
+    litellm_params:
+      model: "openai/minimax/minimax-m2.5"
+      api_key: "os.environ/NANOGPT_API_KEY"
+      api_base: "https://nano-gpt.com/api/v1"
+    model_info:
+      input_cost_per_token: 0.0000003
+      output_cost_per_token: 0.0000012
+      max_tokens: 32768
+      max_input_tokens: 1048576
+      access_groups: ["internal"]
+
+  # --- Moonshot AI (Kimi) ---
+
+  - model_name: "kimi-k2.5"
+    litellm_params:
+      model: "openai/moonshotai/kimi-k2.5"
+      api_key: "os.environ/NANOGPT_API_KEY"
+      api_base: "https://nano-gpt.com/api/v1"
+    model_info:
+      input_cost_per_token: 0.0000006
+      output_cost_per_token: 0.000003
+      max_tokens: 32768
+      max_input_tokens: 131072
+      access_groups: ["internal"]

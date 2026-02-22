@@ -289,6 +289,7 @@ resource "kubernetes_secret" "litellm" {
     VERTEX_PROJECT            = var.vertex_project
     VERTEX_LOCATION           = var.vertex_location
     VERTEX_CREDENTIALS        = var.vertex_credentials != "" ? base64decode(var.vertex_credentials) : ""
+    NANOGPT_API_KEY           = var.nanogpt_api_key
     AZURE_API_KEY             = var.azure_api_key
     AZURE_API_BASE            = var.azure_api_base
     AZURE_API_VERSION         = var.azure_api_version

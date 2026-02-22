@@ -444,6 +444,13 @@ variable "vertex_credentials" {
   default     = ""
 }
 
+variable "nanogpt_api_key" {
+  description = "NanoGPT API key for OpenAI-compatible gateway (https://nano-gpt.com/api/v1)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "azure_api_key" {
   description = "Azure OpenAI API key"
   type        = string
