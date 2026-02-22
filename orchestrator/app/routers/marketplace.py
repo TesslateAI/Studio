@@ -137,9 +137,10 @@ async def get_available_models(
     )
 
     # Convert LiteLLM models to response format with pricing and health
+    # System models get a "builtin/" prefix to distinguish from BYOK provider models
     system_models = [
         {
-            "id": model.get("id"),
+            "id": f"builtin/{model.get('id')}",
             "name": model.get("id"),
             "source": "system",
             "provider": "internal",
@@ -253,7 +254,7 @@ async def get_available_models(
         models_str = settings.litellm_default_models
         system_models = [
             {
-                "id": m.strip(),
+                "id": f"builtin/{m.strip()}",
                 "name": m.strip(),
                 "source": "system",
                 "provider": "internal",

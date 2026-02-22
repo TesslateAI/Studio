@@ -32,6 +32,14 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# Built-in Model Prefix
+# =============================================================================
+# System models served via LiteLLM are prefixed with "builtin/" in the API
+# response to distinguish them from BYOK provider models that also use "/" in
+# their identifiers (e.g., "openai/gpt-5.2").
+BUILTIN_PREFIX = "builtin/"
+
 
 # =============================================================================
 # Built-in Provider Configurations
@@ -230,14 +238,15 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
     Get configured LLM client for a user and model.
 
     Routing logic based on model prefix:
-    - "provider/model-name" → User's API key for that provider
-    - No prefix → LiteLLM proxy (system models)
+    - "builtin/model-name" → LiteLLM proxy (strips prefix)
+    - "provider/model-name" → User's API key for that provider (BYOK)
+    - No prefix → LiteLLM proxy (backward compat for old DB records)
 
-    Supported provider prefixes: openrouter, openai, anthropic, groq, together, deepseek, fireworks
+    Supported BYOK provider prefixes: openrouter, openai, anthropic, groq, together, deepseek, fireworks
 
     Args:
         user_id: The user ID
-        model_name: The model identifier (e.g., "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
+        model_name: The model identifier (e.g., "builtin/gpt-4o", "gpt-4o", "openrouter/anthropic/claude-3.5-sonnet")
         db: Database session
 
     Returns:
@@ -256,6 +265,11 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
     user = result.scalar_one_or_none()
     if not user:
         raise ValueError(f"User {user_id} not found")
+
+    # Handle builtin/ prefix — route to LiteLLM
+    if model_name.startswith(BUILTIN_PREFIX):
+        model_name = model_name[len(BUILTIN_PREFIX) :]
+        # Fall through to the "no prefix" LiteLLM path below
 
     # Check if model has a provider prefix (e.g., "openrouter/model-name")
     if "/" in model_name:
@@ -682,10 +696,13 @@ async def create_model_adapter(
         # Get configured client using centralized routing
         client = await get_llm_client(user_id, model_name, db)
 
-        # Strip provider slug prefix from model name before passing to adapter
-        # e.g. "openai/gpt-5.2" → "gpt-5.2", "asdf/zai-org/glm-5" → "zai-org/glm-5"
+        # Strip routing prefix from model name before passing to adapter
+        # builtin/gpt-4o → gpt-4o (LiteLLM models)
+        # openai/gpt-5.2 → gpt-5.2, asdf/zai-org/glm-5 → zai-org/glm-5 (BYOK)
         api_model_name = model_name
-        if "/" in model_name:
+        if model_name.startswith(BUILTIN_PREFIX):
+            api_model_name = model_name[len(BUILTIN_PREFIX) :]
+        elif "/" in model_name:
             api_model_name = model_name.split("/", 1)[1]
 
         # Create adapter with the configured client

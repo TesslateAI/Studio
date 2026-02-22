@@ -99,10 +99,15 @@ class StreamAgent(AbstractAgent):
             logger.info(f"[StreamAgent] Using model: {model}")
 
             # Prepare request parameters
-            # Strip openrouter/ prefix if present (OpenRouter API expects just the model ID)
-            model_id = (
-                model.removeprefix("openrouter/") if model.startswith("openrouter/") else model
-            )
+            # Strip routing prefix before sending to LLM API
+            from .models import BUILTIN_PREFIX
+
+            if model.startswith(BUILTIN_PREFIX):
+                model_id = model[len(BUILTIN_PREFIX) :]
+            elif model.startswith("openrouter/"):
+                model_id = model.removeprefix("openrouter/")
+            else:
+                model_id = model
 
             stream_params = {"model": model_id, "messages": messages, "stream": True}
 

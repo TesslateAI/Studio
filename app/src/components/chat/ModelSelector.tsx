@@ -29,9 +29,7 @@ function rawModelName(id: string): string {
 
 /** Compact display for the trigger button */
 function formatButtonLabel(model: ModelInfo): string {
-  const label = getProviderLabel(model.provider || 'internal', model.provider_name);
-  const name = model.name ? rawModelName(model.name) : rawModelName(model.id);
-  return `${label}/${name}`;
+  return model.name ? rawModelName(model.name) : rawModelName(model.id);
 }
 
 /** Get a friendly provider label */
@@ -215,7 +213,9 @@ export function ModelSelector({
     // Derive provider from model ID prefix (e.g. "asdf/glm-5" → provider "asdf")
     const slashIdx = activeModel.indexOf('/');
     const fallbackProvider = slashIdx > 0 ? activeModel.substring(0, slashIdx) : 'internal';
-    return { id: activeModel, pricing: null, provider: fallbackProvider } as ModelInfo;
+    // Map "builtin" to "internal" for display consistency (builtin/ prefix = system models)
+    const normalizedProvider = fallbackProvider === 'builtin' ? 'internal' : fallbackProvider;
+    return { id: activeModel, pricing: null, provider: normalizedProvider } as ModelInfo;
   }, [allModels, activeModel]);
 
   // No model info at all — hide the selector
