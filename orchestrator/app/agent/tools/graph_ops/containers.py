@@ -167,7 +167,7 @@ async def graph_stop_container_executor(
         from sqlalchemy import select
 
         from ....models import Container
-        from ....services.orchestration import get_orchestrator
+        from ....services.orchestration import get_orchestrator, is_kubernetes_mode
 
         # Fetch container
         container_result = await db.execute(
@@ -185,12 +185,16 @@ async def graph_stop_container_executor(
 
         # Stop the container
         orchestrator = get_orchestrator()
-        await orchestrator.stop_container(
-            project_slug=project_slug,
-            project_id=project_id,
-            container_name=container.directory or container.name,
-            user_id=user_id,
-        )
+        stop_kwargs: dict = {
+            "project_slug": project_slug,
+            "project_id": project_id,
+            "container_name": container.directory or container.name,
+            "user_id": user_id,
+        }
+        if is_kubernetes_mode() and getattr(container, "container_type", "base") == "service":
+            stop_kwargs["container_type"] = "service"
+            stop_kwargs["service_slug"] = container.service_slug
+        await orchestrator.stop_container(**stop_kwargs)
 
         return success_output(
             message=f"Container '{container.name}' stopped successfully",
@@ -378,9 +382,19 @@ async def graph_container_status_executor(
 
         # Build container list with status
         container_list = []
+        status_map = status.get("containers", {})
         for container in containers:
-            container_key = container.directory or container.name
-            container_status = status.get("containers", {}).get(container_key, {})
+            # K8s keys status by sanitized service_slug (service) or directory (base)
+            if getattr(container, "container_type", "base") == "service":
+                container_key = (container.service_slug or container.name).lower()
+            else:
+                dir_for_k8s = (
+                    container.name
+                    if container.directory in (".", "", None)
+                    else container.directory
+                )
+                container_key = dir_for_k8s
+            container_status = status_map.get(container_key, {})
 
             container_list.append(
                 {

@@ -35,6 +35,7 @@ from datetime import UTC
 from typing import Any
 from uuid import UUID
 
+from kubernetes import client
 from kubernetes.client.rest import ApiException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,7 +50,9 @@ from .kubernetes.helpers import (
     create_ingress_manifest,
     create_network_policy_manifest,
     create_pvc_manifest,
+    create_service_container_deployment,
     create_service_manifest,
+    create_service_pvc_manifest,
     generate_git_clone_script,
 )
 
@@ -461,6 +464,202 @@ fi
     # CONTAINER LIFECYCLE (START/STOP)
     # =========================================================================
 
+    async def _start_service_container(
+        self,
+        project,
+        container,
+        all_containers: list,
+        user_id: UUID,
+        db: AsyncSession,
+    ) -> dict[str, Any]:
+        """
+        Start a service container (PostgreSQL, Redis, MongoDB, etc.).
+
+        Service containers use their actual Docker images (not devserver),
+        have their own PVC for data, and are internal-only (no Ingress).
+
+        Args:
+            project: Project model
+            container: Container model (container_type == "service")
+            all_containers: All containers in project
+            user_id: User UUID
+            db: Database session
+
+        Returns:
+            Dict with status and internal service hostname
+        """
+        from ...services.service_definitions import ServiceType, get_service
+
+        project_id = str(project.id)
+        namespace = self._get_namespace(project_id)
+        container_directory = self._sanitize_name(container.service_slug or container.name)
+
+        logger.info(
+            f"[K8S] Starting service container '{container_directory}' "
+            f"(slug={container.service_slug}) in namespace {namespace}"
+        )
+
+        # Import WebSocket manager for status updates
+        from ...routers.chat import get_chat_connection_manager
+
+        ws_manager = get_chat_connection_manager()
+
+        async def send_progress(phase: str, message: str, progress: int, **kwargs):
+            try:
+                status = {
+                    "container_status": "starting",
+                    "phase": phase,
+                    "message": message,
+                    "progress": progress,
+                    **kwargs,
+                }
+                await ws_manager.send_status_update(user_id, project.id, status)
+            except Exception:
+                pass
+
+        try:
+            service_def = get_service(container.service_slug)
+            if not service_def:
+                raise RuntimeError(
+                    f"Service definition not found for slug: {container.service_slug}"
+                )
+
+            # Skip external-only services
+            if service_def.service_type == ServiceType.EXTERNAL:
+                logger.info(f"[K8S] Skipping external service '{container.service_slug}'")
+                return {
+                    "status": "connected",
+                    "container_name": container.name,
+                    "container_directory": container_directory,
+                    "url": None,
+                }
+
+            is_external = getattr(container, "deployment_mode", "container") == "external"
+            if is_external:
+                logger.info(
+                    f"[K8S] Skipping externally-deployed service '{container.service_slug}'"
+                )
+                return {
+                    "status": "connected",
+                    "container_name": container.name,
+                    "container_directory": container_directory,
+                    "url": None,
+                }
+
+            await send_progress("creating_environment", "Creating project environment...", 10)
+
+            # Ensure namespace exists
+            namespace_exists = await self.k8s_client.namespace_exists(namespace)
+            if not namespace_exists:
+                is_hibernated = project.environment_status == "hibernated"
+                await self.ensure_project_environment(
+                    project.id, user_id, is_hibernated=is_hibernated, db=db
+                )
+                if is_hibernated:
+                    project.environment_status = "active"
+                    project.hibernated_at = None
+                    await db.commit()
+
+            await send_progress("creating_storage", "Creating service storage...", 30)
+
+            # Create PVC for service data (separate from project PVC)
+            if service_def.volumes:
+                svc_pvc = create_service_pvc_manifest(
+                    namespace=namespace,
+                    project_id=project.id,
+                    user_id=user_id,
+                    container_directory=container_directory,
+                    storage_class=self.settings.k8s_storage_class,
+                    size="1Gi",
+                )
+                await self.k8s_client.create_pvc(svc_pvc, namespace)
+
+            await send_progress("starting_service", f"Starting {service_def.name}...", 50)
+
+            # Build env overrides from secret manager
+            env_overrides = await build_env_overrides(db, project.id, [container])
+            extra_env = env_overrides.get(container.id, {})
+            merged_env = {**service_def.environment_vars, **extra_env}
+
+            service_port = service_def.internal_port or service_def.default_port or 5432
+
+            # Create Deployment for the service
+            deployment = create_service_container_deployment(
+                namespace=namespace,
+                project_id=project.id,
+                user_id=user_id,
+                container_id=container.id,
+                container_directory=container_directory,
+                image=service_def.docker_image,
+                port=service_port,
+                environment_vars=merged_env,
+                volumes=service_def.volumes,
+                command=service_def.command,
+                health_check=service_def.health_check,
+                enable_pod_affinity=self.settings.k8s_enable_pod_affinity
+                and len(all_containers) > 1,
+                affinity_topology_key=self.settings.k8s_affinity_topology_key,
+            )
+            await self.k8s_client.create_deployment(deployment, namespace)
+
+            await send_progress("creating_service", "Creating internal service...", 70)
+
+            # Create ClusterIP Service for internal DNS discovery (no Ingress needed)
+            svc_name = f"svc-{container_directory}"
+            service = client.V1Service(
+                metadata=client.V1ObjectMeta(
+                    name=svc_name,
+                    namespace=namespace,
+                    labels={
+                        "tesslate.io/project-id": str(project.id),
+                        "tesslate.io/container-id": str(container.id),
+                        "tesslate.io/container-directory": container_directory,
+                        "tesslate.io/component": "service-container",
+                    },
+                ),
+                spec=client.V1ServiceSpec(
+                    selector={"tesslate.io/container-id": str(container.id)},
+                    ports=[
+                        client.V1ServicePort(
+                            port=service_port,
+                            target_port=service_port,
+                            protocol="TCP",
+                        )
+                    ],
+                    type="ClusterIP",
+                ),
+            )
+            await self.k8s_client.create_service(service, namespace)
+
+            # Internal DNS hostname for other containers to connect
+            internal_hostname = f"svc-{container_directory}.{namespace}.svc.cluster.local"
+
+            logger.info(
+                f"[K8S] ✅ Service container started: {service_def.name} "
+                f"at {internal_hostname}:{service_port}"
+            )
+
+            await send_progress(
+                "ready",
+                f"{service_def.name} is ready!",
+                100,
+                container_status="ready",
+            )
+
+            return {
+                "status": "running",
+                "container_name": container.name,
+                "container_directory": container_directory,
+                "url": None,  # Internal services don't have external URLs
+                "internal_hostname": internal_hostname,
+                "internal_port": service_port,
+                "namespace": namespace,
+            }
+
+        except Exception as e:
+            logger.error(f"[K8S] Error starting service container: {e}", exc_info=True)
+            raise
+
     async def start_container(
         self,
         project,
@@ -473,7 +672,10 @@ fi
         """
         Start a single container (create Deployment + Service + Ingress).
 
-        Files should already exist from initialize_container_files().
+        For service containers (postgres, redis, etc.), delegates to
+        _start_service_container() which uses the actual service image.
+
+        For base containers, files should already exist from initialize_container_files().
         NO init containers needed - files already exist on PVC!
 
         Args:
@@ -487,6 +689,16 @@ fi
         Returns:
             Dict with status and URL
         """
+        # Route service containers to dedicated handler
+        if getattr(container, "container_type", "base") == "service":
+            return await self._start_service_container(
+                project=project,
+                container=container,
+                all_containers=all_containers,
+                user_id=user_id,
+                db=db,
+            )
+
         project_id = str(project.id)
         namespace = self._get_namespace(project_id)
         # Use container.name if directory is "." or empty (root directory = use container name)
@@ -550,7 +762,9 @@ fi
             if is_hibernated:
                 logger.info("[K8S] Skipping git clone - project restored from snapshot")
             elif container.base_id is None:
-                logger.info("[K8S] Skipping git clone - git-imported container (files already on PVC)")
+                logger.info(
+                    "[K8S] Skipping git clone - git-imported container (files already on PVC)"
+                )
             else:
                 # This clones from git or sets up the project directory
                 git_url = None
@@ -673,7 +887,13 @@ fi
             raise
 
     async def stop_container(
-        self, project_slug: str, project_id: UUID, container_name: str, user_id: UUID
+        self,
+        project_slug: str,
+        project_id: UUID,
+        container_name: str,
+        user_id: UUID,
+        container_type: str = "base",
+        service_slug: str | None = None,
     ) -> None:
         """
         Stop a single container (delete Deployment + Service + Ingress).
@@ -685,38 +905,69 @@ fi
             project_id: Project UUID
             container_name: Container name
             user_id: User UUID
+            container_type: "base" or "service"
+            service_slug: Service slug (for service containers)
         """
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
-        container_directory = self._sanitize_name(container_name)
 
-        deployment_name = f"dev-{container_directory}"
-        service_name = f"dev-{container_directory}"
-        ingress_name = f"dev-{container_directory}"
+        if container_type == "service" and service_slug:
+            container_directory = self._sanitize_name(service_slug)
+            deployment_name = f"svc-{container_directory}"
+            svc_name = f"svc-{container_directory}"
 
-        logger.info(f"[K8S] Stopping container '{container_directory}' in namespace {namespace}")
+            logger.info(
+                f"[K8S] Stopping service container '{container_directory}' in namespace {namespace}"
+            )
 
-        try:
-            # Delete Deployment
-            await self.k8s_client.delete_deployment(deployment_name, namespace)
-            # Delete Service
-            await self.k8s_client.delete_service(service_name, namespace)
-            # Delete Ingress
-            await self.k8s_client.delete_ingress(ingress_name, namespace)
+            try:
+                await self.k8s_client.delete_deployment(deployment_name, namespace)
+                await self.k8s_client.delete_service(svc_name, namespace)
+                # No Ingress to delete for service containers
+                logger.info("[K8S] ✅ Service container stopped (data PVC persists)")
+            except Exception as e:
+                if "404" not in str(e):
+                    logger.error(f"[K8S] Error stopping service container: {e}")
+                    raise
+        else:
+            container_directory = self._sanitize_name(container_name)
+            deployment_name = f"dev-{container_directory}"
+            svc_name = f"dev-{container_directory}"
+            ingress_name = f"dev-{container_directory}"
 
-            logger.info("[K8S] ✅ Container stopped (files persist on PVC)")
+            logger.info(
+                f"[K8S] Stopping container '{container_directory}' in namespace {namespace}"
+            )
 
-        except Exception as e:
-            if "404" not in str(e):
-                logger.error(f"[K8S] Error stopping container: {e}")
-                raise
+            try:
+                await self.k8s_client.delete_deployment(deployment_name, namespace)
+                await self.k8s_client.delete_service(svc_name, namespace)
+                await self.k8s_client.delete_ingress(ingress_name, namespace)
+                logger.info("[K8S] ✅ Container stopped (files persist on PVC)")
+            except Exception as e:
+                if "404" not in str(e):
+                    logger.error(f"[K8S] Error stopping container: {e}")
+                    raise
 
     async def get_container_status(
-        self, project_slug: str, project_id: UUID, container_name: str | None, user_id: UUID
+        self,
+        project_slug: str,
+        project_id: UUID,
+        container_name: str | None,
+        user_id: UUID,
+        service_slug: str | None = None,
     ) -> dict[str, Any]:
         """Get status of a single container or the project environment.
 
         If container_name is None, returns overall project/file-manager status.
+
+        Args:
+            project_slug: Project slug
+            project_id: Project UUID
+            container_name: Container name (or None for project-level status)
+            user_id: User UUID
+            service_slug: Service slug for service containers (used to find
+                          the svc-{slug} deployment instead of sanitizing the name)
         """
         project_id_str = str(project_id)
         namespace = self._get_namespace(project_id_str)
@@ -744,31 +995,42 @@ fi
                     return {"status": "stopped", "deployment_ready": False, "ready": False}
                 raise
 
-        # Specific container status
+        # Build candidate deployment names to check.
+        # For service containers the deployment uses the service_slug, not the
+        # display name, so we need both variants.
         container_directory = self._sanitize_name(container_name)
-        deployment_name = f"dev-{container_directory}"
+        candidates = [f"dev-{container_directory}", f"svc-{container_directory}"]
 
-        try:
-            deployment = await asyncio.to_thread(
-                self.k8s_client.apps_v1.read_namespaced_deployment,
-                name=deployment_name,
-                namespace=namespace,
-            )
+        if service_slug:
+            svc_directory = self._sanitize_name(service_slug)
+            svc_candidate = f"svc-{svc_directory}"
+            if svc_candidate not in candidates:
+                candidates.append(svc_candidate)
 
-            ready = (deployment.status.ready_replicas or 0) > 0
+        for deployment_name in candidates:
+            try:
+                deployment = await asyncio.to_thread(
+                    self.k8s_client.apps_v1.read_namespaced_deployment,
+                    name=deployment_name,
+                    namespace=namespace,
+                )
 
-            return {
-                "status": "running" if ready else "starting",
-                "container_name": container_name,
-                "ready": ready,
-                "replicas": deployment.status.replicas,
-                "ready_replicas": deployment.status.ready_replicas,
-            }
+                ready = (deployment.status.ready_replicas or 0) > 0
 
-        except ApiException as e:
-            if e.status == 404:
-                return {"status": "stopped", "container_name": container_name}
-            raise
+                return {
+                    "status": "running" if ready else "starting",
+                    "container_name": container_name,
+                    "ready": ready,
+                    "replicas": deployment.status.replicas,
+                    "ready_replicas": deployment.status.ready_replicas,
+                }
+
+            except ApiException as e:
+                if e.status == 404:
+                    continue  # Try next candidate
+                raise
+
+        return {"status": "stopped", "container_name": container_name}
 
     # =========================================================================
     # PROJECT LIFECYCLE (START/STOP ALL)
@@ -835,7 +1097,17 @@ fi
             for deployment in deployments.items:
                 await self.k8s_client.delete_deployment(deployment.metadata.name, namespace)
 
-            # Delete all dev container services
+            # Delete all service container deployments
+            svc_deployments = await asyncio.to_thread(
+                self.k8s_client.apps_v1.list_namespaced_deployment,
+                namespace=namespace,
+                label_selector="tesslate.io/component=service-container",
+            )
+
+            for deployment in svc_deployments.items:
+                await self.k8s_client.delete_deployment(deployment.metadata.name, namespace)
+
+            # Delete all dev and service container services
             services = await asyncio.to_thread(
                 self.k8s_client.core_v1.list_namespaced_service,
                 namespace=namespace,
@@ -928,6 +1200,15 @@ fi
                         "phase": pod.status.phase,
                         "ready": self.k8s_client.is_pod_ready(pod),
                         "running": self.k8s_client.is_pod_ready(pod),
+                    }
+                elif component == "service-container" and container_dir:
+                    is_ready = self.k8s_client.is_pod_ready(pod)
+                    container_statuses[container_dir] = {
+                        "phase": pod.status.phase,
+                        "ready": is_ready,
+                        "running": is_ready,
+                        "url": None,  # Service containers are internal only
+                        "service": True,
                     }
                 elif container_dir:
                     is_ready = self.k8s_client.is_pod_ready(pod)

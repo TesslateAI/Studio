@@ -736,6 +736,205 @@ echo "[CLONE] ======================================"
 
 
 # =============================================================================
+# Service Container Deployment (PostgreSQL, Redis, MongoDB, etc.)
+# =============================================================================
+
+
+def create_service_container_deployment(
+    namespace: str,
+    project_id: UUID,
+    user_id: UUID,
+    container_id: UUID,
+    container_directory: str,
+    image: str,
+    port: int,
+    environment_vars: dict[str, str],
+    volumes: list[str],
+    command: list[str] | None = None,
+    health_check: dict | None = None,
+    enable_pod_affinity: bool = True,
+    affinity_topology_key: str = "kubernetes.io/hostname",
+) -> client.V1Deployment:
+    """
+    Create a Deployment for a service container (database, cache, queue, etc.).
+
+    Unlike dev containers, service containers:
+    - Use their own Docker image (e.g., postgres:16-alpine)
+    - Have their own PVC for data persistence
+    - Don't need file-manager or git clone
+    - Don't need tmux or dev-server wrappers
+    - Don't need ingress (internal services only)
+
+    Args:
+        namespace: Kubernetes namespace
+        project_id: Project UUID
+        user_id: User UUID
+        container_id: Container UUID
+        container_directory: Sanitized container name (used for resource naming)
+        image: Docker image (e.g., "postgres:16-alpine")
+        port: Service port (e.g., 5432 for postgres)
+        environment_vars: Environment variables for the service
+        volumes: Volume mount paths (e.g., ["/var/lib/postgresql/data"])
+        command: Optional command override
+        health_check: Optional health check config (Docker format)
+        enable_pod_affinity: Whether to enable pod affinity
+        affinity_topology_key: Topology key for pod affinity
+
+    Returns:
+        V1Deployment manifest
+    """
+    deployment_name = f"svc-{container_directory}"
+
+    labels = get_standard_labels(
+        project_id=str(project_id),
+        user_id=str(user_id),
+        component="service-container",
+        container_id=str(container_id),
+        container_directory=container_directory,
+    )
+    labels["app"] = f"svc-{container_directory}"
+
+    selector_labels = {"tesslate.io/container-id": str(container_id)}
+
+    # Build environment variables
+    env_vars = [client.V1EnvVar(name=k, value=v) for k, v in environment_vars.items()]
+
+    # Build volume mounts and volumes
+    # Each volume path gets its own mount backed by the same PVC.
+    # Currently all services define a single volume, but this handles multiple.
+    volume_mounts = []
+    volume_specs = []
+    pvc_name = f"svc-{container_directory}-data"
+
+    for idx, vol_path in enumerate(volumes):
+        vol_name = "service-data" if idx == 0 else f"service-data-{idx}"
+        volume_mounts.append(client.V1VolumeMount(name=vol_name, mount_path=vol_path))
+        volume_specs.append(
+            client.V1Volume(
+                name=vol_name,
+                persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                    claim_name=pvc_name
+                ),
+            )
+        )
+
+    # Build container spec
+    container_spec = client.V1Container(
+        name="service",
+        image=image,
+        env=env_vars,
+        ports=[client.V1ContainerPort(container_port=port, name="service")],
+        volume_mounts=volume_mounts if volume_mounts else None,
+        resources=client.V1ResourceRequirements(
+            requests={"memory": "256Mi", "cpu": "100m"},
+            limits={"memory": "512Mi", "cpu": "500m"},
+        ),
+    )
+
+    # Add command if specified
+    if command:
+        container_spec.command = command
+
+    # Convert Docker-format health check to K8s probes
+    if health_check and "test" in health_check:
+        test_cmd = health_check["test"]
+        # Docker format: ["CMD-SHELL", "pg_isready -U postgres"] or ["CMD", "mysqladmin", ...]
+        if isinstance(test_cmd, list):
+            if test_cmd[0] == "CMD-SHELL":
+                exec_command = ["/bin/sh", "-c", test_cmd[1]]
+            elif test_cmd[0] == "CMD":
+                exec_command = test_cmd[1:]
+            else:
+                exec_command = test_cmd
+        else:
+            exec_command = ["/bin/sh", "-c", test_cmd]
+
+        probe = client.V1Probe(
+            _exec=client.V1ExecAction(command=exec_command),
+            initial_delay_seconds=10,
+            period_seconds=10,
+            timeout_seconds=5,
+            failure_threshold=5,
+        )
+        container_spec.readiness_probe = probe
+        container_spec.liveness_probe = client.V1Probe(
+            _exec=client.V1ExecAction(command=exec_command),
+            initial_delay_seconds=30,
+            period_seconds=10,
+            timeout_seconds=5,
+            failure_threshold=3,
+        )
+
+    # Pod spec - no security context restrictions for service images
+    # (postgres, redis, etc. often need to run as their own user)
+    pod_spec = client.V1PodSpec(
+        containers=[container_spec],
+        volumes=volume_specs if volume_specs else None,
+    )
+
+    # Add pod affinity if enabled
+    if enable_pod_affinity:
+        pod_spec.affinity = create_pod_affinity_spec(
+            project_id=str(project_id), topology_key=affinity_topology_key
+        )
+
+    return client.V1Deployment(
+        metadata=client.V1ObjectMeta(name=deployment_name, namespace=namespace, labels=labels),
+        spec=client.V1DeploymentSpec(
+            replicas=1,
+            selector=client.V1LabelSelector(match_labels=selector_labels),
+            template=client.V1PodTemplateSpec(
+                metadata=client.V1ObjectMeta(labels={**labels, **selector_labels}),
+                spec=pod_spec,
+            ),
+        ),
+    )
+
+
+def create_service_pvc_manifest(
+    namespace: str,
+    project_id: UUID,
+    user_id: UUID,
+    container_directory: str,
+    storage_class: str,
+    size: str = "1Gi",
+) -> client.V1PersistentVolumeClaim:
+    """
+    Create a PVC for a service container's data (separate from project PVC).
+
+    Args:
+        namespace: Kubernetes namespace
+        project_id: Project UUID
+        user_id: User UUID
+        container_directory: Sanitized container name
+        storage_class: StorageClass to use
+        size: Storage size
+
+    Returns:
+        V1PersistentVolumeClaim manifest
+    """
+    pvc_name = f"svc-{container_directory}-data"
+
+    return client.V1PersistentVolumeClaim(
+        metadata=client.V1ObjectMeta(
+            name=pvc_name,
+            namespace=namespace,
+            labels=get_standard_labels(
+                project_id=str(project_id),
+                user_id=str(user_id),
+                component="service-storage",
+                container_directory=container_directory,
+            ),
+        ),
+        spec=client.V1PersistentVolumeClaimSpec(
+            storage_class_name=storage_class,
+            access_modes=["ReadWriteOnce"],
+            resources=client.V1ResourceRequirements(requests={"storage": size}),
+        ),
+    )
+
+
+# =============================================================================
 # NOTE: S3 hibernation scripts removed - now using EBS VolumeSnapshots
 # =============================================================================
 # Hibernation is now handled by snapshot_manager.py using Kubernetes VolumeSnapshots.

@@ -4166,34 +4166,43 @@ async def add_container_to_project(
                 "status_endpoint": f"/api/tasks/{task.id}/status",
             }
         else:
-            # Service containers don't need initialization
-            # Just regenerate docker-compose and return
-            logger.info("[CONTAINER] Service container created, regenerating docker-compose")
+            # Service containers don't need file initialization
+            from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
-            # Get all containers and connections
-            # Use selectinload to eagerly load the base relationship
-            containers_result = await db.execute(
-                select(Container)
-                .where(Container.project_id == project.id)
-                .options(selectinload(Container.base))  # Eagerly load base
-            )
-            all_containers = containers_result.scalars().all()
+            if not is_kubernetes_mode():
+                # Docker mode: regenerate docker-compose.yml to include the new service
+                logger.info("[CONTAINER] Service container created, regenerating docker-compose")
 
-            from ..models import ContainerConnection
+                containers_result = await db.execute(
+                    select(Container)
+                    .where(Container.project_id == project.id)
+                    .options(selectinload(Container.base))
+                )
+                all_containers = containers_result.scalars().all()
 
-            connections_result = await db.execute(
-                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-            )
-            all_connections = connections_result.scalars().all()
+                from ..models import ContainerConnection
 
-            # Regenerate docker-compose.yml
-            from ..services.orchestration import get_orchestrator
+                connections_result = await db.execute(
+                    select(ContainerConnection).where(ContainerConnection.project_id == project.id)
+                )
+                all_connections = connections_result.scalars().all()
 
-            orchestrator = get_orchestrator()
-            env_overrides = await build_env_overrides(db, project.id, all_containers)
-            await orchestrator.write_compose_file(
-                project, all_containers, all_connections, current_user.id, env_overrides
-            )
+                orchestrator = get_orchestrator()
+                env_overrides = await build_env_overrides(db, project.id, all_containers)
+                await orchestrator.write_compose_file(
+                    project,
+                    all_containers,
+                    all_connections,
+                    current_user.id,
+                    env_overrides,
+                )
+            else:
+                # Kubernetes mode: service container will be started via
+                # start_single_container endpoint (no compose file needed)
+                logger.info(
+                    "[CONTAINER] Service container created in K8s mode "
+                    "(will be started via start_container)"
+                )
 
             return {
                 "container": new_container,
@@ -4603,6 +4612,9 @@ async def get_containers_status(
     Get the runtime status of all containers in the project.
 
     Returns Docker status for each container (running, stopped, etc.)
+    The response keys status entries by both the K8s directory name and the
+    sanitized container display name so the frontend graph canvas polling
+    can always find the correct entry.
     """
     project = await get_project_by_slug(db, project_slug, current_user.id)
 
@@ -4612,11 +4624,39 @@ async def get_containers_status(
         orchestrator = get_orchestrator()
         status = await orchestrator.get_project_status(project.slug, project.id)
 
+        # Add display-name aliases so the frontend can look up status by
+        # sanitized container.name (which may differ from the K8s directory key,
+        # e.g. "PostgreSQL" → "postgresql" vs service_slug "postgres").
+        containers_map = status.get("containers")
+        if containers_map:
+            containers_result = await db.execute(
+                select(Container).where(Container.project_id == project.id)
+            )
+            for c in containers_result.scalars().all():
+                # Frontend sanitises: name.lower(), keep [a-z0-9-], collapse dashes
+                frontend_key = _sanitize_status_key(c.name)
+                # K8s key depends on container type
+                if c.container_type == "service":
+                    k8s_key = _sanitize_status_key(c.service_slug or c.name)
+                else:
+                    dir_for_k8s = c.name if c.directory in (".", "", None) else c.directory
+                    k8s_key = _sanitize_status_key(dir_for_k8s)
+                # Add alias if the keys differ and the K8s entry exists
+                if frontend_key != k8s_key and k8s_key in containers_map:
+                    containers_map[frontend_key] = containers_map[k8s_key]
+
         return status
 
     except Exception as e:
         logger.error(f"[ORCHESTRATION] Failed to get container status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}") from e
+
+
+def _sanitize_status_key(name: str) -> str:
+    """Sanitize a name into a DNS-1123 style key (matches frontend sanitization)."""
+    s = re.sub(r"[^a-z0-9-]", "-", name.lower())
+    s = re.sub(r"-+", "-", s)
+    return s.strip("-")
 
 
 def _container_response(container, injected_env_vars: list | None = None) -> dict:
@@ -5173,12 +5213,15 @@ async def _start_container_background_task(
         orchestrator = get_orchestrator()
         status = await orchestrator.get_project_status(project.slug, project.id)
 
-        # Sanitize service name to match what's in status
-        import re
-
-        service_name = container.name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
-        service_name = "".join(c for c in service_name if c.isalnum() or c == "-")
-        service_name = re.sub(r"-+", "-", service_name).strip("-")
+        # Build the lookup key matching what K8s uses for the pod label:
+        # service containers key by service_slug, base containers by directory
+        if getattr(container, "container_type", "base") == "service":
+            service_name = _sanitize_status_key(container.service_slug or container.name)
+        else:
+            dir_for_k8s = (
+                container.name if container.directory in (".", "", None) else container.directory
+            )
+            service_name = _sanitize_status_key(dir_for_k8s)
 
         container_info = status.get("containers", {}).get(service_name)
         if container_info and container_info.get("running"):
@@ -5491,15 +5534,29 @@ async def stop_single_container(
         raise HTTPException(status_code=404, detail="Container not found")
 
     try:
-        from ..services.orchestration import get_orchestrator
+        from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
         orchestrator = get_orchestrator()
-        await orchestrator.stop_container(
-            project_slug=project.slug,
-            project_id=project.id,
-            container_name=container.name,
-            user_id=current_user.id,
-        )
+        if (
+            is_kubernetes_mode()
+            and hasattr(container, "container_type")
+            and container.container_type == "service"
+        ):
+            await orchestrator.stop_container(
+                project_slug=project.slug,
+                project_id=project.id,
+                container_name=container.name,
+                user_id=current_user.id,
+                container_type="service",
+                service_slug=container.service_slug,
+            )
+        else:
+            await orchestrator.stop_container(
+                project_slug=project.slug,
+                project_id=project.id,
+                container_name=container.name,
+                user_id=current_user.id,
+            )
 
         logger.info(f"[ORCHESTRATION] Stopped container {container.name} in project {project.slug}")
 
@@ -5664,7 +5721,7 @@ async def _restart_container_background_task(
 ) -> dict:
     """Background task worker for restarting a container."""
     from ..database import get_db
-    from ..services.orchestration import get_orchestrator
+    from ..services.orchestration import get_orchestrator, is_kubernetes_mode
 
     db_gen = get_db()
     db = await db_gen.__anext__()
@@ -5683,12 +5740,26 @@ async def _restart_container_background_task(
         # Stop the container
         task.update_progress(30, 100, f"Stopping container '{container.name}'")
         try:
-            await orchestrator.stop_container(
-                project_slug=project.slug,
-                project_id=project.id,
-                container_name=container.name,
-                user_id=user_id,
-            )
+            if (
+                is_kubernetes_mode()
+                and hasattr(container, "container_type")
+                and container.container_type == "service"
+            ):
+                await orchestrator.stop_container(
+                    project_slug=project.slug,
+                    project_id=project.id,
+                    container_name=container.name,
+                    user_id=user_id,
+                    container_type="service",
+                    service_slug=container.service_slug,
+                )
+            else:
+                await orchestrator.stop_container(
+                    project_slug=project.slug,
+                    project_id=project.id,
+                    container_name=container.name,
+                    user_id=user_id,
+                )
             task.add_log(f"Container '{container.name}' stopped")
         except Exception as e:
             task.add_log(f"Note: Container may not have been running: {e}")
