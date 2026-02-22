@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
 import {
@@ -69,6 +69,10 @@ export default function Project() {
   const [container, setContainer] = useState<Record<string, unknown> | null>(null);
   const [containers, setContainers] = useState<Array<Record<string, unknown>>>([]);
   const [agents, setAgents] = useState<ChatAgent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
+    if (!slug) return null;
+    return localStorage.getItem(`tesslate-agent-${slug}`);
+  });
   const [activeView, setActiveView] = useState<MainViewType>('preview');
   const [kanbanMounted, setKanbanMounted] = useState(false);
   const [activePanel, setActivePanel] = useState<PanelType>(null);
@@ -586,6 +590,23 @@ export default function Project() {
       toast.error('Failed to load agents');
     }
   };
+
+  // Derive current agent from agents + selectedAgentId (persisted in localStorage)
+  const currentAgent = useMemo(() => {
+    if (selectedAgentId) {
+      const found = agents.find((a) => a.id === selectedAgentId);
+      if (found) return found;
+    }
+    return agents[0] ?? null;
+  }, [agents, selectedAgentId]);
+
+  const handleAgentSelect = useCallback(
+    (agent: ChatAgent) => {
+      setSelectedAgentId(agent.id);
+      if (slug) localStorage.setItem(`tesslate-agent-${slug}`, agent.id);
+    },
+    [slug]
+  );
 
   const handleFileUpdate = useCallback(
     async (filePath: string, content: string) => {
@@ -1105,8 +1126,8 @@ export default function Project() {
                         containerId={containerId || undefined}
                         viewContext="builder"
                         agents={agents}
-                        currentAgent={agents[0]}
-                        onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+                        currentAgent={currentAgent}
+                        onSelectAgent={handleAgentSelect}
                         onFileUpdate={handleFileUpdate}
                         projectFiles={files}
                         projectName={project?.name}
@@ -1260,8 +1281,8 @@ export default function Project() {
                         containerId={containerId || undefined}
                         viewContext="builder"
                         agents={agents}
-                        currentAgent={agents[0]}
-                        onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+                        currentAgent={currentAgent}
+                        onSelectAgent={handleAgentSelect}
                         onFileUpdate={handleFileUpdate}
                         projectFiles={files}
                         projectName={project?.name}
@@ -1492,8 +1513,8 @@ export default function Project() {
             containerId={containerId || undefined}
             viewContext="builder"
             agents={agents}
-            currentAgent={agents[0]}
-            onSelectAgent={(agent) => console.log('Selected agent:', agent)}
+            currentAgent={currentAgent}
+            onSelectAgent={handleAgentSelect}
             onFileUpdate={handleFileUpdate}
             projectFiles={files}
             projectName={project?.name}

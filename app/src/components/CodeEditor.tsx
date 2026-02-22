@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { File, Folder, ChevronRight, ChevronDown, FileText, Code, PanelLeftClose, PanelLeft } from 'lucide-react';
+import {
+  File,
+  Folder,
+  ChevronRight,
+  ChevronDown,
+  FileText,
+  Code,
+  PanelLeftClose,
+  PanelLeft,
+} from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '../theme/ThemeContext';
 
@@ -22,7 +31,11 @@ interface CodeEditorProps {
   onFileUpdate: (filePath: string, content: string) => void;
 }
 
-export default function CodeEditor({ projectId: _projectId, files, onFileUpdate }: CodeEditorProps) {
+export default function CodeEditor({
+  projectId: _projectId,
+  files,
+  onFileUpdate,
+}: CodeEditorProps) {
   const { theme } = useTheme();
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -33,18 +46,29 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
   const getLanguage = (fileName: string): string => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     switch (ext) {
-      case 'js': return 'javascript';
-      case 'jsx': return 'javascript';
-      case 'ts': return 'typescript';
-      case 'tsx': return 'typescript';
-      case 'html': return 'html';
-      case 'css': return 'css';
-      case 'json': return 'json';
-      case 'md': return 'markdown';
-      case 'py': return 'python';
+      case 'js':
+        return 'javascript';
+      case 'jsx':
+        return 'javascript';
+      case 'ts':
+        return 'typescript';
+      case 'tsx':
+        return 'typescript';
+      case 'html':
+        return 'html';
+      case 'css':
+        return 'css';
+      case 'json':
+        return 'json';
+      case 'md':
+        return 'markdown';
+      case 'py':
+        return 'python';
       case 'yml':
-      case 'yaml': return 'yaml';
-      default: return 'plaintext';
+      case 'yaml':
+        return 'yaml';
+      default:
+        return 'plaintext';
     }
   };
 
@@ -66,13 +90,17 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
     // Sort files by path to ensure proper tree building
     const sortedFiles = [...files].sort((a, b) => a.file_path.localeCompare(b.file_path));
 
-    sortedFiles.forEach(file => {
-      const parts = file.file_path.split('/').filter(Boolean);
+    sortedFiles.forEach((file) => {
+      // Handle empty directory entries (path ends with /)
+      const isEmptyDir = file.file_path.endsWith('/');
+      const cleanPath = isEmptyDir ? file.file_path.slice(0, -1) : file.file_path;
+      const parts = cleanPath.split('/').filter(Boolean);
       let currentPath = '';
 
       parts.forEach((part: string, index: number) => {
         const fullPath = currentPath ? `${currentPath}/${part}` : part;
-        const isFile = index === parts.length - 1;
+        // For empty dir entries, all parts (including the last) are directories
+        const isFile = !isEmptyDir && index === parts.length - 1;
 
         if (!pathMap.has(fullPath)) {
           const node: FileNode = {
@@ -80,7 +108,7 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
             path: fullPath,
             isDirectory: !isFile,
             children: !isFile ? [] : undefined,
-            content: isFile ? file.content : undefined
+            content: isFile ? file.content : undefined,
           };
 
           pathMap.set(fullPath, node);
@@ -101,15 +129,17 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
 
     setFileTree(tree);
 
-    // Auto-select the first file if none selected
+    // Auto-select the first actual file if none selected (skip directory placeholders)
     if (!selectedFile && files.length > 0) {
-      setSelectedFile(files[0].file_path);
+      const firstFile = files.find((f) => !f.file_path.endsWith('/'));
+      if (firstFile) {
+        setSelectedFile(firstFile.file_path);
+      }
     }
   }, [files]);
 
-
   const toggleDirectory = (path: string) => {
-    setExpandedDirs(prev => {
+    setExpandedDirs((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(path)) {
         newSet.delete(path);
@@ -140,7 +170,7 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
   };
 
   const renderFileTree = (nodes: FileNode[], depth = 0) => {
-    return nodes.map(node => (
+    return nodes.map((node) => (
       <div key={node.path} className="select-none">
         <div
           className={`flex items-center py-2 px-3 cursor-pointer rounded-lg mb-0.5 transition-all duration-150 ${
@@ -173,30 +203,33 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
               <div className="mr-2"></div>
             </>
           )}
-          <span className={`text-sm flex-1 font-medium truncate ${
-            selectedFile === node.path
-              ? 'text-orange-200'
-              : ''
-          }`}>
+          <span
+            className={`text-sm flex-1 font-medium truncate ${
+              selectedFile === node.path ? 'text-orange-200' : ''
+            }`}
+          >
             {node.name}
           </span>
         </div>
 
-        {node.isDirectory && expandedDirs.has(node.path) && node.children && (
-          renderFileTree(node.children, depth + 1)
-        )}
+        {node.isDirectory &&
+          expandedDirs.has(node.path) &&
+          node.children &&
+          renderFileTree(node.children, depth + 1)}
       </div>
     ));
   };
 
-  const selectedFileContent = files.find(f => f.file_path === selectedFile);
+  const selectedFileContent = files.find((f) => f.file_path === selectedFile);
 
   return (
     <div className="h-full flex bg-[var(--surface)] overflow-hidden">
       {/* File tree sidebar */}
-      <div className={`bg-[var(--background)] border-r border-[var(--border-color)] overflow-y-auto flex flex-col transition-all duration-300 ${
-        isSidebarCollapsed ? 'w-0 border-0' : 'w-72'
-      }`}>
+      <div
+        className={`bg-[var(--background)] border-r border-[var(--border-color)] overflow-y-auto flex flex-col transition-all duration-300 ${
+          isSidebarCollapsed ? 'w-0 border-0' : 'w-72'
+        }`}
+      >
         <div className="px-4 h-12 border-b border-[var(--border-color)] bg-[var(--surface)]/50 backdrop-blur-sm flex items-center">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-pink-600 rounded-lg flex items-center justify-center shadow-lg">
@@ -210,9 +243,11 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
             </div>
           </div>
         </div>
-        
+
         <div className="flex-1 p-2 overflow-y-auto" key={files.length}>
-          {fileTree.length > 0 ? renderFileTree(fileTree) : (
+          {fileTree.length > 0 ? (
+            renderFileTree(fileTree)
+          ) : (
             <div className="text-[var(--text)]/60 text-sm p-6 text-center rounded-xl bg-[var(--surface)]/50">
               <Code size={32} className="mx-auto mb-3 opacity-50" />
               <p className="font-medium mb-1 text-[var(--text)]">No files yet</p>
@@ -233,7 +268,7 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
                 <button
                   onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
                   className="p-1.5 hover:bg-[var(--text)]/10 active:bg-[var(--text)]/20 rounded transition-colors"
-                  title={isSidebarCollapsed ? "Show file explorer" : "Hide file explorer"}
+                  title={isSidebarCollapsed ? 'Show file explorer' : 'Hide file explorer'}
                 >
                   {isSidebarCollapsed ? (
                     <PanelLeft size={16} className="text-[var(--text)]/60" />
@@ -245,12 +280,13 @@ export default function CodeEditor({ projectId: _projectId, files, onFileUpdate 
                 <div className="flex-1">
                   <h4 className="text-sm font-semibold text-[var(--text)]">{selectedFile}</h4>
                   <p className="text-xs text-[var(--text)]/50">
-                    {selectedFileContent.content.split('\n').length} lines • {selectedFileContent.content.length} characters
+                    {selectedFileContent.content.split('\n').length} lines •{' '}
+                    {selectedFileContent.content.length} characters
                   </p>
                 </div>
               </div>
             </div>
-            
+
             {/* Monaco Editor */}
             <div className="flex-1 overflow-hidden">
               <Editor

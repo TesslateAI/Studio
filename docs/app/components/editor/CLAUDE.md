@@ -124,6 +124,54 @@ const filteredFiles = useMemo(() => {
 </div>
 ```
 
+## Empty Directory Handling
+
+The CodeEditor's file tree supports empty directories via a trailing `/` path convention:
+
+### Backend Convention
+
+The backend (both Docker and K8s modes) includes empty directory entries in file listings with `file_path` ending in `/` and empty `content`:
+
+```json
+{
+  "file_path": "src/components/",
+  "content": ""
+}
+```
+
+### Tree Builder
+
+The `buildFileTree` logic in CodeEditor.tsx handles these entries:
+
+```typescript
+sortedFiles.forEach(file => {
+  const isEmptyDir = file.file_path.endsWith('/');
+  const cleanPath = isEmptyDir ? file.file_path.slice(0, -1) : file.file_path;
+  const parts = cleanPath.split('/').filter(Boolean);
+
+  // For empty dir entries, all parts (including the last) are treated as directories
+  parts.forEach((part, index) => {
+    const isFile = !isEmptyDir && index === parts.length - 1;
+    // ... create tree node
+  });
+});
+```
+
+### Auto-Select Behavior
+
+When no file is selected, CodeEditor auto-selects the first **actual file** (not directory placeholders):
+
+```typescript
+if (!selectedFile && files.length > 0) {
+  const firstFile = files.find(f => !f.file_path.endsWith('/'));
+  if (firstFile) {
+    setSelectedFile(firstFile.file_path);
+  }
+}
+```
+
+This prevents the editor from trying to display content for a directory entry.
+
 ## Performance Optimization
 
 ### Lazy Load Monaco

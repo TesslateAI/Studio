@@ -370,7 +370,9 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
       className="fixed inset-0 z-[100]"
       filter={(value, search) => {
         // Custom filter that includes keywords
-        const cmd = allCommands.find((c) => c.id === value);
+        // Strip "recent-" prefix to find the actual command
+        const cmdId = value.startsWith('recent-') ? value.slice(7) : value;
+        const cmd = allCommands.find((c) => c.id === cmdId);
         if (!cmd) return 0;
         const searchLower = search.toLowerCase();
         if (cmd.label.toLowerCase().includes(searchLower)) return 1;
@@ -442,7 +444,12 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
                 }
               >
                 {recentCommands.map((cmd) => (
-                  <CommandItem key={`recent-${cmd.id}`} command={cmd} onSelect={handleSelect} />
+                  <CommandItem
+                    key={`recent-${cmd.id}`}
+                    command={cmd}
+                    onSelect={handleSelect}
+                    valuePrefix="recent-"
+                  />
                 ))}
               </Command.Group>
             )}
@@ -492,13 +499,15 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
 function CommandItem({
   command,
   onSelect,
+  valuePrefix = '',
 }: {
   command: CommandItem;
   onSelect: (cmd: CommandItem) => void;
+  valuePrefix?: string;
 }) {
   return (
     <Command.Item
-      value={command.id}
+      value={`${valuePrefix}${command.id}`}
       onSelect={() => onSelect(command)}
       className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer
                  text-white/80 transition-colors

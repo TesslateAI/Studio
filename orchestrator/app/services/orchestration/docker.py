@@ -876,6 +876,18 @@ class DockerOrchestrator(BaseOrchestrator):
             for root, dirs, filenames in os.walk(project_path):
                 dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
 
+                # Detect empty directories (no files after exclusions, no remaining subdirs)
+                non_excluded_files = [
+                    f
+                    for f in filenames
+                    if f not in EXCLUDED_FILES
+                    and (f.split(".")[-1].lower() if "." in f else "") not in BINARY_EXTENSIONS
+                ]
+                if not non_excluded_files and not dirs:
+                    rel_path = Path(root).relative_to(project_path)
+                    if str(rel_path) != ".":
+                        files_with_content.append({"file_path": str(rel_path) + "/", "content": ""})
+
                 for filename in filenames:
                     if count >= max_files:
                         break

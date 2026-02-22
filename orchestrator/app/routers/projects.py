@@ -1358,6 +1358,7 @@ async def get_project_files(
                             continue
                     elif pod_file["type"] == "directory":
                         # Skip node_modules and other large directories
+                        # Keep in sync with EXCLUDED_DIRS in docker.py
                         if file_name in [
                             "node_modules",
                             ".next",
@@ -1365,6 +1366,12 @@ async def get_project_files(
                             "__pycache__",
                             "dist",
                             "build",
+                            ".venv",
+                            "venv",
+                            ".cache",
+                            ".turbo",
+                            "coverage",
+                            ".nyc_output",
                         ]:
                             continue
                         # Recursively read directory contents
@@ -1376,7 +1383,20 @@ async def get_project_files(
                                 container_name=None,
                                 directory=sub_dir,
                             )
+                            count_before = len(files_with_content)
                             await read_files_recursive(sub_files, rel_path)
+                            # If no files were added, this directory is empty — emit placeholder
+                            if len(files_with_content) == count_before:
+                                files_with_content.append(
+                                    ProjectFileSchema(
+                                        id=uuid4(),
+                                        project_id=project_id,
+                                        file_path=rel_path + "/",
+                                        content="",
+                                        created_at=now,
+                                        updated_at=now,
+                                    )
+                                )
                         except Exception as e:
                             logger.warning(f"[FILES] Failed to list {rel_path}: {e}")
 

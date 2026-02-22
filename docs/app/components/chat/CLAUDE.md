@@ -249,6 +249,52 @@ Manually trigger approval:
 />
 ```
 
+## Unmount Protection (isMountedRef)
+
+ChatContainer uses an `isMountedRef` to guard against React state updates from orphaned SSE and WebSocket callbacks after the component unmounts (e.g., when the user navigates away mid-stream).
+
+### Pattern
+
+```typescript
+const isMountedRef = useRef(true);
+
+useEffect(() => {
+  isMountedRef.current = true;
+  return () => {
+    isMountedRef.current = false;
+  };
+}, []);
+```
+
+### Where Guards Are Applied
+
+1. **SSE event callback** (in `sendAgentMessage`): The streaming response handler checks `isMountedRef.current` before updating messages, agent steps, or execution state.
+
+2. **WebSocket onmessage handler**: Checks `isMountedRef.current` alongside the `isCleaningUp` flag before processing incoming messages.
+
+```typescript
+// SSE callback guard
+(event) => {
+  if (!isMountedRef.current) return;
+  // ... process event, update state
+};
+
+// WebSocket guard
+ws.onmessage = (event) => {
+  if (isCleaningUp || !isMountedRef.current) return;
+  // ... process message
+};
+```
+
+### Why This Is Needed
+
+When a user navigates away from the builder while an agent is streaming:
+- The SSE fetch is NOT aborted (only ESC key triggers abort)
+- The backend continues executing and saves results to DB
+- SSE callbacks still fire, trying to call `setMessages()`, `setAgentExecuting()`, etc.
+- Without the guard, React logs warnings about state updates on unmounted components
+- On return, `loadChatHistory` reloads completed messages from DB
+
 ## Performance Optimization Tips
 
 ### Reduce Message Re-renders

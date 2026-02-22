@@ -33,25 +33,25 @@ function ThemeCard({
         {/* Primary color */}
         <div
           className="w-6 h-6 rounded-md border border-black/20"
-          style={{ backgroundColor: preset.primary }}
+          style={{ backgroundColor: preset.colors.primary }}
           title="Primary"
         />
         {/* Background color */}
         <div
           className="w-6 h-6 rounded-md border border-black/20"
-          style={{ backgroundColor: preset.bgDark }}
+          style={{ backgroundColor: preset.colors.background }}
           title="Background"
         />
         {/* Surface color */}
         <div
           className="w-6 h-6 rounded-md border border-black/20"
-          style={{ backgroundColor: preset.surface }}
+          style={{ backgroundColor: preset.colors.surface }}
           title="Surface"
         />
         {/* Accent color */}
         <div
           className="w-6 h-6 rounded-md border border-black/20"
-          style={{ backgroundColor: preset.accent }}
+          style={{ backgroundColor: preset.colors.accent }}
           title="Accent"
         />
       </div>
@@ -67,7 +67,7 @@ function ThemeCard({
         <span className="text-[10px] text-[var(--text)]/40">Corners:</span>
         <div
           className="w-4 h-4 border border-[var(--text)]/30"
-          style={{ borderRadius: preset.radiusMedium, backgroundColor: 'transparent' }}
+          style={{ borderRadius: preset.spacing.radiusMedium, backgroundColor: 'transparent' }}
         />
       </div>
 
@@ -93,18 +93,15 @@ export default function PreferencesSettings() {
   const { execute: executeLoad } = useCancellableRequest<UserPreferences>();
 
   const loadPreferences = useCallback(() => {
-    executeLoad(
-      () => usersApi.getPreferences(),
-      {
-        onSuccess: (prefs) => {
-          setDiagramModel(prefs.diagram_model || 'claude-3-5-sonnet-20241022');
-        },
-        onError: (error) => {
-          console.error('Failed to load preferences:', error);
-        },
-        onFinally: () => setLoading(false),
-      }
-    );
+    executeLoad(() => usersApi.getPreferences(), {
+      onSuccess: (prefs) => {
+        setDiagramModel(prefs.diagram_model || 'claude-3-5-sonnet-20241022');
+      },
+      onError: (error) => {
+        console.error('Failed to load preferences:', error);
+      },
+      onFinally: () => setLoading(false),
+    });
   }, [executeLoad]);
 
   useEffect(() => {
@@ -140,10 +137,7 @@ export default function PreferencesSettings() {
   }
 
   return (
-    <SettingsSection
-      title="Preferences"
-      description="Customize your Tesslate Studio experience"
-    >
+    <SettingsSection title="Preferences" description="Customize your Tesslate Studio experience">
       {/* Theme Selection */}
       <SettingsGroup title="Theme">
         <div className="p-4">

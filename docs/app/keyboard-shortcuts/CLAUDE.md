@@ -374,6 +374,27 @@ return createPortal(
 );
 ```
 
+### Issue: Recent Commands Double-Highlighted in Palette
+
+**Symptom**: Arrow-key navigating in the command palette highlights BOTH the Recent group entry AND the normal group entry simultaneously for the same command.
+
+**Root Cause**: The `cmdk` library tracks highlight/selection by the `value` prop on `Command.Item`. When recent items and grouped items share the same `value` (the command id), both highlight at once.
+
+**Solution**: The `CommandItem` component accepts a `valuePrefix` prop. Recent items pass `valuePrefix="recent-"`, giving them unique `value` attributes for `cmdk` tracking while remaining functionally identical:
+
+```typescript
+// Recent items use prefixed value
+<CommandItem key={`recent-${cmd.id}`} command={cmd} onSelect={handleSelect} valuePrefix="recent-" />
+
+// Normal items use default (no prefix)
+<CommandItem key={cmd.id} command={cmd} onSelect={handleSelect} />
+
+// CommandItem renders with the prefix
+<Command.Item value={`${valuePrefix}${command.id}`} onSelect={() => onSelect(command)} ...>
+```
+
+The `filter` function in `Command.Dialog` strips the "recent-" prefix before looking up the command for search matching.
+
 ## File Organization
 
 ```

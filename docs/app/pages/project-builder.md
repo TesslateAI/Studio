@@ -125,9 +125,26 @@ const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(
 const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
 const [previewMode, setPreviewMode] = useState<'normal' | 'browser-tabs'>('normal');
 
-// Agents
+// Agents (selection persisted to localStorage per project slug)
 const [agents, setAgents] = useState<UIAgent[]>([]);
-const [currentAgent, setCurrentAgent] = useState<UIAgent | null>(null);
+const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
+  if (!slug) return null;
+  return localStorage.getItem(`tesslate-agent-${slug}`);
+});
+
+// Derived: resolve selected agent from agents list
+const currentAgent = useMemo(() => {
+  if (selectedAgentId) {
+    const found = agents.find(a => a.id === selectedAgentId);
+    if (found) return found;
+  }
+  return agents[0] ?? null;
+}, [agents, selectedAgentId]);
+
+const handleAgentSelect = useCallback((agent: ChatAgent) => {
+  setSelectedAgentId(agent.id);
+  if (slug) localStorage.setItem(`tesslate-agent-${slug}`, agent.id);
+}, [slug]);
 
 // Modals
 const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
@@ -396,8 +413,8 @@ The chat interface is always visible in the right sidebar:
   containerId={containerId} // Optional: filter to container files
   viewContext="builder"      // Enable builder-scoped tools only
   agents={agents}
-  currentAgent={currentAgent}
-  onSelectAgent={setCurrentAgent}
+  currentAgent={currentAgent}      // Derived from selectedAgentId + agents list
+  onSelectAgent={handleAgentSelect} // Persists to localStorage
   onFileUpdate={(filePath, content) => {
     // Agent wrote a file
     fileEvents.emit('fileUpdated', { filePath, content });

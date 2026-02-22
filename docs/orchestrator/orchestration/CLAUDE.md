@@ -153,6 +153,10 @@ success = await orchestrator.delete_file(
 files = await orchestrator.list_files(
     user_id, project_id, container_name, directory="."
 )
+# Note: File listings include empty directory placeholders.
+# These have file_path ending in "/" and empty content.
+# Both Docker (get_files_with_content) and K8s (read_files_recursive)
+# modes emit these entries so the frontend can render empty dirs.
 ```
 
 ### Shell Operations (for Agent Tools)
@@ -344,6 +348,7 @@ await orchestrator.read_file(
 3. **File Operations**:
    - Direct filesystem access (orchestrator reads `/projects/{slug}/`)
    - Fast and simple (no pod exec needed)
+   - `get_files_with_content()` includes empty directory placeholders (path ending in `/`, empty content) detected during `os.walk` when a directory has no non-excluded files and no remaining subdirectories
 
 ### Kubernetes Mode
 

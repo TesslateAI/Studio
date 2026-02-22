@@ -21,8 +21,7 @@ function formatAgentError(raw: string): string {
     return 'Request timed out. Please try again.';
   if (raw.includes('401') || raw.includes('authentication') || raw.includes('api_key'))
     return 'Authentication error. Check your API key configuration.';
-  if (raw.includes('Resource limit'))
-    return 'Resource limit exceeded for this session.';
+  if (raw.includes('Resource limit')) return 'Resource limit exceeded for this session.';
   return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
 }
 
@@ -148,6 +147,15 @@ export function ChatContainer({
   const isUserScrollingRef = useRef(false);
   const _previousMessageCountRef = useRef(0);
   const animatedMessagesRef = useRef<Set<string>>(new Set());
+  const isMountedRef = useRef(true);
+
+  // Track mounted state to guard orphaned SSE callbacks after unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Load chat history from database
   useEffect(() => {
@@ -327,7 +335,7 @@ export function ChatContainer({
         };
 
         ws.onmessage = (event) => {
-          if (isCleaningUp) return;
+          if (isCleaningUp || !isMountedRef.current) return;
 
           const data = JSON.parse(event.data);
 
@@ -746,6 +754,9 @@ export function ChatContainer({
           view_context: viewContext, // UI view context for scoped tools
         },
         (event) => {
+          // Guard against state updates after unmount (orphaned SSE callbacks)
+          if (!isMountedRef.current) return;
+
           if (event.type === 'agent_step') {
             // Transform tool_results array to match HTTP format
             const transformedStep = {

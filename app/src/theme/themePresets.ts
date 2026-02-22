@@ -230,104 +230,132 @@ export function areThemesLoaded(): boolean {
 // ============================================================================
 
 /**
+ * Safely set a CSS custom property. Skips if value is undefined/null/empty,
+ * preserving the previous value rather than setting "undefined" as a string.
+ */
+function safeSetProperty(el: HTMLElement, prop: string, value: string | undefined | null): void {
+  if (value != null && value !== '') {
+    el.style.setProperty(prop, value);
+  }
+}
+
+/**
  * Apply a theme to the document (sets all CSS variables).
  */
 export function applyThemePreset(theme: Theme): void {
   const root = document.documentElement;
   const { colors, typography, spacing, animation } = theme;
 
+  // Guard: bail out if the theme object is fundamentally broken
+  if (!colors || !typography || !spacing || !animation) {
+    console.warn('applyThemePreset: theme is missing required sections, skipping apply');
+    return;
+  }
+
   // === CORE COLORS ===
-  root.style.setProperty('--primary', colors.primary);
-  root.style.setProperty('--primary-hover', colors.primaryHover);
-  root.style.setProperty('--primary-rgb', colors.primaryRgb);
-  root.style.setProperty('--accent', colors.accent);
+  safeSetProperty(root, '--primary', colors.primary);
+  safeSetProperty(root, '--primary-hover', colors.primaryHover);
+  safeSetProperty(root, '--primary-rgb', colors.primaryRgb);
+  safeSetProperty(root, '--accent', colors.accent);
 
   // === BACKGROUNDS ===
-  root.style.setProperty('--bg', colors.background);
-  root.style.setProperty('--bg-dark', colors.background); // Legacy alias
-  root.style.setProperty('--surface', colors.surface);
-  root.style.setProperty('--surface-hover', colors.surfaceHover);
+  safeSetProperty(root, '--bg', colors.background);
+  safeSetProperty(root, '--bg-dark', colors.background); // Legacy alias
+  safeSetProperty(root, '--surface', colors.surface);
+  safeSetProperty(root, '--surface-hover', colors.surfaceHover);
 
   // === TEXT ===
-  root.style.setProperty('--text', colors.text);
-  root.style.setProperty('--text-muted', colors.textMuted);
-  root.style.setProperty('--text-subtle', colors.textSubtle);
+  safeSetProperty(root, '--text', colors.text);
+  safeSetProperty(root, '--text-muted', colors.textMuted);
+  safeSetProperty(root, '--text-subtle', colors.textSubtle);
 
   // === BORDERS ===
-  root.style.setProperty('--border', colors.border);
-  root.style.setProperty('--border-hover', colors.borderHover);
+  safeSetProperty(root, '--border', colors.border);
+  safeSetProperty(root, '--border-hover', colors.borderHover);
 
   // === SIDEBAR ===
-  root.style.setProperty('--sidebar-bg', colors.sidebar.background);
-  root.style.setProperty('--sidebar-text', colors.sidebar.text);
-  root.style.setProperty('--sidebar-border', colors.sidebar.border);
-  root.style.setProperty('--sidebar-hover', colors.sidebar.hover);
-  root.style.setProperty('--sidebar-active', colors.sidebar.active);
+  if (colors.sidebar) {
+    safeSetProperty(root, '--sidebar-bg', colors.sidebar.background);
+    safeSetProperty(root, '--sidebar-text', colors.sidebar.text);
+    safeSetProperty(root, '--sidebar-border', colors.sidebar.border);
+    safeSetProperty(root, '--sidebar-hover', colors.sidebar.hover);
+    safeSetProperty(root, '--sidebar-active', colors.sidebar.active);
+  }
 
   // === INPUT ===
-  root.style.setProperty('--input-bg', colors.input.background);
-  root.style.setProperty('--input-border', colors.input.border);
-  root.style.setProperty('--input-border-focus', colors.input.borderFocus);
-  root.style.setProperty('--input-text', colors.input.text);
-  root.style.setProperty('--input-placeholder', colors.input.placeholder);
+  if (colors.input) {
+    safeSetProperty(root, '--input-bg', colors.input.background);
+    safeSetProperty(root, '--input-border', colors.input.border);
+    safeSetProperty(root, '--input-border-focus', colors.input.borderFocus);
+    safeSetProperty(root, '--input-text', colors.input.text);
+    safeSetProperty(root, '--input-placeholder', colors.input.placeholder);
+  }
 
   // === SCROLLBAR ===
-  root.style.setProperty('--scrollbar-thumb', colors.scrollbar.thumb);
-  root.style.setProperty('--scrollbar-thumb-hover', colors.scrollbar.thumbHover);
-  root.style.setProperty('--scrollbar-track', colors.scrollbar.track);
+  if (colors.scrollbar) {
+    safeSetProperty(root, '--scrollbar-thumb', colors.scrollbar.thumb);
+    safeSetProperty(root, '--scrollbar-thumb-hover', colors.scrollbar.thumbHover);
+    safeSetProperty(root, '--scrollbar-track', colors.scrollbar.track);
+  }
 
   // === CODE ===
-  root.style.setProperty('--code-inline-bg', colors.code.inlineBackground);
-  root.style.setProperty('--code-inline-text', colors.code.inlineText);
-  root.style.setProperty('--code-block-bg', colors.code.blockBackground);
-  root.style.setProperty('--code-block-border', colors.code.blockBorder);
-  root.style.setProperty('--code-block-text', colors.code.blockText);
+  if (colors.code) {
+    safeSetProperty(root, '--code-inline-bg', colors.code.inlineBackground);
+    safeSetProperty(root, '--code-inline-text', colors.code.inlineText);
+    safeSetProperty(root, '--code-block-bg', colors.code.blockBackground);
+    safeSetProperty(root, '--code-block-border', colors.code.blockBorder);
+    safeSetProperty(root, '--code-block-text', colors.code.blockText);
+  }
 
   // === STATUS ===
-  root.style.setProperty('--status-error', colors.status.error);
-  root.style.setProperty('--status-error-rgb', colors.status.errorRgb);
-  root.style.setProperty('--status-success', colors.status.success);
-  root.style.setProperty('--status-success-rgb', colors.status.successRgb);
-  root.style.setProperty('--status-warning', colors.status.warning);
-  root.style.setProperty('--status-warning-rgb', colors.status.warningRgb);
-  root.style.setProperty('--status-info', colors.status.info);
-  root.style.setProperty('--status-info-rgb', colors.status.infoRgb);
+  if (colors.status) {
+    safeSetProperty(root, '--status-error', colors.status.error);
+    safeSetProperty(root, '--status-error-rgb', colors.status.errorRgb);
+    safeSetProperty(root, '--status-success', colors.status.success);
+    safeSetProperty(root, '--status-success-rgb', colors.status.successRgb);
+    safeSetProperty(root, '--status-warning', colors.status.warning);
+    safeSetProperty(root, '--status-warning-rgb', colors.status.warningRgb);
+    safeSetProperty(root, '--status-info', colors.status.info);
+    safeSetProperty(root, '--status-info-rgb', colors.status.infoRgb);
 
-  // Legacy status variable names
-  root.style.setProperty('--status-red', colors.status.error);
-  root.style.setProperty('--status-green', colors.status.success);
-  root.style.setProperty('--status-yellow', colors.status.warning);
-  root.style.setProperty('--status-blue', colors.status.info);
+    // Legacy status variable names
+    safeSetProperty(root, '--status-red', colors.status.error);
+    safeSetProperty(root, '--status-green', colors.status.success);
+    safeSetProperty(root, '--status-yellow', colors.status.warning);
+    safeSetProperty(root, '--status-blue', colors.status.info);
+  }
 
   // === SHADOWS ===
-  root.style.setProperty('--shadow-small', colors.shadow.small);
-  root.style.setProperty('--shadow-medium', colors.shadow.medium);
-  root.style.setProperty('--shadow-large', colors.shadow.large);
+  if (colors.shadow) {
+    safeSetProperty(root, '--shadow-small', colors.shadow.small);
+    safeSetProperty(root, '--shadow-medium', colors.shadow.medium);
+    safeSetProperty(root, '--shadow-large', colors.shadow.large);
+  }
 
   // === TYPOGRAPHY ===
-  root.style.setProperty('--font-family', typography.fontFamily);
-  root.style.setProperty('--font-family-mono', typography.fontFamilyMono);
-  root.style.setProperty('--font-size-base', typography.fontSizeBase);
-  root.style.setProperty('--line-height', typography.lineHeight);
+  safeSetProperty(root, '--font-family', typography.fontFamily);
+  safeSetProperty(root, '--font-family-mono', typography.fontFamilyMono);
+  safeSetProperty(root, '--font-size-base', typography.fontSizeBase);
+  safeSetProperty(root, '--line-height', typography.lineHeight);
 
   // === SPACING / RADIUS ===
-  root.style.setProperty('--radius-small', spacing.radiusSmall);
-  root.style.setProperty('--radius-medium', spacing.radiusMedium);
-  root.style.setProperty('--radius-large', spacing.radiusLarge);
-  root.style.setProperty('--radius-xl', spacing.radiusXl);
-  root.style.setProperty('--radius', spacing.radiusXl); // Default radius
+  safeSetProperty(root, '--radius-small', spacing.radiusSmall);
+  safeSetProperty(root, '--radius-medium', spacing.radiusMedium);
+  safeSetProperty(root, '--radius-large', spacing.radiusLarge);
+  safeSetProperty(root, '--radius-xl', spacing.radiusXl);
+  safeSetProperty(root, '--radius', spacing.radiusXl); // Default radius
 
   // === ANIMATION ===
-  root.style.setProperty('--duration-fast', animation.durationFast);
-  root.style.setProperty('--duration-normal', animation.durationNormal);
-  root.style.setProperty('--duration-slow', animation.durationSlow);
-  root.style.setProperty('--easing', animation.easing);
+  safeSetProperty(root, '--duration-fast', animation.durationFast);
+  safeSetProperty(root, '--duration-normal', animation.durationNormal);
+  safeSetProperty(root, '--duration-slow', animation.durationSlow);
+  safeSetProperty(root, '--easing', animation.easing);
 
   // === MODE CLASS ===
   document.body.classList.remove('light-mode', 'dark-mode');
   document.body.classList.add(`${theme.mode}-mode`);
 
-  // Update body styles
-  document.body.style.backgroundColor = colors.background;
-  document.body.style.color = colors.text;
+  // Update body styles directly (these are the authoritative values, not CSS overrides)
+  if (colors.background) document.body.style.backgroundColor = colors.background;
+  if (colors.text) document.body.style.color = colors.text;
 }

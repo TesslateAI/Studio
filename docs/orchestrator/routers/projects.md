@@ -192,6 +192,23 @@ Returns all files in the project with their content.
 - **Docker mode**: Files are read from filesystem, synced to database
 - **K8s mode**: Files are read from database (source of truth), synced to PVC on container start
 
+**Empty Directory Entries**:
+
+Both Docker and K8s modes include placeholder entries for empty directories in the response. These entries have `file_path` ending with `/` and empty `content`:
+
+```json
+{
+  "id": "uuid",
+  "project_id": "uuid",
+  "file_path": "src/components/",
+  "content": "",
+  "created_at": "2025-01-09T10:00:00Z",
+  "updated_at": "2025-01-09T10:00:00Z"
+}
+```
+
+The frontend CodeEditor uses this convention to render empty directories in the file tree. Excluded directories (node_modules, .git, .next, __pycache__, dist, build, .venv, venv, .cache, .turbo, coverage, .nyc_output) are never included — the exclusion list is kept in sync between Docker (`EXCLUDED_DIRS` in `docker.py`) and K8s (`read_files_recursive` in `projects.py`).
+
 ### Save File
 
 ```
