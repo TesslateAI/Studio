@@ -274,6 +274,42 @@ variable "stripe_webhook_secret" {
 }
 
 # -----------------------------------------------------------------------------
+# Deployment Provider OAuth (Vercel, Netlify)
+# -----------------------------------------------------------------------------
+variable "vercel_client_id" {
+  description = "Vercel OAuth client ID for deployment integration"
+  type        = string
+  default     = ""
+}
+
+variable "vercel_client_secret" {
+  description = "Vercel OAuth client secret for deployment integration"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "netlify_client_id" {
+  description = "Netlify OAuth client ID for deployment integration"
+  type        = string
+  default     = ""
+}
+
+variable "netlify_client_secret" {
+  description = "Netlify OAuth client secret for deployment integration"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "deployment_encryption_key" {
+  description = "Base64-encoded Fernet key for encrypting deployment OAuth tokens. Falls back to SECRET_KEY if empty."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
 # SMTP Configuration (Email / 2FA)
 # -----------------------------------------------------------------------------
 variable "smtp_host" {

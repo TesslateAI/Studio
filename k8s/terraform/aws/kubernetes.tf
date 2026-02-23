@@ -141,6 +141,19 @@ resource "kubernetes_secret" "app_secrets" {
     STRIPE_SECRET_KEY    = var.stripe_secret_key
     STRIPE_WEBHOOK_SECRET = var.stripe_webhook_secret
 
+    # Deployment Providers - Vercel
+    VERCEL_CLIENT_ID          = var.vercel_client_id
+    VERCEL_CLIENT_SECRET      = var.vercel_client_secret
+    VERCEL_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/vercel/callback"
+
+    # Deployment Providers - Netlify
+    NETLIFY_CLIENT_ID          = var.netlify_client_id
+    NETLIFY_CLIENT_SECRET      = var.netlify_client_secret
+    NETLIFY_OAUTH_REDIRECT_URI = "https://${var.domain_name}/api/deployment-oauth/netlify/callback"
+
+    # Deployment credential encryption
+    DEPLOYMENT_ENCRYPTION_KEY = var.deployment_encryption_key
+
     # SMTP (Email / 2FA)
     SMTP_HOST         = var.smtp_host
     SMTP_PORT         = tostring(var.smtp_port)
