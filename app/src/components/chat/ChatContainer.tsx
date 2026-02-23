@@ -91,7 +91,6 @@ export function ChatContainer({
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
@@ -1203,16 +1202,13 @@ export function ChatContainer({
               ${
                 isExpanded
                   ? 'md:w-[min(800px,calc(100vw-48px))] md:max-h-[calc(100vh-48px)] max-md:max-h-[90vh] max-md:translate-y-0'
-                  : 'md:w-[min(600px,calc(100vw-48px))] max-md:translate-y-full max-md:opacity-0 max-md:pointer-events-none'
+                  : 'md:w-[min(650px,calc(100vw-48px))] max-md:translate-y-full max-md:opacity-0 max-md:pointer-events-none'
               }
-              ${!isExpanded && isHovered ? 'md:w-[min(650px,calc(100vw-48px))]' : ''}
             `
           }
           ${className}
         `}
         style={containerStyle}
-        onMouseEnter={() => !isDocked && !isExpanded && setIsHovered(true)}
-        onMouseLeave={() => !isDocked && !isExpanded && setIsHovered(false)}
       >
         {/* Glow effects - only shown when floating (not docked) */}
         {!isDocked && (
@@ -1227,7 +1223,7 @@ export function ChatContainer({
               pointer-events-none
               rounded-inherit
               transition-opacity duration-400
-              ${isExpanded || isHovered ? 'opacity-100' : 'opacity-0'}
+              ${isExpanded ? 'opacity-100' : 'opacity-0'}
             `}
               style={{ zIndex: -1 }}
             />
@@ -1241,7 +1237,7 @@ export function ChatContainer({
               pointer-events-none
               rounded-inherit
               transition-opacity duration-400
-              ${isExpanded || isHovered ? 'opacity-100' : 'opacity-0'}
+              ${isExpanded ? 'opacity-100' : 'opacity-0'}
             `}
               style={{ zIndex: -1 }}
             />
