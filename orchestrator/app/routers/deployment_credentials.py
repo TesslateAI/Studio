@@ -84,8 +84,8 @@ class ProviderInfo(BaseModel):
     display_name: str
     description: str
     auth_type: str
-    required_credentials: list[str]
-    optional_credentials: list[str]
+    required_fields: list[str]
+    optional_fields: list[str]
 
 
 class TestCredentialResponse(BaseModel):

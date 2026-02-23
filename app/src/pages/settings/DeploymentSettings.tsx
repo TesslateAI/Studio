@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
   X,
@@ -11,6 +11,7 @@ import {
   Info,
 } from '@phosphor-icons/react';
 import { deploymentCredentialsApi } from '../../lib/api';
+import { isValidOAuthUrl } from '../../lib/url-validation';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import { SettingsSection } from '../../components/settings';
 import { useCancellableParallelRequests } from '../../hooks/useCancellableRequest';
@@ -73,14 +74,75 @@ export default function DeploymentSettings() {
     loadData();
   }, [loadData]);
 
+  // Use refs for OAuth popup polling to prevent race conditions
+  const oauthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup OAuth polling on unmount
+  useEffect(() => {
+    return () => {
+      if (oauthCheckIntervalRef.current) clearInterval(oauthCheckIntervalRef.current);
+      if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
+    };
+  }, []);
+
   const handleOAuthConnect = async (provider: Provider) => {
     try {
       const result = await deploymentCredentialsApi.startOAuth(provider.name);
-      if (result.auth_url) {
-        window.location.href = result.auth_url;
-      } else {
+      if (!result.auth_url) {
         toast.error('Failed to start OAuth flow');
+        return;
       }
+
+      if (!isValidOAuthUrl(result.auth_url)) {
+        toast.error('Invalid OAuth URL received');
+        return;
+      }
+
+      // Open OAuth in popup window instead of full-page redirect
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      const popup = window.open(
+        result.auth_url,
+        `Connect ${provider.display_name}`,
+        `width=${width},height=${height},left=${left},top=${top},popup=1`
+      );
+
+      // Poll to check if credential was created after OAuth completes
+      if (oauthCheckIntervalRef.current) clearInterval(oauthCheckIntervalRef.current);
+      if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
+
+      oauthCheckIntervalRef.current = setInterval(async () => {
+        if (popup && popup.closed) {
+          if (oauthCheckIntervalRef.current) clearInterval(oauthCheckIntervalRef.current);
+          if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
+          // Final check and refresh data
+          loadData();
+          return;
+        }
+        try {
+          const data = await deploymentCredentialsApi.list(provider.name);
+          const creds = data.credentials || [];
+          if (creds.some((c: { provider: string }) => c.provider === provider.name)) {
+            if (oauthCheckIntervalRef.current) clearInterval(oauthCheckIntervalRef.current);
+            if (oauthTimeoutRef.current) clearTimeout(oauthTimeoutRef.current);
+            toast.success(`${provider.display_name} connected successfully!`);
+            loadData();
+          }
+        } catch {
+          // Silently handle polling errors
+        }
+      }, 2000);
+
+      // Timeout after 5 minutes
+      oauthTimeoutRef.current = setTimeout(() => {
+        if (oauthCheckIntervalRef.current) {
+          clearInterval(oauthCheckIntervalRef.current);
+          oauthCheckIntervalRef.current = null;
+        }
+      }, 5 * 60 * 1000);
     } catch (error: unknown) {
       console.error('OAuth flow error:', error);
       const err = error as { response?: { data?: { detail?: string } } };

@@ -5,7 +5,12 @@ This module provides OAuth 2.0 authentication endpoints for deployment providers
 (Vercel, Netlify) that support OAuth instead of manual API tokens.
 """
 
+import base64
+import hashlib
+import html as html_mod
 import logging
+import secrets
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -30,6 +35,86 @@ from ..users import current_active_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/deployment-oauth", tags=["deployment-oauth"])
+
+
+# ============================================================================
+# Shared HTML response helpers
+# ============================================================================
+
+
+def _success_html(provider_name: str) -> HTMLResponse:
+    """Return HTML page that shows success and closes the popup window."""
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{provider_name} Connected</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #1a1a1a;
+            color: #fff;
+        }}
+        .checkmark {{ font-size: 64px; margin-bottom: 16px; }}
+        h1 {{ font-size: 24px; margin: 0 0 8px 0; }}
+        p {{ color: #888; margin: 0; }}
+    </style>
+</head>
+<body>
+    <div class="checkmark">&#10003;</div>
+    <h1>{provider_name} Connected!</h1>
+    <p>This window will close automatically...</p>
+    <script>
+        setTimeout(function() {{ window.close(); }}, 1500);
+    </script>
+</body>
+</html>
+    """, status_code=200)
+
+
+def _error_html(title: str, message: str) -> HTMLResponse:
+    """Return HTML error page that shows the error and closes the popup window."""
+    # Escape HTML entities in user-facing strings
+    safe_title = html_mod.escape(title)
+    safe_message = html_mod.escape(message)
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connection Failed</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #1a1a1a;
+            color: #fff;
+        }}
+        .error {{ font-size: 64px; margin-bottom: 16px; }}
+        h1 {{ font-size: 24px; margin: 0 0 8px 0; color: #f87171; }}
+        p {{ color: #888; margin: 0; max-width: 400px; text-align: center; }}
+    </style>
+</head>
+<body>
+    <div class="error">&#10007;</div>
+    <h1>{safe_title}</h1>
+    <p>{safe_message}</p>
+    <script>
+        setTimeout(function() {{ window.close(); }}, 3000);
+    </script>
+</body>
+</html>
+    """, status_code=200)
 
 
 # ============================================================================
@@ -67,8 +152,14 @@ async def vercel_authorize(
             detail="Vercel OAuth is not configured on this server",
         )
 
+    # PKCE: generate code_verifier and code_challenge (required by Vercel)
+    code_verifier = secrets.token_hex(43)
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
     # Generate signed JWT state token (stateless, survives restarts)
-    extra = {}
+    # Store code_verifier in JWT so we can use it in the callback
+    extra = {"code_verifier": code_verifier}
     if project_id:
         extra["project_id"] = str(project_id)
     state = generate_oauth_state(
@@ -78,13 +169,16 @@ async def vercel_authorize(
         extra=extra,
     )
 
-    # Build Vercel OAuth URL
+    # Build Vercel OAuth URL (redirect_uri must be URL-encoded per OAuth 2.0 spec)
+    encoded_redirect = quote(settings.vercel_oauth_redirect_uri, safe="")
     oauth_url = (
         f"https://vercel.com/oauth/authorize"
         f"?client_id={settings.vercel_client_id}"
-        f"&redirect_uri={settings.vercel_oauth_redirect_uri}"
+        f"&redirect_uri={encoded_redirect}"
         f"&state={state}"
-        f"&scope=deployments"  # Request deployment permissions
+        f"&response_type=code"
+        f"&code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
     )
 
     logger.info(f"Generated Vercel OAuth URL for user {current_user.id}")
@@ -93,8 +187,10 @@ async def vercel_authorize(
 
 @router.get("/vercel/callback")
 async def vercel_callback(
-    code: str = Query(..., description="Authorization code from Vercel"),
+    code: str | None = Query(None, description="Authorization code from Vercel"),
     state: str | None = Query(None, description="State token for CSRF protection"),
+    error: str | None = Query(None, description="OAuth error code"),
+    error_description: str | None = Query(None, description="OAuth error description"),
     configurationId: str | None = Query(None, description="Vercel configuration ID"),
     teamId: str | None = Query(None, description="Vercel team ID"),
     db: AsyncSession = Depends(get_db),
@@ -111,8 +207,10 @@ async def vercel_callback(
     2. Marketplace installation flow (with configurationId, no state)
 
     Args:
-        code: Authorization code from Vercel
+        code: Authorization code from Vercel (missing if user denied or error occurred)
         state: State token for CSRF verification (optional for marketplace flow)
+        error: OAuth error code (e.g., "access_denied")
+        error_description: Human-readable error description
         configurationId: Vercel configuration ID (for marketplace installations)
         teamId: Vercel team ID (optional)
         db: Database session
@@ -122,6 +220,20 @@ async def vercel_callback(
         HTML page that closes the popup window
     """
     settings = get_settings()
+
+    # Handle OAuth errors (user denied, provider error, etc.)
+    if error:
+        desc = error_description or error
+        logger.warning(f"Vercel OAuth error: {error} - {error_description}")
+        return _error_html("Authorization Denied", f"Vercel returned: {desc}")
+
+    # code is required for the token exchange
+    if not code:
+        logger.warning("Vercel OAuth callback received without authorization code")
+        return _error_html(
+            "Connection Failed",
+            "No authorization code received from Vercel. Please try again.",
+        )
 
     try:
         # Determine which flow we're using
@@ -137,7 +249,7 @@ async def vercel_callback(
                     detail="Invalid or expired state token",
                 )
             user_id = UUID(state_payload["sub"])
-            # Extract project_id from JWT extra data
+            # Extract extra data from JWT (project_id, code_verifier)
             extra_data = state_payload.get("data", {})
             project_id_str = extra_data.get("project_id")
             if project_id_str:
@@ -148,6 +260,7 @@ async def vercel_callback(
         elif current_user:
             # Marketplace installation flow - user is already authenticated
             user_id = current_user.id
+            extra_data = {}
             logger.info(f"Vercel marketplace installation for user {user_id}")
         else:
             # No state and no current user - can't proceed
@@ -156,18 +269,31 @@ async def vercel_callback(
                 detail="Missing authentication: no state token or current user",
             )
 
-        # Exchange code for access token
+        # Exchange code for access token using Vercel's current OAuth endpoint
+        # PKCE code_verifier is stored in the JWT state token
+        code_verifier = extra_data.get("code_verifier", "")
+        token_params = {
+            "grant_type": "authorization_code",
+            "client_id": settings.vercel_client_id,
+            "client_secret": settings.vercel_client_secret,
+            "code": code,
+            "code_verifier": code_verifier,
+            "redirect_uri": settings.vercel_oauth_redirect_uri,
+        }
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://api.vercel.com/v2/oauth/access_token",
-                data={
-                    "client_id": settings.vercel_client_id,
-                    "client_secret": settings.vercel_client_secret,
-                    "code": code,
-                    "redirect_uri": settings.vercel_oauth_redirect_uri,
-                },
+                "https://api.vercel.com/login/oauth/token",
+                data=token_params,
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                error_body = response.text
+                logger.error(
+                    f"Vercel token exchange failed ({response.status_code}): {error_body}"
+                )
+                return _error_html(
+                    "Connection Failed",
+                    "Vercel rejected the token exchange. Please try again.",
+                )
             token_data = response.json()
 
         access_token = token_data.get("access_token")
@@ -233,83 +359,13 @@ async def vercel_callback(
             await db.commit()
             logger.info(f"Created Vercel credential for user {user_id}")
 
-        # Return HTML that closes the popup window (the opener is polling for credentials)
-        return HTMLResponse(content="""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Vercel Connected</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background: #1a1a1a;
-            color: #fff;
-        }
-        .checkmark { font-size: 64px; margin-bottom: 16px; }
-        h1 { font-size: 24px; margin: 0 0 8px 0; }
-        p { color: #888; margin: 0; }
-    </style>
-</head>
-<body>
-    <div class="checkmark">&#10003;</div>
-    <h1>Vercel Connected!</h1>
-    <p>This window will close automatically...</p>
-    <script>
-        // Close the popup after a short delay
-        setTimeout(function() {
-            window.close();
-        }, 1500);
-    </script>
-</body>
-</html>
-        """, status_code=200)
+        return _success_html("Vercel")
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Vercel OAuth callback failed: {e}", exc_info=True)
-
-        # Return HTML error page that closes the popup
-        return HTMLResponse(content="""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Connection Failed</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background: #1a1a1a;
-            color: #fff;
-        }
-        .error { font-size: 64px; margin-bottom: 16px; }
-        h1 { font-size: 24px; margin: 0 0 8px 0; color: #f87171; }
-        p { color: #888; margin: 0; }
-    </style>
-</head>
-<body>
-    <div class="error">&#10007;</div>
-    <h1>Connection Failed</h1>
-    <p>Please close this window and try again.</p>
-    <script>
-        setTimeout(function() {
-            window.close();
-        }, 3000);
-    </script>
-</body>
-</html>
-        """, status_code=200)
+        return _error_html("Connection Failed", "Please close this window and try again.")
 
 
 # ============================================================================
@@ -358,11 +414,12 @@ async def netlify_authorize(
         extra=extra,
     )
 
-    # Build Netlify OAuth URL
+    # Build Netlify OAuth URL (redirect_uri must be URL-encoded per OAuth 2.0 spec)
+    encoded_redirect = quote(settings.netlify_oauth_redirect_uri, safe="")
     oauth_url = (
         f"https://app.netlify.com/authorize"
         f"?client_id={settings.netlify_client_id}"
-        f"&redirect_uri={settings.netlify_oauth_redirect_uri}"
+        f"&redirect_uri={encoded_redirect}"
         f"&state={state}"
         f"&response_type=code"
     )
@@ -373,8 +430,10 @@ async def netlify_authorize(
 
 @router.get("/netlify/callback")
 async def netlify_callback(
-    code: str = Query(..., description="Authorization code from Netlify"),
-    state: str = Query(..., description="State token for CSRF protection"),
+    code: str | None = Query(None, description="Authorization code from Netlify"),
+    state: str | None = Query(None, description="State token for CSRF protection"),
+    error: str | None = Query(None, description="OAuth error code"),
+    error_description: str | None = Query(None, description="OAuth error description"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -384,14 +443,37 @@ async def netlify_callback(
     It exchanges the authorization code for an access token and stores it securely.
 
     Args:
-        code: Authorization code from Netlify
+        code: Authorization code from Netlify (missing if user denied or error occurred)
         state: State token for CSRF verification
+        error: OAuth error code (e.g., "access_denied")
+        error_description: Human-readable error description
         db: Database session
 
     Returns:
         HTML page that closes the popup window
     """
     settings = get_settings()
+
+    # Handle OAuth errors (user denied, provider error, etc.)
+    if error:
+        desc = error_description or error
+        logger.warning(f"Netlify OAuth error: {error} - {error_description}")
+        return _error_html("Authorization Denied", f"Netlify returned: {desc}")
+
+    # code and state are required for the token exchange
+    if not code:
+        logger.warning("Netlify OAuth callback received without authorization code")
+        return _error_html(
+            "Connection Failed",
+            "No authorization code received from Netlify. Please try again.",
+        )
+
+    if not state:
+        logger.warning("Netlify OAuth callback received without state token")
+        return _error_html(
+            "Connection Failed",
+            "Missing state token. Please try again.",
+        )
 
     try:
         # Validate JWT state token
@@ -426,7 +508,15 @@ async def netlify_callback(
                     "redirect_uri": settings.netlify_oauth_redirect_uri,
                 },
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                error_body = response.text
+                logger.error(
+                    f"Netlify token exchange failed ({response.status_code}): {error_body}"
+                )
+                return _error_html(
+                    "Connection Failed",
+                    "Netlify rejected the token exchange. Please try again.",
+                )
             token_data = response.json()
 
         access_token = token_data.get("access_token")
@@ -485,80 +575,10 @@ async def netlify_callback(
             await db.commit()
             logger.info(f"Created Netlify credential for user {user_id}")
 
-        # Return HTML that closes the popup window (the opener is polling for credentials)
-        return HTMLResponse(content="""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Netlify Connected</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background: #1a1a1a;
-            color: #fff;
-        }
-        .checkmark { font-size: 64px; margin-bottom: 16px; }
-        h1 { font-size: 24px; margin: 0 0 8px 0; }
-        p { color: #888; margin: 0; }
-    </style>
-</head>
-<body>
-    <div class="checkmark">&#10003;</div>
-    <h1>Netlify Connected!</h1>
-    <p>This window will close automatically...</p>
-    <script>
-        // Close the popup after a short delay
-        setTimeout(function() {
-            window.close();
-        }, 1500);
-    </script>
-</body>
-</html>
-        """, status_code=200)
+        return _success_html("Netlify")
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Netlify OAuth callback failed: {e}", exc_info=True)
-
-        # Return HTML error page that closes the popup
-        return HTMLResponse(content="""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Connection Failed</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            background: #1a1a1a;
-            color: #fff;
-        }
-        .error { font-size: 64px; margin-bottom: 16px; }
-        h1 { font-size: 24px; margin: 0 0 8px 0; color: #f87171; }
-        p { color: #888; margin: 0; }
-    </style>
-</head>
-<body>
-    <div class="error">&#10007;</div>
-    <h1>Connection Failed</h1>
-    <p>Please close this window and try again.</p>
-    <script>
-        setTimeout(function() {
-            window.close();
-        }, 3000);
-    </script>
-</body>
-</html>
-        """, status_code=200)
+        return _error_html("Connection Failed", "Please close this window and try again.")
