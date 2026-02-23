@@ -74,15 +74,14 @@ class TestOpenAIAdapter:
         assert adapter.client is mock_openai_client
         assert adapter.temperature == 0.8
         assert adapter.max_tokens == 2000
-        assert adapter.is_openrouter is False
 
-    def test_openai_adapter_detects_openrouter_models(self, mock_openai_client):
-        """Test that adapter detects OpenRouter models."""
+    def test_openai_adapter_stores_model_name(self, mock_openai_client):
+        """Test that adapter stores the model name as given."""
         adapter = OpenAIAdapter(
-            model_name="openrouter/anthropic/claude-3.5-sonnet", client=mock_openai_client
+            model_name="anthropic/claude-3.5-sonnet", client=mock_openai_client
         )
 
-        assert adapter.is_openrouter is True
+        assert adapter.model_name == "anthropic/claude-3.5-sonnet"
 
     def test_openai_adapter_get_model_name(self, mock_openai_client):
         """Test getting model name from adapter."""
@@ -121,8 +120,8 @@ class TestOpenAIAdapter:
         mock_openai_client.chat.completions.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_openai_adapter_strips_openrouter_prefix(self, mock_openai_client):
-        """Test that OpenRouter prefix is stripped from model name in API call."""
+    async def test_openai_adapter_passes_model_name_to_api(self, mock_openai_client):
+        """Test that adapter passes its model_name directly to the API call."""
         mock_response = AsyncMock()
         mock_chunk = Mock()
         mock_chunk.choices = [Mock(delta=Mock(content="test"))]
@@ -133,8 +132,9 @@ class TestOpenAIAdapter:
         mock_response.__aiter__ = lambda self: mock_stream()
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
+        # Adapter receives already-stripped model name from create_model_adapter
         adapter = OpenAIAdapter(
-            model_name="openrouter/anthropic/claude-3.5-sonnet", client=mock_openai_client
+            model_name="anthropic/claude-3.5-sonnet", client=mock_openai_client
         )
 
         messages = [{"role": "user", "content": "test"}]
@@ -144,31 +144,6 @@ class TestOpenAIAdapter:
 
         call_args = mock_openai_client.chat.completions.create.call_args
         assert call_args.kwargs["model"] == "anthropic/claude-3.5-sonnet"
-
-    @pytest.mark.asyncio
-    async def test_openai_adapter_adds_openrouter_headers(self, mock_openai_client):
-        """Test that OpenRouter requests include extra headers."""
-        mock_response = AsyncMock()
-        mock_chunk = Mock()
-        mock_chunk.choices = [Mock(delta=Mock(content="test"))]
-
-        async def mock_stream():
-            yield mock_chunk
-
-        mock_response.__aiter__ = lambda self: mock_stream()
-        mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
-
-        adapter = OpenAIAdapter(model_name="openrouter/openai/gpt-4", client=mock_openai_client)
-
-        messages = [{"role": "user", "content": "test"}]
-
-        async for _ in adapter.chat(messages):
-            pass
-
-        call_args = mock_openai_client.chat.completions.create.call_args
-        assert "extra_headers" in call_args.kwargs
-        assert "HTTP-Referer" in call_args.kwargs["extra_headers"]
-        assert "X-Title" in call_args.kwargs["extra_headers"]
 
     @pytest.mark.asyncio
     async def test_openai_adapter_handles_empty_delta(self, mock_openai_client):
@@ -293,7 +268,7 @@ class TestCreateModelAdapter:
 
     @pytest.mark.asyncio
     async def test_create_adapter_for_openrouter_model(self, mock_user_id, mock_db):
-        """Test creating adapter for OpenRouter model."""
+        """Test creating adapter for OpenRouter model strips provider prefix."""
         with patch("app.agent.models.get_llm_client") as mock_get_client:
             mock_client = AsyncMock()
             mock_get_client.return_value = mock_client
@@ -305,8 +280,8 @@ class TestCreateModelAdapter:
             )
 
             assert isinstance(adapter, OpenAIAdapter)
-            assert adapter.model_name == "openrouter/anthropic/claude-3.5-sonnet"
-            assert adapter.is_openrouter is True
+            # create_model_adapter strips the first provider prefix
+            assert adapter.model_name == "anthropic/claude-3.5-sonnet"
 
     @pytest.mark.asyncio
     async def test_create_adapter_with_custom_params(self, mock_user_id, mock_db):
