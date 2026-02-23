@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
+
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
@@ -55,6 +56,7 @@ from ..schemas import (
     ContainerCredentialUpdate,
     ContainerRename,
     ContainerUpdate,
+    DeploymentTargetAssignment,
     ProjectCreate,
     TemplateExportRequest,
 )
@@ -4987,6 +4989,80 @@ async def rename_container(
         await db.rollback()
         logger.error(f"[CONTAINER] Failed to rename container: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to rename container: {str(e)}") from e
+
+
+@router.patch("/{project_slug}/containers/{container_id}/deployment-target", response_model=ContainerSchema)
+async def assign_deployment_target(
+    project_slug: str,
+    container_id: UUID,
+    assignment: DeploymentTargetAssignment,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Assign or remove a deployment target from a container.
+
+    Validates that the container type and framework are compatible with the
+    deployment provider before assignment.
+    """
+    from ..services.service_definitions import is_deployment_compatible, DEPLOYMENT_COMPATIBILITY
+
+    project = await get_project_by_slug(db, project_slug, current_user.id)
+
+    # Get container with base relationship for tech stack info
+    result = await db.execute(
+        select(Container)
+        .where(Container.id == container_id)
+        .options(selectinload(Container.base))
+    )
+    container = result.scalar_one_or_none()
+
+    if not container or container.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Container not found")
+
+    provider = assignment.provider
+
+    # If removing deployment target (provider is None), just clear it
+    if provider is None:
+        container.deployment_provider = None
+        await db.commit()
+        await db.refresh(container)
+        logger.info(f"[CONTAINER] Removed deployment target from container {container_id}")
+        return container
+
+    # Normalize provider name
+    provider = provider.lower().strip()
+
+    # Validate provider exists
+    if provider not in DEPLOYMENT_COMPATIBILITY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid deployment provider. Must be one of: {', '.join(DEPLOYMENT_COMPATIBILITY.keys())}"
+        )
+
+    # Get tech stack from base if available
+    tech_stack = []
+    if container.base and container.base.tech_stack:
+        tech_stack = container.base.tech_stack if isinstance(container.base.tech_stack, list) else []
+
+    # Validate compatibility
+    is_compatible, reason = is_deployment_compatible(
+        container_type=container.container_type,
+        service_slug=container.service_slug,
+        tech_stack=tech_stack,
+        provider=provider
+    )
+
+    if not is_compatible:
+        raise HTTPException(status_code=400, detail=reason)
+
+    # Assign deployment target
+    container.deployment_provider = provider
+    await db.commit()
+    await db.refresh(container)
+
+    logger.info(f"[CONTAINER] Assigned deployment target '{provider}' to container {container_id}")
+    return container
 
 
 @router.delete("/{project_slug}/containers/{container_id}")

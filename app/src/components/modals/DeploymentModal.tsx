@@ -18,6 +18,7 @@ interface DeploymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  defaultProvider?: string;  // Pre-select this provider if set (from container's deployment_provider)
 }
 
 interface Provider {
@@ -37,7 +38,8 @@ export function DeploymentModal({
   projectSlug,
   isOpen,
   onClose,
-  onSuccess
+  onSuccess,
+  defaultProvider
 }: DeploymentModalProps) {
   const navigate = useNavigate();
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -79,8 +81,12 @@ export function DeploymentModal({
       setProviders(providersData.providers || []);
       setCredentials(credentialsData.credentials || []);
 
-      // Auto-select first connected provider
-      if (credentialsData.credentials && credentialsData.credentials.length > 0) {
+      // Auto-select provider: prefer defaultProvider, then first connected provider
+      if (defaultProvider && credentialsData.credentials?.some((c: DeploymentCredential) => c.provider === defaultProvider)) {
+        // Use the default provider from container's deployment target
+        setSelectedProvider(defaultProvider);
+      } else if (credentialsData.credentials && credentialsData.credentials.length > 0) {
+        // Fall back to first connected provider
         setSelectedProvider(credentialsData.credentials[0].provider);
       }
     } catch (error: unknown) {

@@ -1,6 +1,6 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Handle, Position, type Node } from '@xyflow/react';
-import { Cube, X } from '@phosphor-icons/react';
+import { Cube, X, Rocket } from '@phosphor-icons/react';
 
 interface ContainerNodeData extends Record<string, unknown> {
   name: string;
@@ -10,6 +10,7 @@ interface ContainerNodeData extends Record<string, unknown> {
   techStack?: string[];
   containerType?: 'base' | 'service';
   serviceType?: 'container' | 'external' | 'hybrid';
+  deploymentProvider?: 'vercel' | 'netlify' | 'cloudflare' | null;
   onDelete?: (id: string) => void;
   onClick?: (id: string) => void;
   onDoubleClick?: (id: string) => void;
@@ -48,6 +49,7 @@ const arePropsEqual = (
     prevData.baseIcon === nextData.baseIcon &&
     prevData.containerType === nextData.containerType &&
     prevData.serviceType === nextData.serviceType &&
+    prevData.deploymentProvider === nextData.deploymentProvider &&
     prevData.techStack?.length === nextData.techStack?.length &&
     (prevData.techStack?.every((t, i) => t === nextData.techStack?.[i]) ?? true)
   );
@@ -55,11 +57,59 @@ const arePropsEqual = (
 
 const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
   const typeColor = getTypeColor(data.containerType, data.serviceType);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useState(0);
+
+  // Only base containers can receive deployment targets
+  const canReceiveDeployTarget = data.containerType === 'base';
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    // Check if this is a deployment target being dragged
+    const nodeType = e.dataTransfer.types.includes('application/reactflow');
+    if (nodeType && canReceiveDeployTarget) {
+      dragCounter[1](prev => prev + 1);
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    // Keep showing the indicator while dragging over
+    if (canReceiveDeployTarget && e.dataTransfer.types.includes('application/reactflow')) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter[1](prev => {
+      const newCount = prev - 1;
+      if (newCount <= 0) {
+        setIsDragOver(false);
+        return 0;
+      }
+      return newCount;
+    });
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    // Don't stopPropagation - let it bubble up to ProjectGraphCanvas for handling
+    setIsDragOver(false);
+    dragCounter[1](0);
+  };
 
   return (
     <div
-      className="relative group"
+      className={`relative group transition-all duration-150 ${
+        isDragOver ? 'scale-105' : ''
+      }`}
       style={{ contain: 'layout style' }}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       {/* Connection handles */}
       <Handle
@@ -73,6 +123,31 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
         className="!bg-[#333] !w-2.5 !h-2.5 !border !border-[#444]"
       />
 
+      {/* Deployment provider badge - bottom right corner */}
+      {data.deploymentProvider && (
+        <div className="absolute -bottom-1.5 -right-1.5 z-10" title={`Deploys to ${data.deploymentProvider}`}>
+          <div className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold shadow-lg border-2
+            ${data.deploymentProvider === 'vercel' ? 'bg-white text-black border-gray-300' : ''}
+            ${data.deploymentProvider === 'netlify' ? 'bg-[#00C7B7] text-white border-[#00A799]' : ''}
+            ${data.deploymentProvider === 'cloudflare' ? 'bg-[#F38020] text-white border-[#D97218]' : ''}
+          `}>
+            {data.deploymentProvider === 'vercel' && '▲'}
+            {data.deploymentProvider === 'netlify' && '◆'}
+            {data.deploymentProvider === 'cloudflare' && '🔥'}
+          </div>
+        </div>
+      )}
+
+      {/* Drop zone overlay - shows when dragging deployment target over */}
+      {isDragOver && canReceiveDeployTarget && (
+        <div className="absolute inset-0 z-20 bg-purple-500/20 border-2 border-dashed border-purple-500 rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-lg">
+            <Rocket size={14} weight="fill" />
+            Drop to assign
+          </div>
+        </div>
+      )}
+
       {/* Node content - no transitions for performance */}
       <div
         onClick={() => data.onClick?.(id)}
@@ -81,7 +156,9 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
             data.onDoubleClick(id);
           }
         }}
-        className="bg-[#1a1a1a] rounded-xl min-w-[180px] cursor-pointer shadow-md"
+        className={`bg-[#1a1a1a] rounded-xl min-w-[180px] cursor-pointer shadow-md ${
+          isDragOver && canReceiveDeployTarget ? 'ring-2 ring-purple-500' : ''
+        }`}
       >
         {/* Header - Color-coded icon + Title/Status */}
         <div className="flex items-center gap-3 p-3">

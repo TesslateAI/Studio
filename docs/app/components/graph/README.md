@@ -68,13 +68,15 @@ export const GraphCanvas = memo(GraphCanvasComponent, arePropsEqual);
 
 ### ContainerNode.tsx
 
-**Container Card Node**: Displays a service/container with icon, status, port, and tech stack.
+**Container Card Node**: Displays a service/container with icon, status, port, tech stack, and deployment target badge.
 
 **Features**:
 - Color-coded by type (external=purple, hybrid=cyan, service=blue, base=green)
 - Status indicator (stopped/starting/running/failed)
 - Port display
 - Tech stack badges (show first 3, +N for more)
+- **Deployment target badge** (bottom-right corner showing Vercel/Netlify/Cloudflare assignment)
+- **Drag-and-drop zone** for deployment targets (base containers only)
 - Delete button (hover to show)
 - Double-click to open builder (base containers only)
 - Memoized with custom comparison
@@ -89,6 +91,7 @@ interface ContainerNodeData {
   techStack?: string[];
   containerType?: 'base' | 'service';
   serviceType?: 'container' | 'external' | 'hybrid';
+  deploymentProvider?: 'vercel' | 'netlify' | 'cloudflare' | null;  // Deployment target
   onDelete?: (id: string) => void;
   onClick?: (id: string) => void;
   onDoubleClick?: (id: string) => void;
@@ -101,6 +104,24 @@ interface ContainerNodeData {
   {/* Handles for connections */}
   <Handle type="target" position={Position.Left} />
   <Handle type="source" position={Position.Right} />
+
+  {/* Deployment provider badge - bottom right corner */}
+  {deploymentProvider && (
+    <div className="absolute -bottom-1.5 -right-1.5 z-10">
+      <div className="w-6 h-6 rounded-md flex items-center justify-center">
+        {deploymentProvider === 'vercel' && '▲'}
+        {deploymentProvider === 'netlify' && '◆'}
+        {deploymentProvider === 'cloudflare' && '🔥'}
+      </div>
+    </div>
+  )}
+
+  {/* Drop zone overlay - shows when dragging deployment target over */}
+  {isDragOver && canReceiveDeployTarget && (
+    <div className="absolute inset-0 bg-purple-500/20 border-dashed border-purple-500">
+      <Rocket /> Drop to assign
+    </div>
+  )}
 
   {/* Header */}
   <div className="flex items-center gap-3 p-3">

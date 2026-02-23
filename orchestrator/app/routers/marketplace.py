@@ -3192,6 +3192,8 @@ async def get_user_marketplace_items(
     services = get_all_services()
     for service in services:
         service_data = service_to_dict(service)
+        # Deployment targets should have type "deployment" for proper frontend categorization
+        item_type = "deployment" if service_data["service_type"] == "deployment_target" else "service"
         items.append(
             {
                 "id": f"service-{service.slug}",  # Unique ID for services
@@ -3202,8 +3204,8 @@ async def get_user_marketplace_items(
                 "category": service.category,
                 "tech_stack": [service.docker_image] if service.docker_image else [],
                 "features": list(service.outputs.keys()) if service.outputs else [],
-                "type": "service",
-                # Service type (container, external, hybrid)
+                "type": item_type,
+                # Service type (container, external, hybrid, deployment_target)
                 "service_type": service_data["service_type"],
                 # Container-specific fields
                 "docker_image": service.docker_image,

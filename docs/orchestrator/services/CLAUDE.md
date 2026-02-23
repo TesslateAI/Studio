@@ -60,7 +60,14 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 
 ### Configuration
 - **base_config_parser.py** (560 lines) - Parse TESSLATE.md for project config
-- **service_definitions.py** (1,385 lines) - Database/Redis/etc service definitions
+- **service_definitions.py** (1,537 lines) - Database/Redis/etc service definitions, deployment targets
+
+#### Deployment Target Definitions (service_definitions.py)
+Service definitions now include deployment targets (Vercel, Netlify, Cloudflare) with:
+- `ServiceType.DEPLOYMENT_TARGET` - New service type for external hosting providers
+- `DEPLOYMENT_COMPATIBILITY` - Framework/container type validation rules per provider
+- `is_deployment_compatible()` - Validates if container can be deployed to provider
+- `get_compatible_providers()` - Returns list of valid providers for a container
 
 ## Related Contexts
 

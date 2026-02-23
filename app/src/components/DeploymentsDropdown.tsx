@@ -20,7 +20,16 @@ interface DeploymentsDropdownProps {
   onClose: () => void;
   onOpenDeployModal: () => void;
   onDeploymentChange?: () => void;
+  assignedDeploymentTarget?: 'vercel' | 'netlify' | 'cloudflare' | null;
+  containerName?: string;
 }
+
+// Provider display info
+const PROVIDER_INFO: Record<string, { name: string; icon: string; color: string; bgColor: string }> = {
+  vercel: { name: 'Vercel', icon: '▲', color: 'text-black', bgColor: 'bg-white' },
+  netlify: { name: 'Netlify', icon: '◆', color: 'text-white', bgColor: 'bg-[#00C7B7]' },
+  cloudflare: { name: 'Cloudflare', icon: '🔥', color: 'text-white', bgColor: 'bg-[#F38020]' },
+};
 
 interface Deployment {
   id: string;
@@ -38,7 +47,9 @@ export function DeploymentsDropdown({
   isOpen,
   onClose,
   onOpenDeployModal,
-  onDeploymentChange
+  onDeploymentChange,
+  assignedDeploymentTarget,
+  containerName,
 }: DeploymentsDropdownProps) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -183,6 +194,31 @@ export function DeploymentsDropdown({
               <X size={18} className="text-[var(--text)]/60" />
             </button>
           </div>
+
+          {/* Show assigned deployment target if present */}
+          {assignedDeploymentTarget && PROVIDER_INFO[assignedDeploymentTarget] && (
+            <div className="mb-3 p-3 rounded-lg border border-[var(--primary)]/30 bg-[var(--primary)]/5">
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${PROVIDER_INFO[assignedDeploymentTarget].bgColor} ${PROVIDER_INFO[assignedDeploymentTarget].color}`}>
+                  {PROVIDER_INFO[assignedDeploymentTarget].icon}
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-[var(--text)]">
+                    Assigned Target: {PROVIDER_INFO[assignedDeploymentTarget].name}
+                  </p>
+                  {containerName && (
+                    <p className="text-[10px] text-[var(--text)]/60">
+                      For container: {containerName}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <p className="text-[10px] text-[var(--text)]/60">
+                This container will deploy to {PROVIDER_INFO[assignedDeploymentTarget].name} when using "Deploy All" in the Architecture view.
+              </p>
+            </div>
+          )}
+
           <button
             onClick={() => {
               onClose();

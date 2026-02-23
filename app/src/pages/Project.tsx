@@ -1040,6 +1040,23 @@ export default function Project() {
               </span>
             </button>
 
+            {/* Deployment Target Badge */}
+            {container?.deployment_provider && (
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                <span className="text-xs text-purple-400">Deploy to:</span>
+                <span className={`text-xs font-semibold flex items-center gap-1
+                  ${container.deployment_provider === 'vercel' ? 'text-white' : ''}
+                  ${container.deployment_provider === 'netlify' ? 'text-[#00C7B7]' : ''}
+                  ${container.deployment_provider === 'cloudflare' ? 'text-[#F38020]' : ''}
+                `}>
+                  {container.deployment_provider === 'vercel' && '▲'}
+                  {container.deployment_provider === 'netlify' && '◆'}
+                  {container.deployment_provider === 'cloudflare' && '🔥'}
+                  {(container.deployment_provider as string).charAt(0).toUpperCase() + (container.deployment_provider as string).slice(1)}
+                </span>
+              </div>
+            )}
+
             {/* Deploy Button with Dropdown */}
             <div className="relative hidden md:block">
               <button
@@ -1054,6 +1071,8 @@ export default function Project() {
                 isOpen={showDeploymentsDropdown}
                 onClose={() => setShowDeploymentsDropdown(false)}
                 onOpenDeployModal={() => setShowDeployModal(true)}
+                assignedDeploymentTarget={container?.deployment_provider as 'vercel' | 'netlify' | 'cloudflare' | null | undefined}
+                containerName={container?.name as string | undefined}
               />
             </div>
 
@@ -1552,6 +1571,7 @@ export default function Project() {
             setShowDeployModal(false);
             toast.success('Deployment started successfully!');
           }}
+          defaultProvider={container?.deployment_provider as string | undefined}
         />
       )}
     </div>

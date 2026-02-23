@@ -9,11 +9,11 @@
 ### Router Files
 Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 
-- `projects.py` (5142 lines) - Project CRUD, file operations, container lifecycle, assets
+- `projects.py` (5218 lines) - Project CRUD, file operations, container lifecycle, assets, deployment target assignment
 - `chat.py` (2044 lines) - Chat management, agent streaming, WebSocket support
 - `marketplace.py` (~2600 lines) - Agent/base marketplace, purchases, reviews, user-submitted bases
 - `admin.py` (1163 lines) - Platform metrics, user management, moderation
-- `deployments.py` (923 lines) - External deployments (Vercel, Netlify, Cloudflare)
+- `deployments.py` (1,197 lines) - External deployments (Vercel, Netlify, Cloudflare), deploy-all endpoint
 - `kanban.py` (757 lines) - Project task board management
 - `billing.py` (702 lines) - Subscriptions, credits, usage tracking, Stripe webhooks
 - `git.py` (607 lines) - Git operations (init, commit, push, pull)

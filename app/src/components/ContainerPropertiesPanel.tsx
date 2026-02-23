@@ -10,8 +10,12 @@ import {
   Check,
   Lock,
   Key,
+  Rocket,
+  Link,
+  LinkBreak,
+  Gear,
 } from '@phosphor-icons/react';
-import api from '../lib/api';
+import api, { projectsApi } from '../lib/api';
 import { toast } from 'react-hot-toast';
 import { connectionEvents } from '../utils/connectionEvents';
 import {
@@ -34,7 +38,17 @@ interface ContainerPropertiesPanelProps {
   onStatusChange?: (newStatus: string) => void;
   onNameChange?: (newName: string) => void;
   port?: number;
+  containerType?: 'base' | 'service';
+  deploymentProvider?: 'vercel' | 'netlify' | 'cloudflare' | null;
+  onDeploymentProviderChange?: (provider: 'vercel' | 'netlify' | 'cloudflare' | null) => void;
 }
+
+// Deployment provider display info
+const DEPLOYMENT_PROVIDERS = {
+  vercel: { name: 'Vercel', icon: '▲', color: 'bg-white text-black', borderColor: 'border-gray-300' },
+  netlify: { name: 'Netlify', icon: '◆', color: 'bg-[#00C7B7] text-white', borderColor: 'border-[#00A799]' },
+  cloudflare: { name: 'Cloudflare', icon: '🔥', color: 'bg-[#F38020] text-white', borderColor: 'border-[#D97218]' },
+};
 
 export const ContainerPropertiesPanel = ({
   containerId,
@@ -45,6 +59,9 @@ export const ContainerPropertiesPanel = ({
   onStatusChange,
   onNameChange,
   port,
+  containerType = 'base',
+  deploymentProvider,
+  onDeploymentProviderChange,
 }: ContainerPropertiesPanelProps) => {
   const [savedEnvVars, setSavedEnvVars] = useState<SavedEnvVar[]>([]);
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
@@ -62,6 +79,8 @@ export const ContainerPropertiesPanel = ({
   const [credentialServiceItem, setCredentialServiceItem] = useState<ExternalServiceItem | null>(
     null
   );
+  const [hasDeploymentCredentials, setHasDeploymentCredentials] = useState<Record<string, boolean>>({});
+  const [isLoadingCredentials, setIsLoadingCredentials] = useState(false);
 
   const isExternalService = deploymentMode === 'external' && !!serviceSlug;
 
@@ -90,6 +109,9 @@ export const ContainerPropertiesPanel = ({
 
   useEffect(() => {
     fetchContainerDetailsCallback();
+    if (containerType === 'base') {
+      fetchDeploymentCredentials();
+    }
   }, [fetchContainerDetailsCallback]);
 
   // Re-fetch when connections change (env injection added/removed)
@@ -101,6 +123,48 @@ export const ContainerPropertiesPanel = ({
     });
     return unsubscribe;
   }, [containerId, fetchContainerDetailsCallback]);
+
+  // Fetch deployment credentials status
+  const fetchDeploymentCredentials = async () => {
+    try {
+      setIsLoadingCredentials(true);
+      const response = await api.get('/api/deployments/credentials');
+      const credentials = response.data || [];
+      const credMap: Record<string, boolean> = {};
+      credentials.forEach((cred: { provider: string }) => {
+        credMap[cred.provider] = true;
+      });
+      setHasDeploymentCredentials(credMap);
+    } catch (error) {
+      console.error('Failed to fetch deployment credentials:', error);
+    } finally {
+      setIsLoadingCredentials(false);
+    }
+  };
+
+  // Handle assigning a deployment target
+  const handleAssignDeploymentTarget = async (provider: 'vercel' | 'netlify' | 'cloudflare') => {
+    try {
+      await projectsApi.assignDeploymentTarget(projectSlug, containerId, provider);
+      onDeploymentProviderChange?.(provider);
+      toast.success(`${DEPLOYMENT_PROVIDERS[provider].name} assigned as deployment target`);
+    } catch (error) {
+      console.error('Failed to assign deployment target:', error);
+      toast.error('Failed to assign deployment target');
+    }
+  };
+
+  // Handle removing a deployment target
+  const handleRemoveDeploymentTarget = async () => {
+    try {
+      await projectsApi.assignDeploymentTarget(projectSlug, containerId, null);
+      onDeploymentProviderChange?.(null);
+      toast.success('Deployment target removed');
+    } catch (error) {
+      console.error('Failed to remove deployment target:', error);
+      toast.error('Failed to remove deployment target');
+    }
+  };
 
   // Reset edited name when container changes
   useEffect(() => {
@@ -440,6 +504,84 @@ export const ContainerPropertiesPanel = ({
               <Key size={14} />
               Edit Credentials
             </button>
+          </div>
+        )}
+
+        {/* Deployment Target - Only show for base containers */}
+        {containerType === 'base' && (
+          <div className="px-3 py-2 border-b border-[var(--border-color)] flex-shrink-0">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-[var(--text)] flex items-center gap-1.5">
+                <Rocket size={12} weight="fill" />
+                Deployment Target
+              </p>
+            </div>
+
+            {deploymentProvider ? (
+              // Show current deployment target
+              <div className="space-y-2">
+                <div className={`flex items-center gap-2 p-2 rounded-lg border ${DEPLOYMENT_PROVIDERS[deploymentProvider].borderColor} bg-[var(--bg)]`}>
+                  <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${DEPLOYMENT_PROVIDERS[deploymentProvider].color}`}>
+                    {DEPLOYMENT_PROVIDERS[deploymentProvider].icon}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-[var(--text)]">{DEPLOYMENT_PROVIDERS[deploymentProvider].name}</p>
+                    <p className="text-[10px] text-[var(--text)]/60">
+                      {hasDeploymentCredentials[deploymentProvider] ? (
+                        <span className="text-green-400 flex items-center gap-1">
+                          <Link size={10} /> Connected
+                        </span>
+                      ) : (
+                        <span className="text-yellow-400 flex items-center gap-1">
+                          <LinkBreak size={10} /> Not connected
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleRemoveDeploymentTarget}
+                    className="p-1 hover:bg-red-500/20 rounded transition-colors"
+                    title="Remove deployment target"
+                  >
+                    <Trash size={12} className="text-red-400" />
+                  </button>
+                </div>
+
+                {!hasDeploymentCredentials[deploymentProvider] && (
+                  <a
+                    href="/settings?tab=deployments"
+                    className="flex items-center justify-center gap-1.5 px-2 py-1.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-xs font-medium transition-colors"
+                  >
+                    <Gear size={12} />
+                    Connect {DEPLOYMENT_PROVIDERS[deploymentProvider].name} Account
+                  </a>
+                )}
+              </div>
+            ) : (
+              // Show deployment target options
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-[var(--text)]/60 mb-2">
+                  Assign a deployment target to enable external deployment
+                </p>
+                {Object.entries(DEPLOYMENT_PROVIDERS).map(([key, provider]) => (
+                  <button
+                    key={key}
+                    onClick={() => handleAssignDeploymentTarget(key as 'vercel' | 'netlify' | 'cloudflare')}
+                    className="w-full flex items-center gap-2 p-2 rounded-lg border border-[var(--border-color)] hover:border-[var(--primary)] hover:bg-[var(--bg)] transition-colors"
+                  >
+                    <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${provider.color}`}>
+                      {provider.icon}
+                    </div>
+                    <span className="text-xs font-medium text-[var(--text)]">{provider.name}</span>
+                    {hasDeploymentCredentials[key] && (
+                      <span className="ml-auto text-[10px] text-green-400 flex items-center gap-1">
+                        <Link size={10} /> Ready
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

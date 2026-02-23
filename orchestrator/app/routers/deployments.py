@@ -83,6 +83,26 @@ class DeploymentStatusResponse(BaseModel):
     updated_at: str
 
 
+class DeployAllResult(BaseModel):
+    """Result for a single container deployment in deploy_all."""
+    container_id: UUID
+    container_name: str
+    provider: str
+    status: str  # 'success' | 'failed' | 'skipped'
+    deployment_id: UUID | None = None
+    deployment_url: str | None = None
+    error: str | None = None
+
+
+class DeployAllResponse(BaseModel):
+    """Response for deploy_all endpoint."""
+    total: int
+    deployed: int
+    failed: int
+    skipped: int
+    results: list[DeployAllResult]
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -523,6 +543,260 @@ async def deploy_project(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Deployment failed: {str(e)}"
         ) from e
+
+
+@router.post("/{project_slug}/deploy-all", response_model=DeployAllResponse)
+async def deploy_all_containers(
+    project_slug: str,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Deploy all containers that have deployment targets assigned.
+
+    This endpoint:
+    1. Finds all containers with deployment_provider set
+    2. Validates credentials exist for each provider
+    3. Deploys containers in parallel (non-blocking)
+    4. Returns aggregated results
+
+    Only base containers with deployment targets are deployed.
+    Service containers (databases, caches) are skipped.
+    """
+    import asyncio
+    from sqlalchemy.orm import selectinload
+
+    # 1. Verify project ownership
+    result = await db.execute(
+        select(Project).where(
+            and_(
+                Project.slug == project_slug,
+                Project.owner_id == current_user.id
+            )
+        )
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+
+    # 2. Get all containers with deployment targets
+    result = await db.execute(
+        select(Container)
+        .where(
+            and_(
+                Container.project_id == project.id,
+                Container.deployment_provider.isnot(None)
+            )
+        )
+        .options(selectinload(Container.base))
+    )
+    containers_with_targets = result.scalars().all()
+
+    if not containers_with_targets:
+        return DeployAllResponse(
+            total=0,
+            deployed=0,
+            failed=0,
+            skipped=0,
+            results=[]
+        )
+
+    # 3. Group containers by provider to validate credentials
+    providers_needed = set(c.deployment_provider for c in containers_with_targets)
+    encryption_service = get_deployment_encryption_service()
+
+    # Validate credentials for each provider
+    provider_credentials = {}
+    for provider in providers_needed:
+        try:
+            credential = await get_credential_for_deployment(
+                db, current_user.id, project.id, provider
+            )
+            decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
+            provider_credentials[provider] = {
+                "token": decrypted_token,
+                "metadata": credential.metadata,
+                "credential": credential
+            }
+        except HTTPException:
+            # Credential not found for this provider - will mark containers as failed
+            provider_credentials[provider] = None
+
+    # 4. Deploy each container (non-blocking parallel deployment)
+    results = []
+
+    async def deploy_single_container(container: Container) -> DeployAllResult:
+        """Deploy a single container to its assigned provider."""
+        provider = container.deployment_provider
+
+        # Check if we have credentials
+        if provider_credentials.get(provider) is None:
+            return DeployAllResult(
+                container_id=container.id,
+                container_name=container.name,
+                provider=provider,
+                status="failed",
+                error=f"No credentials found for {provider}. Please connect your {provider} account in Settings."
+            )
+
+        # Skip service containers (databases, caches, etc.)
+        if container.container_type != "base":
+            return DeployAllResult(
+                container_id=container.id,
+                container_name=container.name,
+                provider=provider,
+                status="skipped",
+                error="Service containers cannot be deployed to external providers"
+            )
+
+        try:
+            # Create deployment record
+            deployment = Deployment(
+                project_id=project.id,
+                user_id=current_user.id,
+                provider=provider,
+                status="building",
+                logs=[f"Deploy-all: Deploying {container.name} to {provider}"],
+                metadata={"container_id": str(container.id), "container_name": container.name}
+            )
+            db.add(deployment)
+            await db.commit()
+            await db.refresh(deployment)
+
+            # Get builder and framework
+            builder = get_deployment_builder()
+
+            # Determine framework from container's base
+            framework = "vite"  # Default
+            if container.base and container.base.tech_stack:
+                tech_stack = container.base.tech_stack
+                if isinstance(tech_stack, list) and len(tech_stack) > 0:
+                    framework_map = {
+                        "Next.js": "nextjs",
+                        "React": "vite",
+                        "Vue": "vite",
+                        "Svelte": "vite",
+                        "Astro": "astro",
+                    }
+                    framework = framework_map.get(tech_stack[0], "vite")
+
+            # Determine deployment mode
+            default_modes = {
+                "vercel": "source",
+                "netlify": "pre-built",
+                "cloudflare": "pre-built"
+            }
+            deployment_mode = default_modes.get(provider, "pre-built")
+
+            # Build if needed
+            if deployment_mode == "pre-built":
+                deployment.logs.append(f"Building {container.name} locally...")
+                await db.commit()
+
+                success, build_output = await builder.trigger_build(
+                    user_id=str(current_user.id),
+                    project_id=str(project.id),
+                    project_slug=project.slug,
+                    framework=framework,
+                    build_command=None,
+                    container_name=container.container_name,
+                    working_directory=container.directory
+                )
+
+                if not success:
+                    deployment.status = "failed"
+                    deployment.error = "Build failed"
+                    deployment.logs.append(f"Build failed: {build_output[:500]}")
+                    deployment.completed_at = datetime.utcnow()
+                    await db.commit()
+
+                    return DeployAllResult(
+                        container_id=container.id,
+                        container_name=container.name,
+                        provider=provider,
+                        status="failed",
+                        deployment_id=deployment.id,
+                        error="Build failed"
+                    )
+
+            # Deploy to provider
+            deployment.logs.append(f"Deploying to {provider}...")
+            deployment.status = "deploying"
+            await db.commit()
+
+            creds = provider_credentials[provider]
+            prepared_creds = prepare_provider_credentials(
+                provider, creds["token"], creds["metadata"]
+            )
+
+            config = DeploymentConfig(
+                provider=provider,
+                project_name=f"{project.slug}-{container.name}",
+                framework=framework,
+                use_source_deployment=(deployment_mode == "source")
+            )
+
+            manager = DeploymentManager()
+            deploy_result = await manager.deploy(
+                provider=provider,
+                config=config,
+                credentials=prepared_creds,
+                project_path=builder._get_project_path(str(current_user.id), str(project.id)),
+                container_name=container.container_name,
+                working_directory=container.directory
+            )
+
+            # Update deployment record
+            deployment.status = "success" if deploy_result.success else "failed"
+            deployment.deployment_id = deploy_result.deployment_id
+            deployment.deployment_url = deploy_result.url
+            deployment.error = deploy_result.error
+            deployment.logs.extend(deploy_result.logs or [])
+            deployment.completed_at = datetime.utcnow()
+            await db.commit()
+
+            return DeployAllResult(
+                container_id=container.id,
+                container_name=container.name,
+                provider=provider,
+                status="success" if deploy_result.success else "failed",
+                deployment_id=deployment.id,
+                deployment_url=deploy_result.url,
+                error=deploy_result.error
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to deploy container {container.name}: {e}", exc_info=True)
+            return DeployAllResult(
+                container_id=container.id,
+                container_name=container.name,
+                provider=provider,
+                status="failed",
+                error=str(e)
+            )
+
+    # Run deployments in parallel
+    deployment_tasks = [deploy_single_container(c) for c in containers_with_targets]
+    results = await asyncio.gather(*deployment_tasks)
+
+    # Calculate summary
+    deployed = sum(1 for r in results if r.status == "success")
+    failed = sum(1 for r in results if r.status == "failed")
+    skipped = sum(1 for r in results if r.status == "skipped")
+
+    logger.info(f"Deploy-all completed for {project.slug}: {deployed} deployed, {failed} failed, {skipped} skipped")
+
+    return DeployAllResponse(
+        total=len(results),
+        deployed=deployed,
+        failed=failed,
+        skipped=skipped,
+        results=results
+    )
 
 
 @router.get("/{project_slug}/deployments", response_model=list[DeploymentResponse])

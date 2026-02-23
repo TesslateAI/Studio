@@ -28,6 +28,7 @@ class ServiceType(StrEnum):
     CONTAINER = "container"  # Runs in Docker container
     EXTERNAL = "external"  # External cloud service (no container)
     HYBRID = "hybrid"  # Can run either way
+    DEPLOYMENT_TARGET = "deployment_target"  # External deployment provider (Vercel, Netlify, etc.)
 
 
 class AuthType(StrEnum):
@@ -983,6 +984,52 @@ SERVICES: dict[str, ServiceDefinition] = {
         outputs={"PROMETHEUS_URL": "Prometheus URL"},
         connection_template={"PROMETHEUS_URL": "http://{container_name}:{internal_port}"},
     ),
+
+    # ============================================================================
+    # DEPLOYMENT TARGETS (external hosting providers)
+    # ============================================================================
+
+    "vercel-deploy": ServiceDefinition(
+        slug="vercel-deploy",
+        name="Vercel",
+        description="Deploy to Vercel - optimized for Next.js, React, and frontend frameworks",
+        category="deployment",
+        icon="▲",
+        service_type=ServiceType.DEPLOYMENT_TARGET,
+        docs_url="https://vercel.com/docs",
+        outputs={
+            "compatible_frameworks": "nextjs,react,vite,remix,astro,svelte,nuxt,vue,solid",
+            "compatible_types": "base"
+        }
+    ),
+
+    "netlify-deploy": ServiceDefinition(
+        slug="netlify-deploy",
+        name="Netlify",
+        description="Deploy to Netlify - JAMstack and static site hosting with serverless functions",
+        category="deployment",
+        icon="◆",
+        service_type=ServiceType.DEPLOYMENT_TARGET,
+        docs_url="https://docs.netlify.com",
+        outputs={
+            "compatible_frameworks": "nextjs,react,vite,gatsby,hugo,eleventy,astro,svelte,nuxt",
+            "compatible_types": "base"
+        }
+    ),
+
+    "cloudflare-deploy": ServiceDefinition(
+        slug="cloudflare-deploy",
+        name="Cloudflare Pages",
+        description="Deploy to Cloudflare Pages - edge-first hosting with Workers integration",
+        category="deployment",
+        icon="🔥",
+        service_type=ServiceType.DEPLOYMENT_TARGET,
+        docs_url="https://developers.cloudflare.com/pages",
+        outputs={
+            "compatible_frameworks": "nextjs,react,vite,astro,svelte,remix,solid,qwik",
+            "compatible_types": "base"
+        }
+    ),
 }
 
 
@@ -1064,3 +1111,108 @@ def service_to_dict(service: ServiceDefinition) -> dict[str, Any]:
         "connection_template": service.connection_template,
         "outputs": service.outputs,
     }
+
+
+# ============================================================================
+# DEPLOYMENT TARGET COMPATIBILITY
+# ============================================================================
+
+# Framework compatibility rules for deployment targets
+DEPLOYMENT_COMPATIBILITY: dict[str, dict[str, Any]] = {
+    "vercel": {
+        "frameworks": ["nextjs", "react", "vite", "remix", "astro", "svelte", "nuxt", "vue", "solid"],
+        "container_types": ["base"],
+        "exclude_services": ["postgres", "mysql", "mongodb", "redis", "rabbitmq", "elasticsearch", "minio"],
+        "display_name": "Vercel",
+        "icon": "▲"
+    },
+    "netlify": {
+        "frameworks": ["nextjs", "react", "vite", "gatsby", "hugo", "eleventy", "astro", "svelte", "nuxt"],
+        "container_types": ["base"],
+        "exclude_services": ["postgres", "mysql", "mongodb", "redis", "rabbitmq", "elasticsearch", "minio"],
+        "display_name": "Netlify",
+        "icon": "◆"
+    },
+    "cloudflare": {
+        "frameworks": ["nextjs", "react", "vite", "astro", "svelte", "remix", "solid", "qwik"],
+        "container_types": ["base"],
+        "exclude_services": ["postgres", "mysql", "mongodb", "redis", "rabbitmq", "elasticsearch", "minio"],
+        "display_name": "Cloudflare Pages",
+        "icon": "🔥"
+    }
+}
+
+
+def get_deployment_targets() -> list[ServiceDefinition]:
+    """Get all deployment target services"""
+    return [s for s in SERVICES.values() if s.service_type == ServiceType.DEPLOYMENT_TARGET]
+
+
+def get_deployment_target(provider: str) -> ServiceDefinition | None:
+    """Get a deployment target by provider name (e.g., 'vercel', 'netlify', 'cloudflare')"""
+    slug = f"{provider}-deploy"
+    return SERVICES.get(slug)
+
+
+def is_deployment_compatible(
+    container_type: str,
+    service_slug: str | None,
+    tech_stack: list[str],
+    provider: str
+) -> tuple[bool, str]:
+    """
+    Check if a container is compatible with a deployment provider.
+    Returns (is_compatible, reason)
+    """
+    if provider not in DEPLOYMENT_COMPATIBILITY:
+        return False, f"Unknown provider: {provider}"
+
+    rules = DEPLOYMENT_COMPATIBILITY[provider]
+
+    # Check container type - only base containers can be deployed
+    if container_type not in rules["container_types"]:
+        return False, f"{rules['display_name']} can only deploy base containers, not {container_type}s"
+
+    # Check if it's an excluded service (databases, caches, etc.)
+    if service_slug and service_slug in rules["exclude_services"]:
+        return False, f"Cannot deploy {service_slug} to {rules['display_name']}"
+
+    # Check framework compatibility (use first tech stack item as framework identifier)
+    if tech_stack:
+        # Normalize framework name for comparison
+        framework = tech_stack[0].lower().replace(".", "").replace(" ", "")
+        # Handle common aliases
+        framework_aliases = {
+            "next": "nextjs",
+            "nextjs": "nextjs",
+            "react": "react",
+            "vue": "vue",
+            "vuejs": "vue",
+            "svelte": "svelte",
+            "sveltekit": "svelte",
+            "astro": "astro",
+            "remix": "remix",
+            "gatsby": "gatsby",
+            "nuxt": "nuxt",
+            "nuxtjs": "nuxt",
+            "vite": "vite",
+            "solid": "solid",
+            "solidjs": "solid",
+            "qwik": "qwik",
+        }
+        normalized = framework_aliases.get(framework, framework)
+
+        if normalized not in rules["frameworks"]:
+            return False, f"{tech_stack[0]} is not supported by {rules['display_name']}"
+
+    return True, "Compatible"
+
+
+def get_compatible_providers(container_type: str, service_slug: str | None, tech_stack: list[str]) -> list[str]:
+    """Get list of compatible deployment providers for a container"""
+    compatible = []
+    for provider in DEPLOYMENT_COMPATIBILITY.keys():
+        is_compatible, _ = is_deployment_compatible(container_type, service_slug, tech_stack, provider)
+        if is_compatible:
+            compatible.append(provider)
+    return compatible

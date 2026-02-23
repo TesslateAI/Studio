@@ -182,6 +182,46 @@ spec:
               key: GITHUB_OAUTH_REDIRECT_URI
               optional: true
 
+        # OAuth - Vercel (Deployment)
+        - name: VERCEL_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: VERCEL_CLIENT_ID
+              optional: true
+        - name: VERCEL_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: VERCEL_CLIENT_SECRET
+              optional: true
+        - name: VERCEL_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: VERCEL_OAUTH_REDIRECT_URI
+              optional: true
+
+        # OAuth - Netlify (Deployment)
+        - name: NETLIFY_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: NETLIFY_CLIENT_ID
+              optional: true
+        - name: NETLIFY_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: NETLIFY_CLIENT_SECRET
+              optional: true
+        - name: NETLIFY_OAUTH_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: tesslate-app-secrets
+              key: NETLIFY_OAUTH_REDIRECT_URI
+              optional: true
+
         # S3 Storage (Required for K8s - MinIO locally, real S3 in production)
         - name: S3_ACCESS_KEY_ID
           valueFrom:

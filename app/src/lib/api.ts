@@ -473,6 +473,12 @@ export const projectsApi = {
       };
     }
   },
+  assignDeploymentTarget: async (slug: string, containerId: string, provider: string | null) => {
+    const response = await api.patch(`/api/projects/${slug}/containers/${containerId}/deployment-target`, {
+      provider
+    });
+    return response.data;
+  },
 };
 
 export const chatApi = {
@@ -1760,6 +1766,26 @@ export const deploymentsApi = {
     }
   ) => {
     const response = await api.post(`/api/deployments/${projectSlug}/deploy`, data);
+    return response.data;
+  },
+
+  // Deploy all containers with deployment targets
+  deployAll: async (projectSlug: string): Promise<{
+    total: number;
+    deployed: number;
+    failed: number;
+    skipped: number;
+    results: Array<{
+      container_id: string;
+      container_name: string;
+      provider: string;
+      status: 'success' | 'failed' | 'skipped';
+      deployment_id?: string;
+      deployment_url?: string;
+      error?: string;
+    }>;
+  }> => {
+    const response = await api.post(`/api/deployments/${projectSlug}/deploy-all`);
     return response.data;
   },
 

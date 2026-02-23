@@ -15,6 +15,7 @@ import {
   Question,
   TreeStructure,
   Sliders,
+  Rocket,
 } from '@phosphor-icons/react';
 import api from '../lib/api';
 import { MainTechIcon, TechStackIcons } from './ui/TechStackIcons';
@@ -36,8 +37,8 @@ interface MarketplaceItem {
   icon: string;
   tech_stack: string[];
   category: string;
-  type?: 'base' | 'service' | 'workflow';
-  service_type?: 'container' | 'external' | 'hybrid';
+  type?: 'base' | 'service' | 'workflow' | 'deployment';
+  service_type?: 'container' | 'external' | 'hybrid' | 'deployment_target';
   credential_fields?: CredentialField[];
   auth_type?: string;
   docs_url?: string;
@@ -58,6 +59,12 @@ const ItemTypeBadge = ({ item }: { item: MarketplaceItem }) => {
       icon: <FlowArrow size={12} weight="fill" />,
       label: 'Workflow',
       color: 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+    };
+  } else if (item.type === 'deployment' || item.service_type === 'deployment_target') {
+    badge = {
+      icon: <Rocket size={12} weight="fill" />,
+      label: 'Deploy',
+      color: 'bg-orange-500/20 text-orange-400 border-orange-500/30'
     };
   } else if (item.type === 'service' && item.service_type) {
     const serviceBadges: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
@@ -100,6 +107,7 @@ const ItemTypeBadge = ({ item }: { item: MarketplaceItem }) => {
 const CATEGORIES = [
   { id: 'base', label: 'Bases', icon: <Cube size={16} weight="fill" /> },
   { id: 'service', label: 'Services', icon: <Cloud size={16} weight="fill" /> },
+  { id: 'deployment', label: 'Deploy Targets', icon: <Rocket size={16} weight="fill" /> },
   { id: 'workflow', label: 'Workflows', icon: <FlowArrow size={16} weight="fill" /> },
 ];
 
@@ -109,7 +117,7 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [isAutoOpen, setIsAutoOpen] = useState(false);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['base', 'service', 'workflow']));
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['base', 'service', 'deployment', 'workflow']));
   const dropdownRef = useRef<HTMLDivElement>(null);
   const autoRef = useRef<HTMLDivElement>(null);
 
@@ -170,7 +178,11 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
 
   const onDragStart = (event: React.DragEvent, item: MarketplaceItem) => {
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('application/reactflow', 'containerNode');
+    // Use different node type for deployment targets so drop handler can distinguish
+    const nodeType = item.type === 'deployment' || item.service_type === 'deployment_target'
+      ? 'deploymentTarget'
+      : 'containerNode';
+    event.dataTransfer.setData('application/reactflow', nodeType);
     event.dataTransfer.setData('base', JSON.stringify(item));
   };
 

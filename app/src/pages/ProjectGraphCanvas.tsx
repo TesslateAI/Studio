@@ -5,6 +5,7 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeTypes,
@@ -28,6 +29,7 @@ import {
   Article,
   Kanban,
   TreeStructure,
+  Rocket,
 } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
@@ -44,7 +46,7 @@ import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../componen
 import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, configApi } from '../lib/api';
+import api, { projectsApi, configApi, deploymentsApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import { connectionEvents } from '../utils/connectionEvents';
@@ -85,6 +87,7 @@ interface Container {
   status: 'stopped' | 'starting' | 'running' | 'failed';
   port?: number;
   container_type?: string;
+  deployment_provider?: 'vercel' | 'netlify' | 'cloudflare' | null;
 }
 
 interface ContainerConnection {
@@ -97,16 +100,13 @@ interface ContainerConnection {
   label?: string;
 }
 
-export const ProjectGraphCanvas = () => {
+const ProjectGraphCanvasInner = () => {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
-  const handleReactFlowInit = useCallback((instance: ReactFlowInstance) => {
-    reactFlowInstance.current = instance;
-  }, []);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const reactFlowInstance = useReactFlow();
 
   // Refs for stable callback references - prevents node re-renders when parent state changes
   const nodesRef = useRef<Node[]>(nodes);
@@ -130,6 +130,8 @@ export const ProjectGraphCanvas = () => {
     name: string;
     status: string;
     port?: number;
+    containerType?: 'base' | 'service';
+    deploymentProvider?: 'vercel' | 'netlify' | 'cloudflare' | null;
   } | null>(null);
 
   // Drag state for pausing polling during drag operations - critical for performance
@@ -343,6 +345,7 @@ export const ProjectGraphCanvas = () => {
           baseIcon: '📦', // TODO: Get from base info
           techStack: [], // TODO: Get from base info
           containerType: container.container_type || 'base',
+          deploymentProvider: container.deployment_provider || null,
           onDelete: handleDeleteContainer,
           onClick: handleContainerClick,
           onDoubleClick: handleOpenBuilder,
@@ -614,16 +617,90 @@ export const ProjectGraphCanvas = () => {
     async (event: React.DragEvent) => {
       event.preventDefault();
 
+      const nodeType = event.dataTransfer.getData('application/reactflow');
       const baseData = event.dataTransfer.getData('base');
-      if (!baseData || !reactFlowInstance.current) return;
+      if (!baseData || !reactFlowInstance) return;
 
       const item = JSON.parse(baseData);
 
       // Convert screen coordinates to flow coordinates (accounts for zoom and pan)
-      const dropPosition = reactFlowInstance.current.screenToFlowPosition({
+      const dropPosition = reactFlowInstance.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
+
+      // Handle deployment target drops - must be dropped on an existing container
+      if (nodeType === 'deploymentTarget') {
+        // Convert screen coordinates to flow coordinates
+        const flowPosition = reactFlowInstance.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+
+        // Find which container node the drop position is inside
+        // Use generous bounds since nodes can vary in height with tech stacks
+        const NODE_WIDTH = 220;
+        const NODE_HEIGHT = 180;
+
+        // Also try to find node from DOM element under cursor
+        const elementsUnderCursor = document.elementsFromPoint(event.clientX, event.clientY);
+        const nodeElement = elementsUnderCursor.find(el => el.closest('.react-flow__node'));
+        const nodeIdFromDom = nodeElement?.closest('.react-flow__node')?.getAttribute('data-id');
+
+        // Try DOM-based detection first, then fall back to coordinate calculation
+        let targetNode = nodeIdFromDom ? nodes.find(n => n.id === nodeIdFromDom && n.type === 'containerNode') : null;
+
+        // Fall back to coordinate-based detection with generous bounds
+        if (!targetNode) {
+          targetNode = nodes.find(n => {
+            if (n.type !== 'containerNode') return false;
+            const nodeX = n.position.x;
+            const nodeY = n.position.y;
+            return (
+              flowPosition.x >= nodeX - 20 &&
+              flowPosition.x <= nodeX + NODE_WIDTH &&
+              flowPosition.y >= nodeY - 20 &&
+              flowPosition.y <= nodeY + NODE_HEIGHT
+            );
+          });
+        }
+
+        if (targetNode) {
+          // Validate compatibility - only base containers can have deployment targets
+          if (targetNode.data.containerType !== 'base') {
+            toast.error('Deploy targets can only be assigned to base containers, not services');
+            return;
+          }
+
+          // Extract provider name from the deployment target slug (e.g., 'vercel-deploy' -> 'vercel')
+          const provider = item.slug.replace('-deploy', '');
+
+          try {
+            await projectsApi.assignDeploymentTarget(slug!, targetNode.id, provider);
+
+            // Update node data locally
+            setNodes((nds) =>
+              nds.map((node) =>
+                node.id === targetNode.id
+                  ? { ...node, data: { ...node.data, deploymentProvider: provider } }
+                  : node
+              )
+            );
+
+            toast.success(`${item.name} assigned to ${targetNode.data.name}`);
+          } catch (error: unknown) {
+            console.error('Failed to assign deployment target:', error);
+            // Extract detailed error message from axios response
+            const axiosError = error as { response?: { data?: { detail?: string } } };
+            const errorMessage = axiosError.response?.data?.detail || (error instanceof Error ? error.message : 'Unknown error');
+            toast.error(`Failed to assign deployment target: ${errorMessage}`);
+          }
+          return;
+        }
+
+        toast.error('Drop deployment target onto a container node to assign it');
+        return;
+      }
 
       // Handle browser preview drops
       if (item.type === 'browser') {
@@ -678,7 +755,7 @@ export const ProjectGraphCanvas = () => {
       // For container services and bases, create immediately
       await createContainerNode(item, dropPosition);
     },
-    [slug, project, setNodes, handleDeleteBrowser]
+    [slug, project, setNodes, handleDeleteBrowser, nodes, reactFlowInstance]
   );
 
   // Instantiate a workflow template (creates multiple nodes and connections)
@@ -992,6 +1069,8 @@ export const ProjectGraphCanvas = () => {
         name: containerNode.data.name,
         status: containerNode.data.status,
         port: containerNode.data.port,
+        containerType: containerNode.data.containerType,
+        deploymentProvider: containerNode.data.deploymentProvider,
       });
     }
   }, []); // Empty deps - uses ref
@@ -1188,6 +1267,40 @@ export const ProjectGraphCanvas = () => {
     } catch (error) {
       console.error('Failed to stop containers:', error);
       toast.error('Failed to stop containers', { id: 'stop-all' });
+    }
+  };
+
+  // Count containers with deployment targets
+  const deployableCount = useMemo(() => {
+    return nodes.filter(n => n.type === 'containerNode' && n.data?.deploymentProvider).length;
+  }, [nodes]);
+
+  const handleDeployAll = async () => {
+    if (!slug || deployableCount === 0) return;
+
+    try {
+      toast.loading(`Deploying ${deployableCount} container(s)...`, { id: 'deploy-all' });
+      const result = await deploymentsApi.deployAll(slug);
+
+      if (result.failed === 0) {
+        toast.success(`Successfully deployed ${result.deployed} container(s)!`, { id: 'deploy-all' });
+      } else if (result.deployed > 0) {
+        toast.success(`${result.deployed} deployed, ${result.failed} failed`, { id: 'deploy-all' });
+      } else {
+        toast.error(`All ${result.failed} deployment(s) failed`, { id: 'deploy-all' });
+      }
+
+      // Show individual results
+      result.results.forEach(r => {
+        if (r.status === 'success' && r.deployment_url) {
+          console.log(`${r.container_name} deployed to: ${r.deployment_url}`);
+        } else if (r.status === 'failed') {
+          console.error(`${r.container_name} failed: ${r.error}`);
+        }
+      });
+    } catch (error) {
+      console.error('Failed to deploy containers:', error);
+      toast.error('Deployment failed', { id: 'deploy-all' });
     }
   };
 
@@ -1612,6 +1725,20 @@ export const ProjectGraphCanvas = () => {
                 <span className="hidden md:inline">Start All</span>
               </button>
             )}
+
+            {/* Deploy All Button */}
+            <button
+              onClick={handleDeployAll}
+              disabled={deployableCount === 0}
+              className="flex items-center gap-2 px-3 md:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              title={deployableCount > 0 ? `Deploy ${deployableCount} container(s) with targets` : 'No containers have deployment targets assigned'}
+            >
+              <Rocket size={16} weight="fill" />
+              <span className="hidden md:inline">Deploy All</span>
+              {deployableCount > 0 && (
+                <span className="bg-white/20 px-1.5 py-0.5 rounded text-xs">{deployableCount}</span>
+              )}
+            </button>
           </div>
 
           {/* Mobile hamburger menu */}
@@ -1653,7 +1780,7 @@ export const ProjectGraphCanvas = () => {
                 onConnect={onConnect}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
-                onInit={handleReactFlowInit}
+                onInit={() => {}}
                 onNodeDragStart={handleNodeDragStart}
                 onNodeDragStop={handleNodeDragStop}
                 onNodeClick={handleNodeClick}
@@ -1675,6 +1802,8 @@ export const ProjectGraphCanvas = () => {
                 containerStatus={selectedContainer.status}
                 projectSlug={slug || ''}
                 port={selectedContainer.port}
+                containerType={selectedContainer.containerType}
+                deploymentProvider={selectedContainer.deploymentProvider}
                 onClose={() => setSelectedContainer(null)}
                 onStatusChange={(newStatus) => {
                   setNodes((nds) =>
@@ -1698,6 +1827,18 @@ export const ProjectGraphCanvas = () => {
                   // Update selected container state
                   setSelectedContainer({ ...selectedContainer, name: newName });
                   // PERFORMANCE: Removed fetchProjectData() - local state is sufficient
+                }}
+                onDeploymentProviderChange={(provider) => {
+                  // Update node data locally
+                  setNodes((nds) =>
+                    nds.map((node) =>
+                      node.id === selectedContainer.id
+                        ? { ...node, data: { ...node.data, deploymentProvider: provider } }
+                        : node
+                    )
+                  );
+                  // Update selected container state
+                  setSelectedContainer({...selectedContainer, deploymentProvider: provider});
                 }}
               />
             )}
@@ -1783,3 +1924,13 @@ export const ProjectGraphCanvas = () => {
     </div>
   );
 };
+
+// Import ReactFlowProvider for useReactFlow hook
+import { ReactFlowProvider } from '@xyflow/react';
+
+// Export wrapped component so useReactFlow works
+export const ProjectGraphCanvas = () => (
+  <ReactFlowProvider>
+    <ProjectGraphCanvasInner />
+  </ReactFlowProvider>
+);

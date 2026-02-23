@@ -187,6 +187,7 @@ class ContainerUpdate(BaseModel):
     env_vars_to_delete: list[str] | None = None
     external_endpoint: str | None = None
     deployment_mode: str | None = None
+    deployment_provider: str | None = None  # 'vercel' | 'netlify' | 'cloudflare' | None
 
 
 class ContainerCredentialUpdate(BaseModel):
@@ -210,6 +211,11 @@ class InjectedEnvVar(BaseModel):
     source_container_id: str
 
 
+class DeploymentTargetAssignment(BaseModel):
+    """Schema for assigning a deployment target to a container."""
+    provider: str | None = None  # 'vercel' | 'netlify' | 'cloudflare' | None (None to remove)
+
+
 class Container(ContainerBase):
     id: UUID
     project_id: UUID
@@ -228,6 +234,7 @@ class Container(ContainerBase):
     credentials_id: UUID | None = None
     injected_env_vars: list[InjectedEnvVar] | None = None
     service_outputs: dict[str, str] | None = None
+    deployment_provider: str | None = None  # 'vercel' | 'netlify' | 'cloudflare' | None
     position_x: float
     position_y: float
     status: str

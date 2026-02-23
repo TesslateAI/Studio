@@ -214,6 +214,9 @@ class Container(Base):
         nullable=True,
     )  # Link to stored credentials
 
+    # External deployment target (Vercel, Netlify, Cloudflare)
+    deployment_provider = Column(String, nullable=True)  # 'vercel' | 'netlify' | 'cloudflare' | None
+
     # React Flow position
     position_x = Column(Float, default=0)
     position_y = Column(Float, default=0)

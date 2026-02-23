@@ -83,13 +83,30 @@ Semantic edge types showing relationships:
 - Stop all containers
 - Status polling during startup
 
-### 6. Container Properties Panel
+### 6. Deploy All
+- **Deploy All Button**: One-click deployment of all containers with assigned deployment targets
+- Shows count badge with number of deployable containers
+- Parallel deployment execution (non-blocking)
+- Toast notifications for success/failure per container
+
+### 7. Deployment Targets (Drag-and-Drop)
+- Drag deployment target items (Vercel, Netlify, Cloudflare) from Marketplace sidebar
+- Drop onto base container nodes to assign deployment provider
+- Visual feedback: purple drop zone overlay when dragging over valid containers
+- Deployment provider badge shows on assigned containers (bottom-right corner)
+- Only base containers can receive deployment targets (services are excluded)
+
+### 8. Container Properties Panel
 - Edit container configuration
 - View environment variables
 - Manage connections
+- **Deployment Target section** (base containers only):
+  - View/change assigned deployment provider
+  - Shows credential connection status
+  - Quick link to connect accounts in Settings
 - Delete container
 
-### 7. AI Chat Integration
+### 9. AI Chat Integration
 - Same chat interface as builder
 - Graph-scoped tools (add_container, create_connection, etc.)
 - View context: 'graph'
@@ -112,6 +129,7 @@ ProjectGraphCanvas
 │   ├── Breadcrumbs
 │   ├── Builder button (→ /project/:slug/builder)
 │   ├── Start/Stop all button
+│   ├── Deploy All button (with deployable count badge)
 │   └── View switcher (graph/code/kanban)
 │
 ├── Left Sidebar (collapsible)
@@ -121,10 +139,11 @@ ProjectGraphCanvas
 │   │   ├── Notes
 │   │   └── Settings
 │   └── Marketplace browser
+│       └── Deploy Targets category (Vercel, Netlify, Cloudflare)
 │
 ├── Main Canvas
 │   └── GraphCanvas (XYFlow)
-│       ├── Container Nodes
+│       ├── Container Nodes (with deployment badges)
 │       ├── Browser Preview Nodes
 │       └── Connection Edges
 │
@@ -136,7 +155,8 @@ ProjectGraphCanvas
 │   └── SettingsPanel
 │
 └── Container Properties Panel
-    └── (shows when container selected)
+    ├── (shows when container selected)
+    └── Deployment Target section (base containers)
 ```
 
 ## State Management
@@ -158,10 +178,22 @@ const [isRunning, setIsRunning] = useState(false);
 const [activeView, setActiveView] = useState<'graph' | 'code' | 'kanban'>('graph');
 const [activePanel, setActivePanel] = useState<PanelType>(null);
 const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(true);
-const [selectedContainer, setSelectedContainer] = useState<Container | null>(null);
+const [selectedContainer, setSelectedContainer] = useState<{
+  id: string;
+  name: string;
+  status: string;
+  port?: number;
+  containerType?: 'base' | 'service';
+  deploymentProvider?: 'vercel' | 'netlify' | 'cloudflare' | null;
+} | null>(null);
 
 // Drag state (pauses polling during drag for performance)
 const [isDragging, setIsDragging] = useState(false);
+
+// Deployment metrics (computed)
+const deployableCount = useMemo(() => {
+  return nodes.filter(n => n.type === 'containerNode' && n.data?.deploymentProvider).length;
+}, [nodes]);
 ```
 
 ## Data Flow
@@ -411,6 +443,73 @@ const refreshContainerStatus = async () => {
 };
 ```
 
+### Deployment Target Drag-and-Drop
+
+Handle dropping deployment targets from marketplace onto containers:
+
+```typescript
+// In onDrop handler
+const onDrop = useCallback(async (event: React.DragEvent) => {
+  const nodeType = event.dataTransfer.getData('application/reactflow');
+  const baseData = event.dataTransfer.getData('base');
+  const item = JSON.parse(baseData);
+
+  // Handle deployment target drops - must be dropped on existing container
+  if (nodeType === 'deploymentTarget') {
+    // Convert screen coords to flow coords
+    const flowPosition = reactFlowInstance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+
+    // Find container node at drop position
+    const targetNode = nodes.find(n => {
+      if (n.type !== 'containerNode') return false;
+      // Check if drop position is within node bounds
+      return isPositionInsideNode(flowPosition, n);
+    });
+
+    if (targetNode && targetNode.data.containerType === 'base') {
+      // Extract provider from slug (e.g., 'vercel-deploy' -> 'vercel')
+      const provider = item.slug.replace('-deploy', '');
+      await projectsApi.assignDeploymentTarget(slug, targetNode.id, provider);
+
+      // Update node locally
+      setNodes(nds => nds.map(node =>
+        node.id === targetNode.id
+          ? { ...node, data: { ...node.data, deploymentProvider: provider } }
+          : node
+      ));
+      toast.success(`${item.name} assigned to ${targetNode.data.name}`);
+    } else {
+      toast.error('Drop deployment target onto a base container');
+    }
+    return;
+  }
+
+  // ... handle other node types
+}, [nodes, slug, reactFlowInstance]);
+```
+
+### Deploy All Handler
+
+Deploy all containers with assigned deployment targets:
+
+```typescript
+const handleDeployAll = async () => {
+  if (!slug || deployableCount === 0) return;
+
+  toast.loading(`Deploying ${deployableCount} container(s)...`, { id: 'deploy-all' });
+  const result = await deploymentsApi.deployAll(slug);
+
+  if (result.failed === 0) {
+    toast.success(`Successfully deployed ${result.deployed} container(s)!`, { id: 'deploy-all' });
+  } else {
+    toast.error(`${result.deployed} deployed, ${result.failed} failed`, { id: 'deploy-all' });
+  }
+};
+```
+
 ### Browser Preview Nodes
 
 Add live preview nodes to the graph:
@@ -656,6 +755,14 @@ POST /api/projects/{slug}/start
 
 // Stop all
 POST /api/projects/{slug}/stop
+
+// Assign/remove deployment target for a container
+PATCH /api/projects/{slug}/containers/{id}/deployment-target
+{ provider: 'vercel' | 'netlify' | 'cloudflare' | null }
+
+// Deploy all containers with assigned deployment targets
+POST /api/deployments/{slug}/deploy-all
+// Returns: { total, deployed, failed, skipped, results: [...] }
 ```
 
 ## Best Practices
