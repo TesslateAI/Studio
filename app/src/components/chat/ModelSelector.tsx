@@ -210,9 +210,19 @@ export function ModelSelector({
       const found = allModels.find((m) => m.id === activeModel);
       if (found) return found;
     }
-    // Derive provider from model ID prefix (e.g. "asdf/glm-5" → provider "asdf")
-    const slashIdx = activeModel.indexOf('/');
-    const fallbackProvider = slashIdx > 0 ? activeModel.substring(0, slashIdx) : 'internal';
+    // Derive provider from model ID prefix
+    // "custom/my-ollama/neural-7b" → provider "my-ollama"
+    // "openrouter/gpt-4o" → provider "openrouter"
+    // "builtin/gpt-4o" → provider "internal"
+    let fallbackProvider: string;
+    if (activeModel.startsWith('custom/')) {
+      const rest = activeModel.slice('custom/'.length);
+      const slashIdx = rest.indexOf('/');
+      fallbackProvider = slashIdx > 0 ? rest.substring(0, slashIdx) : rest;
+    } else {
+      const slashIdx = activeModel.indexOf('/');
+      fallbackProvider = slashIdx > 0 ? activeModel.substring(0, slashIdx) : 'internal';
+    }
     // Map "builtin" to "internal" for display consistency (builtin/ prefix = system models)
     const normalizedProvider = fallbackProvider === 'builtin' ? 'internal' : fallbackProvider;
     return { id: activeModel, pricing: null, provider: normalizedProvider } as ModelInfo;

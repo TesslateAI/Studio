@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 # their identifiers (e.g., "openai/gpt-5.2").
 BUILTIN_PREFIX = "builtin/"
 
+# Custom provider models are prefixed with "custom/" so routing is deterministic
+# and user-chosen slugs can never collide with built-in provider names.
+# Format: custom/{provider_slug}/{model_id}
+CUSTOM_PREFIX = "custom/"
+
 
 # =============================================================================
 # Built-in Provider Configurations
@@ -271,36 +276,57 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
         model_name = model_name[len(BUILTIN_PREFIX) :]
         # Fall through to the "no prefix" LiteLLM path below
 
-    # Check if model has a provider prefix (e.g., "openrouter/model-name")
+    # Handle custom/ prefix — route directly to user's custom provider
+    elif model_name.startswith(CUSTOM_PREFIX):
+        stripped = model_name[len(CUSTOM_PREFIX) :]
+        provider_slug = stripped.split("/")[0]
+
+        result = await db.execute(
+            select(UserProvider).where(
+                UserProvider.user_id == user_id,
+                UserProvider.slug == provider_slug,
+                UserProvider.is_active.is_(True),
+            )
+        )
+        custom_provider = result.scalar_one_or_none()
+
+        if not custom_provider:
+            raise ValueError(
+                f"Custom provider '{provider_slug}' not found. "
+                f"Please add it in Library → API Keys."
+            )
+
+        provider_config = {
+            "name": custom_provider.name,
+            "base_url": custom_provider.base_url,
+            "api_type": custom_provider.api_type,
+            "default_headers": custom_provider.default_headers or {},
+        }
+
+        logger.info(f"Using custom provider {provider_config['name']} API for model: {model_name}")
+
+        user_key_data = await get_user_api_key(user_id, provider_slug, db)
+        effective_base_url = user_key_data["base_url"] or provider_config["base_url"]
+
+        return AsyncOpenAI(
+            api_key=user_key_data["key"],
+            base_url=effective_base_url,
+            default_headers=provider_config.get("default_headers", {}),
+        )
+
+    # Check if model has a built-in provider prefix (e.g., "openrouter/model-name")
     if "/" in model_name:
         provider_slug = model_name.split("/")[0]
 
-        # Try built-in provider first
+        # Try built-in provider
         provider_config = get_builtin_provider_config(provider_slug)
 
-        # If not built-in, check user's custom providers
         if not provider_config:
-            result = await db.execute(
-                select(UserProvider).where(
-                    UserProvider.user_id == user_id,
-                    UserProvider.slug == provider_slug,
-                    UserProvider.is_active.is_(True),
-                )
+            raise ValueError(
+                f"Unknown provider '{provider_slug}'. "
+                f"Available providers: {', '.join(BUILTIN_PROVIDERS.keys())}. "
+                f"Custom providers must use the 'custom/' prefix."
             )
-            custom_provider = result.scalar_one_or_none()
-
-            if custom_provider:
-                provider_config = {
-                    "name": custom_provider.name,
-                    "base_url": custom_provider.base_url,
-                    "api_type": custom_provider.api_type,
-                    "default_headers": custom_provider.default_headers or {},
-                }
-            else:
-                raise ValueError(
-                    f"Unknown provider '{provider_slug}'. "
-                    f"Available providers: {', '.join(BUILTIN_PROVIDERS.keys())}"
-                )
 
         logger.info(f"Using {provider_config['name']} API for model: {model_name}")
 
@@ -698,10 +724,16 @@ async def create_model_adapter(
 
         # Strip routing prefix from model name before passing to adapter
         # builtin/gpt-4o → gpt-4o (LiteLLM models)
-        # openai/gpt-5.2 → gpt-5.2, asdf/zai-org/glm-5 → zai-org/glm-5 (BYOK)
+        # custom/my-ollama/neural-7b → neural-7b (custom provider)
+        # openai/gpt-5.2 → gpt-5.2, openrouter/anthropic/claude → anthropic/claude (BYOK)
         api_model_name = model_name
         if model_name.startswith(BUILTIN_PREFIX):
             api_model_name = model_name[len(BUILTIN_PREFIX) :]
+        elif model_name.startswith(CUSTOM_PREFIX):
+            # Strip "custom/{slug}/" to get bare model name for the API call
+            stripped = model_name[len(CUSTOM_PREFIX) :]
+            parts = stripped.split("/", 1)
+            api_model_name = parts[1] if len(parts) > 1 else parts[0]
         elif "/" in model_name:
             api_model_name = model_name.split("/", 1)[1]
 

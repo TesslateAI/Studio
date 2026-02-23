@@ -223,13 +223,13 @@ async def get_available_models(
         if not cp.available_models:
             continue
         for model_id in cp.available_models:
-            full_id = f"{cp.slug}/{model_id}"
+            full_id = f"custom/{cp.slug}/{model_id}"
             provider_models.append(
                 {
                     "id": full_id,
                     "name": model_id,
-                    "source": "provider",
-                    "provider": cp.slug,
+                    "source": "custom_provider",
+                    "provider": f"custom/{cp.slug}",
                     "provider_name": cp.name,
                     "pricing": None,
                     "available": cp.slug in user_providers_set,

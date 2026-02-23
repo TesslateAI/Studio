@@ -341,3 +341,56 @@ class TestCreateModelAdapter:
                 db=mock_db,
             )
             assert isinstance(adapter2, OpenAIAdapter)
+
+    @pytest.mark.asyncio
+    async def test_create_adapter_for_custom_provider_model(self, mock_user_id, mock_db):
+        """Test creating adapter for custom provider model strips custom/{slug}/ prefix."""
+        with patch("app.agent.models.get_llm_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+
+            adapter = await create_model_adapter(
+                model_name="custom/my-ollama/neural-7b",
+                user_id=mock_user_id,
+                db=mock_db,
+            )
+
+            assert isinstance(adapter, OpenAIAdapter)
+            # custom/{slug}/{model} → strips to bare model name
+            assert adapter.model_name == "neural-7b"
+            mock_get_client.assert_called_once_with(
+                mock_user_id, "custom/my-ollama/neural-7b", mock_db
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_adapter_custom_prefix_not_detected_as_anthropic(self, mock_user_id, mock_db):
+        """Test that custom/anthropic/model is NOT auto-detected as native Anthropic provider."""
+        with patch("app.agent.models.get_llm_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+
+            # This should use OpenAI-compatible path, not native Anthropic
+            adapter = await create_model_adapter(
+                model_name="custom/anthropic/my-model",
+                user_id=mock_user_id,
+                db=mock_db,
+            )
+
+            assert isinstance(adapter, OpenAIAdapter)
+            assert adapter.model_name == "my-model"
+
+    @pytest.mark.asyncio
+    async def test_create_adapter_builtin_prefix_strips_correctly(self, mock_user_id, mock_db):
+        """Test that builtin/ prefix is stripped for LiteLLM models."""
+        with patch("app.agent.models.get_llm_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+
+            adapter = await create_model_adapter(
+                model_name="builtin/gpt-4o",
+                user_id=mock_user_id,
+                db=mock_db,
+            )
+
+            assert isinstance(adapter, OpenAIAdapter)
+            assert adapter.model_name == "gpt-4o"

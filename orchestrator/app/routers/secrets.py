@@ -390,8 +390,9 @@ async def create_custom_provider(
             detail="Slug must start with a letter/number and contain only lowercase letters, numbers, hyphens, and underscores",
         )
 
-    # Check if slug conflicts with built-in providers
-    if slug.lower() in BUILTIN_PROVIDERS:
+    # Check if slug conflicts with built-in providers or reserved prefixes
+    reserved_slugs = {"custom", "builtin"}
+    if slug.lower() in BUILTIN_PROVIDERS or slug.lower() in reserved_slugs:
         raise HTTPException(
             status_code=400,
             detail=f"'{slug}' is a reserved provider name. Please choose a different slug.",
