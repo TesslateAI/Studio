@@ -61,19 +61,6 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {"HTTP-Referer": "https://tesslate.com", "X-Title": "Tesslate Studio"},
         "website": "https://openrouter.ai",
         "requires_key": True,
-        "default_models": [
-            "openai/gpt-5.2",
-            "openai/gpt-5.2-codex",
-            "openai/gpt-oss-120b",
-            "anthropic/claude-sonnet-4.6",
-            "anthropic/claude-opus-4.6",
-            "deepseek/deepseek-r1",
-            "deepseek/deepseek-v3.2",
-            "qwen/qwen3-coder",
-            "z-ai/glm-5",
-            "moonshotai/kimi-k2.5",
-            "minimax/minimax-m2.5",
-        ],
     },
     "nano-gpt": {
         "name": "NanoGPT",
@@ -83,19 +70,6 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://nano-gpt.com",
         "requires_key": True,
-        "default_models": [
-            "openai/gpt-5.2",
-            "openai/gpt-5.2-codex",
-            "openai/gpt-oss-120b",
-            "anthropic/claude-sonnet-4.6",
-            "anthropic/claude-opus-4.6",
-            "deepseek-r1",
-            "deepseek/deepseek-v3.2",
-            "qwen/qwen3-coder",
-            "zai-org/glm-5",
-            "moonshotai/kimi-k2.5",
-            "minimax/minimax-m2.5",
-        ],
     },
     "openai": {
         "name": "OpenAI",
@@ -105,14 +79,6 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://platform.openai.com",
         "requires_key": True,
-        "default_models": [
-            "gpt-5.2",
-            "gpt-5.2-codex",
-            "gpt-5-mini",
-            "gpt-4.1",
-            "o3",
-            "o4-mini",
-        ],
     },
     "anthropic": {
         "name": "Anthropic",
@@ -122,13 +88,6 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://console.anthropic.com",
         "requires_key": True,
-        "default_models": [
-            "claude-opus-4-6",
-            "claude-opus-4-5",
-            "claude-sonnet-4-6",
-            "claude-haiku-4-5",
-            "claude-sonnet-4-5",
-        ],
     },
     "groq": {
         "name": "Groq",
@@ -138,12 +97,6 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://console.groq.com",
         "requires_key": True,
-        "default_models": [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "openai/gpt-oss-120b",
-            "meta-llama/llama-4-scout-17b-16e-instruct",
-        ],
     },
     "together": {
         "name": "Together AI",
@@ -153,12 +106,6 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://api.together.xyz",
         "requires_key": True,
-        "default_models": [
-            "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-            "deepseek-ai/DeepSeek-R1",
-            "deepseek-ai/DeepSeek-V3.1",
-            "Qwen/Qwen3-235B-A22B-Instruct-2507-tput",
-        ],
     },
     "deepseek": {
         "name": "DeepSeek",
@@ -168,10 +115,6 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://platform.deepseek.com",
         "requires_key": True,
-        "default_models": [
-            "deepseek-reasoner",
-            "deepseek-chat",
-        ],
     },
     "fireworks": {
         "name": "Fireworks AI",
@@ -181,12 +124,15 @@ BUILTIN_PROVIDERS: dict[str, dict[str, Any]] = {
         "default_headers": {},
         "website": "https://fireworks.ai",
         "requires_key": True,
-        "default_models": [
-            "accounts/fireworks/models/deepseek-r1",
-            "accounts/fireworks/models/deepseek-v3p1",
-            "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
-            "accounts/fireworks/models/llama-v3p3-70b-instruct",
-        ],
+    },
+    "z-ai": {
+        "name": "Z.AI (ZhipuAI)",
+        "description": "GLM-5, GLM-4.7, and other ZhipuAI models — includes Coding Plan subscriptions",
+        "base_url": "https://api.z.ai/api/paas/v4",
+        "api_type": "openai",
+        "default_headers": {},
+        "website": "https://z.ai",
+        "requires_key": True,
     },
 }
 
@@ -334,11 +280,34 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
         provider_config = get_builtin_provider_config(provider_slug)
 
         if not provider_config:
-            raise ValueError(
-                f"Unknown provider '{provider_slug}'. "
-                f"Available providers: {', '.join(BUILTIN_PROVIDERS.keys())}. "
-                f"Custom providers must use the 'custom/' prefix."
+            # Unknown prefix — check if this model_id exists as a user's custom model
+            # under a known provider (e.g. "z-ai/glm-5" stored under "openrouter")
+            from ..models import UserCustomModel
+
+            result = await db.execute(
+                select(UserCustomModel).where(
+                    UserCustomModel.user_id == user_id,
+                    UserCustomModel.model_id == model_name,
+                    UserCustomModel.is_active.is_(True),
+                )
             )
+            custom_model = result.scalar_one_or_none()
+
+            if custom_model and custom_model.provider in BUILTIN_PROVIDERS:
+                # Re-route through the correct provider
+                provider_slug = custom_model.provider
+                provider_config = BUILTIN_PROVIDERS[provider_slug]
+                # Rewrite model_name with provider prefix so stripping works correctly
+                model_name = f"{provider_slug}/{model_name}"
+                logger.info(
+                    f"Resolved unprefixed model to {provider_slug}: {model_name}"
+                )
+            else:
+                raise ValueError(
+                    f"Unknown provider '{provider_slug}'. "
+                    f"Available providers: {', '.join(BUILTIN_PROVIDERS.keys())}. "
+                    f"Custom providers must use the 'custom/' prefix."
+                )
 
         logger.info(f"Using {provider_config['name']} API for model: {model_name}")
 
@@ -760,7 +729,12 @@ async def create_model_adapter(
             parts = stripped.split("/", 1)
             api_model_name = parts[1] if len(parts) > 1 else parts[0]
         elif "/" in model_name:
-            api_model_name = model_name.split("/", 1)[1]
+            # Only strip the first segment if it's a known provider prefix
+            # e.g. "openrouter/z-ai/glm-5" → "z-ai/glm-5" (strip "openrouter/")
+            # but  "z-ai/glm-5" → "z-ai/glm-5" (keep as-is, it's the full model name)
+            first_seg = model_name.split("/", 1)[0]
+            if first_seg in BUILTIN_PROVIDERS:
+                api_model_name = model_name.split("/", 1)[1]
 
         # Create adapter with the configured client
         return OpenAIAdapter(model_name=api_model_name, client=client, **kwargs)

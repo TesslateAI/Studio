@@ -70,6 +70,7 @@ class ProjectCreate(ProjectBase):
         None  # "github", "gitlab", "bitbucket" - auto-detected if not provided
     )
     base_id: UUID | str | None = None  # UUID for marketplace bases, 'builtin' for built-in template
+    base_version: str | None = None  # Git tag to clone from (e.g., "v2.1.0")
 
     @field_validator("source_type")
     @classmethod
@@ -526,7 +527,7 @@ class AgentChatRequest(BaseModel):
     message: str
     agent_id: UUID | None = None  # ID of the agent to use
     container_id: UUID | None = None  # If set, agent is scoped to this container (files at root)
-    max_iterations: int | None = 20
+    max_iterations: int | None = None  # None = unlimited
     minimal_prompts: bool | None = False
     edit_mode: str | None = "ask"  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)
     view_context: str | None = None  # UI view context: 'graph', 'builder', 'terminal', 'kanban'

@@ -47,7 +47,7 @@ def test_user_password() -> str:
 @pytest.fixture(scope="session")
 def nextjs_base_slug() -> str:
     """Get the Next.js base slug from environment."""
-    return os.environ.get("NEXTJS_BASE_SLUG", "nextjs-15")
+    return os.environ.get("NEXTJS_BASE_SLUG", "nextjs-16")
 
 
 @pytest.fixture(scope="session")

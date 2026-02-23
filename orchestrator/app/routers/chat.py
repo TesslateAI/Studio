@@ -144,7 +144,7 @@ async def _build_architecture_context(project: Project, db: AsyncSession) -> str
             mode_label = ""
             if c.deployment_mode == "external":
                 mode_label = " [external]"
-            port_label = f" port:{c.port}" if c.port else ""
+            port_label = f" port:{c.effective_port}"
             lines.append(f"  - {c.name}{svc_label}{mode_label}{port_label} [{c.status}]")
 
         # List connections
@@ -728,7 +728,7 @@ async def agent_chat(
                 status_code=500, detail=f"Error creating agent instance: {str(e)}"
             ) from e
 
-        # Set max_iterations for IterativeAgent
+        # Set max_iterations for IterativeAgent (None = unlimited)
         if hasattr(agent_instance, "max_iterations"):
             agent_instance.max_iterations = request.max_iterations
         if hasattr(agent_instance, "minimal_prompts"):
@@ -1291,9 +1291,9 @@ async def agent_chat_stream(
                 agent_model=agent_model, model_adapter=model_adapter, tools_override=tools_override
             )
 
-            # Set max_iterations
+            # Set max_iterations (None = unlimited)
             if hasattr(agent_instance, "max_iterations"):
-                agent_instance.max_iterations = request.max_iterations or 20
+                agent_instance.max_iterations = request.max_iterations
 
             # Build project context with TESSLATE.md and Git info
             project_context = {
@@ -1954,10 +1954,9 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
             f"for agent '{agent_model.name}'"
         )
 
-        # Set max_iterations for IterativeAgent (default to 20 for complex tasks)
+        # Set max_iterations for IterativeAgent (None = unlimited)
         if hasattr(agent_instance, "max_iterations"):
-            # Use client-provided value or default to 20
-            max_iters = data.get("max_iterations", 20)
+            max_iters = data.get("max_iterations")
             agent_instance.max_iterations = max_iters
             logger.info(f"[UNIFIED-CHAT] Set max_iterations to {max_iters}")
 

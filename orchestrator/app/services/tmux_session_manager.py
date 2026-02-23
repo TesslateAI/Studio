@@ -50,7 +50,7 @@ class StartupCommandStrategy(ABC):
 
 
 class NextJSStrategy(StartupCommandStrategy):
-    """Strategy for Next.js 15 integrated fullstack apps."""
+    """Strategy for Next.js integrated fullstack apps."""
 
     def get_tmux_command(self, port: int, **kwargs) -> str:
         install_cmd = kwargs.get("install_cmd", "npm install --silent")
@@ -142,7 +142,7 @@ class TmuxSessionManager:
 
     # Strategy registry: maps base slugs to command strategies
     STRATEGIES: dict[str, StartupCommandStrategy] = {
-        "nextjs-15": NextJSStrategy(),
+        "nextjs-16": NextJSStrategy(),
         "vite-react-fastapi": ViteReactFastAPIStrategy(),
         "vite-react-go": ViteReactGoStrategy(),
         "expo-default": ExpoStrategy(),
@@ -175,7 +175,7 @@ class TmuxSessionManager:
         Generate tmux-wrapped startup command for a base type.
 
         Args:
-            base_slug: Slug identifying the base type (e.g., 'nextjs-15')
+            base_slug: Slug identifying the base type (e.g., 'nextjs-16')
             port: Port to run the service on
             custom_command: Optional custom command from TESSLATE.md
             **kwargs: Additional configuration passed to strategy
@@ -185,7 +185,7 @@ class TmuxSessionManager:
 
         Example:
             >>> manager = TmuxSessionManager()
-            >>> cmd = manager.generate_startup_command('nextjs-15', 3000)
+            >>> cmd = manager.generate_startup_command('nextjs-16', 3000)
             >>> print(cmd)
             tmux new-session -d -s main -x 120 -y 30 'npm install --silent && npm run dev'
         """

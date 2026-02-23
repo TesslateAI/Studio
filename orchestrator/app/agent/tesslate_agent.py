@@ -41,7 +41,7 @@ from .tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-# Retry constants (matching Codex's backoff pattern)
+# Retry constants (exponential backoff with jitter)
 INITIAL_DELAY_MS = 200
 MAX_RETRIES = 5
 RETRYABLE_KEYWORDS = frozenset(
@@ -600,7 +600,7 @@ class TesslateAgent(AbstractAgent):
             if plan_guidance:
                 processed += f"\n\n{plan_guidance}"
 
-        # Inject active plan context if one exists (1:1 codex pattern)
+        # Inject active plan context if one exists
         # Uses sync variant — dict.get() is atomic in CPython, and we only
         # need a consistent snapshot for the system prompt.
         if self.features.enabled(Feature.PLAN_MODE):

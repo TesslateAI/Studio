@@ -321,6 +321,7 @@ docker cp scripts/seed/seed_marketplace_bases.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_opensource_agents.py tesslate-orchestrator:/tmp/
 docker cp scripts/seed/seed_themes.py tesslate-orchestrator:/tmp/
+docker cp scripts/seed/seed_community_bases.py tesslate-orchestrator:/tmp/
 
 # 3. Copy theme JSON files
 docker exec tesslate-orchestrator mkdir -p /tmp/themes
@@ -338,6 +339,8 @@ from pathlib import Path
 exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
 asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
 "
+# Community bases (open-source project templates)
+docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_community_bases.py
 ```
 
 #### Seed All (Kubernetes)
@@ -350,6 +353,7 @@ kubectl cp scripts/seed/seed_marketplace_bases.py tesslate/$POD:/tmp/
 kubectl cp scripts/seed/seed_marketplace_agents.py tesslate/$POD:/tmp/
 kubectl cp scripts/seed/seed_opensource_agents.py tesslate/$POD:/tmp/
 kubectl cp scripts/seed/seed_themes.py tesslate/$POD:/tmp/
+kubectl cp scripts/seed/seed_community_bases.py tesslate/$POD:/tmp/
 kubectl cp scripts/themes tesslate/$POD:/tmp/themes
 
 # Run (on Windows prefix with MSYS_NO_PATHCONV=1)
@@ -362,16 +366,18 @@ from pathlib import Path
 exec(open('/tmp/seed_themes.py').read().split('if __name__')[0])
 asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
 "
+kubectl exec -n tesslate $POD -- python /tmp/seed_community_bases.py
 ```
 
 #### What Gets Seeded
 
 | Script | Data | Count |
 |--------|------|-------|
-| `seed_marketplace_bases.py` | Project templates (Next.js 16, Next.js 15, Vite+React+FastAPI, Vite+React+Go, Expo) | 5 |
+| `seed_marketplace_bases.py` | Project templates (Next.js 16, Vite+React+FastAPI, Vite+React+Go, Expo) | 4 |
 | `seed_marketplace_agents.py` | Official agents + Tesslate account (Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent) | 5 |
 | `seed_opensource_agents.py` | Community agents (Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer) | 6 |
 | `seed_themes.py` | UI themes (default-dark, default-light, midnight, ocean, forest, rose, sunset) | 7 |
+| `seed_community_bases.py` | Community open-source bases (Go, Rust, Django, Laravel, Rails, Flutter, .NET, etc.) | 63 |
 
 ### Kubernetes (Minikube/Production)
 - `DEPLOYMENT_MODE=kubernetes` in config

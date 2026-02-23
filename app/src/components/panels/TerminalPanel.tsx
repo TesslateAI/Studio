@@ -471,23 +471,6 @@ export function TerminalPanel({ projectId }: TerminalPanelProps) {
         style={{ minHeight: 0, minWidth: 0 }}
       />
 
-      {/* Info Footer - More compact on mobile */}
-      <div className="px-4 py-2.5 bg-gradient-to-r from-[#1a1a1a] to-[#151515] border-t border-white/[0.08]">
-        <p className="text-xs text-gray-500 hidden sm:block">
-          Tip: Type{' '}
-          <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">
-            dev-server
-          </code>{' '}
-          to control your app (logs, stop, restart). Dev server runs in background.
-        </p>
-        <p className="text-xs text-gray-500 sm:hidden">
-          Tip: Type{' '}
-          <code className="px-1 py-0.5 bg-black/30 rounded text-orange-500 font-mono">
-            dev-server
-          </code>{' '}
-          for commands
-        </p>
-      </div>
     </div>
   );
 }

@@ -125,7 +125,7 @@ async def get_available_models(
             "name": model.get("id"),
             "source": "system",
             "provider": "internal",
-            "pricing": pricing_map.get(model.get("id", ""), {"input": 0.0, "output": 0.0}),
+            "pricing": pricing_map.get(model.get("id", ""), {"input": 1.00, "output": 3.00}),
             "available": True,
             "health": health_map.get(model.get("id", ""), {}).get("status"),
         }
@@ -153,9 +153,20 @@ async def get_available_models(
     # Convert custom models to response format
     # Custom models for built-in providers get source="provider" so they group
     # with that provider's default models. Others remain source="custom".
+    # IMPORTANT: Prefix model_id with provider slug for built-in providers so the
+    # routing layer (get_llm_client) can identify the correct provider.
+    # e.g. provider="openrouter", model_id="z-ai/glm-5" → id="openrouter/z-ai/glm-5"
+    def _prefixed_model_id(model: UserCustomModel) -> str:
+        if model.provider in BUILTIN_PROVIDERS:
+            # Don't double-prefix if model_id already starts with provider slug
+            if model.model_id.startswith(f"{model.provider}/"):
+                return model.model_id
+            return f"{model.provider}/{model.model_id}"
+        return model.model_id
+
     custom_models_data = [
         {
-            "id": model.model_id,
+            "id": _prefixed_model_id(model),
             "name": model.model_name,
             "source": "provider" if model.provider in BUILTIN_PROVIDERS else "custom",
             "provider": model.provider,
@@ -266,11 +277,9 @@ async def add_custom_model(
     from ..agent.models import BUILTIN_PROVIDERS
     from ..models import UserCustomModel
 
-    # If provider not explicitly set (still default) but model_id has a known prefix, infer it
-    if provider == "openrouter" and "/" in model_id:
-        prefix = model_id.split("/", 1)[0]
-        if prefix in BUILTIN_PROVIDERS:
-            provider = prefix
+    # Provider is always explicitly set by the frontend — respect the user's choice.
+    # e.g. "z-ai/glm-5" under OpenRouter should stay under OpenRouter,
+    # not get reassigned to "z-ai" just because z-ai is a known provider.
 
     # Check if model already exists for this user + provider combo
     existing_query = select(UserCustomModel).where(
@@ -299,10 +308,15 @@ async def add_custom_model(
     await db.commit()
     await db.refresh(custom_model)
 
+    # Prefix model_id with provider slug for built-in providers (routing needs it)
+    prefixed_id = custom_model.model_id
+    if provider in BUILTIN_PROVIDERS and not custom_model.model_id.startswith(f"{provider}/"):
+        prefixed_id = f"{provider}/{custom_model.model_id}"
+
     return {
         "message": "Custom model added successfully",
         "model": {
-            "id": custom_model.model_id,
+            "id": prefixed_id,
             "name": custom_model.model_name,
             "source": "provider" if provider in BUILTIN_PROVIDERS else "custom",
             "provider": custom_model.provider,
@@ -417,6 +431,11 @@ async def get_marketplace_agents(
     elif sort == "price_desc":
         query = query.order_by(MarketplaceAgent.price.desc(), MarketplaceAgent.id)
 
+    # Get total count before pagination
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
     # Pagination
     offset = (page - 1) * limit
     query = query.offset(offset).limit(limit)
@@ -491,7 +510,14 @@ async def get_marketplace_agents(
         }
         response.append(agent_dict)
 
-    return {"agents": response, "page": page, "limit": limit, "has_more": len(agents) == limit}
+    return {
+        "agents": response,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit,
+        "has_more": len(agents) == limit,
+    }
 
 
 @router.get("/agents/{slug}")
@@ -2408,21 +2434,30 @@ async def get_marketplace_bases(
             | func.lower(MarketplaceBase.description).like(func.lower(search_filter))
         )
 
-    # Apply sorting
+    # Apply sorting — always include id as tiebreaker for stable pagination
     if sort == "featured":
-        query = query.order_by(MarketplaceBase.is_featured.desc(), MarketplaceBase.downloads.desc())
+        query = query.order_by(
+            MarketplaceBase.is_featured.desc(), MarketplaceBase.downloads.desc(), MarketplaceBase.id
+        )
     elif sort == "popular":
-        query = query.order_by(MarketplaceBase.downloads.desc())
+        query = query.order_by(MarketplaceBase.downloads.desc(), MarketplaceBase.id)
     elif sort == "newest":
-        query = query.order_by(MarketplaceBase.created_at.desc())
+        query = query.order_by(MarketplaceBase.created_at.desc(), MarketplaceBase.id)
     elif sort == "name":
-        query = query.order_by(MarketplaceBase.name.asc())
+        query = query.order_by(MarketplaceBase.name.asc(), MarketplaceBase.id)
     elif sort == "rating":
-        query = query.order_by(MarketplaceBase.rating.desc(), MarketplaceBase.downloads.desc())
+        query = query.order_by(
+            MarketplaceBase.rating.desc(), MarketplaceBase.downloads.desc(), MarketplaceBase.id
+        )
     elif sort == "price_asc":
-        query = query.order_by(MarketplaceBase.price.asc())
+        query = query.order_by(MarketplaceBase.price.asc(), MarketplaceBase.id)
     elif sort == "price_desc":
-        query = query.order_by(MarketplaceBase.price.desc())
+        query = query.order_by(MarketplaceBase.price.desc(), MarketplaceBase.id)
+
+    # Get total count before pagination
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
 
     # Pagination
     offset = (page - 1) * limit
@@ -2440,9 +2475,25 @@ async def get_marketplace_bases(
         )
         purchased_base_ids = [row[0] for row in purchased_result.fetchall()]
 
+    # Batch-lookup creator info for community bases
+    creator_ids = {b.created_by_user_id for b in bases if b.created_by_user_id}
+    creator_info: dict[str, User] = {}
+    if creator_ids:
+        creator_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
+        creator_info = {u.id: u for u in creator_result.scalars().all()}
+
     # Format response
     response = []
     for base in bases:
+        # Resolve creator info
+        is_community = base.created_by_user_id is not None
+        creator_user = creator_info.get(base.created_by_user_id) if is_community else None
+        creator_name = (
+            _resolve_display_name(creator_user) if creator_user else ("Tesslate" if not is_community else "Community")
+        )
+        creator_username = creator_user.username if creator_user else None
+        creator_avatar_url = creator_user.avatar_url if creator_user else None
+
         response.append(
             {
                 "id": base.id,
@@ -2469,6 +2520,10 @@ async def get_marketplace_bases(
                 "source_type": base.source_type or "git",
                 "is_forkable": False,  # Bases can't be forked
                 "usage_count": base.downloads,
+                "creator_type": "community" if is_community else "official",
+                "creator_name": creator_name,
+                "creator_username": creator_username,
+                "creator_avatar_url": creator_avatar_url,
                 "created_by_user_id": str(base.created_by_user_id)
                 if base.created_by_user_id
                 else None,
@@ -2476,7 +2531,14 @@ async def get_marketplace_bases(
             }
         )
 
-    return {"bases": response, "page": page, "limit": limit, "has_more": len(bases) == limit}
+    return {
+        "bases": response,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit,
+        "has_more": len(bases) == limit,
+    }
 
 
 @router.get("/bases/{slug}")
@@ -2524,6 +2586,21 @@ async def get_base_details(
     )
     reviews = reviews_result.scalars().all()
 
+    # Resolve creator info
+    is_community = base.created_by_user_id is not None
+    creator_user = None
+    if is_community:
+        creator_result = await db.execute(
+            select(User).where(User.id == base.created_by_user_id)
+        )
+        creator_user = creator_result.scalar_one_or_none()
+
+    creator_name = (
+        _resolve_display_name(creator_user) if creator_user else ("Tesslate" if not is_community else "Community")
+    )
+    creator_username = creator_user.username if creator_user else None
+    creator_avatar_url = creator_user.avatar_url if creator_user else None
+
     return {
         "id": base.id,
         "name": base.name,
@@ -2550,6 +2627,10 @@ async def get_base_details(
         "is_forkable": False,
         "usage_count": base.downloads,
         "archive_size_bytes": base.archive_size_bytes,
+        "creator_type": "community" if is_community else "official",
+        "creator_name": creator_name,
+        "creator_username": creator_username,
+        "creator_avatar_url": creator_avatar_url,
         "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
         "visibility": base.visibility or "private",
         "reviews": [
@@ -2562,6 +2643,95 @@ async def get_base_details(
             for review in reviews
         ],
     }
+
+
+@router.get("/bases/{slug}/versions")
+async def get_base_versions(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get the 5 most recent git tags (versions) for a marketplace base.
+    Public endpoint, no authentication required.
+    Results are cached for 10 minutes to respect GitHub API rate limits.
+    """
+    import httpx
+
+    from ..services.github_client import GitHubClient
+
+    cache_key = f"base_versions:{slug}"
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result = await db.execute(select(MarketplaceBase).where(MarketplaceBase.slug == slug))
+    base = result.scalar_one_or_none()
+    if not base:
+        raise HTTPException(status_code=404, detail="Base not found")
+
+    if not base.git_repo_url:
+        return {
+            "versions": [],
+            "default_branch": base.default_branch,
+            "git_repo_url": None,
+        }
+
+    parsed = GitHubClient.parse_repo_url(base.git_repo_url)
+    if not parsed:
+        return {
+            "versions": [],
+            "default_branch": base.default_branch,
+            "git_repo_url": base.git_repo_url,
+        }
+
+    owner, repo = parsed["owner"], parsed["repo"]
+    versions = []
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            tags_resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/tags",
+                params={"per_page": 5},
+                headers={"Accept": "application/vnd.github.v3+json"},
+            )
+            if tags_resp.status_code != 200:
+                logger.warning(f"GitHub tags API returned {tags_resp.status_code} for {owner}/{repo}")
+            else:
+                tags = tags_resp.json()
+                # Fetch commit dates in parallel
+                commit_urls = [tag["commit"]["url"] for tag in tags if tag.get("commit", {}).get("url")]
+                commit_tasks = [
+                    client.get(url, headers={"Accept": "application/vnd.github.v3+json"})
+                    for url in commit_urls
+                ]
+                commit_responses = await asyncio.gather(*commit_tasks, return_exceptions=True)
+
+                for i, tag in enumerate(tags):
+                    commit_date = None
+                    if i < len(commit_responses) and not isinstance(commit_responses[i], Exception):
+                        resp = commit_responses[i]
+                        if resp.status_code == 200:
+                            commit_data = resp.json()
+                            commit_date = (
+                                commit_data.get("commit", {}).get("committer", {}).get("date")
+                            )
+
+                    versions.append({
+                        "tag": tag["name"],
+                        "sha": tag["commit"]["sha"][:7],
+                        "date": commit_date,
+                        "url": f"https://github.com/{owner}/{repo}/releases/tag/{tag['name']}",
+                    })
+    except Exception:
+        logger.exception(f"Failed to fetch versions for base {slug}")
+
+    response = {
+        "versions": versions,
+        "default_branch": base.default_branch,
+        "git_repo_url": base.git_repo_url,
+    }
+    await cache.set(cache_key, response, ttl=600)
+    return response
 
 
 @router.post("/bases/{base_id}/purchase")

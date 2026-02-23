@@ -5,6 +5,7 @@ interface SidebarItem {
   title: string;
   onClick: () => void;
   active?: boolean;
+  disabled?: boolean;
   dataTour?: string;
 }
 
@@ -27,8 +28,9 @@ export function FloatingSidebar({ position, items }: FloatingSidebarProps) {
       {items.map((item, index) => (
         <button
           key={index}
-          onClick={item.onClick}
-          title={item.title}
+          onClick={item.disabled ? undefined : item.onClick}
+          disabled={item.disabled}
+          title={item.disabled ? `${item.title} (Coming soon)` : item.title}
           data-tour={item.dataTour}
           className={`
             sidebar-icon
@@ -38,9 +40,11 @@ export function FloatingSidebar({ position, items }: FloatingSidebarProps) {
             bg-white/[0.03]
             border border-white/[0.08]
             transition-all duration-300 ease-[var(--ease)]
-            ${item.active
-              ? 'bg-gradient-to-br from-[rgba(255,107,0,0.3)] to-[rgba(255,107,0,0.2)] text-[var(--primary)] border-[rgba(255,107,0,0.4)] shadow-[0_0_20px_rgba(255,107,0,0.2)]'
-              : 'text-gray-500 hover:bg-[rgba(255,107,0,0.15)] hover:text-[var(--primary)] hover:border-[rgba(255,107,0,0.3)] hover:scale-110'
+            ${item.disabled
+              ? 'opacity-40 cursor-not-allowed'
+              : item.active
+                ? 'bg-gradient-to-br from-[rgba(255,107,0,0.3)] to-[rgba(255,107,0,0.2)] text-[var(--primary)] border-[rgba(255,107,0,0.4)] shadow-[0_0_20px_rgba(255,107,0,0.2)]'
+                : 'text-gray-500 hover:bg-[rgba(255,107,0,0.15)] hover:text-[var(--primary)] hover:border-[rgba(255,107,0,0.3)] hover:scale-110'
             }
           `}
         >

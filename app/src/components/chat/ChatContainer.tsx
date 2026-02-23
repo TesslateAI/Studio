@@ -72,6 +72,8 @@ interface ChatContainerProps {
   sidebarExpanded?: boolean;
   isDocked?: boolean; // When true, renders as docked panel instead of floating
   isPointerOverPreviewRef?: React.RefObject<boolean>; // Tracks if mouse is over preview iframe
+  prefillMessage?: string | null;
+  onPrefillConsumed?: () => void;
 }
 
 export function ChatContainer({
@@ -88,6 +90,8 @@ export function ChatContainer({
   sidebarExpanded = true,
   isDocked = false,
   isPointerOverPreviewRef,
+  prefillMessage,
+  onPrefillConsumed,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -191,7 +195,8 @@ export function ChatContainer({
             initialAgents.length > 0
               ? initialAgents.find((a) => a.name === msg.message_metadata?.agent_type)
               : null;
-          const agentIcon = agentData?.icon || '🤖'; // Fallback icon if agents not loaded yet
+          const agentIcon = agentData?.icon || '🤖';
+          const agentAvatarUrl = agentData?.avatar_url;
           const agentType = msg.message_metadata.agent_type;
           const finalResponse = msg.content && msg.content.trim() ? msg.content : '';
 
@@ -215,6 +220,7 @@ export function ChatContainer({
                   completion_reason: 'step_complete',
                 },
                 agentIcon,
+                agentAvatarUrl,
                 agentType,
               });
             });
@@ -232,6 +238,7 @@ export function ChatContainer({
                   completion_reason: 'complete',
                 },
                 agentIcon,
+                agentAvatarUrl,
                 agentType,
               });
             }
@@ -248,6 +255,7 @@ export function ChatContainer({
                 completion_reason: 'complete',
               },
               agentIcon,
+              agentAvatarUrl,
               agentType,
             });
           }
@@ -753,7 +761,7 @@ export function ChatContainer({
           container_id: containerId, // Container ID for scoped file access
           message,
           agent_id: currentAgent.backendId?.toString(),
-          max_iterations: 20,
+          max_iterations: null,
           edit_mode: editMode,
           view_context: viewContext, // UI view context for scoped tools
         },
@@ -1430,7 +1438,7 @@ export function ChatContainer({
           {/* Streaming message */}
           {isStreaming && currentStream && (
             <div className="mb-4 animate-[slideIn_0.3s_ease-out]">
-              <ChatMessage type="ai" content={renderMessageContent(currentStream, true)} />
+              <ChatMessage type="ai" content={renderMessageContent(currentStream, true)} agentAvatarUrl={currentAgent?.avatar_url} />
             </div>
           )}
 
@@ -1456,6 +1464,8 @@ export function ChatContainer({
             onModeChange={setEditMode}
             onPlanMode={() => setEditMode('plan')}
             isDocked={isDocked}
+            prefillMessage={prefillMessage}
+            onPrefillConsumed={onPrefillConsumed}
           />
         </div>
       </div>

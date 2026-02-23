@@ -2,23 +2,21 @@ import { DiscordLogo } from '@phosphor-icons/react';
 
 interface DiscordSupportProps {
   chatPosition?: 'left' | 'center' | 'right';
-  chatPanelWidth?: number; // Dynamic width when chat is docked on right
 }
 
 export function DiscordSupport({
   chatPosition = 'center',
-  chatPanelWidth = 400,
 }: DiscordSupportProps) {
-  // When chat is docked on right, move Discord button to avoid overlap
-  // Position it to the left of the chat panel
-  const rightOffset = chatPanelWidth + 20; // Panel width + margin
+  // Mobile: always bottom-right (chat is floating, not docked)
+  // Desktop with right-docked chat: anchor just left of the chat panel (~30% wide)
+  const positionClasses =
+    chatPosition === 'right'
+      ? 'right-[31%]'
+      : 'right-4';
 
   return (
     <div
-      className="fixed bottom-4 md:bottom-8 z-40 group"
-      style={{
-        right: chatPosition === 'right' ? `${rightOffset}px` : '16px',
-      }}
+      className={`fixed bottom-4 md:bottom-8 z-40 group ${positionClasses}`}
       data-tour="discord-support"
     >
       <a

@@ -332,7 +332,7 @@ The orchestrator reads `TESSLATE.md` from project files to determine:
 
 **Example TESSLATE.md**:
 ```markdown
-# Next.js 15 Template
+# Next.js 16 Template
 
 ## Configuration
 

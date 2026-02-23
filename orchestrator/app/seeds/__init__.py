@@ -11,6 +11,7 @@ from .marketplace_agents import (
     get_or_create_tesslate_account,
     seed_marketplace_agents,
 )
+from .community_bases import seed_community_bases
 from .marketplace_bases import seed_marketplace_bases
 from .opensource_agents import seed_opensource_agents
 from .themes import seed_themes
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "run_all_seeds",
     "seed_marketplace_bases",
+    "seed_community_bases",
     "seed_marketplace_agents",
     "seed_opensource_agents",
     "seed_themes",
@@ -46,6 +48,14 @@ async def run_all_seeds():
             logger.info("Seed marketplace bases: %d new", count)
         except Exception:
             logger.exception("Failed to seed marketplace bases")
+            await db.rollback()
+
+        # 1.5. Community bases (creates community account)
+        try:
+            count = await seed_community_bases(db)
+            logger.info("Seed community bases: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed community bases")
             await db.rollback()
 
         # 2. Official agents (creates Tesslate account)

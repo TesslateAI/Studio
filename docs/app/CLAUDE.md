@@ -123,9 +123,9 @@ When working on specific features, also load:
 For specific UI work, reference the actual component files:
 - **Chat**: `app/src/components/chat/`
 - **Panels**: `app/src/components/panels/`
-- **Modals**: `app/src/components/modals/` (includes `SubmitBaseModal` for base template submission)
+- **Modals**: `app/src/components/modals/` (includes `SubmitBaseModal`, `RepoImportModal` decomposed into sub-components)
 - **Billing**: `app/src/components/billing/`
-- **Marketplace**: `app/src/components/marketplace/` (includes `SkeletonCard` for loading states)
+- **Marketplace**: `app/src/components/marketplace/` (includes `SkeletonCard`, `Pagination`, `AgentCard`, `FeaturedCard`)
 - **Settings**: `app/src/components/settings/` (see `docs/app/components/settings.md`)
 - **Command**: `app/src/components/CommandPalette.tsx`, `KeyboardShortcutsModal.tsx`
 - **UI**: `app/src/components/ui/` (HelpButton, HelpMenu, UserDropdown, Tooltip)
@@ -814,6 +814,24 @@ function BasesBrowse() {
 }
 ```
 
+**Paginated Browse (Community Bases)**:
+
+For larger datasets like community bases, server-side pagination is used:
+
+```typescript
+// Server-side paginated browse
+const result = await marketplaceApi.browseBases({
+  page,
+  limit: 20,
+  category: selectedCategory,
+  search: searchQuery,
+  sort: sortBy,
+});
+// Returns: { bases, total, page, total_pages }
+```
+
+The `Pagination` component (`components/marketplace/Pagination.tsx`) provides page navigation with accessible controls.
+
 ### 19. Analytics Integration
 
 **Pattern**: Use PostHog with privacy-respecting initialization
@@ -872,6 +890,9 @@ function AgentGrid({ loading, agents }) {
 // Featured variant for hero sections
 <SkeletonCard variant="featured" />
 ```
+
+**Pagination alongside loading**:
+When using paginated data, show skeleton cards during page transitions while preserving the pagination controls.
 
 ### 21. Help Menu System
 

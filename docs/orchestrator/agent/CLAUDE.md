@@ -36,8 +36,53 @@ This context provides information about Tesslate Studio's AI agent system, inclu
 
 ### Supporting Files
 - `orchestrator/app/agent/parser.py` - Parse LLM responses for tool calls
-- `orchestrator/app/agent/models.py` - Model adapters for LLM providers
-- `orchestrator/app/agent/resource_limits.py` - Resource tracking and limits
+- `orchestrator/app/agent/models.py` - Model adapters and BYOK provider routing (see Provider Routing below)
+- `orchestrator/app/agent/resource_limits.py` - Resource tracking: per-run cost limits ($5.00), iteration caps (env: `AGENT_MAX_ITERATIONS_PER_RUN`)
+
+### Resource Limits & Iteration Controls
+- `orchestrator/app/agent/resource_limits.py` - Resource tracking and limits (iteration caps, cost limits)
+  - **Per-run cost limit**: $5.00 (primary safety net)
+  - **Per-run iteration limit**: Controlled by `AGENT_MAX_ITERATIONS_PER_RUN` env var (default: unlimited)
+  - **Note**: The cost limit is the primary guard against runaway agents. Iteration limits are disabled by default to allow agents to complete complex multi-step tasks.
+- Subagent turn limits are configured in `subagent_manager.py` (default: 100 turns per subagent invocation)
+
+## Provider Routing (`agent/models.py`)
+
+`BUILTIN_PROVIDERS` is the single source of truth for BYOK (Bring Your Own Key) providers. Users add their own API keys and models — there are no hardcoded default model lists per provider.
+
+### Current Built-in Providers
+
+| Slug | Provider | Base URL |
+|------|----------|----------|
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` |
+| `nano-gpt` | NanoGPT | `https://nano-gpt.com/api/v1` |
+| `openai` | OpenAI | `https://api.openai.com/v1` |
+| `anthropic` | Anthropic | `https://api.anthropic.com/v1` |
+| `groq` | Groq | `https://api.groq.com/openai/v1` |
+| `together` | Together AI | `https://api.together.xyz/v1` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` |
+| `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` |
+| `z-ai` | Z.AI (ZhipuAI) | `https://api.z.ai/api/paas/v4` |
+
+### Model Routing Flow
+
+Model names use a prefix-based routing system:
+
+1. **`builtin/gpt-4o`** → LiteLLM proxy (system models)
+2. **`custom/my-ollama/neural-7b`** → User's custom provider
+3. **`openrouter/z-ai/glm-5`** → OpenRouter API (strips `openrouter/`, sends `z-ai/glm-5`)
+4. **`z-ai/glm-5`** → Z.AI API directly (strips `z-ai/`, sends `glm-5`)
+5. **Unknown prefix** (e.g. `z-ai/glm-5` when z-ai not in BUILTIN_PROVIDERS) → DB fallback: looks up `UserCustomModel` to find parent provider, re-routes through that provider
+
+Key distinction: A model like `z-ai/glm-5` means different things depending on context:
+- On **OpenRouter**: it's the model identifier OpenRouter uses → route as `openrouter/z-ai/glm-5`
+- On **Z.AI directly**: `z-ai` is the provider prefix → strips to `glm-5` for their API
+
+### Adding a New Provider
+
+1. Add entry to `BUILTIN_PROVIDERS` in `agent/models.py` (no `default_models` — users add their own)
+2. It automatically becomes available for BYOK in the marketplace API
+3. `is_byok_model()` in credit service auto-detects it (zero-cost routing)
 
 ## Related Contexts
 

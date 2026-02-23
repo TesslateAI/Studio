@@ -20,6 +20,7 @@ import {
   List,
   Article,
   Terminal,
+  Books,
 } from '@phosphor-icons/react';
 import { FloatingPanel } from '../components/ui/FloatingPanel';
 import { MobileMenu } from '../components/ui/MobileMenu';
@@ -86,9 +87,8 @@ export default function Project() {
   });
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
+  const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
 
-  // Chat panel width for Discord button positioning (stored in localStorage by react-resizable-panels)
-  const [chatPanelWidth, _setChatPanelWidth] = useState(400);
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
@@ -555,6 +555,7 @@ export default function Project() {
         id: agent.slug as string,
         name: agent.name as string,
         icon: (agent.icon as string) || '🤖',
+        avatar_url: (agent.avatar_url as string) || undefined,
         backendId: agent.id as string,
         mode: agent.mode as string,
         model: agent.model as string | undefined,
@@ -586,6 +587,10 @@ export default function Project() {
     },
     [slug]
   );
+
+  const handleAskAgent = useCallback((message: string) => {
+    setPrefillChatMessage(message);
+  }, []);
 
   const handleFileUpdate = useCallback(
     async (filePath: string, content: string) => {
@@ -783,8 +788,13 @@ export default function Project() {
     {
       icon: <GitBranch size={18} />,
       title: 'GitHub Sync',
-      onClick: () => togglePanel('github'),
-      active: activePanel === 'github',
+      onClick: () => toast('GitHub Sync coming soon!'),
+      disabled: true,
+    },
+    {
+      icon: <Books size={18} />,
+      title: 'Library',
+      onClick: () => navigate('/library'),
     },
     {
       icon: <Storefront size={18} />,
@@ -805,7 +815,8 @@ export default function Project() {
     {
       icon: <ShareNetwork size={18} />,
       title: 'Share',
-      onClick: () => toast('Share feature coming soon!', { icon: '🔗' }),
+      onClick: () => toast('Share feature coming soon!'),
+      disabled: true,
     },
   ];
 
@@ -927,33 +938,43 @@ export default function Project() {
             isLeftSidebarExpanded ? (
               <button
                 key={index}
-                onClick={item.onClick}
+                onClick={item.disabled ? undefined : item.onClick}
+                disabled={item.disabled}
                 className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                  item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                  item.disabled
+                    ? 'opacity-40 cursor-not-allowed'
+                    : item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                 }`}
               >
                 {React.cloneElement(item.icon, {
                   className: `transition-colors ${
-                    item.active
-                      ? 'text-[var(--text)]'
-                      : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                    item.disabled
+                      ? 'text-[var(--text)]/40'
+                      : item.active
+                        ? 'text-[var(--text)]'
+                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
                   }`,
                 })}
                 <span className="text-sm font-medium text-[var(--text)]">{item.title}</span>
               </button>
             ) : (
-              <Tooltip key={index} content={item.title} side="right" delay={200}>
+              <Tooltip key={index} content={item.disabled ? `${item.title} (Coming soon)` : item.title} side="right" delay={200}>
                 <button
-                  onClick={item.onClick}
+                  onClick={item.disabled ? undefined : item.onClick}
+                  disabled={item.disabled}
                   className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                    item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                    item.disabled
+                      ? 'opacity-40 cursor-not-allowed'
+                      : item.active ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
                   }`}
                 >
                   {React.cloneElement(item.icon, {
                     className: `transition-colors ${
-                      item.active
-                        ? 'text-[var(--text)]'
-                        : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
+                      item.disabled
+                        ? 'text-[var(--text)]/40'
+                        : item.active
+                          ? 'text-[var(--text)]'
+                          : 'text-[var(--text)]/40 group-hover:text-[var(--text)]'
                     }`,
                   })}
                 </button>
@@ -1132,6 +1153,8 @@ export default function Project() {
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
                         isPointerOverPreviewRef={isPointerOverPreviewRef}
+                        prefillMessage={prefillChatMessage}
+                        onPrefillConsumed={() => setPrefillChatMessage(null)}
                       />
                     </Panel>
                     <PanelResizeHandle className="w-2 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
@@ -1150,6 +1173,8 @@ export default function Project() {
                         logs={containerStartup.logs}
                         error={containerStartup.error || undefined}
                         onRetry={containerStartup.retry}
+                        onAskAgent={handleAskAgent}
+                        containerPort={(container?.internal_port as number) || 3000}
                       />
                     ) : devServerUrl ? (
                       previewMode === 'browser-tabs' ? (
@@ -1287,6 +1312,8 @@ export default function Project() {
                         sidebarExpanded={isLeftSidebarExpanded}
                         isDocked={true}
                         isPointerOverPreviewRef={isPointerOverPreviewRef}
+                        prefillMessage={prefillChatMessage}
+                        onPrefillConsumed={() => setPrefillChatMessage(null)}
                       />
                     </Panel>
                   </>
@@ -1305,6 +1332,8 @@ export default function Project() {
                       logs={containerStartup.logs}
                       error={containerStartup.error || undefined}
                       onRetry={containerStartup.retry}
+                      onAskAgent={handleAskAgent}
+                      containerPort={(container?.internal_port as number) || 3000}
                     />
                   ) : devServerUrl ? (
                     previewMode === 'browser-tabs' ? (
@@ -1428,6 +1457,8 @@ export default function Project() {
                   logs={containerStartup.logs}
                   error={containerStartup.error || undefined}
                   onRetry={containerStartup.retry}
+                  onAskAgent={handleAskAgent}
+                  containerPort={(container?.internal_port as number) || 3000}
                 />
               ) : devServerUrl ? (
                 <div className="w-full h-full bg-white">
@@ -1519,6 +1550,8 @@ export default function Project() {
             projectName={project?.name}
             sidebarExpanded={isLeftSidebarExpanded}
             isPointerOverPreviewRef={isPointerOverPreviewRef}
+            prefillMessage={prefillChatMessage}
+            onPrefillConsumed={() => setPrefillChatMessage(null)}
           />
         </div>
       )}
@@ -1559,7 +1592,7 @@ export default function Project() {
       )}
 
       {/* Discord Support - position adjusts when chat is right-docked */}
-      <DiscordSupport chatPosition={chatPosition} chatPanelWidth={chatPanelWidth} />
+      <DiscordSupport chatPosition={chatPosition} />
 
       {/* Deployment Modal */}
       {showDeployModal && (

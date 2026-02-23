@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { projectsApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { MobileMenu, ProjectCard, UserDropdown } from '../components/ui';
@@ -17,6 +17,8 @@ import {
   Books,
   SignOut,
   GitBranch,
+  ChatCircleDots,
+  Article,
 } from '@phosphor-icons/react';
 
 interface Project {
@@ -42,10 +44,29 @@ export default function Dashboard() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoCreateTriggered = useRef(false);
+  const [createBaseId, setCreateBaseId] = useState<string | undefined>();
+  const [createBaseVersion, setCreateBaseVersion] = useState<string | undefined>();
 
   useEffect(() => {
     loadProjects();
   }, []);
+
+  // Open create modal with pre-selected base from search params (e.g., from marketplace "Use This Version")
+  useEffect(() => {
+    if (autoCreateTriggered.current) return;
+    const shouldCreate = searchParams.get('create');
+    const baseId = searchParams.get('base_id');
+    const baseVersion = searchParams.get('base_version');
+    if (shouldCreate === 'true' && baseId) {
+      autoCreateTriggered.current = true;
+      setSearchParams({}, { replace: true });
+      setCreateBaseId(baseId);
+      setCreateBaseVersion(baseVersion || undefined);
+      setShowCreateDialog(true);
+    }
+  }, [searchParams]);
 
   // Poll for project status updates every 60 seconds
   useEffect(() => {
@@ -73,7 +94,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleCreateProject = async (projectName: string, baseId?: string) => {
+  const handleCreateProject = async (projectName: string, baseId?: string, baseVersion?: string) => {
     if (isCreating) return;
 
     setIsCreating(true);
@@ -88,7 +109,8 @@ export default function Dashboard() {
         'base', // Always use 'base' source type
         undefined,
         'main',
-        baseId
+        baseId,
+        baseVersion || undefined
       );
 
       const project = response.project;
@@ -113,7 +135,8 @@ export default function Dashboard() {
           }
         } catch (taskError) {
           console.error('Project setup task failed:', taskError);
-          toast.error('Project created but setup failed', { id: creatingToast });
+          const taskErrMsg = taskError instanceof Error ? taskError.message : 'Setup failed';
+          toast.error(taskErrMsg, { id: creatingToast });
           setIsCreating(false);
           // Navigate to graph canvas as fallback
           navigate(`/project/${project.slug}`);
@@ -286,7 +309,7 @@ export default function Dashboard() {
     }
   };
 
-  // Sidebar items for mobile menu
+  // Sidebar items for mobile menu - matches NavigationSidebar desktop items
   const mobileMenuItems = {
     left: [
       {
@@ -304,6 +327,16 @@ export default function Dashboard() {
         icon: <Books className="w-5 h-5" weight="fill" />,
         title: 'Library',
         onClick: () => navigate('/library'),
+      },
+      {
+        icon: <ChatCircleDots className="w-5 h-5" weight="fill" />,
+        title: 'Feedback',
+        onClick: () => navigate('/feedback'),
+      },
+      {
+        icon: <Article className="w-5 h-5" weight="fill" />,
+        title: 'Documentation',
+        onClick: () => window.open('https://docs.tesslate.com', '_blank'),
       },
     ],
     right: [
@@ -494,9 +527,15 @@ export default function Dashboard() {
       {/* Create Project Modal */}
       <CreateProjectModal
         isOpen={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
+        onClose={() => {
+          setShowCreateDialog(false);
+          setCreateBaseId(undefined);
+          setCreateBaseVersion(undefined);
+        }}
         onConfirm={handleCreateProject}
         isLoading={isCreating}
+        initialBaseId={createBaseId}
+        baseVersion={createBaseVersion}
       />
 
       {/* Import from Repository Modal */}
@@ -541,7 +580,8 @@ export default function Dashboard() {
                 }
               } catch (taskError) {
                 console.error('Project import task failed:', taskError);
-                toast.error('Project created but import setup failed', { id: creatingToast });
+                const taskErrMsg = taskError instanceof Error ? taskError.message : 'Import setup failed';
+                toast.error(taskErrMsg, { id: creatingToast });
                 setIsCreating(false);
                 navigate(`/project/${project.slug}`);
               }

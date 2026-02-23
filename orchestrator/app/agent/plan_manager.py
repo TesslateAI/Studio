@@ -1,8 +1,7 @@
 """
 Plan Manager for Tesslate Agent.
 
-1:1 port of minimal-codex/plan_manager.py, adapted from filesystem to
-in-memory storage (same pattern as todos.py). Plans are keyed by
+In-memory plan storage (same pattern as todos.py). Plans are keyed by
 "user_{id}_project_{id}" so they persist across agent iterations within
 a single session but don't leak across projects.
 
@@ -15,7 +14,7 @@ import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-# Word list for generating plan names (1:1 from codex)
+# Word list for generating plan names
 WORDS = [
     "swift",
     "brave",
@@ -70,7 +69,7 @@ WORDS = [
 
 
 def _generate_plan_name() -> str:
-    """Generate a plan name like swift_brave_calm (1:1 codex naming)."""
+    """Generate a plan name like swift_brave_calm."""
     words = random.sample(WORDS, 3)
     return "_".join(words)
 
@@ -94,7 +93,7 @@ class Plan:
     created_at: str = ""
 
     def to_markdown(self) -> str:
-        """Format plan as markdown with status symbols (1:1 codex: □ ▶ ✓)."""
+        """Format plan as markdown with status symbols (□ ▶ ✓)."""
         lines = [f"# Plan: {self.name.replace('_', ' ').title()}", ""]
         lines.append(f"## Task\n{self.task}")
         lines.append(f"\n## Created\n{self.created_at}")
@@ -242,7 +241,7 @@ class PlanManager:
     async def get_plan_context(context: dict) -> str | None:
         """Get plan content formatted for injection into system prompt.
 
-        Returns the exact format codex uses:
+        Returns the plan wrapped in delimiters:
         === ACTIVE PLAN ===
         ...
         === END PLAN ===

@@ -46,8 +46,8 @@ class ResourceLimits:
     max_cost: float = field(default_factory=lambda: float(os.getenv("AGENT_MAX_COST", "20.0")))
     max_iterations: int = 0  # 0 = unlimited. Global iteration cap is not meaningful for multi-user servers; per-run limits handle safety.
     max_iterations_per_run: int = field(
-        default_factory=lambda: int(os.getenv("AGENT_MAX_ITERATIONS_PER_RUN", "50"))
-    )  # Per-message limit
+        default_factory=lambda: int(os.getenv("AGENT_MAX_ITERATIONS_PER_RUN", "0"))
+    )  # Per-message limit (0 = unlimited)
     max_cost_per_run: float = field(
         default_factory=lambda: float(os.getenv("AGENT_MAX_COST_PER_RUN", "5.0"))
     )
@@ -111,8 +111,8 @@ class ResourceLimits:
             if run_id:
                 self._run_iterations[run_id] = self._run_iterations.get(run_id, 0) + 1
 
-                # Check per-run iteration limit (50 iterations per message)
-                if self._run_iterations[run_id] > self.max_iterations_per_run:
+                # Check per-run iteration limit (0 = unlimited)
+                if self.max_iterations_per_run > 0 and self._run_iterations[run_id] > self.max_iterations_per_run:
                     raise ResourceLimitExceeded(
                         f"Per-message iteration limit exceeded: {self._run_iterations[run_id]} > {self.max_iterations_per_run}. "
                         f"Agent has exhausted its iteration budget for this message."
@@ -218,7 +218,8 @@ class ResourceLimits:
                     )
 
                 if (
-                    run_id in self._run_iterations
+                    self.max_iterations_per_run > 0
+                    and run_id in self._run_iterations
                     and self._run_iterations[run_id] >= self.max_iterations_per_run
                 ):
                     raise ResourceLimitExceeded(

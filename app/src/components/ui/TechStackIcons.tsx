@@ -86,6 +86,8 @@ const techIconMap: Record<string, IconType> = {
   // JavaScript/TypeScript ecosystem
   'nextjs': SiNextdotjs,
   'next.js': SiNextdotjs,
+  'next.js 16': SiNextdotjs,
+  'next.js 16.1': SiNextdotjs,
   'next.js 15': SiNextdotjs,
   'next.js 14': SiNextdotjs,
   'react': SiReact,

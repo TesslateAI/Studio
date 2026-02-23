@@ -3,15 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { User, CaretDown, Coins, CreditCard, Gear, SignOut } from '@phosphor-icons/react';
 import { billingApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
+import type { CreditBalanceResponse } from '../../types/billing';
 
 export function UserDropdown() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [showDropdown, setShowDropdown] = useState(false);
-  const [credits, setCredits] = useState<number>(0);
+  const [creditBalance, setCreditBalance] = useState<CreditBalanceResponse | null>(null);
   const [imgError, setImgError] = useState(false);
 
   const userName = user?.name || 'User';
+  const totalCredits = creditBalance?.total_credits ?? 0;
 
   // Determine avatar source: user-set avatar → DiceBear identicon → fallback icon
   const avatarSrc = user?.avatar_url
@@ -29,7 +31,7 @@ export function UserDropdown() {
   useEffect(() => {
     billingApi
       .getCreditsBalance()
-      .then((res) => setCredits(res.total_credits ?? 0))
+      .then((res) => setCreditBalance(res))
       .catch(() => {});
   }, []);
 
@@ -38,7 +40,7 @@ export function UserDropdown() {
     if (showDropdown) {
       billingApi
         .getCreditsBalance()
-        .then((res) => setCredits(res.total_credits ?? 0))
+        .then((res) => setCreditBalance(res))
         .catch(() => {});
     }
   }, [showDropdown]);
@@ -47,7 +49,9 @@ export function UserDropdown() {
   const handleCreditsUpdated = useCallback((e: Event) => {
     const detail = (e as CustomEvent).detail;
     if (typeof detail?.newBalance === 'number') {
-      setCredits(detail.newBalance);
+      setCreditBalance((prev) =>
+        prev ? { ...prev, total_credits: detail.newBalance } : prev
+      );
     }
   }, []);
 
@@ -55,6 +59,21 @@ export function UserDropdown() {
     window.addEventListener('credits-updated', handleCreditsUpdated);
     return () => window.removeEventListener('credits-updated', handleCreditsUpdated);
   }, [handleCreditsUpdated]);
+
+  // Grey segments for remaining credits, primary fill for used
+  const GREY_SEGMENTS = [
+    { key: 'daily_credits' as const, grey: 'rgba(255,255,255,0.06)' },
+    { key: 'bundled_credits' as const, grey: 'rgba(255,255,255,0.10)' },
+    { key: 'signup_bonus_credits' as const, grey: 'rgba(255,255,255,0.14)' },
+  ];
+  const capacity = creditBalance
+    ? Math.max(creditBalance.monthly_allowance || 0, totalCredits, 1)
+    : 1;
+  const used = capacity - totalCredits;
+  const usedPct = Math.min((used / capacity) * 100, 100);
+  const greySegments = creditBalance
+    ? GREY_SEGMENTS.map((s) => ({ ...s, value: creditBalance[s.key] || 0 })).filter((s) => s.value > 0)
+    : [];
 
   return (
     <div className="relative">
@@ -95,15 +114,36 @@ export function UserDropdown() {
                   setShowDropdown(false);
                   navigate('/settings/billing');
                 }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
+                className="w-full px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
               >
-                <Coins size={18} className="text-[var(--primary)]" weight="fill" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-[var(--text)]">Credits</div>
-                  <div className="text-xs text-[var(--text)]/60">
-                    {credits.toLocaleString()} available
+                <div className="flex items-center gap-3">
+                  <Coins size={18} className="text-[var(--primary)]" weight="fill" />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-[var(--text)]">Credits</div>
+                    <div className="text-xs text-[var(--text)]/60 tabular-nums">
+                      {totalCredits.toLocaleString()} available
+                    </div>
                   </div>
                 </div>
+                {/* Compact usage bar: primary = used, grey segments = remaining */}
+                {creditBalance && (
+                  <div className="flex h-1 rounded-full overflow-hidden mt-2">
+                    <div
+                      className="h-full bg-[var(--primary)] transition-all duration-500 shrink-0"
+                      style={{ width: `${usedPct}%` }}
+                    />
+                    {greySegments.map((seg) => (
+                      <div
+                        key={seg.key}
+                        className="h-full transition-all duration-500"
+                        style={{
+                          width: `${(seg.value / capacity) * 100}%`,
+                          backgroundColor: seg.grey,
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
               </button>
 
               <div className="h-px bg-white/10 my-2" />

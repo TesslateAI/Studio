@@ -133,7 +133,7 @@ asyncio.run(seed_themes(themes_dir=Path('/tmp/themes')))
 ```
 
 This creates:
-- **5 marketplace bases**: Next.js 16, Next.js 15, Vite+React+FastAPI, Vite+React+Go, Expo
+- **4 marketplace bases**: Next.js 16, Vite+React+FastAPI, Vite+React+Go, Expo
 - **5 official agents**: Stream Builder, Tesslate Agent, React Component Builder, API Integration, ReAct Agent
 - **6 open-source agents**: Code Analyzer, Doc Writer, Refactoring Assistant, Test Generator, API Designer, DB Schema Designer
 - **7 themes**: default-dark, default-light, midnight, ocean, forest, rose, sunset

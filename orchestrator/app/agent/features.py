@@ -1,7 +1,6 @@
 """
 Feature flags for Tesslate Agent.
 
-1:1 port of minimal-codex features.py, adapted for Tesslate Studio.
 All features are ENABLED by default. Disable via:
 - Environment variables: TESSLATE_FEATURE_SUBAGENTS=0
 - Per-agent config: MarketplaceAgent.config["features"]["subagents"] = false
@@ -41,7 +40,7 @@ FEATURES = {
 
 
 class Features:
-    """Feature flag container (matches Codex's Features struct).
+    """Feature flag container.
 
     All features are enabled by default. Use disable() or environment
     variables (TESSLATE_FEATURE_*=0) to turn them off.

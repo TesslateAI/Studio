@@ -39,7 +39,9 @@
 
 **Container** (models.py)
 - Purpose: Individual services in a project (frontend, backend, database)
-- Key fields: `name`, `directory`, `port`, `container_type`, `deployment_mode`, `status`
+- Key fields: `name`, `directory`, `port`, `internal_port`, `container_type`, `deployment_mode`, `status`
+- **Port columns**: `port` = exposed/mapped port (host side in Docker), `internal_port` = port the dev server listens on inside the container
+- **`effective_port` property**: Returns `internal_port or port or 3000`. Single source of truth for "what port is the server on." All callsites should use this instead of ad-hoc fallback chains.
 - Related: Project, MarketplaceBase, ContainerConnection
 
 **ContainerConnection** (models.py)
@@ -157,12 +159,14 @@
 - Related: Updated by LiteLLM callback
 
 **UserAPIKey** (models.py)
-- Purpose: Store user API keys for OpenAI, Anthropic, OpenRouter, etc.
+- Purpose: Store user API keys for BYOK providers (OpenRouter, OpenAI, Groq, Z.AI, etc.)
 - Key fields: `provider`, `auth_type`, `encrypted_value`, `provider_metadata`
+- Related: Provider slugs match `BUILTIN_PROVIDERS` in `agent/models.py`
 
 **UserCustomModel** (models.py)
-- Purpose: User-added custom OpenRouter models
-- Key fields: `model_id`, `model_name`, `pricing_input`, `pricing_output`
+- Purpose: User-added models under any BYOK provider (e.g. `z-ai/glm-5` under OpenRouter, `glm-5` under Z.AI)
+- Key fields: `model_id`, `model_name`, `provider`, `pricing_input`, `pricing_output`
+- Routing: The `provider` field determines which BYOK provider to route through. Model IDs are prefixed with the provider slug in API responses (e.g. `openrouter/z-ai/glm-5`). If an unprefixed model ID reaches the router, DB lookup resolves the parent provider.
 
 ### Kanban & Project Management Models (models_kanban.py)
 **KanbanBoard** (models_kanban.py)

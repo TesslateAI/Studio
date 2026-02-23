@@ -338,6 +338,19 @@ export function Modal({ isOpen, onClose, onConfirm }: ModalProps) {
 }
 ```
 
+### RepoImportModal (Decomposed)
+
+The repository import modal has been refactored into sub-components for maintainability:
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `RepoUrlInput` | `modals/RepoImportModal/RepoUrlInput.tsx` | URL input with validation indicator |
+| `RepoInfoCard` | `modals/RepoImportModal/RepoInfoCard.tsx` | Resolved repo metadata display |
+| `BranchSelector` | `modals/RepoImportModal/BranchSelector.tsx` | Branch/tag selection dropdown |
+| `BrowseReposSection` | `modals/RepoImportModal/BrowseReposSection.tsx` | Browse connected provider repos |
+| `ConnectProviderInline` | `modals/RepoImportModal/ConnectProviderInline.tsx` | OAuth popup for connecting git providers |
+| `useRepoResolver` | `modals/RepoImportModal/useRepoResolver.ts` | Custom hook for URL resolution with debounce |
+
 ### Container Loading Overlay
 
 **Pattern for Container Startup Feedback**:
@@ -383,6 +396,24 @@ function BrowserPreview({ projectSlug, containerId }: Props) {
 }
 ```
 
+**Health Check Timeout Pattern**:
+
+The overlay distinguishes between health-check timeouts and hard failures using a string prefix protocol:
+- `HEALTH_CHECK_TIMEOUT:` prefix on the error string → shows "Container needs setup" UI with "Ask Agent to start it" button
+- All other errors → shows standard red error state
+
+```typescript
+// In useContainerStartup.ts
+const errorMsg = 'HEALTH_CHECK_TIMEOUT:Container started but server did not respond in time';
+
+// In ContainerLoadingOverlay.tsx
+if (error?.startsWith('HEALTH_CHECK_TIMEOUT:')) {
+  // Show agent-assist UI with "Ask Agent to start it" button
+}
+```
+
+New props added: `onAskAgent?: (message: string) => void`, `containerPort?: number`
+
 **ContainerLoadingOverlay Props**:
 ```typescript
 interface ContainerLoadingOverlayProps {
@@ -401,6 +432,40 @@ interface ContainerLoadingOverlayProps {
 - Terminal-style log viewer with auto-scroll
 - Color-coded logs (red=error, yellow=warn, green=success)
 - Error state with retry button and log preview
+
+**Health Check Timeout Pattern**:
+
+The overlay distinguishes between health-check timeouts and hard failures using a string prefix protocol:
+- `HEALTH_CHECK_TIMEOUT:` prefix on the error string → shows "Container needs setup" UI with "Ask Agent to start it" button
+- All other errors → shows standard red error state
+
+```typescript
+// In useContainerStartup.ts
+const errorMsg = 'HEALTH_CHECK_TIMEOUT:Container started but server did not respond in time';
+
+// In ContainerLoadingOverlay.tsx
+if (error?.startsWith('HEALTH_CHECK_TIMEOUT:')) {
+  // Show agent-assist UI
+}
+```
+
+New props added: `onAskAgent?: (message: string) => void`, `containerPort?: number`
+
+### Pagination Component
+
+Reusable pagination for paginated API results:
+
+```typescript
+import { Pagination } from '../components/marketplace/Pagination';
+
+<Pagination
+  currentPage={page}
+  totalPages={totalPages}
+  onPageChange={setPage}
+/>
+```
+
+Features: Accessible (`aria-label`, `aria-current`), ellipsis for large page ranges, disabled state handling, theme-aware styling.
 
 ### Error Handling
 
@@ -455,6 +520,22 @@ const fetchData = async () => {
   }
 };
 ```
+
+### Pagination Component
+
+Reusable pagination for paginated API results:
+
+```typescript
+import { Pagination } from '../components/marketplace/Pagination';
+
+<Pagination
+  currentPage={page}
+  totalPages={totalPages}
+  onPageChange={setPage}
+/>
+```
+
+Features: Accessible (`aria-label`, `aria-current`), ellipsis for large ranges, disabled state handling, theme-aware styling.
 
 ## Common Debugging Patterns
 

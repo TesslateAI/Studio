@@ -1,7 +1,7 @@
 """
 Apply Patch Tool
 
-Codex-style unified patch tool that can add, delete, update, and move files
+Unified patch tool that can add, delete, update, and move files
 in a single operation. Uses the pure algorithm from agent/apply_patch.py
 with container I/O via the orchestrator.
 
@@ -37,7 +37,7 @@ from ..retry_config import tool_retry
 logger = logging.getLogger(__name__)
 
 
-APPLY_PATCH_DESCRIPTION = """Edit files using Codex patch format. This is a FREEFORM tool.
+APPLY_PATCH_DESCRIPTION = """Edit files using unified patch format. This is a FREEFORM tool.
 
 Format:
 *** Begin Patch
@@ -208,7 +208,7 @@ async def _apply_hunk(hunk: Hunk, ctx: _PatchContext) -> str:
 @tool_retry
 async def apply_patch_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """
-    Apply a Codex-format patch to files in the user's container.
+    Apply a unified patch to files in the user's container.
 
     Supports Add, Delete, Update (with Move) operations in a single patch.
     Uses 4-level fuzzy matching for robust context location.
@@ -299,7 +299,7 @@ def register_apply_patch_tool(registry):
                 "properties": {
                     "patch": {
                         "type": "string",
-                        "description": "The patch content in Codex format",
+                        "description": "The patch content in unified patch format",
                     },
                 },
                 "required": ["patch"],

@@ -187,7 +187,7 @@ export function useContainerStartup(
         // Check if max retries reached
         if (healthCheckRetriesRef.current >= healthCheckMaxRetries) {
           cleanup();
-          const errorMsg = 'Container started but server did not respond in time';
+          const errorMsg = 'HEALTH_CHECK_TIMEOUT:Container started but server did not respond in time';
           setState((prev) => ({
             ...prev,
             status: 'error',

@@ -58,6 +58,9 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **email_service.py** (174 lines) - `EmailService` for async SMTP email (2FA codes, password reset links), falls back to console logging in dev
 - **two_fa_service.py** (165 lines) - `TwoFAService` for 6-digit code generation, verification (argon2 hash), temp token signing (itsdangerous)
 
+### Container Startup
+- **tmux_session_manager.py** - Tmux session startup strategies per base type (nextjs-16, vite-react-fastapi, vite-react-go, expo-react-native)
+
 ### Configuration
 - **base_config_parser.py** (560 lines) - Parse TESSLATE.md for project config
 - **service_definitions.py** (1,537 lines) - Database/Redis/etc service definitions, deployment targets
@@ -208,6 +211,25 @@ async def clone_repository(self, repo_url: str, branch: Optional[str] = None):
         logger.error(f"[GIT] Failed to clone repository: {e}", exc_info=True)
         raise RuntimeError(f"Failed to clone repository: {str(e)}") from e
 ```
+
+### 8. Container Port Resolution
+
+The `Container.effective_port` model property provides a single source of truth for port resolution:
+
+```python
+# Resolution order: internal_port → port → 3000
+container.effective_port  # Always returns an int
+```
+
+Both Docker and K8s orchestrators use this property, with TESSLATE.md config taking precedence when available.
+
+### 9. K8s Probe Strategy
+
+K8s container probes use a two-tier strategy:
+- **Startup + Liveness**: Exec-based (`tmux has-session -t main`) — keeps container alive regardless of dev server state
+- **Readiness**: HTTP-based (`GET /` on effective_port) — controls traffic routing only
+
+This prevents CrashLoopBackOff for community bases that may not have a working startup command. Docker mode is unaffected — Docker doesn't kill containers on health check failure.
 
 ## Usage Examples
 

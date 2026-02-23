@@ -16,18 +16,75 @@ interface TemplateCardProps {
   inLibrary?: boolean;
 }
 
-// Map base slugs to framework icons/colors
+// Map base slugs to framework icons/colors using substring matching
+const FRAMEWORK_STYLES: { match: string; bg: string; text: string; icon: string }[] = [
+  { match: 'nextjs', bg: 'bg-black', text: 'text-white', icon: '▲' },
+  { match: 'next-forge', bg: 'bg-black', text: 'text-white', icon: '▲' },
+  { match: 'vite', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '⚡' },
+  { match: 'react', bg: 'bg-cyan-500/20', text: 'text-cyan-400', icon: '⚛' },
+  { match: 'bulletproof', bg: 'bg-cyan-500/20', text: 'text-cyan-400', icon: '⚛' },
+  { match: 'fastapi', bg: 'bg-emerald-500/20', text: 'text-emerald-400', icon: '🚀' },
+  { match: 'express', bg: 'bg-gray-500/20', text: 'text-gray-300', icon: 'E' },
+  { match: 'hackathon', bg: 'bg-gray-500/20', text: 'text-gray-300', icon: '🏆' },
+  { match: 'django', bg: 'bg-green-600/20', text: 'text-green-400', icon: '🐍' },
+  { match: 'flask', bg: 'bg-gray-600/20', text: 'text-gray-300', icon: '🧪' },
+  { match: 'laravel', bg: 'bg-red-500/20', text: 'text-red-400', icon: '🔥' },
+  { match: 'rails', bg: 'bg-red-500/20', text: 'text-red-400', icon: '🚊' },
+  { match: 'bullet-train', bg: 'bg-red-500/20', text: 'text-red-400', icon: '🚊' },
+  { match: 'spring', bg: 'bg-green-500/20', text: 'text-green-400', icon: '🍃' },
+  { match: 'jhipster', bg: 'bg-green-500/20', text: 'text-green-400', icon: '🍃' },
+  { match: 'flutter', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '📱' },
+  { match: 'expo', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '📱' },
+  { match: 'ignite', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '🔥' },
+  { match: 'rn-template', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '📱' },
+  { match: 'vue', bg: 'bg-green-500/20', text: 'text-green-400', icon: '🌿' },
+  { match: 'vitesse', bg: 'bg-green-500/20', text: 'text-green-400', icon: '🌿' },
+  { match: 'nuxt', bg: 'bg-green-500/20', text: 'text-green-400', icon: '🌿' },
+  { match: 'svelte', bg: 'bg-orange-500/20', text: 'text-orange-400', icon: '🔥' },
+  { match: 'nest', bg: 'bg-red-500/20', text: 'text-red-400', icon: '🐱' },
+  { match: 'rust', bg: 'bg-orange-500/20', text: 'text-orange-400', icon: '🦀' },
+  { match: 'loco', bg: 'bg-orange-500/20', text: 'text-orange-400', icon: '🦀' },
+  { match: 'axum', bg: 'bg-orange-500/20', text: 'text-orange-400', icon: '🦀' },
+  { match: 'astro', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '🚀' },
+  { match: 'remix', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '💿' },
+  { match: 'epic-stack', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '💿' },
+  { match: 't3', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '🚀' },
+  { match: 'hono', bg: 'bg-orange-500/20', text: 'text-orange-400', icon: '🔥' },
+  { match: 'tanstack', bg: 'bg-cyan-500/20', text: 'text-cyan-400', icon: '⚛' },
+  { match: 'tanstarter', bg: 'bg-cyan-500/20', text: 'text-cyan-400', icon: '⚛' },
+  { match: 'elixir', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '🌺' },
+  { match: 'petal', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '🌺' },
+  { match: 'phoenix', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '🌺' },
+  { match: 'blazor', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '💠' },
+  { match: 'dotnet', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '💠' },
+  { match: 'cobra', bg: 'bg-gray-500/20', text: 'text-gray-300', icon: '💻' },
+  { match: 'oclif', bg: 'bg-gray-500/20', text: 'text-gray-300', icon: '💻' },
+  { match: 'clap', bg: 'bg-gray-500/20', text: 'text-gray-300', icon: '💻' },
+  { match: 'cli', bg: 'bg-gray-500/20', text: 'text-gray-300', icon: '💻' },
+  { match: 'saas', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '💰' },
+  { match: 'chatbot', bg: 'bg-violet-500/20', text: 'text-violet-400', icon: '🤖' },
+  { match: 'dify', bg: 'bg-violet-500/20', text: 'text-violet-400', icon: '🤖' },
+  { match: 'ai', bg: 'bg-violet-500/20', text: 'text-violet-400', icon: '🤖' },
+  { match: 'admin', bg: 'bg-amber-500/20', text: 'text-amber-400', icon: '📊' },
+  { match: 'refine', bg: 'bg-amber-500/20', text: 'text-amber-400', icon: '📊' },
+  { match: 'landing', bg: 'bg-pink-500/20', text: 'text-pink-400', icon: '🎨' },
+  { match: 'taxonomy', bg: 'bg-pink-500/20', text: 'text-pink-400', icon: '🎨' },
+  { match: 'turbo', bg: 'bg-red-500/20', text: 'text-red-400', icon: '🚀' },
+  { match: 'go-', bg: 'bg-cyan-500/20', text: 'text-cyan-400', icon: '🔷' },
+  { match: 'htmx', bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '🌐' },
+  { match: 'elysia', bg: 'bg-indigo-500/20', text: 'text-indigo-400', icon: '🐰' },
+  { match: 'fresh', bg: 'bg-yellow-500/20', text: 'text-yellow-400', icon: '🍋' },
+  { match: 'deno', bg: 'bg-yellow-500/20', text: 'text-yellow-400', icon: '🍋' },
+  { match: 'ktor', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '💠' },
+  { match: 'kotlin', bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '💠' },
+  { match: 'cookiecutter', bg: 'bg-green-600/20', text: 'text-green-400', icon: '🐍' },
+];
+const DEFAULT_FRAMEWORK_STYLE = { bg: 'bg-[var(--primary)]/20', text: 'text-[var(--primary)]', icon: '📦' };
+
 const getFrameworkStyle = (slug: string) => {
-  const styles: Record<string, { bg: string; text: string; icon: string }> = {
-    'nextjs': { bg: 'bg-black', text: 'text-white', icon: '▲' },
-    'vite': { bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '⚡' },
-    'react': { bg: 'bg-cyan-500/20', text: 'text-cyan-400', icon: '⚛' },
-    'fastapi': { bg: 'bg-emerald-500/20', text: 'text-emerald-400', icon: '🚀' },
-    'express': { bg: 'bg-gray-500/20', text: 'text-gray-300', icon: 'E' },
-    'django': { bg: 'bg-green-600/20', text: 'text-green-400', icon: '🐍' },
-    'flask': { bg: 'bg-gray-600/20', text: 'text-gray-300', icon: '🧪' },
-  };
-  return styles[slug.toLowerCase()] || { bg: 'bg-[var(--primary)]/20', text: 'text-[var(--primary)]', icon: '📦' };
+  const lower = slug.toLowerCase();
+  const found = FRAMEWORK_STYLES.find((s) => lower.includes(s.match));
+  return found || DEFAULT_FRAMEWORK_STYLE;
 };
 
 export function TemplateCard({

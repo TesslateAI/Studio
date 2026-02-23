@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { AgentSelector } from './AgentSelector';
-import { ModelSelector } from './ModelSelector';
+
 import { EditModeStatus, type EditMode } from './EditModeStatus';
 import { Gear } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
@@ -38,6 +38,8 @@ interface ChatInputProps {
   onPlanMode?: () => void;
   onModelChange?: (model: string) => void;
   isDocked?: boolean; // When true, removes rounded corners at bottom
+  prefillMessage?: string | null;
+  onPrefillConsumed?: () => void;
 }
 
 export function ChatInput({
@@ -59,6 +61,8 @@ export function ChatInput({
   onPlanMode,
   onModelChange,
   isDocked = false,
+  prefillMessage,
+  onPrefillConsumed,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -129,6 +133,14 @@ export function ChatInput({
       localStorage.removeItem('landingPrompt');
     }
   }, []);
+
+  // Handle prefill message from external triggers (e.g. "Ask Agent" button)
+  useEffect(() => {
+    if (prefillMessage) {
+      setMessage(prefillMessage);
+      onPrefillConsumed?.();
+    }
+  }, [prefillMessage, onPrefillConsumed]);
 
   // Detect slash commands
   useEffect(() => {
@@ -379,17 +391,6 @@ export function ChatInput({
               compact={isCompact}
             />
           </div>
-
-          {/* Model selector - hidden when very compact */}
-          {onModelChange && !isVeryCompact && (
-            <div className="min-w-0 shrink">
-              <ModelSelector
-                currentAgent={currentAgent}
-                onModelChange={onModelChange}
-                compact={isCompact}
-              />
-            </div>
-          )}
 
           {/* Spacer */}
           <div className="flex-1 min-w-0" />

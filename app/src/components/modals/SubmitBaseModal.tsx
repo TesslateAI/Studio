@@ -35,6 +35,11 @@ const CATEGORIES = [
   { value: 'frontend', label: 'Frontend' },
   { value: 'backend', label: 'Backend' },
   { value: 'mobile', label: 'Mobile' },
+  { value: 'saas', label: 'SaaS' },
+  { value: 'ai', label: 'AI / ML' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'landing', label: 'Landing Page' },
+  { value: 'cli', label: 'CLI' },
   { value: 'data', label: 'Data' },
   { value: 'devops', label: 'DevOps' },
 ];

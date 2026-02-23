@@ -192,8 +192,8 @@ class Container(Base):
     container_name = Column(String, nullable=False)  # Docker container name
 
     # Docker configuration
-    port = Column(Integer, nullable=True)  # Exposed port
-    internal_port = Column(Integer, nullable=True)  # Container internal port
+    port = Column(Integer, nullable=True)  # Exposed/mapped port (host side in Docker)
+    internal_port = Column(Integer, nullable=True)  # Port the dev server listens on inside the container
     environment_vars = Column(JSON, nullable=True)  # Environment variables
     dockerfile_path = Column(String, nullable=True)  # Relative path to Dockerfile
     volume_name = Column(String, nullable=True)  # Docker volume name for container files
@@ -262,6 +262,17 @@ class Container(Base):
     @property
     def env_vars_count(self) -> int:
         return len(self.environment_vars or {})
+
+    @property
+    def effective_port(self) -> int:
+        """The port the dev server actually listens on inside the container.
+
+        Resolution order:
+          1. internal_port — set during project creation from TESSLATE.md / framework detection
+          2. port — the exposed/mapped port (sometimes the same)
+          3. 3000 — last-resort default
+        """
+        return self.internal_port or self.port or 3000
 
 
 class ContainerConnection(Base):

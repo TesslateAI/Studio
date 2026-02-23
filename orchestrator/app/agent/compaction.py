@@ -2,8 +2,7 @@
 Context Compaction
 
 Handles conversation context compaction when approaching context window limits.
-Ported from minimal-codex's compaction logic (agent.py:110-268) and adapted
-for Tesslate's async infrastructure and ModelAdapter interface.
+Adapted for Tesslate's async infrastructure and ModelAdapter interface.
 
 When the agent's conversation grows large enough to risk exceeding the context window,
 this module summarizes older messages and rebuilds a compact conversation history.
@@ -16,7 +15,7 @@ from .models import ModelAdapter
 
 logger = logging.getLogger(__name__)
 
-# Constants (matching Codex's util.rs/truncate.rs values)
+# Constants
 APPROX_BYTES_PER_TOKEN = 4
 COMPACT_USER_MESSAGE_MAX_BYTES = 80_000
 
@@ -37,7 +36,7 @@ def approx_token_count(text: str) -> int:
     """
     Approximate token count from text length.
 
-    Uses the heuristic of ~4 bytes per token, matching Codex's approach.
+    Uses the heuristic of ~4 bytes per token.
 
     Args:
         text: Input text

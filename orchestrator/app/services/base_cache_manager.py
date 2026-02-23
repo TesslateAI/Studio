@@ -240,7 +240,7 @@ class BaseCacheManager:
         """
         try:
             # Get the path inside the volume to mount
-            # directory is like /app/base-cache/nextjs-15
+            # directory is like /app/base-cache/nextjs-16
             # We want to mount just that subdirectory from the volume
             relative_path = directory.relative_to(self.cache_dir)
 

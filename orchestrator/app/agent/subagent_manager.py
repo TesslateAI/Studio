@@ -2,8 +2,8 @@
 Subagent Manager
 
 Manages specialized subagents that can be invoked by the main TesslateAgent.
-Ported from minimal-codex's subagents.py and adapted for Tesslate's async
-infrastructure, container-based execution, and SSE event streaming.
+Adapted for Tesslate's async infrastructure, container-based execution,
+and SSE event streaming.
 
 Subagents are lightweight agent instances with scoped tool access and focused
 system prompts. They run their own agent loop but CANNOT invoke other subagents
@@ -14,7 +14,7 @@ Built-in subagent types:
 - Plan: Read-only tools, creates implementation plans
 - Explore: Read-only tools, fast codebase exploration
 
-Extended features (1:1 from minimal-codex):
+Extended features:
 - Resumable sessions via agent_id / resume_id
 - Custom subagents from container (.tesslate/agents/*.md)
 - Custom subagents from DB (MarketplaceAgent item_type="subagent")
@@ -32,7 +32,7 @@ from .tools.registry import ToolRegistry, create_scoped_tool_registry
 
 logger = logging.getLogger(__name__)
 
-# Maximum concurrent subagent invocations (matches minimal-codex)
+# Maximum concurrent subagent invocations
 MAX_CONCURRENT = 10
 
 # Read-only tools for restricted subagents
@@ -72,7 +72,7 @@ class SubagentConfig:
     description: str
     tools: list[str] | None  # None = all standard tools
     system_prompt: str
-    max_turns: int = 10
+    max_turns: int = 100
 
 
 @dataclass
@@ -95,21 +95,21 @@ def _get_builtin_configs() -> dict[str, SubagentConfig]:
             description="General-purpose agent for complex multi-step tasks. Has access to all tools.",
             tools=None,  # All standard tools
             system_prompt=load_prompt("general_purpose", subdir="subagent"),
-            max_turns=15,
+            max_turns=100,
         ),
         "Plan": SubagentConfig(
             name="Plan",
             description="Software architect agent for designing implementation plans. Read-only tools only.",
             tools=READ_ONLY_TOOLS,
             system_prompt=load_prompt("plan", subdir="subagent"),
-            max_turns=10,
+            max_turns=100,
         ),
         "Explore": SubagentConfig(
             name="Explore",
             description="Fast exploration agent for searching codebases. Read-only tools, 3-5 tool calls.",
             tools=READ_ONLY_TOOLS,
             system_prompt=load_prompt("explore", subdir="subagent"),
-            max_turns=8,
+            max_turns=100,
         ),
     }
 
@@ -254,7 +254,7 @@ class SubagentManager:
                     description=agent_model.description or "",
                     tools=tools if tools else None,
                     system_prompt=agent_model.system_prompt or "",
-                    max_turns=(agent_model.config or {}).get("max_turns", 10),
+                    max_turns=(agent_model.config or {}).get("max_turns", 100),
                 )
                 # DB subagents override file-based if name collision
                 self._configs[config.name] = config
@@ -266,7 +266,7 @@ class SubagentManager:
     def _parse_agent_file(self, content: str, filename: str) -> SubagentConfig | None:
         """Parse a subagent markdown file with YAML-like frontmatter.
 
-        Format (1:1 codex):
+        Format:
         ---
         name: my-agent
         description: Does things
@@ -517,7 +517,7 @@ class SubagentManager:
         content: str | None,
         tool_calls: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Serialize assistant message following Codex's exact format."""
+        """Serialize assistant message to OpenAI tool-call format."""
         if not tool_calls:
             return {"role": "assistant", "content": content or ""}
 

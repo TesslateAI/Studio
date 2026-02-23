@@ -10,6 +10,24 @@ interface AgentSelectorProps {
   compact?: boolean;
 }
 
+function AgentAvatar({ agent, size = 'sm' }: { agent: ChatAgent; size?: 'sm' | 'md' }) {
+  const px = size === 'sm' ? 'w-5 h-5' : 'w-6 h-6';
+  if (agent.avatar_url) {
+    return (
+      <img
+        src={agent.avatar_url}
+        alt=""
+        className={`${px} rounded-full object-cover flex-shrink-0`}
+      />
+    );
+  }
+  return (
+    <div className={`${px} rounded-full bg-[var(--surface)] border border-[var(--border-color)] flex items-center justify-center flex-shrink-0`}>
+      <img src="/favicon.svg" alt="" className="w-3/4 h-3/4" />
+    </div>
+  );
+}
+
 export function AgentSelector({
   agents,
   currentAgent,
@@ -94,7 +112,7 @@ export function AgentSelector({
         `}
         title={currentAgent.name}
       >
-        <span className="text-sm flex-shrink-0">{currentAgent.icon}</span>
+        <AgentAvatar agent={currentAgent} size="sm" />
         {!compact && <span className="truncate max-w-[100px]">{currentAgent.name}</span>}
         {!compact && (
           <svg className="w-3 h-3 ml-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 256 256">
@@ -128,7 +146,7 @@ export function AgentSelector({
                 ${agent.id === currentAgent.id && 'bg-[rgba(255,107,0,0.2)]'}
               `}
             >
-              <span className="text-base">{agent.icon}</span>
+              <AgentAvatar agent={agent} size="md" />
               <span className="flex-1 text-left">{agent.name}</span>
               {agent.id === currentAgent.id && (
                 <span className="text-xs text-green-400">Active</span>

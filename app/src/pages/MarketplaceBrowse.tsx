@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useInView } from 'react-intersection-observer';
 import { debounce } from 'lodash';
-import { ArrowLeft, MagnifyingGlass, X, Package, Plus } from '@phosphor-icons/react';
-import { AgentCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
+import { ArrowLeft, MagnifyingGlass, X, Package, Plus, CaretDown } from '@phosphor-icons/react';
+import { AgentCard, SkeletonCard, Pagination, type MarketplaceItem } from '../components/marketplace';
 import { UserDropdown } from '../components/ui';
 import { SubmitBaseModal } from '../components/modals';
 import { marketplaceApi } from '../lib/api';
@@ -34,9 +33,14 @@ const categories = [
   { id: 'frontend', label: 'Frontend' },
   { id: 'fullstack', label: 'Fullstack' },
   { id: 'backend', label: 'Backend' },
+  { id: 'mobile', label: 'Mobile' },
+  { id: 'saas', label: 'SaaS' },
+  { id: 'ai', label: 'AI / ML' },
+  { id: 'admin', label: 'Admin' },
+  { id: 'landing', label: 'Landing Page' },
+  { id: 'cli', label: 'CLI' },
   { id: 'data', label: 'Data' },
   { id: 'devops', label: 'DevOps' },
-  { id: 'mobile', label: 'Mobile' },
 ];
 
 const itemTypeLabels: Record<ItemType, string> = {
@@ -79,24 +83,21 @@ export default function MarketplaceBrowse() {
 
   // State - Data
   const [items, setItems] = useState<MarketplaceItem[]>([]);
-  const [basesCache, setBasesCache] = useState<MarketplaceItem[]>([]);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState<number | null>(null);
 
   // State - Loading
   const [initialLoading, setInitialLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [filtering, setFiltering] = useState(false);
 
   // State - Submit base modal
   const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
 
-  // Intersection observer for infinite scroll
-  const { ref: loadMoreRef, inView } = useInView({
-    threshold: 0,
-    rootMargin: '100px',
-  });
+  // State - Mobile filter dropdowns
+  const [showMobileCategoryDropdown, setShowMobileCategoryDropdown] = useState(false);
+  const [showMobilePriceDropdown, setShowMobilePriceDropdown] = useState(false);
+  const [showMobileSortDropdown, setShowMobileSortDropdown] = useState(false);
 
   // "/" keyboard shortcut to focus search
   useEffect(() => {
@@ -131,7 +132,7 @@ export default function MarketplaceBrowse() {
     { id: 'paid', label: 'Paid' },
   ];
 
-  // Load items with server-side filtering
+  // Load items with server-side filtering and pagination
   const loadItems = useCallback(
     async (params: {
       category: string;
@@ -139,27 +140,26 @@ export default function MarketplaceBrowse() {
       sort: SortOption;
       pricing: PricingFilter;
       pageNum: number;
-      append?: boolean;
     }) => {
-      const { category, search, sort, pricing, pageNum, append = false } = params;
+      const { category, search, sort, pricing, pageNum } = params;
 
       // Cancel any in-flight request
       abortControllerRef.current?.abort();
       abortControllerRef.current = new AbortController();
 
       // Set appropriate loading state
-      if (pageNum === 1 && !append) {
-        if (initialLoading) {
-          // Keep initial loading
-        } else {
+      if (pageNum === 1) {
+        if (!initialLoading) {
           setFiltering(true);
         }
       } else {
-        setLoadingMore(true);
+        setFiltering(true);
       }
 
       try {
         let data: MarketplaceItem[];
+        let resultTotal = 0;
+        let resultTotalPages = 1;
 
         if (itemType === 'agent') {
           // "community" is a creator_type filter, not a database category
@@ -183,31 +183,31 @@ export default function MarketplaceBrowse() {
           // Client-side filter for community agents
           if (isCommunityFilter) {
             data = data.filter((item) => item.creator_type === 'community');
-          }
-
-          if (pageNum === 1) {
-            setTotalCount(isCommunityFilter ? data.length : result.total || data.length);
-          }
-          setHasMore(!isCommunityFilter && data.length === ITEMS_PER_PAGE);
-        } else if (itemType === 'base') {
-          // Bases use client-side filtering
-          if (basesCache.length === 0) {
-            const result = await marketplaceApi.getAllBases();
-            const bases = (result.bases || []).map((base: Record<string, unknown>) => ({
-              ...base,
-              item_type: 'base' as ItemType,
-            }));
-            setBasesCache(bases);
-            data = filterBasesClientSide(bases, { category, search, sort, pricing });
+            resultTotal = data.length;
+            resultTotalPages = 1;
           } else {
-            data = filterBasesClientSide(basesCache, { category, search, sort, pricing });
+            resultTotal = result.total || data.length;
+            resultTotalPages = result.total_pages || 1;
           }
-          if (pageNum === 1) {
-            setTotalCount(data.length);
-          }
-          setHasMore(false);
+        } else if (itemType === 'base') {
+          const result = await marketplaceApi.getAllBases(
+            {
+              category: category !== 'all' ? category : undefined,
+              pricing_type: pricing !== 'all' ? pricing : undefined,
+              search: search || undefined,
+              sort,
+              page: pageNum,
+              limit: ITEMS_PER_PAGE,
+            },
+            { signal: abortControllerRef.current.signal }
+          );
+          data = (result.bases || []).map((base: Record<string, unknown>) => ({
+            ...base,
+            item_type: 'base' as ItemType,
+          }));
+          resultTotal = result.total || data.length;
+          resultTotalPages = result.total_pages || 1;
         } else if (itemType === 'theme') {
-          // Server-side filtering for themes
           const result = await marketplaceApi.getMarketplaceThemes({
             category: category !== 'all' ? category : undefined,
             pricing: pricing !== 'all' ? pricing : undefined,
@@ -220,25 +220,15 @@ export default function MarketplaceBrowse() {
             ...theme,
             item_type: 'theme' as ItemType,
           }));
-          if (pageNum === 1) {
-            setTotalCount(result.total || data.length);
-          }
-          setHasMore(data.length === ITEMS_PER_PAGE);
+          resultTotal = result.total || data.length;
+          resultTotalPages = result.total_pages || 1;
         } else {
           data = [];
-          setTotalCount(0);
-          setHasMore(false);
         }
 
-        if (append && pageNum > 1) {
-          setItems((prev) => {
-            const existingIds = new Set(prev.map((i) => i.id));
-            const newItems = data.filter((i) => !existingIds.has(i.id));
-            return [...prev, ...newItems];
-          });
-        } else {
-          setItems(data);
-        }
+        setItems(data);
+        setTotalCount(resultTotal);
+        setTotalPages(resultTotalPages);
       } catch (err) {
         // Silently ignore cancelled requests (both native AbortError and Axios CanceledError)
         if (isCanceledError(err)) {
@@ -248,67 +238,11 @@ export default function MarketplaceBrowse() {
         toast.error('Failed to load items');
       } finally {
         setInitialLoading(false);
-        setLoadingMore(false);
         setFiltering(false);
       }
     },
-    [itemType, basesCache, initialLoading]
+    [itemType, initialLoading]
   );
-
-  // Client-side filtering for bases
-  const filterBasesClientSide = (
-    bases: MarketplaceItem[],
-    filters: { category: string; search: string; sort: SortOption; pricing: PricingFilter }
-  ): MarketplaceItem[] => {
-    let filtered = [...bases];
-
-    if (filters.category !== 'all') {
-      filtered = filtered.filter(
-        (item) => item.category?.toLowerCase() === filters.category.toLowerCase()
-      );
-    }
-
-    if (filters.search) {
-      const query = filters.search.toLowerCase();
-      filtered = filtered.filter(
-        (item) =>
-          item.name.toLowerCase().includes(query) ||
-          item.description.toLowerCase().includes(query) ||
-          item.tags?.some((tag) => tag.toLowerCase().includes(query))
-      );
-    }
-
-    if (filters.pricing === 'free') {
-      filtered = filtered.filter((item) => item.pricing_type === 'free' || item.price === 0);
-    } else if (filters.pricing === 'paid') {
-      filtered = filtered.filter((item) => item.pricing_type !== 'free' && item.price > 0);
-    }
-
-    switch (filters.sort) {
-      case 'popular':
-        filtered.sort(
-          (a, b) => (b.downloads || b.usage_count || 0) - (a.downloads || a.usage_count || 0)
-        );
-        break;
-      case 'newest':
-        filtered.sort((a, b) => b.id.localeCompare(a.id));
-        break;
-      case 'name':
-        filtered.sort((a, b) => a.name.localeCompare(b.name));
-        break;
-      case 'rating':
-        filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-        break;
-      case 'price_asc':
-        filtered.sort((a, b) => (a.price || 0) - (b.price || 0));
-        break;
-      case 'price_desc':
-        filtered.sort((a, b) => (b.price || 0) - (a.price || 0));
-        break;
-    }
-
-    return filtered;
-  };
 
   // Debounced search
   const debouncedLoadItems = useMemo(
@@ -384,22 +318,22 @@ export default function MarketplaceBrowse() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCategory, searchQuery, sortBy, pricingFilter]);
 
-  // Infinite scroll
-  useEffect(() => {
-    if (inView && hasMore && !loadingMore && !initialLoading && !filtering) {
-      const nextPage = page + 1;
-      setPage(nextPage);
+  // Handle page change from Pagination component
+  const handlePageChange = useCallback(
+    (newPage: number) => {
+      setPage(newPage);
       loadItems({
         category: selectedCategory,
         search: searchQuery,
         sort: sortBy,
         pricing: pricingFilter,
-        pageNum: nextPage,
-        append: true,
+        pageNum: newPage,
       });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inView, hasMore, loadingMore, initialLoading, filtering]);
+      // Scroll to top of results
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    [selectedCategory, searchQuery, sortBy, pricingFilter, loadItems]
+  );
 
   const handleInstall = async (item: MarketplaceItem) => {
     if (item.is_purchased) {
@@ -564,67 +498,170 @@ export default function MarketplaceBrowse() {
               lg:pr-6
             `}
             >
-              {/* Mobile/Tablet: Horizontal filter row */}
+              {/* Mobile/Tablet: Styled pill-button dropdowns */}
               <div className="flex flex-wrap gap-2 lg:hidden mb-4">
-                {/* Category Select */}
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className={`
-                  px-3 py-2 rounded-lg text-sm border
-                  ${
-                    theme === 'light'
-                      ? 'bg-white border-black/10 text-black'
-                      : 'bg-white/5 border-white/10 text-white'
-                  }
-                `}
-                >
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.label}
-                    </option>
-                  ))}
-                </select>
+                {/* Category Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowMobileCategoryDropdown(!showMobileCategoryDropdown);
+                      setShowMobilePriceDropdown(false);
+                      setShowMobileSortDropdown(false);
+                    }}
+                    className={`
+                      flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors
+                      ${selectedCategory !== 'all'
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/30 text-[var(--primary)]'
+                        : theme === 'light'
+                          ? 'bg-white border-black/10 text-black/70 hover:border-black/20'
+                          : 'bg-white/5 border-white/10 text-white/70 hover:border-white/20'
+                      }
+                    `}
+                  >
+                    {categories.find((c) => c.id === selectedCategory)?.label || 'Category'}
+                    <CaretDown size={12} />
+                  </button>
+                  {showMobileCategoryDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowMobileCategoryDropdown(false)} />
+                      <div
+                        className={`
+                          absolute left-0 top-full mt-1 py-1 rounded-xl border shadow-xl z-50 min-w-[180px] max-h-64 overflow-y-auto
+                          ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
+                        `}
+                      >
+                        {categories.map((cat) => (
+                          <button
+                            key={cat.id}
+                            onClick={() => {
+                              setSelectedCategory(cat.id);
+                              setShowMobileCategoryDropdown(false);
+                            }}
+                            className={`
+                              w-full px-3 py-2 text-left text-sm transition-colors
+                              ${selectedCategory === cat.id
+                                ? 'text-[var(--primary)] font-medium'
+                                : theme === 'light'
+                                  ? 'text-black/70 hover:bg-black/5'
+                                  : 'text-white/70 hover:bg-white/5'
+                              }
+                            `}
+                          >
+                            {cat.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
 
-                {/* Price Select */}
-                <select
-                  value={pricingFilter}
-                  onChange={(e) => setPricingFilter(e.target.value as PricingFilter)}
-                  className={`
-                  px-3 py-2 rounded-lg text-sm border
-                  ${
-                    theme === 'light'
-                      ? 'bg-white border-black/10 text-black'
-                      : 'bg-white/5 border-white/10 text-white'
-                  }
-                `}
-                >
-                  {pricingOptions.map((opt) => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                {/* Price Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowMobilePriceDropdown(!showMobilePriceDropdown);
+                      setShowMobileCategoryDropdown(false);
+                      setShowMobileSortDropdown(false);
+                    }}
+                    className={`
+                      flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors
+                      ${pricingFilter !== 'all'
+                        ? 'bg-[var(--primary)]/10 border-[var(--primary)]/30 text-[var(--primary)]'
+                        : theme === 'light'
+                          ? 'bg-white border-black/10 text-black/70 hover:border-black/20'
+                          : 'bg-white/5 border-white/10 text-white/70 hover:border-white/20'
+                      }
+                    `}
+                  >
+                    {pricingOptions.find((o) => o.id === pricingFilter)?.label || 'Price'}
+                    <CaretDown size={12} />
+                  </button>
+                  {showMobilePriceDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowMobilePriceDropdown(false)} />
+                      <div
+                        className={`
+                          absolute left-0 top-full mt-1 py-1 rounded-xl border shadow-xl z-50 min-w-[140px]
+                          ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
+                        `}
+                      >
+                        {pricingOptions.map((opt) => (
+                          <button
+                            key={opt.id}
+                            onClick={() => {
+                              setPricingFilter(opt.id);
+                              setShowMobilePriceDropdown(false);
+                            }}
+                            className={`
+                              w-full px-3 py-2 text-left text-sm transition-colors
+                              ${pricingFilter === opt.id
+                                ? 'text-[var(--primary)] font-medium'
+                                : theme === 'light'
+                                  ? 'text-black/70 hover:bg-black/5'
+                                  : 'text-white/70 hover:bg-white/5'
+                              }
+                            `}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
 
-                {/* Sort Select */}
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as SortOption)}
-                  className={`
-                  px-3 py-2 rounded-lg text-sm border
-                  ${
-                    theme === 'light'
-                      ? 'bg-white border-black/10 text-black'
-                      : 'bg-white/5 border-white/10 text-white'
-                  }
-                `}
-                >
-                  {sortOptions.map((opt) => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                {/* Sort Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowMobileSortDropdown(!showMobileSortDropdown);
+                      setShowMobileCategoryDropdown(false);
+                      setShowMobilePriceDropdown(false);
+                    }}
+                    className={`
+                      flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-colors
+                      ${theme === 'light'
+                        ? 'bg-white border-black/10 text-black/70 hover:border-black/20'
+                        : 'bg-white/5 border-white/10 text-white/70 hover:border-white/20'
+                      }
+                    `}
+                  >
+                    {sortOptions.find((o) => o.id === sortBy)?.label || 'Sort'}
+                    <CaretDown size={12} />
+                  </button>
+                  {showMobileSortDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowMobileSortDropdown(false)} />
+                      <div
+                        className={`
+                          absolute left-0 top-full mt-1 py-1 rounded-xl border shadow-xl z-50 min-w-[180px]
+                          ${theme === 'light' ? 'bg-white border-black/10' : 'bg-[#1a1a1c] border-white/10'}
+                        `}
+                      >
+                        {sortOptions.map((opt) => (
+                          <button
+                            key={opt.id}
+                            onClick={() => {
+                              setSortBy(opt.id);
+                              setShowMobileSortDropdown(false);
+                            }}
+                            className={`
+                              w-full px-3 py-2 text-left text-sm transition-colors
+                              ${sortBy === opt.id
+                                ? 'text-[var(--primary)] font-medium'
+                                : theme === 'light'
+                                  ? 'text-black/70 hover:bg-black/5'
+                                  : 'text-white/70 hover:bg-white/5'
+                              }
+                            `}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Desktop: Sidebar filters */}
@@ -746,16 +783,16 @@ export default function MarketplaceBrowse() {
             </aside>
 
             {/* Main Content */}
-            <main className={`flex-1 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
+            <main className="flex-1">
               {initialLoading ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                   {Array.from({ length: 9 }).map((_, i) => (
                     <SkeletonCard key={i} />
                   ))}
                 </div>
-              ) : items.length > 0 || loadingMore ? (
+              ) : items.length > 0 ? (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 ${filtering ? 'opacity-60' : ''} transition-opacity`}>
                     {items.map((item) => (
                       <AgentCard
                         key={item.id}
@@ -764,13 +801,13 @@ export default function MarketplaceBrowse() {
                         isAuthenticated={isAuthenticated}
                       />
                     ))}
-                    {loadingMore &&
-                      Array.from({ length: 3 }).map((_, i) => (
-                        <SkeletonCard key={`loading-${i}`} />
-                      ))}
                   </div>
 
-                  {hasMore && !loadingMore && <div ref={loadMoreRef} className="h-10 mt-4" />}
+                  <Pagination
+                    currentPage={page}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                  />
                 </>
               ) : (
                 <div
@@ -814,8 +851,14 @@ export default function MarketplaceBrowse() {
         onSuccess={() => {
           setShowSubmitBaseModal(false);
           // Refresh the bases list
-          setBasesCache([]);
           setPage(1);
+          loadItems({
+            category: selectedCategory,
+            search: searchQuery,
+            sort: sortBy,
+            pricing: pricingFilter,
+            pageNum: 1,
+          });
         }}
       />
     </>

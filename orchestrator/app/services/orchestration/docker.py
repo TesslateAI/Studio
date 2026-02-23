@@ -1622,14 +1622,13 @@ class DockerOrchestrator(BaseOrchestrator):
             except Exception as e:
                 logger.debug(f"[DOCKER] Could not read config from cache: {e}")
 
-        # Determine port
-        container_port = 3000  # Default
+        # Determine port: TESSLATE.md runtime override > container.effective_port (DB)
         if base_config and base_config.port:
             container_port = base_config.port
             logger.info(f"[DOCKER] Using port from TESSLATE.md: {container_port}")
-        elif container.internal_port:
-            container_port = container.internal_port
-            logger.info(f"[DOCKER] Using port from database: {container_port}")
+        else:
+            container_port = container.effective_port
+            logger.info(f"[DOCKER] Using effective_port from database: {container_port}")
 
         # Generate startup command
         startup_command = generate_startup_command(base_config)

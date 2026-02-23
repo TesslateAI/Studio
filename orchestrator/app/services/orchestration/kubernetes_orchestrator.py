@@ -851,8 +851,8 @@ fi
             # Read TESSLATE.md directly from the file-manager pod
             base_config = await self._get_tesslate_config_from_pod(namespace, container_directory)
 
-            # Determine port and startup command from base config
-            port = container.internal_port or (base_config.port if base_config else 3000)
+            # Determine port: TESSLATE.md runtime override > container.effective_port (DB)
+            port = (base_config.port if base_config and base_config.port else None) or container.effective_port
 
             # Get startup command as a string for tmux (convert newlines to &&)
             if base_config and base_config.start_command:

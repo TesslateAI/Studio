@@ -137,7 +137,7 @@ class TestTmuxSessionManagerInit:
         """Test get_strategy returns correct strategy for base slug."""
         manager = TmuxSessionManager()
 
-        assert isinstance(manager.get_strategy("nextjs-15"), NextJSStrategy)
+        assert isinstance(manager.get_strategy("nextjs-16"), NextJSStrategy)
         assert isinstance(manager.get_strategy("vite-react-fastapi"), ViteReactFastAPIStrategy)
         assert isinstance(manager.get_strategy("vite-react-go"), ViteReactGoStrategy)
         assert isinstance(manager.get_strategy("expo-default"), ExpoStrategy)
@@ -157,7 +157,7 @@ class TestGenerateStartupCommand:
     def test_generate_startup_command_nextjs(self):
         """Test generate_startup_command for NextJS."""
         manager = TmuxSessionManager()
-        command = manager.generate_startup_command("nextjs-15", 3000)
+        command = manager.generate_startup_command("nextjs-16", 3000)
 
         assert "tmux new-session" in command
         assert "npm" in command
@@ -496,7 +496,7 @@ class TestTmuxDeterminism:
         """Verify same base slug always returns same strategy type."""
         manager = TmuxSessionManager()
 
-        assert isinstance(manager.get_strategy("nextjs-15"), NextJSStrategy)
+        assert isinstance(manager.get_strategy("nextjs-16"), NextJSStrategy)
         assert isinstance(manager.get_strategy("generic"), GenericStrategy)
 
     @pytest.mark.parametrize("run_number", range(5))
@@ -504,8 +504,8 @@ class TestTmuxDeterminism:
         """Verify same inputs always generate same command."""
         manager = TmuxSessionManager()
 
-        command1 = manager.generate_startup_command("nextjs-15", 3000)
-        command2 = manager.generate_startup_command("nextjs-15", 3000)
+        command1 = manager.generate_startup_command("nextjs-16", 3000)
+        command2 = manager.generate_startup_command("nextjs-16", 3000)
 
         assert command1 == command2
 

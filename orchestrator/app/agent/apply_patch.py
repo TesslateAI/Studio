@@ -1,12 +1,12 @@
-"""Apply patch implementation matching Codex CLI's exact format.
+"""Apply patch implementation for the structured patch format.
 
-Verbatim port of minimal-codex/apply_patch.py. Pure algorithm — zero I/O.
+Pure algorithm — zero I/O.
 Container file I/O is handled by apply_patch_tool.py.
 
-Implements the exact algorithms from Codex's Rust implementation:
-- seek_sequence.rs: 4-level fuzzy matching
-- parser.rs: Lenient heredoc handling
-- lib.rs: compute_replacements + apply_replacements (reverse order)
+Implements:
+- 4-level fuzzy matching
+- Lenient heredoc handling
+- compute_replacements + apply_replacements (reverse order)
 
 Supports:
 - *** Add File: path/to/new.py
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # ============================================================================
-# Patch Markers (exact Codex constants from parser.rs)
+# Patch Markers
 # ============================================================================
 
 BEGIN_PATCH_MARKER = "*** Begin Patch"
@@ -37,7 +37,7 @@ EMPTY_CHANGE_CONTEXT_MARKER = "@@"
 
 
 # ============================================================================
-# Unicode Normalization (exact match to Codex's seek_sequence.rs)
+# Unicode Normalization
 # ============================================================================
 
 UNICODE_NORMALIZATIONS = {
@@ -77,7 +77,7 @@ UNICODE_NORMALIZATIONS = {
 
 
 def normalize_unicode(s: str) -> str:
-    """Normalize Unicode characters for fuzzy matching (exact Codex impl)."""
+    """Normalize Unicode characters for fuzzy matching."""
     result = []
     for c in s.strip():
         result.append(UNICODE_NORMALIZATIONS.get(c, c))
@@ -85,7 +85,7 @@ def normalize_unicode(s: str) -> str:
 
 
 # ============================================================================
-# seek_sequence (exact match to Codex's seek_sequence.rs)
+# seek_sequence — 4-level fuzzy line matching
 # ============================================================================
 
 
@@ -97,7 +97,7 @@ def seek_sequence(
 ) -> int | None:
     """Find pattern sequence in lines with decreasing strictness.
 
-    Matches Codex's seek_sequence.rs exactly:
+    Matching levels (tried in order):
     1. Exact match
     2. Trim trailing whitespace (rstrip)
     3. Trim both sides
@@ -160,7 +160,7 @@ def seek_sequence(
 
 
 # ============================================================================
-# Patch Data Classes (from parser.rs)
+# Patch Data Classes
 # ============================================================================
 
 
@@ -200,7 +200,7 @@ class UpdateFile(Hunk):
 
 
 # ============================================================================
-# Patch Parser (exact match to Codex's parser.rs)
+# Patch Parser
 # ============================================================================
 
 
@@ -245,7 +245,7 @@ def _check_patch_boundaries_strict(lines: list[str]) -> bool:
 
 
 def _check_patch_boundaries_lenient(lines: list[str]) -> list[str] | None:
-    """Handle heredoc wrappers: <<EOF, <<'EOF', <<"EOF" (from parser.rs)"""
+    """Handle heredoc wrappers: <<EOF, <<'EOF', <<"EOF"."""
     if len(lines) < 4:
         return None
 
@@ -370,7 +370,7 @@ def _parse_update_chunk(
 
 
 # ============================================================================
-# compute_replacements + apply_replacements (exact match to Codex's lib.rs)
+# compute_replacements + apply_replacements
 # ============================================================================
 
 
@@ -466,7 +466,7 @@ def apply_patch_to_text(original_text: str, chunks: list[UpdateFileChunk]) -> st
     """
     original_lines = original_text.split("\n")
 
-    # Drop trailing empty line (matches Codex behavior)
+    # Drop trailing empty line from split
     if original_lines and original_lines[-1] == "":
         original_lines.pop()
 

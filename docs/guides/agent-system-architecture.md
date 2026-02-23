@@ -1121,9 +1121,10 @@ flowchart TB
     subgraph OpenAI["OpenAIAdapter"]
         O1["OpenAI API"]
         O2["OpenRouter"]
-        O3["Cerebras"]
-        O4["Together AI"]
-        O5["LiteLLM Proxy"]
+        O3["Groq / Together AI / DeepSeek"]
+        O4["Fireworks AI"]
+        O5["Z.AI (ZhipuAI)"]
+        O6["LiteLLM Proxy"]
     end
 
     subgraph Anthropic["AnthropicAdapter"]
@@ -1139,14 +1140,17 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Start([Model Name]) --> Check{Provider?}
+    Start([Model Name]) --> Prefix{Check Prefix}
 
-    Check -->|openrouter/*| OpenRouter["Use OpenRouter API<br/>with user's key"]
-    Check -->|anthropic/*| Anthropic["Use Anthropic API<br/>via LiteLLM"]
-    Check -->|Other| LiteLLM["Use LiteLLM Proxy<br/>with user's litellm_api_key"]
+    Prefix -->|builtin/*| LiteLLM["Use LiteLLM Proxy<br/>with user's litellm_api_key"]
+    Prefix -->|custom/*| Custom["Use Custom Provider API<br/>with user's key + base_url"]
+    Prefix -->|Provider slug in<br/>BUILTIN_PROVIDERS| BYOK["Use Provider API<br/>(OpenRouter, OpenAI, Groq,<br/>Z.AI, etc.) with user's key"]
+    Prefix -->|Unknown prefix<br/>e.g. z-ai/glm-5| DB["DB Lookup: UserCustomModel<br/>→ find parent provider"]
+    Prefix -->|No slash| LiteLLM
+    DB -->|Found under openrouter| BYOK
 
-    OpenRouter --> Client[Create AsyncOpenAI client]
-    Anthropic --> Client
+    BYOK --> Client[Create AsyncOpenAI client]
+    Custom --> Client
     LiteLLM --> Client
 
     Client --> Adapter[Create ModelAdapter]

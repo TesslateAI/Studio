@@ -115,7 +115,7 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
   const [isAutoOpen, setIsAutoOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['base', 'service', 'deployment', 'workflow']));
   const dropdownRef = useRef<HTMLDivElement>(null);

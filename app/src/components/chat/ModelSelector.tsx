@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Cpu, MagnifyingGlass, CaretDown, Check, Lightning } from '@phosphor-icons/react';
 import { marketplaceApi } from '../../lib/api';
 import { type ChatAgent } from '../../types/chat';
@@ -30,6 +31,14 @@ function rawModelName(id: string): string {
 /** Compact display for the trigger button */
 function formatButtonLabel(model: ModelInfo): string {
   return model.name ? rawModelName(model.name) : rawModelName(model.id);
+}
+
+/** Convert USD per 1M tokens to credits (1 credit = $0.01) */
+function formatCredits(usdPer1M: number): string {
+  const credits = usdPer1M * 100;
+  if (credits === 0) return '0';
+  if (Number.isInteger(credits)) return credits.toLocaleString();
+  return credits.toFixed(1);
 }
 
 /** Get a friendly provider label */
@@ -64,22 +73,57 @@ export function ModelSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
   const lastFetchedAt = useRef<number>(0);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const activeModel = currentAgent.selectedModel || currentAgent.model || '';
   const isReadOnly = currentAgent.sourceType === 'closed' && !currentAgent.isCustom;
 
+  // Position state for portal-based dropdown
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Recalculate position when open
+  useEffect(() => {
+    if (!isOpen || !triggerRef.current) return;
+
+    const updatePos = () => {
+      const rect = triggerRef.current!.getBoundingClientRect();
+      if (dropUp) {
+        setDropdownPos({ top: rect.top - 8, left: rect.left });
+      } else {
+        setDropdownPos({ top: rect.bottom + 8, left: rect.left });
+      }
+    };
+
+    updatePos();
+
+    // Reposition on scroll/resize (any ancestor could scroll)
+    window.addEventListener('scroll', updatePos, true);
+    window.addEventListener('resize', updatePos);
+    return () => {
+      window.removeEventListener('scroll', updatePos, true);
+      window.removeEventListener('resize', updatePos);
+    };
+  }, [isOpen, dropUp]);
+
   // Close dropdown on click outside or window losing focus
   useEffect(() => {
     if (!isOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        triggerRef.current &&
+        !triggerRef.current.contains(target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
@@ -121,6 +165,7 @@ export function ModelSelector({
 
     if (!hasFetched || isStale) {
       if (!hasFetched) setIsLoading(true);
+      setFetchError(false);
       try {
         const data = await marketplaceApi.getAvailableModels();
         const raw: unknown[] = Array.isArray(data) ? data : data.models || [];
@@ -148,6 +193,7 @@ export function ModelSelector({
         lastFetchedAt.current = Date.now();
       } catch (error) {
         console.error('Failed to fetch models:', error);
+        setFetchError(true);
       } finally {
         setIsLoading(false);
       }
@@ -232,9 +278,129 @@ export function ModelSelector({
   // No model info at all — hide the selector
   if (!activeModel) return null;
 
+  // Dropdown rendered via portal to escape overflow:auto ancestors
+  const dropdownContent =
+    isOpen && !isReadOnly && dropdownPos
+      ? createPortal(
+          <div
+            ref={dropdownRef}
+            style={{
+              position: 'fixed',
+              top: dropUp ? undefined : dropdownPos.top,
+              bottom: dropUp ? window.innerHeight - dropdownPos.top : undefined,
+              left: dropdownPos.left,
+            }}
+            className="bg-[rgba(16,16,18,0.98)] backdrop-blur-xl border border-white/[0.08] rounded-xl w-[460px] h-[400px] z-[10000] shadow-2xl shadow-black/40 flex flex-col overflow-hidden"
+          >
+            {/* Search bar */}
+            <div className="px-3 pt-3 pb-2 flex-shrink-0">
+              <div className="relative">
+                <MagnifyingGlass
+                  size={15}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30"
+                />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search models..."
+                  className="w-full pl-8 pr-3 py-2 bg-white/[0.06] border border-white/[0.08] rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-[var(--primary)]/40 transition-colors"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setIsOpen(false);
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="h-px bg-white/[0.06] flex-shrink-0" />
+
+            {/* Main content: tabs on the left, models on the right */}
+            <div className="flex flex-1 min-h-0">
+              {/* Provider tabs — vertical sidebar */}
+              {providers.length > 1 && (
+                <div className="w-[130px] flex-shrink-0 border-r border-white/[0.06] overflow-y-auto py-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(null)}
+                    className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
+                      activeTab === null
+                        ? 'bg-[var(--primary)]/15 text-[var(--primary)] border-r-2 border-[var(--primary)]'
+                        : 'text-white/50 hover:bg-white/[0.04] hover:text-white/70'
+                    }`}
+                  >
+                    All Models
+                  </button>
+                  {providers.map((p) => (
+                    <button
+                      type="button"
+                      key={p.id}
+                      onClick={() => setActiveTab(activeTab === p.id ? null : p.id)}
+                      className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
+                        activeTab === p.id
+                          ? 'bg-[var(--primary)]/15 text-[var(--primary)] border-r-2 border-[var(--primary)]'
+                          : 'text-white/50 hover:bg-white/[0.04] hover:text-white/70'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Model list */}
+              <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
+                {isLoading ? (
+                  <div className="px-4 py-8 text-center">
+                    <div className="inline-block w-5 h-5 border-2 border-white/20 border-t-[var(--primary)] rounded-full animate-spin mb-2" />
+                    <div className="text-xs text-white/40">Loading models...</div>
+                  </div>
+                ) : fetchError ? (
+                  <div className="px-4 py-8 text-center">
+                    <div className="text-sm text-white/40 mb-2">Failed to load models</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHasFetched(false);
+                        handleToggle();
+                      }}
+                      className="text-xs text-[var(--primary)] hover:underline"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : filteredModels.length === 0 ? (
+                  <div className="px-4 py-8 text-center">
+                    <MagnifyingGlass size={24} className="mx-auto mb-2 text-white/20" />
+                    <div className="text-sm text-white/40">
+                      {search.trim() ? 'No models match your search' : 'No models available'}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-1">
+                    {filteredModels.map((model) => (
+                      <ModelRow
+                        key={model.id}
+                        model={model}
+                        isActive={model.id === activeModel}
+                        onSelect={handleSelect}
+                        showProvider={!activeTab}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
-    <div className="relative" ref={dropdownRef} onFocus={(e) => e.stopPropagation()}>
+    <div className="relative" onFocus={(e) => e.stopPropagation()}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={(e) => {
           e.stopPropagation();
@@ -274,103 +440,7 @@ export function ModelSelector({
         )}
       </button>
 
-      {isOpen && !isReadOnly && (
-        <div
-          className={`
-            absolute ${dropUp ? 'bottom-full mb-2' : 'top-full mt-2'} left-0
-            bg-[rgba(16,16,18,0.98)] backdrop-blur-xl
-            border border-white/[0.08] rounded-xl
-            w-[460px] h-[400px] z-[10000]
-            shadow-2xl shadow-black/40
-            flex flex-col overflow-hidden
-          `}
-        >
-          {/* Search bar */}
-          <div className="px-3 pt-3 pb-2 flex-shrink-0">
-            <div className="relative">
-              <MagnifyingGlass
-                size={15}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30"
-              />
-              <input
-                ref={searchRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search models..."
-                className="w-full pl-8 pr-3 py-2 bg-white/[0.06] border border-white/[0.08] rounded-lg text-sm text-white placeholder-white/30 focus:outline-none focus:border-[var(--primary)]/40 transition-colors"
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') setIsOpen(false);
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="h-px bg-white/[0.06] flex-shrink-0" />
-
-          {/* Main content: tabs on the left, models on the right */}
-          <div className="flex flex-1 min-h-0">
-            {/* Provider tabs — vertical sidebar */}
-            {providers.length > 1 && (
-              <div className="w-[130px] flex-shrink-0 border-r border-white/[0.06] overflow-y-auto py-1">
-                <button
-                  onClick={() => setActiveTab(null)}
-                  className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
-                    activeTab === null
-                      ? 'bg-[var(--primary)]/15 text-[var(--primary)] border-r-2 border-[var(--primary)]'
-                      : 'text-white/50 hover:bg-white/[0.04] hover:text-white/70'
-                  }`}
-                >
-                  All Models
-                </button>
-                {providers.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setActiveTab(activeTab === p.id ? null : p.id)}
-                    className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
-                      activeTab === p.id
-                        ? 'bg-[var(--primary)]/15 text-[var(--primary)] border-r-2 border-[var(--primary)]'
-                        : 'text-white/50 hover:bg-white/[0.04] hover:text-white/70'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Model list */}
-            <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
-              {isLoading ? (
-                <div className="px-4 py-8 text-center">
-                  <div className="inline-block w-5 h-5 border-2 border-white/20 border-t-[var(--primary)] rounded-full animate-spin mb-2" />
-                  <div className="text-xs text-white/40">Loading models...</div>
-                </div>
-              ) : filteredModels.length === 0 ? (
-                <div className="px-4 py-8 text-center">
-                  <MagnifyingGlass size={24} className="mx-auto mb-2 text-white/20" />
-                  <div className="text-sm text-white/40">
-                    {search.trim() ? 'No models match your search' : 'No models available'}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-1">
-                  {filteredModels.map((model) => (
-                    <ModelRow
-                      key={model.id}
-                      model={model}
-                      isActive={model.id === activeModel}
-                      onSelect={handleSelect}
-                      showProvider={!activeTab}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {dropdownContent}
     </div>
   );
 }
@@ -426,7 +496,7 @@ function ModelRow({
               </span>
             ) : (
               <span className="text-white/30">
-                ${model.pricing.input.toFixed(2)} / ${model.pricing.output.toFixed(2)} per 1M
+                {formatCredits(model.pricing.input)} / {formatCredits(model.pricing.output)} credits per 1M
               </span>
             )}
           </div>

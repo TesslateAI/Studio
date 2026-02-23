@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster, ToastBar } from 'react-hot-toast';
 import { useState, useEffect, useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ThemeProvider, useTheme } from './theme';
@@ -237,7 +237,62 @@ function AppContent() {
             },
           },
         }}
-      />
+      >
+        {(t) => (
+          <ToastBar
+            toast={t}
+            style={{
+              padding: 0,
+              background: 'none',
+              border: 'none',
+              boxShadow: 'none',
+            }}
+          >
+            {({ icon, message }) => (
+              <>
+                {icon}
+                <div style={{ flex: 1 }}>{message}</div>
+                {t.type !== 'loading' && (
+                  <button
+                    onClick={() => toast.dismiss(t.id)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-secondary, #999)',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '4px',
+                      flexShrink: 0,
+                      transition: 'color 0.15s, background 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = 'var(--text)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = 'var(--text-secondary, #999)';
+                      e.currentTarget.style.background = 'none';
+                    }}
+                    aria-label="Dismiss notification"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path
+                        d="M3 3L11 11M11 3L3 11"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </>
+            )}
+          </ToastBar>
+        )}
+      </Toaster>
       <Routes>
         <Route path="/" element={<NewLandingPage />} />
         <Route path="/landing-old" element={<Landing />} />

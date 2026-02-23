@@ -150,6 +150,13 @@ body.light-mode .dark-mode-only {
   box-sizing: border-box;
 }
 
+/* Native <select>/<option> elements don't inherit CSS variables well.
+   Force dark backgrounds + light text so dropdowns aren't white-on-white. */
+select option {
+  background-color: var(--surface, #1a1a1c);
+  color: var(--text, #ffffff);
+}
+
 html,
 body,
 #root {

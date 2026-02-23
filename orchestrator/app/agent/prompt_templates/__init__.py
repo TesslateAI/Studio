@@ -2,8 +2,7 @@
 Prompt Templates for TesslateAgent
 
 Contains system prompts, plan mode guidance, and subagent prompts
-ported from minimal-codex and adapted for Tesslate Studio's
-container-based, async architecture.
+adapted for Tesslate Studio's container-based, async architecture.
 """
 
 import logging

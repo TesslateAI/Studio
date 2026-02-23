@@ -403,7 +403,7 @@ async def graph_container_status_executor(
                     "directory": container.directory,
                     "status": "running" if container_status.get("running") else "stopped",
                     "url": container_status.get("url"),
-                    "port": container.port,
+                    "port": container.effective_port,
                 }
             )
 

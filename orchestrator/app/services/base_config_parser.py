@@ -270,7 +270,7 @@ def get_base_config_from_cache(base_slug: str) -> BaseConfig | None:
     Read and parse TESSLATE.md from base cache volume (marketplace bases).
 
     Args:
-        base_slug: Base slug (e.g., 'nextjs-15', 'vite-react-fastapi')
+        base_slug: Base slug (e.g., 'nextjs-16', 'vite-react-fastapi')
 
     Returns:
         BaseConfig object or None if not found

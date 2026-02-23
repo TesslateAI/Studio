@@ -19,8 +19,6 @@ import {
   Stop,
   Code,
   FlowArrow,
-  Sun,
-  Moon,
   List,
   Storefront,
   BookOpen,
@@ -105,7 +103,7 @@ interface ContainerConnection {
 const ProjectGraphCanvasInner = () => {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const reactFlowInstance = useReactFlow();
@@ -1700,21 +1698,10 @@ const ProjectGraphCanvasInner = () => {
 
   const rightSidebarItems = [
     {
-      icon: theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />,
-      title: 'Toggle Theme',
-      onClick: toggleTheme,
-    },
-    {
       icon: <BookOpen size={18} />,
       title: 'Notes',
       onClick: () => togglePanel('notes'),
       active: activePanel === 'notes',
-    },
-    {
-      icon: <GitBranch size={18} />,
-      title: 'GitHub Sync',
-      onClick: () => togglePanel('github'),
-      active: activePanel === 'github',
     },
     {
       icon: <Storefront size={18} />,

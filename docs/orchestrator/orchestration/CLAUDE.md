@@ -331,6 +331,35 @@ await orchestrator.read_file(
 )
 ```
 
+## Port Resolution
+
+Use `container.effective_port` everywhere you need "the port the dev server listens on." Never write ad-hoc fallback chains like `container.internal_port or container.port or 3000`.
+
+Resolution order (defined in `Container.effective_port` property on the model):
+1. `internal_port` — set during project creation from TESSLATE.md / framework detection
+2. `port` — the exposed/mapped port (sometimes the same)
+3. `3000` — last-resort default
+
+At container startup, the Docker and K8s orchestrators also check TESSLATE.md at runtime as a live override (in case the file changed after project creation). The pattern is: `base_config.port if available, else container.effective_port`.
+
+## Agent-Assisted Container Startup
+
+Community bases (external repos without `TESSLATE.md`) often fail the default `npm install && npm run dev` startup — Django, Go, Rust, Laravel, etc. won't start on port 3000 with that command.
+
+**How it works**:
+1. K8s startup/liveness probes are exec-based (`tmux has-session -t main`), not HTTP. Container stays alive even if the dev server never starts.
+2. Docker doesn't kill containers on health check failure (already fine).
+3. Frontend health check times out after ~120s → shows "Container needs setup" UI with an "Ask Agent to start it" button.
+4. Button prefills the chat with: "Use the running tmux process to get this up and running. The port for the preview url is {port}."
+5. Agent reads the project files, figures out the correct startup command, and runs it in the tmux session on the correct port.
+
+**Key files**:
+- `kubernetes/helpers.py` — exec-based startup/liveness probes
+- `app/src/hooks/useContainerStartup.ts` — `HEALTH_CHECK_TIMEOUT:` error prefix
+- `app/src/components/ContainerLoadingOverlay.tsx` — "Ask Agent" UI for health check timeouts
+- `app/src/pages/Project.tsx` — `prefillChatMessage` state wiring
+- `app/src/components/chat/ChatInput.tsx` — `prefillMessage` prop to set input value
+
 ## Critical Implementation Details
 
 ### Docker Mode

@@ -4,7 +4,7 @@ Container Startup Timing Test
 End-to-end test that measures the complete container startup flow:
 1. Sign in as a new user
 2. Create a new project
-3. Add a Next.js 15 container
+3. Add a Next.js 16 container
 4. Verify files are initialized
 5. Start the container
 6. Poll until HTTP 200 with valid HTML
@@ -150,7 +150,7 @@ class TestContainerStartupTiming:
     async def _get_nextjs_base_id(
         self, client: httpx.AsyncClient, base_url: str, token: str, base_slug: str
     ) -> str:
-        """Get the Next.js 15 base ID from marketplace."""
+        """Get the Next.js 16 base ID from marketplace."""
         self.observer.record("marketplace_lookup_start")
 
         # Get all bases
@@ -208,7 +208,7 @@ class TestContainerStartupTiming:
             f"{base_url}/api/projects/{project_slug}/containers",
             headers={"Authorization": f"Bearer {token}"},
             json={
-                "name": "Next.js 15",
+                "name": "Next.js 16",
                 "project_id": project_id,
                 "base_id": base_id,
                 "container_type": "base",
@@ -594,8 +594,8 @@ class TestContainerStartupTiming:
         This test:
         1. Registers/logs in as a test user
         2. Creates a new project
-        3. Finds the Next.js 15 base in marketplace
-        4. Adds a Next.js 15 container
+        3. Finds the Next.js 16 base in marketplace
+        4. Adds a Next.js 16 container
         5. Starts the container
         6. Polls until port 3000 returns valid HTML
         7. Reports timing metrics for each phase

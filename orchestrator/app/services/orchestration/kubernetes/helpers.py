@@ -334,15 +334,17 @@ def create_container_deployment(
         resources=client.V1ResourceRequirements(
             requests={"memory": "256Mi", "cpu": "100m"}, limits={"memory": "1Gi", "cpu": "1000m"}
         ),
-        # Startup probe - wait for dev server to be ready
+        # Startup probe - check tmux session exists (passes fast, doesn't require dev server)
+        # Uses exec instead of HTTP so containers stay alive even if dev server never starts
+        # (e.g. community bases with wrong startup command). Agent can fix it later.
         startup_probe=client.V1Probe(
-            http_get=client.V1HTTPGetAction(path="/", port=port),
+            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
             initial_delay_seconds=5,
             period_seconds=3,
             timeout_seconds=5,
-            failure_threshold=30,  # Allow up to 90 seconds for npm install
+            failure_threshold=30,
         ),
-        # Readiness probe
+        # Readiness probe - HTTP GET (controls traffic routing, NOT container lifecycle)
         readiness_probe=client.V1Probe(
             http_get=client.V1HTTPGetAction(path="/", port=port),
             initial_delay_seconds=5,
@@ -350,9 +352,9 @@ def create_container_deployment(
             timeout_seconds=3,
             failure_threshold=3,
         ),
-        # Liveness probe
+        # Liveness probe - check tmux exists (keeps container alive regardless of dev server state)
         liveness_probe=client.V1Probe(
-            http_get=client.V1HTTPGetAction(path="/", port=port),
+            _exec=client.V1ExecAction(command=["sh", "-c", "tmux has-session -t main 2>/dev/null"]),
             initial_delay_seconds=30,
             period_seconds=10,
             timeout_seconds=5,

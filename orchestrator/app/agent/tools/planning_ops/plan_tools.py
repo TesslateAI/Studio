@@ -2,8 +2,8 @@
 Plan Tools
 
 save_plan and update_plan tools for the Tesslate Agent's planning workflow.
-1:1 port of minimal-codex's plan tools. These are NOT in DANGEROUS_TOOLS
-(safe to use in plan mode — they're how the agent records its plan).
+These are NOT in DANGEROUS_TOOLS (safe to use in plan mode — they're how
+the agent records its plan).
 
 save_plan: Called by Plan subagent or main agent in plan mode to save a new plan
 update_plan: Called by main agent during execution to track step progress

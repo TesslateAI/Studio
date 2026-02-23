@@ -222,13 +222,12 @@ spec:
               memory: "1Gi"
               cpu: "1000m"
           startupProbe:
-            httpGet:
-              path: /
-              port: 3000
+            exec:
+              command: ["sh", "-c", "tmux has-session -t main 2>/dev/null"]
             initialDelaySeconds: 5
             periodSeconds: 3
             timeoutSeconds: 5
-            failureThreshold: 30  # Allow 90 seconds for npm install
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /
@@ -238,9 +237,8 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
-            httpGet:
-              path: /
-              port: 3000
+            exec:
+              command: ["sh", "-c", "tmux has-session -t main 2>/dev/null"]
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -276,10 +274,10 @@ exec tail -f /dev/null
   tmux send-keys -t main 'npm run dev' Enter
   ```
 
-**Probes**:
-- **Startup probe**: Waits up to 90 seconds for dev server to start (allows time for npm install)
-- **Readiness probe**: Checks if server is ready to accept traffic
-- **Liveness probe**: Restarts container if server crashes
+**Probes** (exec-based startup/liveness, HTTP readiness):
+- **Startup probe** (exec): Checks `tmux has-session -t main` — passes as soon as tmux is running. Does NOT require dev server to be responding. This prevents CrashLoopBackOff for community bases that don't have TESSLATE.md and may fail the default startup command.
+- **Readiness probe** (HTTP): Checks if dev server is actually responding on the container port. Controls traffic routing only — does NOT affect container lifecycle. Pod stays alive even if readiness fails.
+- **Liveness probe** (exec): Checks `tmux has-session -t main` — keeps container alive as long as the tmux session exists, regardless of whether the dev server is running. This lets the AI agent exec into the container and fix startup issues.
 
 **No Init Containers**: Files already exist on PVC from `initialize_container_files()`. No need for init containers!
 

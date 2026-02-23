@@ -162,7 +162,7 @@ class ToolRegistry:
             "write_file",
             "patch_file",
             "multi_edit",  # File modifications
-            "apply_patch",  # Codex-style unified patches
+            "apply_patch",  # Unified patches
             "bash_exec",
             "shell_exec",
             "shell_open",  # Shell operations

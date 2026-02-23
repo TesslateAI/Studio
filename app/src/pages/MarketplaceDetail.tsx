@@ -5,6 +5,7 @@ import {
   Check,
   Download,
   GitFork,
+  GithubLogo,
   Globe,
   File,
   FileText,
@@ -18,11 +19,16 @@ import {
   X,
   ShieldCheck,
   Users,
+  Tag,
+  ArrowRight,
+  GitCommit,
+  GitBranch,
 } from '@phosphor-icons/react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import {
   StatsBar,
   type MarketplaceItem,
+  parseGitHubRepo,
   AgentCard,
   ReviewCard,
   RatingPicker,
@@ -37,6 +43,20 @@ import {
   generateBreadcrumbStructuredData,
 } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
+
+function formatRelativeDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays < 1) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  if (diffDays < 30) return `${diffDays} days ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `${diffMonths} month${diffMonths > 1 ? 's' : ''} ago`;
+  const diffYears = Math.floor(diffDays / 365);
+  return `${diffYears} year${diffYears > 1 ? 's' : ''} ago`;
+}
 
 // Tool icons mapping
 const toolIcons: Record<string, { icon: React.ReactNode; label: string }> = {
@@ -76,6 +96,16 @@ export default function MarketplaceDetail() {
   const [reviewComment, setReviewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
   const [editingReview, setEditingReview] = useState(false);
+
+  // Version state for bases
+  const [versions, setVersions] = useState<Array<{
+    tag: string;
+    sha: string;
+    date: string | null;
+    url: string;
+  }>>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [versionsDefaultBranch, setVersionsDefaultBranch] = useState<string | null>(null);
 
   useEffect(() => {
     if (slug) {
@@ -119,15 +149,23 @@ export default function MarketplaceDetail() {
     } catch {
       // Try base if agent not found
       try {
-        const bases = await marketplaceApi.getAllBases();
-        const base = (bases.bases || []).find((b: Record<string, unknown>) => b.slug === slug);
-        if (base) {
-          setItem({ ...base, item_type: 'base' });
-          const related = (bases.bases || [])
-            .filter((b: Record<string, unknown>) => b.slug !== slug)
-            .slice(0, 4)
-            .map((b: Record<string, unknown>) => ({ ...b, item_type: 'base' }));
-          setRelatedItems(related);
+        const baseDetail = await marketplaceApi.getBaseDetails(slug!);
+        if (baseDetail) {
+          setItem({ ...baseDetail, item_type: 'base' });
+          // Load related bases from same category
+          try {
+            const relatedResult = await marketplaceApi.getAllBases({
+              category: baseDetail.category || undefined,
+              limit: 5,
+            });
+            const related = (relatedResult.bases || [])
+              .filter((b: Record<string, unknown>) => b.slug !== slug)
+              .slice(0, 4)
+              .map((b: Record<string, unknown>) => ({ ...b, item_type: 'base' }));
+            setRelatedItems(related);
+          } catch {
+            // Non-blocking: related items are optional
+          }
         } else {
           toast.error('Extension not found');
           navigate('/marketplace');
@@ -326,6 +364,28 @@ export default function MarketplaceDetail() {
     }
   }, [item?.id]);
 
+  // Load versions for base items with a git repo
+  useEffect(() => {
+    if (item?.item_type === 'base' && item?.git_repo_url && slug) {
+      setLoadingVersions(true);
+      marketplaceApi.getBaseVersions(slug)
+        .then((data) => {
+          setVersions(data.versions || []);
+          setVersionsDefaultBranch(data.default_branch || null);
+        })
+        .catch(() => {
+          // Non-blocking: versions are optional
+          setVersions([]);
+        })
+        .finally(() => setLoadingVersions(false));
+    }
+  }, [item?.id, item?.item_type]);
+
+  // Build marketplace back URL preserving the tab the user came from
+  const marketplaceBackUrl = item?.item_type
+    ? `/marketplace?type=${item.item_type}`
+    : '/marketplace';
+
   const creatorId = item?.forked_by_user_id || item?.created_by_user_id;
 
   if (loading) {
@@ -399,7 +459,7 @@ export default function MarketplaceDetail() {
           <div className="max-w-5xl mx-auto px-6 md:px-12">
             <div className="h-14 flex items-center gap-4">
               <button
-                onClick={() => navigate('/marketplace')}
+                onClick={() => navigate(marketplaceBackUrl)}
                 className={`
                 flex items-center gap-2 text-sm font-medium transition-colors
                 ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}
@@ -429,6 +489,8 @@ export default function MarketplaceDetail() {
                     alt={item.name}
                     className="w-full h-full object-cover"
                   />
+                ) : item.git_repo_url && parseGitHubRepo(item.git_repo_url) ? (
+                  <GithubLogo size={48} weight="fill" className={theme === 'light' ? 'text-black/70' : 'text-white/70'} />
                 ) : (
                   <img src="/favicon.svg" alt="Tesslate" className="w-16 h-16 md:w-20 md:h-20" />
                 )}
@@ -445,7 +507,7 @@ export default function MarketplaceDetail() {
                   {item.name}
                 </h1>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {item.source_type === 'open' && (
+                  {(item.source_type === 'open' || (item.source_type === 'git' && item.git_repo_url)) && (
                     <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-500/15 text-green-500 text-xs sm:text-sm rounded-lg font-medium whitespace-nowrap">
                       <GitFork size={14} weight="bold" />
                       Open Source
@@ -643,6 +705,113 @@ export default function MarketplaceDetail() {
         <div className="max-w-5xl mx-auto px-6 md:px-12 mb-12">
           <StatsBar usageCount={item.usage_count || 0} category={item.category} />
         </div>
+
+        {/* Versions Section (bases with git repos only) */}
+        {item.item_type === 'base' && item.git_repo_url && (
+          <div className="max-w-5xl mx-auto px-6 md:px-12 mb-12">
+            <h2
+              className={`font-heading text-xl font-bold mb-4 ${theme === 'light' ? 'text-black' : 'text-white'}`}
+            >
+              Versions
+            </h2>
+            {loadingVersions ? (
+              <div
+                className={`flex items-center gap-2 py-4 text-sm ${theme === 'light' ? 'text-black/50' : 'text-white/50'}`}
+              >
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                Loading versions...
+              </div>
+            ) : versions.length > 0 ? (
+              <div className="space-y-2">
+                {versions.map((version, idx) => (
+                  <div
+                    key={version.tag}
+                    className={`
+                      flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors
+                      ${theme === 'light' ? 'bg-black/[0.03] hover:bg-black/[0.06]' : 'bg-white/[0.03] hover:bg-white/[0.06]'}
+                    `}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Tag size={16} weight="fill" className={theme === 'light' ? 'text-black/40' : 'text-white/40'} />
+                      <span className={`font-semibold text-sm ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+                        {version.tag}
+                      </span>
+                      {idx === 0 && (
+                        <span className="px-2 py-0.5 bg-green-500/15 text-green-500 text-xs rounded-md font-medium">
+                          latest
+                        </span>
+                      )}
+                      <span className={`flex items-center gap-1 text-xs ${theme === 'light' ? 'text-black/40' : 'text-white/40'}`}>
+                        <GitCommit size={12} />
+                        {version.sha}
+                      </span>
+                      {version.date && (
+                        <span className={`text-xs ${theme === 'light' ? 'text-black/40' : 'text-white/40'}`}>
+                          {formatRelativeDate(version.date)}
+                        </span>
+                      )}
+                    </div>
+                    {isAuthenticated && (
+                      <button
+                        onClick={() => {
+                          navigate(
+                            `/dashboard?create=true&base_id=${item.id}&base_version=${encodeURIComponent(version.tag)}&base_name=${encodeURIComponent(item.name)}`
+                          );
+                        }}
+                        className={`
+                          flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0
+                          ${theme === 'light'
+                            ? 'bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20'
+                            : 'bg-[var(--primary)]/15 text-[var(--primary)] hover:bg-[var(--primary)]/25'
+                          }
+                        `}
+                      >
+                        Use This Version
+                        <ArrowRight size={12} weight="bold" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div
+                className={`
+                  flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors
+                  ${theme === 'light' ? 'bg-black/[0.03] hover:bg-black/[0.06]' : 'bg-white/[0.03] hover:bg-white/[0.06]'}
+                `}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <GitBranch size={16} weight="fill" className={theme === 'light' ? 'text-black/40' : 'text-white/40'} />
+                  <span className={`font-semibold text-sm ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+                    {versionsDefaultBranch || 'main'}
+                  </span>
+                  <span className="px-2 py-0.5 bg-blue-500/15 text-blue-400 text-xs rounded-md font-medium">
+                    default branch
+                  </span>
+                </div>
+                {isAuthenticated && (
+                  <button
+                    onClick={() => {
+                      navigate(
+                        `/dashboard?create=true&base_id=${item.id}&base_name=${encodeURIComponent(item.name)}`
+                      );
+                    }}
+                    className={`
+                      flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0
+                      ${theme === 'light'
+                        ? 'bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/20'
+                        : 'bg-[var(--primary)]/15 text-[var(--primary)] hover:bg-[var(--primary)]/25'
+                      }
+                    `}
+                  >
+                    Use This Version
+                    <ArrowRight size={12} weight="bold" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Content Sections */}
         <div className="max-w-5xl mx-auto px-6 md:px-12 pb-16">
@@ -928,7 +1097,7 @@ export default function MarketplaceDetail() {
               >
                 People also like
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {relatedItems.map((relatedItem) => (
                   <AgentCard
                     key={relatedItem.id}

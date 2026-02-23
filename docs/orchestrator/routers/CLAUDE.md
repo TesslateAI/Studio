@@ -10,8 +10,8 @@
 Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 
 - `projects.py` (5218 lines) - Project CRUD, file operations, container lifecycle, assets, deployment target assignment
-- `chat.py` (2044 lines) - Chat management, agent streaming, WebSocket support
-- `marketplace.py` (~2600 lines) - Agent/base marketplace, purchases, reviews, user-submitted bases
+- `chat.py` (~2050 lines) - Chat management, agent streaming, WebSocket support (max_iterations default: unlimited, cost limit: $5/run)
+- `marketplace.py` (~2800 lines) - Agent/base marketplace, purchases, reviews, user-submitted bases, community bases browse with pagination, base versioning (git tags)
 - `admin.py` (1163 lines) - Platform metrics, user management, moderation
 - `deployments.py` (1,197 lines) - External deployments (Vercel, Netlify, Cloudflare), deploy-all endpoint
 - `kanban.py` (757 lines) - Project task board management
@@ -133,6 +133,24 @@ async def get_agents(
 **Public Routers:**
 - `themes.py` - Theme presets (needed before login for UI)
 - `marketplace.py` - Agent browsing (public access, optional auth for user context)
+
+### New Marketplace Endpoints
+
+**Browse Community Bases** (`GET /api/marketplace/bases/browse`):
+- Server-side paginated with `page`, `limit`, `category`, `search`, `sort` params
+- Returns `{ bases, total, page, total_pages }`
+- Includes official + community bases with creator info
+- Stable pagination sort with `.id` tiebreaker
+
+**Base Versions** (`GET /api/marketplace/bases/{slug}/versions`):
+- Returns available git tag versions for a base
+- 10-minute server-side cache per slug
+- Fetches tags from GitHub API (unauthenticated, 60 req/hr rate limit)
+- Used by `CreateProjectModal` for version selection
+
+**Project Creation with Version** (`POST /api/projects`):
+- `ProjectCreate` schema now accepts optional `base_version` field
+- Clones the specific git tag via `--branch` instead of latest when provided
 
 ### Authentication Patterns
 

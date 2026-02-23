@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useInView } from 'react-intersection-observer';
 import { debounce } from 'lodash';
 import {
   MagnifyingGlass,
@@ -17,6 +16,8 @@ import {
   Moon,
   Gear,
   SignOut,
+  ChatCircleDots,
+  Article,
   X,
   Funnel,
 } from '@phosphor-icons/react';
@@ -84,20 +85,11 @@ export default function Marketplace() {
 
   // State - Data
   const [items, setItems] = useState<MarketplaceItem[]>([]);
-  const [basesCache, setBasesCache] = useState<MarketplaceItem[]>([]);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
 
   // State - Loading (isolated for non-blocking UI)
   const [initialLoading, setInitialLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [filtering, setFiltering] = useState(false);
-
-  // Intersection observer for infinite scroll
-  const { ref: loadMoreRef, inView } = useInView({
-    threshold: 0,
-    rootMargin: '100px',
-  });
 
   // "/" keyboard shortcut to focus search (like GitHub, Slack, etc.)
   // Using native event listener because useHotkeys doesn't reliably handle "/" key
@@ -142,6 +134,16 @@ export default function Marketplace() {
         icon: <Books className="w-5 h-5" weight="fill" />,
         title: 'Library',
         onClick: () => navigate('/library'),
+      },
+      {
+        icon: <ChatCircleDots className="w-5 h-5" weight="fill" />,
+        title: 'Feedback',
+        onClick: () => navigate('/feedback'),
+      },
+      {
+        icon: <Article className="w-5 h-5" weight="fill" />,
+        title: 'Documentation',
+        onClick: () => window.open('https://docs.tesslate.com', '_blank'),
       },
     ],
     right: [
@@ -197,30 +199,22 @@ export default function Marketplace() {
       sort: SortOption;
       pricing: PricingFilter;
       pageNum: number;
-      append?: boolean;
     }) => {
-      const { itemType, category, search, sort, pricing, pageNum, append = false } = params;
+      const { itemType, category, search, sort, pricing, pageNum } = params;
 
       // Cancel any in-flight request
       abortControllerRef.current?.abort();
       abortControllerRef.current = new AbortController();
 
       // Set appropriate loading state
-      if (pageNum === 1 && !append) {
-        if (initialLoading) {
-          // Keep initial loading
-        } else {
-          setFiltering(true);
-        }
-      } else {
-        setLoadingMore(true);
+      if (!initialLoading) {
+        setFiltering(true);
       }
 
       try {
         let data: MarketplaceItem[];
 
         if (itemType === 'agent') {
-          // Server-side filtering for agents
           const result = await marketplaceApi.getAllAgents(
             {
               category: category !== 'all' ? category : undefined,
@@ -236,25 +230,23 @@ export default function Marketplace() {
             ...agent,
             item_type: 'agent' as ItemType,
           }));
-
-          // Check if there are more items
-          setHasMore(data.length === ITEMS_PER_PAGE);
         } else if (itemType === 'base') {
-          // Bases use client-side filtering (API doesn't support same params)
-          if (basesCache.length === 0) {
-            const result = await marketplaceApi.getAllBases();
-            const bases = (result.bases || []).map((base: Record<string, unknown>) => ({
-              ...base,
-              item_type: 'base' as ItemType,
-            }));
-            setBasesCache(bases);
-            data = filterBasesClientSide(bases, { category, search, sort, pricing });
-          } else {
-            data = filterBasesClientSide(basesCache, { category, search, sort, pricing });
-          }
-          setHasMore(false); // Bases loaded all at once
+          const result = await marketplaceApi.getAllBases(
+            {
+              category: category !== 'all' ? category : undefined,
+              pricing_type: pricing !== 'all' ? pricing : undefined,
+              search: search || undefined,
+              sort,
+              page: pageNum,
+              limit: ITEMS_PER_PAGE,
+            },
+            { signal: abortControllerRef.current.signal }
+          );
+          data = (result.bases || []).map((base: Record<string, unknown>) => ({
+            ...base,
+            item_type: 'base' as ItemType,
+          }));
         } else if (itemType === 'theme') {
-          // Server-side filtering for themes
           const result = await marketplaceApi.getMarketplaceThemes({
             category: category !== 'all' ? category : undefined,
             pricing: pricing !== 'all' ? pricing : undefined,
@@ -267,19 +259,12 @@ export default function Marketplace() {
             ...theme,
             item_type: 'theme' as ItemType,
           }));
-          setHasMore(data.length === ITEMS_PER_PAGE);
         } else {
           // Tools and integrations - coming soon
           data = [];
-          setHasMore(false);
         }
 
-        // Update items
-        if (append && pageNum > 1) {
-          setItems((prev) => [...prev, ...data]);
-        } else {
-          setItems(data);
-        }
+        setItems(data);
       } catch (err) {
         // Silently ignore cancelled requests (both native AbortError and Axios CanceledError)
         if (isCanceledError(err)) {
@@ -289,74 +274,11 @@ export default function Marketplace() {
         toast.error('Failed to load marketplace');
       } finally {
         setInitialLoading(false);
-        setLoadingMore(false);
         setFiltering(false);
       }
     },
-    [basesCache, initialLoading]
+    [initialLoading]
   );
-
-  // Client-side filtering for bases (until backend supports it)
-  const filterBasesClientSide = (
-    bases: MarketplaceItem[],
-    filters: { category: string; search: string; sort: SortOption; pricing: PricingFilter }
-  ): MarketplaceItem[] => {
-    let filtered = [...bases];
-
-    // Category filter
-    if (filters.category !== 'all') {
-      filtered = filtered.filter(
-        (item) => item.category?.toLowerCase() === filters.category.toLowerCase()
-      );
-    }
-
-    // Search filter
-    if (filters.search) {
-      const query = filters.search.toLowerCase();
-      filtered = filtered.filter(
-        (item) =>
-          item.name.toLowerCase().includes(query) ||
-          item.description.toLowerCase().includes(query) ||
-          item.tags?.some((tag) => tag.toLowerCase().includes(query))
-      );
-    }
-
-    // Pricing filter
-    if (filters.pricing === 'free') {
-      filtered = filtered.filter((item) => item.pricing_type === 'free' || item.price === 0);
-    } else if (filters.pricing === 'paid') {
-      filtered = filtered.filter((item) => item.pricing_type !== 'free' && item.price > 0);
-    }
-
-    // Sort
-    switch (filters.sort) {
-      case 'featured':
-        filtered.sort((a, b) => (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0));
-        break;
-      case 'popular':
-        filtered.sort(
-          (a, b) => (b.downloads || b.usage_count || 0) - (a.downloads || a.usage_count || 0)
-        );
-        break;
-      case 'newest':
-        filtered.sort((a, b) => b.id.localeCompare(a.id));
-        break;
-      case 'name':
-        filtered.sort((a, b) => a.name.localeCompare(b.name));
-        break;
-      case 'rating':
-        filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-        break;
-      case 'price_asc':
-        filtered.sort((a, b) => (a.price || 0) - (b.price || 0));
-        break;
-      case 'price_desc':
-        filtered.sort((a, b) => (b.price || 0) - (a.price || 0));
-        break;
-    }
-
-    return filtered;
-  };
 
   // Debounced search
   const debouncedLoadItems = useMemo(
@@ -433,24 +355,6 @@ export default function Marketplace() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItemType, searchQuery, sortBy, pricingFilter]);
-
-  // Infinite scroll - load more when intersection triggers
-  useEffect(() => {
-    if (inView && hasMore && !loadingMore && !initialLoading && !filtering) {
-      const nextPage = page + 1;
-      setPage(nextPage);
-      loadItems({
-        itemType: selectedItemType,
-        category: 'all', // Main page always shows all categories
-        search: searchQuery,
-        sort: sortBy,
-        pricing: pricingFilter,
-        pageNum: nextPage,
-        append: true,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inView, hasMore, loadingMore, initialLoading, filtering]);
 
   const handleInstall = async (item: MarketplaceItem) => {
     if (item.is_purchased) {
@@ -812,8 +716,8 @@ export default function Marketplace() {
                 <div
                   className={`h-6 w-40 rounded mb-6 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'} animate-pulse`}
                 />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {Array.from({ length: 8 }).map((_, i) => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {Array.from({ length: 6 }).map((_, i) => (
                     <SkeletonCard key={i} />
                   ))}
                 </div>
@@ -875,7 +779,7 @@ export default function Marketplace() {
                     <span className="text-lg">→</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3">
                   {categories.map((cat) => (
                     <button
                       key={cat.id}
@@ -928,9 +832,9 @@ export default function Marketplace() {
                   )}
                 </div>
 
-                {regularItems.length > 0 || loadingMore ? (
+                {regularItems.length > 0 ? (
                   <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                       {regularItems.map((item) => (
                         <AgentCard
                           key={item.id}
@@ -939,15 +843,7 @@ export default function Marketplace() {
                           isAuthenticated={isAuthenticated}
                         />
                       ))}
-                      {/* Loading more skeletons */}
-                      {loadingMore &&
-                        Array.from({ length: 4 }).map((_, i) => (
-                          <SkeletonCard key={`loading-${i}`} />
-                        ))}
                     </div>
-
-                    {/* Infinite scroll trigger */}
-                    {hasMore && !loadingMore && <div ref={loadMoreRef} className="h-10 mt-4" />}
                   </>
                 ) : (
                   <div

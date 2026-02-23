@@ -79,6 +79,55 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _validate_git_repo_accessible(
+    repo_url: str,
+    *,
+    timeout: int = 15,
+    auth_token: str | None = None,
+) -> None:
+    """
+    Validate that a git repository URL is reachable before cloning.
+
+    Uses ``git ls-remote`` with a short timeout.  Raises ``RuntimeError``
+    with a user-friendly message when the repo cannot be reached.
+
+    Args:
+        repo_url: The HTTPS clone URL to check.
+        timeout: Seconds before giving up.
+        auth_token: Optional token injected into the URL for private repos.
+    """
+    check_url = repo_url
+    if auth_token and check_url.startswith("https://"):
+        # Inject token for authenticated ls-remote (same pattern git clone uses)
+        check_url = check_url.replace("https://", f"https://x-access-token:{auth_token}@", 1)
+
+    cmd = ["git", "ls-remote", "--exit-code", "--heads", check_url]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+
+        if process.returncode != 0:
+            err_text = stderr.decode(errors="replace").strip() if stderr else ""
+            # Sanitise the error — never leak tokens into user-facing messages
+            if auth_token and auth_token in err_text:
+                err_text = err_text.replace(auth_token, "***")
+            raise RuntimeError(
+                f"Repository is not accessible: {repo_url}. "
+                f"Please check that the URL is correct and the repository is public "
+                f"(or that you have connected the right account for private repos). "
+                f"Git error: {err_text}"
+            )
+    except asyncio.TimeoutError:
+        raise RuntimeError(
+            f"Repository check timed out after {timeout}s for {repo_url}. "
+            f"The remote server may be unreachable."
+        ) from None
+
+
 async def get_project_by_slug(db: AsyncSession, project_slug: str, user_id: UUID) -> Project:
     """
     Get a project by its slug or numeric ID and verify ownership.
@@ -290,6 +339,11 @@ async def _setup_git_provider_project(
     authenticated_url = provider_class.format_clone_url(
         repo_info["owner"], repo_info["repo"], access_token
     )
+
+    # Validate that the repository is accessible before allocating resources
+    task.update_progress(15, 100, "Validating repository access...")
+    await _validate_git_repo_accessible(authenticated_url, auth_token=access_token)
+    logger.info(f"[CREATE] Repository validated: {repo_url}")
 
     # Framework detection defaults (updated after clone based on package.json)
     framework_name = "unknown"
@@ -854,6 +908,11 @@ async def _setup_base_project(
 
         if cached_base_path is None or not os.path.exists(cached_base_path):
             # Base not in local cache - need to git clone
+            # Validate repository is accessible before allocating resources
+            task.update_progress(22, 100, "Validating base repository...")
+            await _validate_git_repo_accessible(base_repo.git_repo_url)
+            logger.info(f"[CREATE] Base repo validated: {base_repo.git_repo_url}")
+
             logger.info(f"[CREATE] Base {base_repo.slug} not in cache, cloning from git")
             task.update_progress(25, 100, "Cloning base repository...")
 
@@ -866,8 +925,9 @@ async def _setup_base_project(
             # Build clone command
             clone_url = base_repo.git_repo_url
             clone_cmd = ["git", "clone", "--depth=1"]
-            if base_repo.default_branch:
-                clone_cmd.extend(["--branch", base_repo.default_branch])
+            branch_ref = project_data.base_version or base_repo.default_branch
+            if branch_ref:
+                clone_cmd.extend(["--branch", branch_ref])
             clone_cmd.extend([clone_url, temp_clone_dir])
 
             # Execute git clone
@@ -885,7 +945,6 @@ async def _setup_base_project(
 
             # Docker mode: Copy files from temp to volume
             if settings.deployment_mode == "docker" and use_volumes:
-                import shutil
                 import subprocess
 
                 volume_project_path = f"/projects/{db_project.slug}"
@@ -924,7 +983,6 @@ async def _setup_base_project(
             and os.path.exists(cached_base_path)
             and not temp_clone_dir
         ):
-            import shutil
             import subprocess
 
             volume_project_path = f"/projects/{db_project.slug}"
@@ -5726,7 +5784,7 @@ async def check_container_health(
         external_url = f"{settings.k8s_container_url_protocol}://{project.slug}-{container_dir}.{settings.app_domain}"
         # Internal URL for health check (always reachable from within cluster)
         # Service naming: dev-{container_dir} in namespace proj-{project.id}
-        service_port = container.port or 3000
+        service_port = container.effective_port
         health_check_url = (
             f"http://dev-{container_dir}.proj-{project.id}.svc.cluster.local:{service_port}"
         )

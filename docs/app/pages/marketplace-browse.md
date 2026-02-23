@@ -30,10 +30,13 @@ Browse all marketplace items of a specific type with comprehensive filtering, so
 - **Sorting**: Popular, Highest Rated, Recently Added, Name A-Z, Price Low-High, Price High-Low
 - **Search**: Full-text search with debouncing and "/" keyboard shortcut
 - **Infinite Scroll**: Load more items as user scrolls
+- **Pagination**: Page-based navigation with `Pagination` component for bases browse
 - **URL State Persistence**: Filters sync to URL query params
 - **Responsive Layout**: Sidebar on desktop, horizontal filters on mobile/tablet
 - **User Info Dropdown**: Shows credits and subscription tier when authenticated
 - **Submit Template Button**: When browsing bases (`itemType === 'base'`) and authenticated, a "Submit Template" button appears in the header that opens the `SubmitBaseModal` for submitting user-created project templates
+- **Community Bases**: 63+ open-source project templates from community contributors
+- **Base Versioning**: Select specific git tag versions when creating projects from bases
 
 ### State Management
 
@@ -128,6 +131,8 @@ const result = await marketplaceApi.getAllAgents(
 ### Client-Side Filtering (Bases)
 
 Bases are loaded once and filtered client-side. This is suitable for smaller datasets:
+
+Bases now include both official Tesslate bases and 63+ community-contributed bases from open-source repositories. Community bases are server-side paginated via the `/api/marketplace/bases/browse` endpoint.
 
 ```typescript
 // Cache all bases on first load
@@ -690,6 +695,40 @@ GET /api/marketplace/bases?category={category}&pricing_type={pricing}&search={se
 }
 ```
 
+### Browse Community Bases (Paginated)
+
+```typescript
+GET /api/marketplace/bases/browse?page={page}&limit={limit}&category={category}&search={search}&sort={sort}
+
+// Response
+{
+  "bases": [...],
+  "total": 67,
+  "page": 1,
+  "limit": 20,
+  "total_pages": 4
+}
+```
+
+### Get Base Versions
+
+```typescript
+GET /api/marketplace/bases/{slug}/versions
+
+// Response (cached 10 minutes)
+{
+  "slug": "nextjs-16",
+  "versions": [
+    {
+      "tag": "v1.2.0",
+      "date": "2026-01-15T...",
+      "commit_sha": "abc123..."
+    }
+  ],
+  "default_version": "v1.2.0"
+}
+```
+
 ---
 
 ## Troubleshooting
@@ -743,3 +782,4 @@ setItems((prev) => prev.map((i) =>
 - **Marketplace API**: `c:/Users/Smirk/Downloads/Tesslate-Studio/docs/orchestrator/routers/marketplace.md`
 - **AgentCard Component**: `c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/marketplace/AgentCard.tsx`
 - **SkeletonCard Component**: `c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/marketplace/SkeletonCard.tsx`
+- **Pagination Component**: `app/src/components/marketplace/Pagination.tsx`

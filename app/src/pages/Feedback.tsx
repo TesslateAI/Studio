@@ -19,6 +19,7 @@ import {
   Moon,
   Gear,
   SignOut,
+  Article,
 } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 
@@ -131,6 +132,11 @@ export default function Feedback() {
         title: 'Feedback',
         onClick: () => {},
         active: true,
+      },
+      {
+        icon: <Article className="w-5 h-5" weight="fill" />,
+        title: 'Documentation',
+        onClick: () => window.open('https://docs.tesslate.com', '_blank'),
       },
     ],
     right: [

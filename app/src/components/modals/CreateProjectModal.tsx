@@ -16,15 +16,16 @@ interface MarketplaceBase {
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (projectName: string, baseId?: string) => void;
+  onConfirm: (projectName: string, baseId?: string, baseVersion?: string) => void;
   isLoading?: boolean;
+  initialBaseId?: string;
+  baseVersion?: string;
 }
 
 // Featured bases shown by default (even if not in user's library)
 // Must match seeded slugs from orchestrator/app/seeds/marketplace_bases.py
 const FEATURED_SLUGS = [
   'nextjs-16',
-  'nextjs-15',
   'vite-react-fastapi',
   'vite-react-go',
   'expo-default',
@@ -35,6 +36,8 @@ export function CreateProjectModal({
   onClose,
   onConfirm,
   isLoading = false,
+  initialBaseId,
+  baseVersion,
 }: CreateProjectModalProps) {
   const [projectName, setProjectName] = useState('');
   const [selectedBase, setSelectedBase] = useState<MarketplaceBase | null>(null);
@@ -64,13 +67,21 @@ export function CreateProjectModal({
       setAllBases(bases);
       setUserBases(userBasesData);
 
-      // Auto-select first featured base as default
+      // Auto-select: initialBaseId (from "Use This Version") or first featured base
       if (!selectedBase) {
-        const defaultBase = FEATURED_SLUGS.map((slug) =>
-          bases.find((b: MarketplaceBase) => b.slug === slug)
-        ).find(Boolean);
-        if (defaultBase) {
-          setSelectedBase(defaultBase);
+        if (initialBaseId) {
+          const preselected = bases.find((b: MarketplaceBase) => b.id === initialBaseId);
+          if (preselected) {
+            setSelectedBase(preselected);
+          }
+        }
+        if (!selectedBase && !initialBaseId) {
+          const defaultBase = FEATURED_SLUGS.map((slug) =>
+            bases.find((b: MarketplaceBase) => b.slug === slug)
+          ).find(Boolean);
+          if (defaultBase) {
+            setSelectedBase(defaultBase);
+          }
         }
       }
     } catch (error) {
@@ -130,7 +141,7 @@ export function CreateProjectModal({
 
   const handleConfirm = () => {
     if (isLoading || !projectName.trim() || !selectedBase) return;
-    onConfirm(projectName.trim(), selectedBase.id);
+    onConfirm(projectName.trim(), selectedBase.id, baseVersion || undefined);
   };
 
   const handleClose = () => {
@@ -187,6 +198,11 @@ export function CreateProjectModal({
         <div className="mb-6">
           <label className="block text-sm font-medium text-[var(--text)] mb-3">
             Choose a Template
+            {baseVersion && (
+              <span className="ml-2 px-2 py-0.5 bg-[rgba(var(--primary-rgb),0.15)] text-[var(--primary)] text-xs rounded-md font-medium">
+                version: {baseVersion}
+              </span>
+            )}
           </label>
 
           {loadingBases ? (

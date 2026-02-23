@@ -31,6 +31,8 @@ import {
   Moon,
   Gear,
   SignOut,
+  ChatCircleDots,
+  Article,
   CaretDown,
   CaretRight,
   Robot,
@@ -62,6 +64,14 @@ import { ImageUpload } from '../components/ImageUpload';
 import { marketplaceApi, secretsApi, billingApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
+
+/** Convert USD per 1M tokens to credits (1 credit = $0.01) */
+function formatCreditsPerMillion(usdPer1M: number): string {
+  const credits = usdPer1M * 100;
+  if (credits === 0) return '0';
+  if (Number.isInteger(credits)) return credits.toLocaleString();
+  return credits.toFixed(1);
+}
 
 interface LibraryAgent {
   id: string;
@@ -281,6 +291,16 @@ export default function Library() {
         title: 'Library',
         onClick: () => {},
         active: true,
+      },
+      {
+        icon: <ChatCircleDots className="w-5 h-5" weight="fill" />,
+        title: 'Feedback',
+        onClick: () => navigate('/feedback'),
+      },
+      {
+        icon: <Article className="w-5 h-5" weight="fill" />,
+        title: 'Documentation',
+        onClick: () => window.open('https://docs.tesslate.com', '_blank'),
       },
     ],
     right: [
@@ -642,7 +662,6 @@ export default function Library() {
               onToggleEnable={handleToggleEnable}
               onEdit={setEditingAgent}
               onTogglePublish={handleTogglePublish}
-              onModelChange={handleModelChange}
               onReload={loadLibraryAgents}
             />
           )}
@@ -1656,14 +1675,12 @@ function AgentsTab({
   onToggleEnable,
   onEdit,
   onTogglePublish,
-  onModelChange,
   onReload,
 }: {
   agents: LibraryAgent[];
   onToggleEnable: (agent: LibraryAgent) => void;
   onEdit: (agent: LibraryAgent) => void;
   onTogglePublish: (agent: LibraryAgent) => void;
-  onModelChange: (agent: LibraryAgent, model: string) => void;
   onReload: () => void;
 }) {
   const navigate = useNavigate();
@@ -1800,7 +1817,6 @@ function AgentsTab({
             onToggleEnable={() => onToggleEnable(agent)}
             onEdit={() => onEdit(agent)}
             onTogglePublish={() => onTogglePublish(agent)}
-            onModelChange={(model) => onModelChange(agent, model)}
             onRemove={() => handleRemove(agent)}
             onDelete={() => handleDelete(agent)}
           />
@@ -2072,7 +2088,7 @@ function ModelCard({
             <div className="text-sm font-medium text-[var(--text)] truncate">{displayName}</div>
             {model.pricing && (model.pricing.input > 0 || model.pricing.output > 0) && (
               <div className="text-[10px] text-[var(--text-subtle)] font-mono mt-0.5">
-                ${model.pricing.input.toFixed(2)}/${model.pricing.output.toFixed(2)} per 1M
+                {formatCreditsPerMillion(model.pricing.input)}/{formatCreditsPerMillion(model.pricing.output)} credits per 1M
               </div>
             )}
           </div>
@@ -2200,6 +2216,13 @@ function ModelsTab({
       providerGroups[key] = { label: getProviderLabel(m.provider, m.provider_name), models: [] };
     }
     providerGroups[key].models.push(m);
+  }
+  // Include providers that have API keys but no models yet
+  for (const key of apiKeys) {
+    const provider = key.provider;
+    if (!providerGroups[provider] && provider !== 'internal') {
+      providerGroups[provider] = { label: getProviderLabel(provider), models: [] };
+    }
   }
 
   // Loading state
@@ -2783,7 +2806,6 @@ function AgentCard({
   onToggleEnable,
   onEdit,
   onTogglePublish,
-  onModelChange,
   onRemove,
   onDelete,
 }: {
@@ -2791,7 +2813,6 @@ function AgentCard({
   onToggleEnable: () => void;
   onEdit: () => void;
   onTogglePublish: () => void;
-  onModelChange: (model: string) => void;
   onRemove: () => void;
   onDelete: () => void;
 }) {
@@ -2846,8 +2867,8 @@ function AgentCard({
         {agent.description}
       </p>
 
-      {/* Badges row */}
-      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+      {/* Badges, model & tools row */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-0">
         {agent.source_type === 'open' ? (
           <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-success)]/15 text-[var(--status-success)] text-[11px] rounded font-medium">
             <LockSimpleOpen size={11} />
@@ -2871,26 +2892,21 @@ function AgentCard({
             Forked
           </span>
         )}
-      </div>
-
-      {/* Model Selection (compact) */}
-      <div className="mb-3">
-        <ModelSelector
-          currentAgent={{
-            id: agent.id,
-            name: agent.name,
-            icon: agent.icon || '',
-            model: agent.model,
-            selectedModel: agent.selected_model,
-            sourceType: agent.source_type,
-            isCustom: agent.is_custom,
-          }}
-          onModelChange={onModelChange}
-        />
-      </div>
-
-      {/* Tools */}
-      <div className="flex flex-wrap gap-1 mb-0">
+        {/* Compact model display */}
+        <span className="flex items-center gap-1 px-2 py-0.5 bg-[var(--surface-hover)] text-[var(--text-muted)] text-[11px] rounded font-medium">
+          <Cpu size={11} />
+          <span className="truncate max-w-[80px]">{agent.selected_model || agent.model}</span>
+          {canEdit && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              className="ml-0.5 text-[var(--text-subtle)] hover:text-[var(--primary)] transition-colors"
+              title="Edit model"
+            >
+              <Pencil size={10} />
+            </button>
+          )}
+        </span>
+        {/* Tools */}
         {!agent.tools || agent.tools.length === 0 ? (
           <div className="flex items-center gap-1 px-2 py-0.5 bg-[var(--status-info)]/10 border border-[var(--status-info)]/20 text-[var(--status-info)] text-[11px] rounded-md font-medium">
             <Wrench size={11} />
@@ -2984,7 +3000,7 @@ const FEATURE_FLAGS = [
   { key: 'subagents', label: 'Subagents', description: 'Invoke specialized subagents' },
   { key: 'plan_mode', label: 'Plan Mode', description: 'save_plan / update_plan tools' },
   { key: 'web_search', label: 'Web Search', description: 'web_fetch tool' },
-  { key: 'apply_patch', label: 'Apply Patch', description: 'Codex-style unified patches' },
+  { key: 'apply_patch', label: 'Apply Patch', description: 'Unified diff patches' },
 ] as const;
 
 // Subagent type for the UI
@@ -3155,12 +3171,24 @@ function EditAgentModal({
             <Pencil size={24} />
             Edit Agent
           </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text-muted)]"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+              }}
+              className="px-5 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors flex items-center gap-2 text-sm font-medium"
+            >
+              <Check size={16} />
+              Save
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text-muted)]"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -3507,22 +3535,6 @@ function EditAgentModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--border)]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text-muted)] transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2 bg-[var(--primary)] hover:bg-[var(--primary)]/90 rounded-lg text-white transition-colors flex items-center gap-2"
-            >
-              <Check size={18} />
-              Save Changes
-            </button>
-          </div>
         </form>
       </div>
     </div>

@@ -428,7 +428,7 @@ if (cmd === '/clear') {
 - ✅ Approval clearing on /clear command
 - ✅ chat_id context tracking for proper session management
 - ✅ Colors optimized for both light and dark modes
-- ✅ Iteration limit: 50 iterations (configurable via AGENT_MAX_ITERATIONS env var)
+- ✅ Iteration limit: unlimited by default (configurable via AGENT_MAX_ITERATIONS_PER_RUN env var, 0 = unlimited)
 
 ### Approval Behavior Details
 

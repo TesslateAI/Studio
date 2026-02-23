@@ -18,6 +18,8 @@ import {
   Sun,
   Moon,
   LogOut,
+  MessageCircle,
+  FileText,
 } from 'lucide-react';
 
 export default function ProjectOverview() {
@@ -77,6 +79,16 @@ export default function ProjectOverview() {
         icon: <BookOpen className="w-5 h-5" />,
         title: 'Library',
         onClick: () => navigate('/library'),
+      },
+      {
+        icon: <MessageCircle className="w-5 h-5" />,
+        title: 'Feedback',
+        onClick: () => navigate('/feedback'),
+      },
+      {
+        icon: <FileText className="w-5 h-5" />,
+        title: 'Documentation',
+        onClick: () => window.open('https://docs.tesslate.com', '_blank'),
       },
     ],
     right: [

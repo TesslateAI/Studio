@@ -100,6 +100,7 @@ api.interceptors.response.use(
       const isTasksApi = error.config?.url?.includes('/api/tasks/');
       const isMarketplacePage = window.location.pathname.startsWith('/marketplace');
       const isPreferencesApi = error.config?.url?.includes('/api/users/preferences');
+      const isGitProvidersApi = error.config?.url?.includes('/api/git-providers/');
       const isPasswordResetPage =
         window.location.pathname === '/forgot-password' ||
         window.location.pathname === '/reset-password';
@@ -108,8 +109,9 @@ api.interceptors.response.use(
       // - Tasks API (transient errors during background operations)
       // - Marketplace pages (public access, 401 is expected for unauthenticated)
       // - Preferences API (optional, fails silently for unauthenticated)
+      // - Git Providers API (401 means provider not connected, handled by UI)
       // - Password reset pages (public, no auth required)
-      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi && !isPasswordResetPage) {
+      if (!isTasksApi && !isMarketplacePage && !isPreferencesApi && !isGitProvidersApi && !isPasswordResetPage) {
         localStorage.removeItem('token');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
@@ -287,7 +289,8 @@ export const projectsApi = {
     sourceType?: 'template' | 'github' | 'gitlab' | 'bitbucket' | 'base',
     repoUrl?: string,
     branch?: string,
-    baseId?: string
+    baseId?: string,
+    baseVersion?: string
   ) => {
     const body: {
       name: string;
@@ -298,6 +301,7 @@ export const projectsApi = {
       git_repo_url?: string;
       git_branch?: string;
       base_id?: string;
+      base_version?: string;
     } = {
       name,
       description,
@@ -314,6 +318,9 @@ export const projectsApi = {
       body.git_branch = branch || 'main';
     } else if (sourceType === 'base') {
       body.base_id = baseId;
+      if (baseVersion) {
+        body.base_version = baseVersion;
+      }
     }
 
     const response = await api.post('/api/projects/', body);
@@ -753,14 +760,17 @@ export const marketplaceApi = {
   },
 
   // Bases endpoints
-  getAllBases: async (params?: {
-    category?: string;
-    pricing_type?: string;
-    search?: string;
-    sort?: string;
-    page?: number;
-    limit?: number;
-  }) => {
+  getAllBases: async (
+    params?: {
+      category?: string;
+      pricing_type?: string;
+      search?: string;
+      sort?: string;
+      page?: number;
+      limit?: number;
+    },
+    options?: { signal?: AbortSignal }
+  ) => {
     const queryParams = new URLSearchParams();
     if (params?.category) queryParams.append('category', params.category);
     if (params?.pricing_type) queryParams.append('pricing_type', params.pricing_type);
@@ -769,12 +779,19 @@ export const marketplaceApi = {
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
 
-    const response = await api.get(`/api/marketplace/bases?${queryParams}`);
+    const response = await api.get(`/api/marketplace/bases?${queryParams}`, {
+      signal: options?.signal,
+    });
     return response.data;
   },
 
   getBaseDetails: async (slug: string) => {
     const response = await api.get(`/api/marketplace/bases/${slug}`);
+    return response.data;
+  },
+
+  getBaseVersions: async (slug: string) => {
+    const response = await api.get(`/api/marketplace/bases/${slug}/versions`);
     return response.data;
   },
 

@@ -7,6 +7,7 @@ interface MobileMenuProps {
     title: string;
     onClick: () => void;
     active?: boolean;
+    disabled?: boolean;
     dataTour?: string;
   }>;
   rightItems: Array<{
@@ -14,6 +15,7 @@ interface MobileMenuProps {
     title: string;
     onClick: () => void;
     active?: boolean;
+    disabled?: boolean;
     dataTour?: string;
   }>;
 }
@@ -95,21 +97,24 @@ export function MobileMenu({ leftItems, rightItems }: MobileMenuProps) {
                     {rightItems.map((item, index) => (
                       <button
                         key={index}
-                        onClick={() => handleItemClick(item.onClick)}
+                        onClick={item.disabled ? undefined : () => handleItemClick(item.onClick)}
+                        disabled={item.disabled}
                         data-tour={item.dataTour}
                         className={`
                           w-full flex items-center gap-3 px-4 py-3 rounded-xl
                           transition-all duration-200
-                          ${item.active
-                            ? 'bg-gradient-to-r from-[rgba(255,107,0,0.2)] to-[rgba(255,107,0,0.1)] text-[var(--primary)] border border-[rgba(255,107,0,0.3)]'
-                            : 'bg-white/5 text-[var(--text)] hover:bg-white/10 border border-transparent'
+                          ${item.disabled
+                            ? 'opacity-40 cursor-not-allowed bg-white/5 text-[var(--text)] border border-transparent'
+                            : item.active
+                              ? 'bg-gradient-to-r from-[rgba(255,107,0,0.2)] to-[rgba(255,107,0,0.1)] text-[var(--primary)] border border-[rgba(255,107,0,0.3)]'
+                              : 'bg-white/5 text-[var(--text)] hover:bg-white/10 border border-transparent'
                           }
                         `}
                       >
-                        <div className={`${item.active ? 'text-[var(--primary)]' : 'text-gray-500'}`}>
+                        <div className={`${item.disabled ? 'text-gray-500' : item.active ? 'text-[var(--primary)]' : 'text-gray-500'}`}>
                           {item.icon}
                         </div>
-                        <span className="font-medium">{item.title}</span>
+                        <span className="font-medium">{item.title}{item.disabled ? ' (Coming soon)' : ''}</span>
                       </button>
                     ))}
                   </div>

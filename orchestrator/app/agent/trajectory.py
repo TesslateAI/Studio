@@ -4,8 +4,7 @@ ATIF v1.4 Trajectory Recording.
 Records agent execution as timestamped entries and converts to the
 Agent Trajectory Interchange Format (ATIF) v1.4 for observability.
 
-1:1 port of minimal-codex trajectory recording, adapted for Tesslate's
-async agent infrastructure.
+Adapted for Tesslate's async agent infrastructure.
 
 Output: timestamped JSON files in .tesslate/trajectories/ inside the
 project volume, written via the orchestrator abstraction layer.
@@ -98,7 +97,7 @@ def convert_to_atif(
 
     Tool results are attached as observation.results on the preceding
     agent step (matched by tool_call_id), NOT as separate steps.
-    This matches the minimal-codex conversion logic exactly.
+    Tool results are matched by tool_call_id to the preceding agent step.
     """
     steps: list[dict[str, Any]] = []
     step_id = 0
