@@ -257,6 +257,14 @@ export function FloatingPanel({
 
   return (
     <>
+      {/* Interaction overlay - captures mouse events above iframes during drag/resize */}
+      {(isDragging || isResizing) && (
+        <div
+          className="fixed inset-0 z-[199]"
+          style={{ cursor: isResizing ? getResizeCursor(resizeDirection) : 'grabbing' }}
+        />
+      )}
+
       {/* Dock indicator - only show during drag when hovering over dock zone (desktop only) */}
       {isDragging && dockHoverPosition && window.innerWidth >= 768 && (
         <div
@@ -398,6 +406,15 @@ function getDockStyle(dock: DockPosition): React.CSSProperties {
       return { left: 0, bottom: 0, width: '100vw', height: '300px' };
     default:
       return {};
+  }
+}
+
+function getResizeCursor(dir: ResizeDirection): string {
+  switch (dir) {
+    case 'se': case 'nw': return 'nwse-resize';
+    case 'sw': case 'ne': return 'nesw-resize';
+    case 'n': case 's': return 'ns-resize';
+    case 'e': case 'w': return 'ew-resize';
   }
 }
 

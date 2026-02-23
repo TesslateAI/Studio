@@ -1725,6 +1725,7 @@ export const ProjectGraphCanvas = () => {
         icon={<GitBranch size={20} />}
         isOpen={activePanel === 'github'}
         onClose={() => setActivePanel(null)}
+        defaultSize={{ width: 420, height: 620 }}
       >
         <GitHubPanel projectId={project?.id} />
       </FloatingPanel>

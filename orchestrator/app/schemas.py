@@ -686,7 +686,7 @@ class GitCloneRequest(BaseModel):
 class GitInitRequest(BaseModel):
     """Request schema for initializing a Git repository."""
 
-    remote_url: str | None = None
+    repo_url: str | None = None
     default_branch: str = "main"
 
 
@@ -743,18 +743,21 @@ class GitBranchRequest(BaseModel):
 class GitSwitchBranchRequest(BaseModel):
     """Request schema for switching branches."""
 
-    name: str
+    branch: str
 
 
 class GitStatusResponse(BaseModel):
     """Response schema for Git status."""
 
     branch: str
-    status: str  # 'clean', 'modified', 'ahead', 'behind', 'diverged'
-    changes: list[dict[str, str]]  # List of changed files
-    changes_count: int
     ahead: int
     behind: int
+    staged_count: int
+    unstaged_count: int
+    untracked_count: int
+    has_conflicts: bool
+    changes: list[dict[str, Any]]  # List of {file_path, status, staged}
+    remote_branch: str | None = None
     last_commit: dict[str, Any] | None = None
 
 
@@ -784,10 +787,10 @@ class GitCommitInfo(BaseModel):
     """Schema for commit information."""
 
     sha: str
-    author_name: str
-    author_email: str
+    author: str
+    email: str
     message: str
-    timestamp: int
+    date: str
 
 
 class GitBranchInfo(BaseModel):

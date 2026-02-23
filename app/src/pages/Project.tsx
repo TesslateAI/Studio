@@ -1459,6 +1459,7 @@ export default function Project() {
         isOpen={activePanel === 'github'}
         onClose={() => setActivePanel(null)}
         defaultPosition={{ x: (isLeftSidebarExpanded ? 192 : 48) + 8, y: 60 }}
+        defaultSize={{ width: 420, height: 620 }}
       >
         <GitHubPanel projectId={project?.id} />
       </FloatingPanel>

@@ -82,7 +82,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   const checkRepositoryConnection = async () => {
     try {
       const info = await gitApi.getRepositoryInfo(projectId);
-      setRepoConnected(true);
+      setRepoConnected(!!info);
       setRepoInfo(info);
     } catch {
       setRepoConnected(false);
@@ -365,7 +365,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
 
   return (
     <>
-      <div className="h-full flex flex-col overflow-hidden">
+      <div>
         {/* GitHub Account Info */}
         <div className="p-4 border-b border-white/5 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -382,13 +382,13 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
         {/* Repository Info */}
         <div className="p-4 border-b border-white/5">
           <div className="flex items-start justify-between mb-3">
-            <div>
+            <div className="min-w-0 flex-1 mr-2">
               <div className="text-sm font-semibold text-[var(--text)] mb-1">{repoInfo?.repo_name}</div>
-              <div className="text-xs text-gray-500 font-mono">{repoInfo?.repo_url}</div>
+              <div className="text-xs text-gray-500 font-mono truncate">{repoInfo?.repo_url}</div>
             </div>
             <button
               onClick={handleDisconnectRepo}
-              className="text-gray-400 hover:text-red-400 transition-colors p-1"
+              className="text-gray-400 hover:text-red-400 transition-colors p-1 shrink-0"
               title="Disconnect repository"
             >
               <LinkBreak className="w-4 h-4" />
@@ -527,89 +527,87 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          {activeView === 'status' ? (
-            <div className="h-full overflow-y-auto p-4 space-y-4">
-              {/* Actions */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={handlePull}
-                  disabled={isPulling || isLoadingStatus}
-                  className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
-                >
-                  <CloudArrowDown className="w-4 h-4" />
-                  {isPulling ? 'Pulling...' : 'Pull'}
-                </button>
-                <button
-                  onClick={handlePush}
-                  disabled={isPushing || isLoadingStatus || totalChanges === 0}
-                  className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
-                >
-                  <CloudArrowUp className="w-4 h-4" />
-                  {isPushing ? 'Pushing...' : 'Push'}
-                </button>
-              </div>
-
-              {/* Commit Button */}
+        {activeView === 'status' ? (
+          <div className="p-4 space-y-4">
+            {/* Actions */}
+            <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => setShowCommitDialog(true)}
-                disabled={isLoadingStatus || totalChanges === 0}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all"
+                onClick={handlePull}
+                disabled={isPulling || isLoadingStatus}
+                className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
               >
-                <GitCommit className="w-5 h-5" weight="fill" />
-                Commit Changes ({totalChanges})
+                <CloudArrowDown className="w-4 h-4" />
+                {isPulling ? 'Pulling...' : 'Pull'}
               </button>
+              <button
+                onClick={handlePush}
+                disabled={isPushing || isLoadingStatus}
+                className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+              >
+                <CloudArrowUp className="w-4 h-4" />
+                {isPushing ? 'Pushing...' : 'Push'}
+              </button>
+            </div>
 
-              {/* Changes */}
-              {gitStatus && (
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 mb-2">CHANGES</h4>
-                  {totalChanges === 0 ? (
-                    <div className="text-sm text-gray-500 text-center py-4">No changes to commit</div>
-                  ) : (
-                    <div className="space-y-1">
-                      {gitStatus.changes.slice(0, 10).map((change, index) => (
-                        <div key={index} className="flex items-center gap-2 text-sm p-2 bg-white/5 rounded-lg">
-                          <span className={`font-mono font-semibold ${
-                            change.status === 'M' ? 'text-yellow-400' :
-                            change.status === 'A' ? 'text-green-400' :
-                            change.status === 'D' ? 'text-red-400' :
-                            'text-gray-400'
-                          }`}>
-                            {change.status}
-                          </span>
-                          <span className="text-gray-300 truncate">{change.file_path}</span>
-                        </div>
-                      ))}
-                      {gitStatus.changes.length > 10 && (
-                        <div className="text-xs text-gray-500 text-center py-2">
-                          +{gitStatus.changes.length - 10} more files
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+            {/* Commit Button */}
+            <button
+              onClick={() => setShowCommitDialog(true)}
+              disabled={isLoadingStatus || totalChanges === 0}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all"
+            >
+              <GitCommit className="w-5 h-5" weight="fill" />
+              Commit Changes ({totalChanges})
+            </button>
 
-              {/* Last Commit */}
-              {gitStatus?.last_commit && (
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 mb-2">LAST COMMIT</h4>
-                  <div className="p-3 bg-white/5 rounded-lg">
-                    <div className="text-sm text-[var(--text)] mb-1">{gitStatus.last_commit.message}</div>
-                    <div className="text-xs text-gray-500">
-                      {gitStatus.last_commit.author} • {gitStatus.last_commit.sha.substring(0, 7)}
-                    </div>
+            {/* Changes */}
+            {gitStatus && (
+              <div>
+                <h4 className="text-xs font-semibold text-gray-400 mb-2">CHANGES</h4>
+                {totalChanges === 0 ? (
+                  <div className="text-sm text-gray-500 text-center py-4">No changes to commit</div>
+                ) : (
+                  <div className="space-y-1">
+                    {gitStatus.changes.slice(0, 10).map((change, index) => (
+                      <div key={index} className="flex items-center gap-2 text-sm p-2 bg-white/5 rounded-lg">
+                        <span className={`font-mono font-semibold shrink-0 ${
+                          change.status === 'M' ? 'text-yellow-400' :
+                          change.status === 'A' ? 'text-green-400' :
+                          change.status === 'D' ? 'text-red-400' :
+                          'text-gray-400'
+                        }`}>
+                          {change.status}
+                        </span>
+                        <span className="text-gray-300 truncate">{change.file_path}</span>
+                      </div>
+                    ))}
+                    {gitStatus.changes.length > 10 && (
+                      <div className="text-xs text-gray-500 text-center py-2">
+                        +{gitStatus.changes.length - 10} more files
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Last Commit */}
+            {gitStatus?.last_commit && (
+              <div>
+                <h4 className="text-xs font-semibold text-gray-400 mb-2">LAST COMMIT</h4>
+                <div className="p-3 bg-white/5 rounded-lg">
+                  <div className="text-sm text-[var(--text)] mb-1">{gitStatus.last_commit.message}</div>
+                  <div className="text-xs text-gray-500">
+                    {gitStatus.last_commit.author} • {gitStatus.last_commit.sha.substring(0, 7)}
                   </div>
                 </div>
-              )}
-            </div>
-          ) : (
-            <div className="h-full p-4">
-              <GitHistoryViewer projectId={projectId} />
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-4">
+            <GitHistoryViewer projectId={projectId} />
+          </div>
+        )}
       </div>
 
       <GitCommitDialog

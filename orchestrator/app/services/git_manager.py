@@ -17,19 +17,31 @@ logger = logging.getLogger(__name__)
 class GitManager:
     """Manages Git operations in user development environments."""
 
-    def __init__(self, user_id: UUID, project_id: str):
+    def __init__(
+        self,
+        user_id: UUID,
+        project_id: str,
+        user_name: str = "Tesslate User",
+        user_email: str = "user@tesslate.com",
+    ):
         """
         Initialize Git Manager for a specific user project.
 
         Args:
             user_id: User ID
             project_id: Project ID
+            user_name: Git author name (defaults to "Tesslate User")
+            user_email: Git author email (defaults to "user@tesslate.com")
         """
         self.user_id = user_id
         self.project_id = project_id
+        self.user_name = user_name
+        self.user_email = user_email
         self.settings = get_settings()
-        # TODO: Update for multi-container system - need to determine which container to run git commands in
         self.container_manager = None
+
+    # Sentinel used to extract exit code from combined stdout+stderr output
+    _EXIT_SENTINEL = "__GIT_EXIT_CODE:"
 
     async def _execute_git_command(self, git_args: list[str], timeout: int = 120) -> str:
         """
@@ -40,19 +52,32 @@ class GitManager:
             timeout: Command timeout in seconds
 
         Returns:
-            Command output (stdout + stderr)
+            Command stdout output
 
         Raises:
-            RuntimeError: If command execution fails
+            RuntimeError: If command execution fails or git returns non-zero exit code
         """
         # Both Docker and Kubernetes now mount to /app
         project_path = "/app"
 
-        # Build the full command
+        # Build the full command with exit code capture.
+        # K8s stream API merges stdout+stderr into one stream, so we use a
+        # sentinel to reliably extract the real exit code.
+        # -c safe.directory=/app avoids "dubious ownership" errors when the
+        # repo was created by a different UID than the current user.
+        quoted_args = " ".join(shlex.quote(arg) for arg in git_args)
+        safe_name = shlex.quote(self.user_name)
+        safe_email = shlex.quote(self.user_email)
+        git_cmd = (
+            f"git -c safe.directory={project_path}"
+            f" -c user.name={safe_name} -c user.email={safe_email}"
+            f" {quoted_args}"
+        )
+        sentinel = self._EXIT_SENTINEL
         command = [
             "/bin/sh",
             "-c",
-            f"cd {project_path} && git {' '.join(shlex.quote(arg) for arg in git_args)}",
+            f"cd {project_path} && {git_cmd} 2>&1; printf '\\n{sentinel}%d\\n' $?",
         ]
 
         try:
@@ -60,7 +85,7 @@ class GitManager:
             from .orchestration import get_orchestrator
 
             orchestrator = get_orchestrator()
-            output = await orchestrator.execute_command(
+            raw_output = await orchestrator.execute_command(
                 user_id=self.user_id,
                 project_id=self.project_id,
                 container_name=None,  # Use default container
@@ -68,8 +93,31 @@ class GitManager:
                 timeout=timeout,
             )
 
-            return output.strip()
+            # Parse exit code from sentinel
+            output = raw_output
+            exit_code = 0
+            if sentinel in raw_output:
+                parts = raw_output.rsplit(sentinel, 1)
+                output = parts[0]
+                try:
+                    exit_code = int(parts[1].strip())
+                except (ValueError, IndexError):
+                    pass
 
+            output = output.strip()
+
+            if exit_code != 0:
+                logger.warning(
+                    f"[GIT] git {git_args[0]} exited with code {exit_code}: {output[:200]}"
+                )
+                raise RuntimeError(
+                    f"Git command 'git {git_args[0]}' failed (exit code {exit_code}): {output}"
+                )
+
+            return output
+
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"[GIT] Failed to execute git command: {git_args[0]}", exc_info=True)
             raise RuntimeError(f"Git command failed: {str(e)}") from e
@@ -242,13 +290,14 @@ class GitManager:
         Get Git repository status.
 
         Returns:
-            Dictionary with status information:
+            Dictionary with status information matching frontend GitStatusResponse:
             - branch: Current branch name
-            - status: Status string (clean, modified, etc.)
-            - changes: List of changed files
-            - changes_count: Number of changed files
-            - ahead: Number of commits ahead of remote
-            - behind: Number of commits behind remote
+            - ahead/behind: Commits ahead/behind remote
+            - staged_count/unstaged_count/untracked_count: Change counts by category
+            - has_conflicts: Whether merge conflicts exist
+            - changes: List of {file_path, status, staged}
+            - remote_branch: Remote tracking branch name or None
+            - last_commit: {sha, author, message, date} or None
 
         Raises:
             RuntimeError: If status check fails
@@ -263,6 +312,10 @@ class GitManager:
 
             # Parse changed files
             changes = []
+            staged_count = 0
+            unstaged_count = 0
+            untracked_count = 0
+            has_conflicts = False
             for line in status_output.split("\n"):
                 if not line.strip():
                     continue
@@ -271,26 +324,51 @@ class GitManager:
                 status_code = line[:2]
                 file_path = line[3:].strip()
 
-                change_type = "modified"
+                # Map to single-letter status codes matching frontend expectations
+                staged = status_code[0] != " " and status_code[0] != "?"
                 if status_code.strip() == "??":
-                    change_type = "untracked"
+                    status_letter = "??"
+                    untracked_count += 1
+                elif "U" in status_code:
+                    status_letter = "U"
+                    has_conflicts = True
+                    unstaged_count += 1
                 elif status_code[0] == "A" or status_code[1] == "A":
-                    change_type = "added"
+                    status_letter = "A"
+                    if staged:
+                        staged_count += 1
+                    else:
+                        unstaged_count += 1
                 elif status_code[0] == "D" or status_code[1] == "D":
-                    change_type = "deleted"
-                elif status_code[0] == "M" or status_code[1] == "M":
-                    change_type = "modified"
+                    status_letter = "D"
+                    if staged:
+                        staged_count += 1
+                    else:
+                        unstaged_count += 1
+                elif status_code[0] == "R" or status_code[1] == "R":
+                    status_letter = "R"
+                    if staged:
+                        staged_count += 1
+                    else:
+                        unstaged_count += 1
+                else:
+                    status_letter = "M"
+                    if staged:
+                        staged_count += 1
+                    else:
+                        unstaged_count += 1
 
                 changes.append(
                     {
-                        "path": file_path,
-                        "type": change_type,
-                        "staged": status_code[0] != " " and status_code[0] != "?",
+                        "file_path": file_path,
+                        "status": status_letter,
+                        "staged": staged,
                     }
                 )
 
             # Get ahead/behind count if tracking remote
             ahead, behind = 0, 0
+            remote_branch = None
             try:
                 rev_list_output = await self._execute_git_command(
                     ["rev-list", "--left-right", "--count", f"origin/{branch}...HEAD"], timeout=30
@@ -299,38 +377,25 @@ class GitManager:
                 if len(parts) == 2:
                     behind = int(parts[0])
                     ahead = int(parts[1])
+                    remote_branch = f"origin/{branch}"
             except Exception:
                 # No remote tracking or fetch hasn't been done
                 pass
-
-            # Determine overall status
-            if not changes:
-                if ahead == 0 and behind == 0:
-                    status = "clean"
-                elif ahead > 0 and behind == 0:
-                    status = "ahead"
-                elif ahead == 0 and behind > 0:
-                    status = "behind"
-                else:
-                    status = "diverged"
-            else:
-                status = "modified"
 
             # Get last commit info
             last_commit = None
             try:
                 commit_output = await self._execute_git_command(
-                    ["log", "-1", "--pretty=format:%H|%an|%ae|%s|%ct"], timeout=30
+                    ["log", "-1", "--pretty=format:%H|%an|%cI|%s"], timeout=30
                 )
                 if commit_output:
-                    parts = commit_output.split("|")
-                    if len(parts) >= 5:
+                    parts = commit_output.split("|", 3)
+                    if len(parts) >= 4:
                         last_commit = {
                             "sha": parts[0],
-                            "author_name": parts[1],
-                            "author_email": parts[2],
+                            "author": parts[1],
+                            "date": parts[2],
                             "message": parts[3],
-                            "timestamp": int(parts[4]),
                         }
             except Exception:
                 # No commits yet
@@ -338,11 +403,14 @@ class GitManager:
 
             return {
                 "branch": branch,
-                "status": status,
-                "changes": changes,
-                "changes_count": len(changes),
                 "ahead": ahead,
                 "behind": behind,
+                "staged_count": staged_count,
+                "unstaged_count": unstaged_count,
+                "untracked_count": untracked_count,
+                "has_conflicts": has_conflicts,
+                "changes": changes,
+                "remote_branch": remote_branch,
                 "last_commit": last_commit,
             }
 
@@ -501,7 +569,7 @@ class GitManager:
         """
         try:
             # Build log command
-            log_args = ["log", f"-{limit}", "--pretty=format:%H|%an|%ae|%s|%ct"]
+            log_args = ["log", f"-{limit}", "--pretty=format:%H|%an|%ae|%cI|%s"]
             if branch:
                 log_args.append(branch)
 
@@ -512,15 +580,15 @@ class GitManager:
                 if not line.strip():
                     continue
 
-                parts = line.split("|")
+                parts = line.split("|", 4)
                 if len(parts) >= 5:
                     commits.append(
                         {
                             "sha": parts[0],
-                            "author_name": parts[1],
-                            "author_email": parts[2],
-                            "message": parts[3],
-                            "timestamp": int(parts[4]),
+                            "author": parts[1],
+                            "email": parts[2],
+                            "date": parts[3],
+                            "message": parts[4],
                         }
                     )
 

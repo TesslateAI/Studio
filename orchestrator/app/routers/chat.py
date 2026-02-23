@@ -74,11 +74,13 @@ async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) 
         if git_status:
             context_lines.append(f"Branch: {git_status['branch']}")
 
-            if git_status.get("status"):
-                context_lines.append(f"Status: {git_status['status']}")
-
-            if git_status.get("changes_count", 0) > 0:
-                context_lines.append(f"Uncommitted Changes: {git_status['changes_count']}")
+            total_changes = (
+                git_status.get("staged_count", 0)
+                + git_status.get("unstaged_count", 0)
+                + git_status.get("untracked_count", 0)
+            )
+            if total_changes > 0:
+                context_lines.append(f"Uncommitted Changes: {total_changes}")
 
             sync_info = []
             if git_status.get("ahead", 0) > 0:

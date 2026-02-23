@@ -52,6 +52,16 @@ async def verify_project_access(project_id: UUID, current_user: User, db: AsyncS
     return project
 
 
+def _create_git_manager(current_user: User, project_id: str) -> GitManager:
+    """Create a GitManager with the authenticated user's identity."""
+    return GitManager(
+        user_id=current_user.id,
+        project_id=str(project_id),
+        user_name=current_user.username or "Tesslate User",
+        user_email=str(current_user.email) if current_user.email else "user@tesslate.com",
+    )
+
+
 @router.post("/init")
 async def initialize_repository(
     project_id: str,
@@ -67,24 +77,24 @@ async def initialize_repository(
         project = await verify_project_access(project_id, current_user, db)
 
         # Initialize Git repository
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         await git_manager.initialize_repository(
-            remote_url=request.remote_url, default_branch=request.default_branch
+            remote_url=request.repo_url, default_branch=request.default_branch
         )
 
         # Update project
         project.has_git_repo = True
-        project.git_remote_url = request.remote_url
+        project.git_remote_url = request.repo_url
 
         # Create git_repository record if remote URL is provided
-        if request.remote_url:
+        if request.repo_url:
             # Parse repository info from URL
-            repo_info = GitHubClient.parse_repo_url(request.remote_url)
+            repo_info = GitHubClient.parse_repo_url(request.repo_url)
 
             git_repo = GitRepository(
                 project_id=project_id,
                 user_id=current_user.id,
-                repo_url=request.remote_url,
+                repo_url=request.repo_url,
                 repo_name=repo_info["repo"] if repo_info else None,
                 repo_owner=repo_info["owner"] if repo_info else None,
                 default_branch=request.default_branch,
@@ -152,7 +162,7 @@ async def clone_repository(
                 branch = "main"  # Fallback
 
         # Clone repository
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         await git_manager.clone_repository(
             repo_url=request.repo_url, branch=branch, auth_token=access_token
         )
@@ -216,20 +226,8 @@ async def get_git_status(
         # Verify project access
         await verify_project_access(project_id, current_user, db)
 
-        # Check if repository exists
-        result = await db.execute(
-            select(GitRepository).where(GitRepository.project_id == project_id)
-        )
-        git_repo = result.scalar_one_or_none()
-
-        if not git_repo:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No Git repository connected to this project",
-            )
-
-        # Get Git status
-        git_manager = GitManager(current_user.id, str(project_id))
+        # Get Git status (works with local .git directory, no DB record needed)
+        git_manager = _create_git_manager(current_user, project_id)
         git_status = await git_manager.get_status()
 
         return GitStatusResponse(**git_status)
@@ -259,7 +257,7 @@ async def create_commit(
         await verify_project_access(project_id, current_user, db)
 
         # Create commit
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         commit_sha = await git_manager.commit(message=request.message, files=request.files)
 
         # Update git_repository record
@@ -300,7 +298,7 @@ async def push_commits(
         await verify_project_access(project_id, current_user, db)
 
         # Push commits
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         success = await git_manager.push(
             branch=request.branch, remote=request.remote, force=request.force
         )
@@ -346,7 +344,7 @@ async def pull_changes(
         await verify_project_access(project_id, current_user, db)
 
         # Pull changes
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         result = await git_manager.pull(branch=request.branch, remote=request.remote)
 
         # Update git_repository record
@@ -391,7 +389,7 @@ async def get_commit_history(
         await verify_project_access(project_id, current_user, db)
 
         # Get commit history
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         commits = await git_manager.get_commit_history(limit=limit, branch=branch)
 
         return GitHistoryResponse(commits=[GitCommitInfo(**commit) for commit in commits])
@@ -420,7 +418,7 @@ async def list_branches(
         await verify_project_access(project_id, current_user, db)
 
         # List branches
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         branches = await git_manager.list_branches()
 
         current_branch = next((b["name"] for b in branches if b["current"]), None)
@@ -454,7 +452,7 @@ async def create_branch(
         await verify_project_access(project_id, current_user, db)
 
         # Create branch
-        git_manager = GitManager(current_user.id, str(project_id))
+        git_manager = _create_git_manager(current_user, project_id)
         await git_manager.create_branch(name=request.name, checkout=request.checkout)
 
         logger.info(f"[GIT] Created branch '{request.name}' in project {project_id}")
@@ -488,11 +486,11 @@ async def switch_branch(
         await verify_project_access(project_id, current_user, db)
 
         # Switch branch
-        git_manager = GitManager(current_user.id, str(project_id))
-        await git_manager.switch_branch(name=request.name)
+        git_manager = _create_git_manager(current_user, project_id)
+        await git_manager.switch_branch(name=request.branch)
 
-        logger.info(f"[GIT] Switched to branch '{request.name}' in project {project_id}")
-        return {"message": f"Switched to branch '{request.name}' successfully"}
+        logger.info(f"[GIT] Switched to branch '{request.branch}' in project {project_id}")
+        return {"message": f"Switched to branch '{request.branch}' successfully"}
 
     except HTTPException:
         raise
