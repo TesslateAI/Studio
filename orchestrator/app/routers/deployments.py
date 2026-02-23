@@ -108,6 +108,24 @@ class DeployAllResponse(BaseModel):
 # ============================================================================
 
 
+def resolve_container_directory(container) -> str:
+    """
+    Resolve the actual on-disk directory for a container.
+
+    When container.directory is ".", "", or None, the K8s orchestrator stores
+    files under the sanitized container.name instead. This must match exactly
+    what kubernetes_orchestrator._sanitize_name + start_container does.
+    """
+    raw = container.name if container.directory in (".", "", None) else container.directory
+    # Replicate _sanitize_name from KubernetesOrchestrator
+    safe = raw.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
+    safe = "".join(c for c in safe if c.isalnum() or c == "-")
+    while "--" in safe:
+        safe = safe.replace("--", "-")
+    safe = safe.strip("-")
+    return safe[:59]
+
+
 async def get_credential_for_deployment(
     db: AsyncSession, user_id: UUID, project_id: UUID, provider: str
 ) -> DeploymentCredential:
@@ -260,7 +278,7 @@ async def deploy_project(
         encryption_service = get_deployment_encryption_service()
         decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
         provider_credentials = prepare_provider_credentials(
-            provider_lower, decrypted_token, credential.metadata
+            provider_lower, decrypted_token, credential.provider_metadata
         )
 
         # 4. Create deployment record (status: building)
@@ -270,7 +288,7 @@ async def deploy_project(
             provider=provider_lower,
             status="building",
             logs=["Deployment started"],
-            metadata={},
+            deployment_metadata={},
         )
         db.add(deployment)
         await db.commit()
@@ -346,7 +364,7 @@ async def deploy_project(
             # TODO: Add logic to identify the primary/frontend container
             primary_container = containers[0]
             build_container_name = primary_container.container_name
-            build_directory = primary_container.directory
+            build_directory = resolve_container_directory(primary_container)
 
             deployment.logs.append(
                 f"Multi-container project: building in container '{primary_container.name}' ({build_container_name})"
@@ -420,6 +438,8 @@ async def deploy_project(
                     project_settings=project.settings,
                     container_name=build_container_name,
                     volume_name=project.slug,  # Use project.slug for shared volume path
+                    container_directory=build_directory,
+                    deployment_mode=deployment_mode,
                 )
 
                 if not success:
@@ -452,7 +472,8 @@ async def deploy_project(
             project_settings=project.settings,
             collect_source=use_source_deployment,
             container_directory=build_directory,
-            volume_name=project.slug,  # Use project.slug for shared volume path
+            volume_name=project.slug,
+            container_name=build_container_name,
         )
 
         deployment.logs.append(f"Collected {len(files)} files")
@@ -482,7 +503,7 @@ async def deploy_project(
             deployment.deployment_url = result.deployment_url
             # For JSON fields, we need to create a new list to trigger SQLAlchemy's change detection
             deployment.logs = deployment.logs + result.logs
-            deployment.metadata = result.metadata
+            deployment.deployment_metadata = result.metadata
             deployment.completed_at = datetime.utcnow()
 
             logger.info(f"Deployment {deployment.id} succeeded: {result.deployment_url}")
@@ -621,7 +642,7 @@ async def deploy_all_containers(
             decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
             provider_credentials[provider] = {
                 "token": decrypted_token,
-                "metadata": credential.metadata,
+                "metadata": credential.provider_metadata,
                 "credential": credential
             }
         except HTTPException:
@@ -663,7 +684,7 @@ async def deploy_all_containers(
                 provider=provider,
                 status="building",
                 logs=[f"Deploy-all: Deploying {container.name} to {provider}"],
-                metadata={"container_id": str(container.id), "container_name": container.name}
+                deployment_metadata={"container_id": str(container.id), "container_name": container.name}
             )
             db.add(deployment)
             await db.commit()
@@ -677,14 +698,21 @@ async def deploy_all_containers(
             if container.base and container.base.tech_stack:
                 tech_stack = container.base.tech_stack
                 if isinstance(tech_stack, list) and len(tech_stack) > 0:
-                    framework_map = {
-                        "Next.js": "nextjs",
-                        "React": "vite",
-                        "Vue": "vite",
-                        "Svelte": "vite",
-                        "Astro": "astro",
-                    }
-                    framework = framework_map.get(tech_stack[0], "vite")
+                    # Prefix match: "Next.js 16" -> "nextjs", "React 19" -> "vite", etc.
+                    framework_prefixes = [
+                        ("Next.js", "nextjs"),
+                        ("React", "vite"),
+                        ("Vue", "vite"),
+                        ("Svelte", "vite"),
+                        ("Astro", "astro"),
+                        ("FastAPI", "static"),
+                    ]
+                    primary = tech_stack[0]
+                    framework = "vite"  # default
+                    for prefix, fw in framework_prefixes:
+                        if primary.startswith(prefix):
+                            framework = fw
+                            break
 
             # Determine deployment mode
             default_modes = {
@@ -699,6 +727,7 @@ async def deploy_all_containers(
                 deployment.logs.append(f"Building {container.name} locally...")
                 await db.commit()
 
+                resolved_directory = resolve_container_directory(container)
                 success, build_output = await builder.trigger_build(
                     user_id=str(current_user.id),
                     project_id=str(project.id),
@@ -706,7 +735,9 @@ async def deploy_all_containers(
                     framework=framework,
                     custom_build_command=None,
                     container_name=container.container_name,
-                    volume_name=project.slug
+                    volume_name=project.slug,
+                    container_directory=resolved_directory,
+                    deployment_mode=deployment_mode,
                 )
 
                 if not success:
@@ -750,8 +781,9 @@ async def deploy_all_containers(
                 project_id=str(project.id),
                 framework=framework,
                 collect_source=(deployment_mode == "source"),
-                container_directory=container.directory,
-                volume_name=project.slug
+                container_directory=resolved_directory,
+                volume_name=project.slug,
+                container_name=container.container_name,
             )
 
             deploy_result = await provider_instance.deploy(files, config)
@@ -904,7 +936,7 @@ async def deploy_single_container_endpoint(
         provider=provider_name,
         status="building",
         logs=[f"Deploying {container.name} to {provider_name}..."],
-        metadata={"container_id": str(container.id), "container_name": container.name},
+        deployment_metadata={"container_id": str(container.id), "container_name": container.name},
     )
     db.add(deployment)
     await db.commit()
@@ -938,6 +970,8 @@ async def deploy_single_container_endpoint(
         }
         deployment_mode = default_modes.get(provider_name, "pre-built")
 
+        resolved_directory = resolve_container_directory(container)
+
         # 9. Build if needed
         if deployment_mode == "pre-built":
             deployment.logs.append(f"Building {container.name} locally...")
@@ -951,6 +985,8 @@ async def deploy_single_container_endpoint(
                 custom_build_command=None,
                 container_name=container.container_name,
                 volume_name=project.slug,
+                container_directory=resolved_directory,
+                deployment_mode=deployment_mode,
             )
 
             if not success:
@@ -986,7 +1022,7 @@ async def deploy_single_container_endpoint(
         await db.commit()
 
         provider_credentials = prepare_provider_credentials(
-            provider_name, decrypted_token, credential.metadata
+            provider_name, decrypted_token, credential.provider_metadata
         )
 
         config = DeploymentConfig(
@@ -1002,8 +1038,9 @@ async def deploy_single_container_endpoint(
             project_id=str(project.id),
             framework=framework,
             collect_source=(deployment_mode == "source"),
-            container_directory=container.directory,
+            container_directory=resolved_directory,
             volume_name=project.slug,
+            container_name=container.container_name,
         )
 
         provider_instance = DeploymentManager.get_provider(provider_name, provider_credentials)
@@ -1253,7 +1290,7 @@ async def get_deployment_status(
         encryption_service = get_deployment_encryption_service()
         decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
         provider_credentials = prepare_provider_credentials(
-            deployment.provider, decrypted_token, credential.metadata
+            deployment.provider, decrypted_token, credential.provider_metadata
         )
 
         # Get provider and check status
@@ -1262,7 +1299,9 @@ async def get_deployment_status(
 
         # Update deployment record if status changed
         if provider_status.get("status") and provider_status["status"] != deployment.status:
-            deployment.metadata["provider_status"] = provider_status
+            if deployment.deployment_metadata is None:
+                deployment.deployment_metadata = {}
+            deployment.deployment_metadata["provider_status"] = provider_status
             await db.commit()
 
         return DeploymentStatusResponse(
@@ -1328,7 +1367,7 @@ async def get_deployment_logs(
                 encryption_service = get_deployment_encryption_service()
                 decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
                 provider_credentials = prepare_provider_credentials(
-                    deployment.provider, decrypted_token, credential.metadata
+                    deployment.provider, decrypted_token, credential.provider_metadata
                 )
 
                 provider = DeploymentManager.get_provider(deployment.provider, provider_credentials)
@@ -1394,7 +1433,7 @@ async def delete_deployment(
                 encryption_service = get_deployment_encryption_service()
                 decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
                 provider_credentials = prepare_provider_credentials(
-                    deployment.provider, decrypted_token, credential.metadata
+                    deployment.provider, decrypted_token, credential.provider_metadata
                 )
 
                 provider = DeploymentManager.get_provider(deployment.provider, provider_credentials)

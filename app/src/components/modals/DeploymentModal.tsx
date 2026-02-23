@@ -214,7 +214,8 @@ export function DeploymentModal({
     }
   };
 
-  const connectedProviders = credentials.map(c => c.provider);
+  const COMING_SOON_PROVIDERS = ['vercel', 'cloudflare'];
+  const connectedProviders = credentials.map(c => c.provider).filter(p => !COMING_SOON_PROVIDERS.includes(p.toLowerCase()));
   const hasConnectedProviders = connectedProviders.length > 0;
 
   if (!isOpen) return null;
@@ -270,7 +271,7 @@ export function DeploymentModal({
               <p className="text-sm text-[var(--text)]/60 mb-4">
                 You need to connect at least one deployment provider before you can deploy.
                 <br />
-                Go to Account Settings to connect Cloudflare, Vercel, or Netlify.
+                Go to Account Settings to connect a deployment provider like Netlify.
               </p>
               <button
                 onClick={() => {

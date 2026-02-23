@@ -6,8 +6,12 @@ for deployment to various providers.
 """
 
 import asyncio
+import base64
+import io
 import logging
 import os
+import tarfile
+import textwrap
 from uuid import UUID
 
 import docker
@@ -56,6 +60,8 @@ class DeploymentBuilder:
         project_settings: dict | None = None,
         container_name: str | None = None,
         volume_name: str | None = None,
+        container_directory: str | None = None,
+        deployment_mode: str | None = None,
     ) -> tuple[bool, str]:
         """
         Trigger a build inside the project container.
@@ -68,6 +74,9 @@ class DeploymentBuilder:
             custom_build_command: Custom build command override
             project_settings: Project settings dict (for cached framework info)
             container_name: Specific container name to build in (for multi-container projects)
+            volume_name: Docker volume name
+            container_directory: Subdirectory within the project (for multi-container projects)
+            deployment_mode: "pre-built" or "source" — pre-built forces static export for Next.js
 
         Returns:
             Tuple of (success: bool, output: str)
@@ -112,7 +121,13 @@ class DeploymentBuilder:
                 logger.warning(f"Framework {framework} does not require a build step")
                 return True, "No build required for this framework"
 
-            logger.info(f"Running build command in container: {build_command}")
+            # Compute working directory for multi-container projects
+            if container_directory and container_directory not in (".", ""):
+                work_dir = f"/app/{container_directory}"
+            else:
+                work_dir = "/app"
+
+            logger.info(f"Running build command in container: {build_command} (work_dir: {work_dir})")
 
             # Execute build command in container using orchestrator
             # This works with both Docker and Kubernetes modes
@@ -120,20 +135,59 @@ class DeploymentBuilder:
                 from ..orchestration import get_orchestrator
 
                 orchestrator = get_orchestrator()
-                logger.info(f"Executing build in container: {container_name or 'default'}")
+                effective_container = container_name or project_slug
+                logger.info(f"Executing build in container: {effective_container}")
+
+                # Install deps safety net (only if node_modules is missing)
+                # Detect package manager from lockfile: bun.lock → bun, pnpm-lock.yaml → pnpm, else npm
+                # set -e ensures the shell exits on any command failure
+                install_cmd = (
+                    "if [ -f bun.lock ] || [ -f bun.lockb ]; then bun install --frozen-lockfile; "
+                    "elif [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; "
+                    "else npm install --prefer-offline --no-audit; fi"
+                )
+
+                # For pre-built Next.js deployments, temporarily patch the project
+                # so `next build` produces the static `out/` directory:
+                # 1. Set output:'export' in next.config
+                # 2. Add force-static to API route files (incompatible with static export)
+                # All changes are backed up and restored after build.
+                pre_build_cmd = ""
+                if framework and framework.lower() == "nextjs" and deployment_mode == "pre-built":
+                    logger.info("Injecting Next.js static export config for pre-built deployment")
+                    write_scripts_cmd = self._get_nextjs_export_scripts_cmd()
+                    pre_build_cmd = f"&& {write_scripts_cmd} && node /tmp/_deploy_inject.js "
+                    # Wrap build in subshell: set +e ensures restore always runs
+                    # even if build fails, then exit with build's exit code
+                    build_command = (
+                        f"(set +e; {build_command}; _E=$?; node /tmp/_deploy_restore.js; exit $_E)"
+                    )
+
+                full_cmd = (
+                    f"set -e && cd {work_dir} "
+                    f"&& ([ -d node_modules ] || ({install_cmd})) "
+                    f"{pre_build_cmd}"
+                    f"&& {build_command} "
+                    f"&& echo BUILD_EXIT_CODE=0"
+                )
 
                 # Use orchestrator's execute_command method which handles both Docker and K8s
                 output = await orchestrator.execute_command(
                     user_id=UUID(user_id),
                     project_id=UUID(project_id),
-                    container_name=container_name or project_slug,
-                    command=["/bin/sh", "-c", f"cd /app && {build_command}"],
+                    container_name=effective_container,
+                    command=["/bin/sh", "-c", full_cmd],
                     timeout=300,
                 )
             except RuntimeError as e:
                 error_msg = f"Build failed: {str(e)}"
                 logger.error(error_msg)
                 raise BuildError(error_msg) from e
+
+            # Verify the build actually produced output
+            if "BUILD_EXIT_CODE=0" not in output:
+                logger.error(f"Build command did not complete successfully. Output: {output[:1000]}")
+                raise BuildError(f"Build command failed. Output: {output[:1000]}")
 
             logger.info(f"Build completed successfully for project {project_id}")
             return True, output
@@ -152,9 +206,13 @@ class DeploymentBuilder:
         collect_source: bool = False,
         container_directory: str | None = None,
         volume_name: str | None = None,
+        container_name: str | None = None,
     ) -> list[DeploymentFile]:
         """
         Collect files from the project for deployment.
+
+        Uses the orchestrator to collect files from inside the project container/pod.
+        This works in both Docker and Kubernetes modes.
 
         Args:
             user_id: User ID
@@ -164,7 +222,8 @@ class DeploymentBuilder:
             project_settings: Project settings dict (for cached framework info)
             collect_source: If True, collect source files; if False, collect built files
             container_directory: Subdirectory within project (for multi-container projects)
-            volume_name: Docker volume name (source of truth for Docker volume-based projects)
+            volume_name: Project slug (used for Docker shared volume path)
+            container_name: Container name for orchestrator commands
 
         Returns:
             List of DeploymentFile objects
@@ -173,119 +232,74 @@ class DeploymentBuilder:
             FileNotFoundError: If build output directory doesn't exist
         """
         try:
-            # Volume-based file collection (source of truth)
-            if volume_name:
-                logger.info(f"Collecting files from Docker volume: {volume_name}")
-
-                if collect_source:
-                    # Collect all source files from volume
-                    files = await self._collect_files_from_volume(
-                        volume_name, subdirectory=container_directory
-                    )
-                    logger.info(f"Collected {len(files)} source files from volume")
-                    return files
-                else:
-                    # Collect built files from volume
-                    # 1. Detect framework from volume
-                    if not framework:
-                        package_json_content = await self._read_file_from_volume(
-                            volume_name, "package.json"
-                        )
-                        if package_json_content:
-                            framework, _ = FrameworkDetector.detect_from_package_json(
-                                package_json_content.decode("utf-8")
-                            )
-                            logger.info(f"Auto-detected framework from volume: {framework}")
-                        else:
-                            framework = "vite"
-                            logger.warning("No package.json found in volume, defaulting to vite")
-
-                    # 2. Get output directory
-                    if custom_output_dir:
-                        output_dir = custom_output_dir
-                    elif project_settings and project_settings.get("output_directory"):
-                        output_dir = project_settings["output_directory"]
-                    else:
-                        output_dir = self._get_build_output_dir(framework)
-
-                    # 3. Build subdirectory path for multi-container
-                    if container_directory and container_directory != ".":
-                        output_dir = f"{container_directory}/{output_dir}"
-
-                    # 4. Verify build output exists
-                    if not await self._directory_exists_in_volume(volume_name, output_dir):
-                        raise FileNotFoundError(
-                            f"Build output directory not found in volume {volume_name}: {output_dir}"
-                        )
-
-                    # 5. Collect files
-                    files = await self._collect_files_from_volume(
-                        volume_name, subdirectory=output_dir
-                    )
-                    logger.info(f"Collected {len(files)} built files from volume")
-                    return files
-
-            # FALLBACK: Original filesystem code for backward compatibility
-            # Get project path
-            project_path = self._get_project_path(user_id, project_id)
-
-            # For multi-container projects, use the container's subdirectory
-            if container_directory and container_directory != ".":
-                project_path = os.path.join(project_path, container_directory)
-                logger.info(f"Multi-container project: using directory {container_directory}")
+            # Compute the target directory inside the container
+            if container_directory and container_directory not in (".", ""):
+                base_dir = f"/app/{container_directory}"
+            else:
+                base_dir = "/app"
 
             if collect_source:
-                # Collect source files for deployment (Vercel will build)
-                logger.info(f"Collecting source files from: {project_path}")
-                files = await self._collect_files_recursive(project_path, ".")
-                logger.info(f"Collected {len(files)} source files for deployment")
-                return files
-
+                # Collect source files (Vercel will build remotely)
+                target_dir = base_dir
+                logger.info(f"Collecting source files from container at {target_dir}")
             else:
-                # Collect built files (original behavior)
-                # Detect framework using priority: parameter > cached > auto-detect
+                # Collect built files — determine output directory
                 if not framework:
-                    # Try to use cached framework from project settings
                     if project_settings and project_settings.get("framework"):
                         framework = project_settings["framework"]
-                        logger.debug(f"Using cached framework from project settings: {framework}")
                     else:
-                        # Fallback: Auto-detect from package.json
-                        package_json_path = os.path.join(project_path, "package.json")
-                        if os.path.exists(package_json_path):
-                            with open(package_json_path) as f:
-                                package_json_content = f.read()
-                            framework, _ = FrameworkDetector.detect_from_package_json(
-                                package_json_content
-                            )
-                        else:
-                            framework = "vite"
+                        framework = "vite"
 
-                # Get output directory with priority: custom > cached > framework default
                 if custom_output_dir:
                     output_dir = custom_output_dir
                 elif project_settings and project_settings.get("output_directory"):
                     output_dir = project_settings["output_directory"]
-                    logger.debug(
-                        f"Using cached output directory from project settings: {output_dir}"
-                    )
                 else:
                     output_dir = self._get_build_output_dir(framework)
-                build_path = os.path.join(project_path, output_dir)
 
-                logger.info(f"Collecting deployment files from: {build_path}")
+                target_dir = f"{base_dir}/{output_dir}"
+                logger.info(f"Collecting built files from container at {target_dir}")
 
-                # Verify build output exists
-                if not os.path.exists(build_path):
-                    error_msg = f"Build output directory not found: {build_path}"
-                    logger.error(error_msg)
-                    raise FileNotFoundError(error_msg)
-
-                # Collect files
-                files = await self._collect_files_recursive(build_path, output_dir)
-
-                logger.info(f"Collected {len(files)} files for deployment")
+            # Primary: use orchestrator to collect files (works for both Docker and K8s)
+            if container_name:
+                files = await self._collect_files_via_orchestrator(
+                    user_id=user_id,
+                    project_id=project_id,
+                    container_name=container_name,
+                    target_dir=target_dir,
+                )
+                logger.info(f"Collected {len(files)} files via orchestrator")
                 return files
+
+            # Fallback: direct filesystem for Docker shared volume
+            if volume_name:
+                volume_dir = f"/projects/{volume_name}"
+                if container_directory and container_directory not in (".", ""):
+                    volume_dir = f"{volume_dir}/{container_directory}"
+
+                if not collect_source:
+                    if not framework:
+                        framework = "vite"
+                    if custom_output_dir:
+                        out = custom_output_dir
+                    elif project_settings and project_settings.get("output_directory"):
+                        out = project_settings["output_directory"]
+                    else:
+                        out = self._get_build_output_dir(framework)
+                    volume_dir = f"{volume_dir}/{out}"
+
+                logger.info(f"Collecting files from shared volume at {volume_dir}")
+                if not os.path.exists(volume_dir):
+                    raise FileNotFoundError(
+                        f"Build output directory not found: {volume_dir}"
+                    )
+                files = await self._collect_files_recursive(volume_dir, ".")
+                logger.info(f"Collected {len(files)} files from volume")
+                return files
+
+            raise FileNotFoundError(
+                "No container_name or volume_name provided for file collection"
+            )
 
         except Exception as e:
             logger.error(f"Failed to collect deployment files: {e}", exc_info=True)
@@ -313,7 +327,11 @@ class DeploymentBuilder:
             ".env.production",
             ".env.development",
             "thumbs.db",
-            ".next/cache",
+            ".next",
+            "out",
+            "dist",
+            "build",
+            ".turbo",
         }
 
         for root, dirs, filenames in os.walk(directory):
@@ -338,6 +356,94 @@ class DeploymentBuilder:
                 except Exception as e:
                     logger.warning(f"Failed to read file {file_path}: {e}")
                     continue
+
+        return files
+
+    async def _collect_files_via_orchestrator(
+        self,
+        user_id: str,
+        project_id: str,
+        container_name: str,
+        target_dir: str,
+    ) -> list[DeploymentFile]:
+        """
+        Collect files from the project container via orchestrator execute_command.
+
+        Runs tar+base64 inside the pod/container and decodes the result.
+        Works in both Docker and Kubernetes modes.
+
+        Args:
+            user_id: User ID
+            project_id: Project ID
+            container_name: Container name for orchestrator
+            target_dir: Absolute path inside the container to collect from
+
+        Returns:
+            List of DeploymentFile objects
+        """
+        from ..orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+
+        # First verify the directory exists; if not, list parent contents for debugging
+        check_output = await orchestrator.execute_command(
+            user_id=UUID(user_id),
+            project_id=UUID(project_id),
+            container_name=container_name,
+            command=["/bin/sh", "-c",
+                     f"if [ -d {target_dir} ]; then echo EXISTS; "
+                     f"else echo NOT_FOUND; echo '---'; ls -la $(dirname {target_dir}) 2>&1 || true; fi"],
+            timeout=10,
+        )
+
+        if "NOT_FOUND" in check_output:
+            raise FileNotFoundError(
+                f"Directory not found in container: {target_dir}\n"
+                f"Container contents:\n{check_output}"
+            )
+
+        # Tar the directory, base64 encode, and stream back
+        excludes = (
+            "--exclude=node_modules --exclude=.git --exclude=__pycache__ "
+            "--exclude=.DS_Store --exclude=.env --exclude=.env.local "
+            "--exclude=.env.production --exclude=.env.development "
+            "--exclude=thumbs.db --exclude=.next --exclude=out "
+            "--exclude=dist --exclude=build --exclude=.turbo"
+        )
+        cmd = f"tar -cf - -C {target_dir} {excludes} . 2>/dev/null | base64"
+
+        output = await orchestrator.execute_command(
+            user_id=UUID(user_id),
+            project_id=UUID(project_id),
+            container_name=container_name,
+            command=["/bin/sh", "-c", cmd],
+            timeout=120,
+        )
+
+        if not output or not output.strip():
+            raise FileNotFoundError(f"No files found in {target_dir}")
+
+        # Decode base64 and extract tar
+        tar_bytes = base64.b64decode(output.strip())
+        files = []
+
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as tar:
+            for member in tar.getmembers():
+                if not member.isfile():
+                    continue
+                name = member.name
+                if name.startswith("./"):
+                    name = name[2:]
+                if not name:
+                    continue
+                # Skip hidden files
+                if any(part.startswith(".") for part in name.split("/")):
+                    continue
+
+                f = tar.extractfile(member)
+                if f:
+                    content = f.read()
+                    files.append(DeploymentFile(path=name, content=content))
 
         return files
 
@@ -426,7 +532,7 @@ class DeploymentBuilder:
         """
         output_dirs = {
             "vite": "dist",
-            "nextjs": ".next",
+            "nextjs": "out",  # Next.js static export (output: 'export' in next.config)
             "react": "build",
             "vue": "dist",
             "svelte": "dist",
@@ -436,6 +542,100 @@ class DeploymentBuilder:
         }
 
         return output_dirs.get(framework.lower(), "dist")
+
+    @staticmethod
+    def _get_nextjs_export_scripts_cmd() -> str:
+        """
+        Return a shell command that writes the inject and restore Node.js scripts
+        to /tmp inside the container. Uses base64 encoding to avoid shell escaping.
+
+        Scripts:
+        - inject: set output:'export' in next.config + add force-static to API routes
+        - restore: revert all changes using .deploy-bak files
+        """
+        inject_js = textwrap.dedent("""\
+            const fs = require('fs');
+            const path = require('path');
+            const configs = ['next.config.ts', 'next.config.mjs', 'next.config.js'];
+            for (const f of configs) {
+              if (fs.existsSync(f)) {
+                let c = fs.readFileSync(f, 'utf8');
+                fs.copyFileSync(f, f + '.deploy-bak');
+                if (/output\\s*:\\s*['"]/.test(c)) {
+                  c = c.replace(/output\\s*:\\s*['"][^'"]*['"]/, "output: 'export'");
+                  console.log('Replaced output value with export in ' + f);
+                } else {
+                  c = c.replace(/(const\\s+\\w+\\s*[=:]\\s*\\{)/, "$1\\n  output: 'export',");
+                  c = c.replace(/(export\\s+default\\s*\\{)/, "$1\\n  output: 'export',");
+                  console.log('Injected output:export into ' + f);
+                }
+                fs.writeFileSync(f, c);
+                break;
+              }
+            }
+            function findRoutes(dir) {
+              const results = [];
+              if (!fs.existsSync(dir)) return results;
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory() && e.name !== 'node_modules' && e.name !== '.next') {
+                  results.push(...findRoutes(full));
+                } else if (e.isFile() && /^route\\.(ts|js|tsx|jsx)$/.test(e.name)) {
+                  results.push(full);
+                }
+              }
+              return results;
+            }
+            for (const r of findRoutes('app')) {
+              let c = fs.readFileSync(r, 'utf8');
+              if (!c.includes("dynamic")) {
+                fs.copyFileSync(r, r + '.deploy-bak');
+                fs.writeFileSync(r, 'export const dynamic = "force-static";\\n' + c);
+                console.log('Added force-static to ' + r);
+              }
+            }
+            console.log('Static export injection complete');
+        """)
+
+        restore_js = textwrap.dedent("""\
+            const fs = require('fs');
+            const path = require('path');
+            function findBaks(dir) {
+              const results = [];
+              if (!fs.existsSync(dir)) return results;
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory() && e.name !== 'node_modules' && e.name !== '.next') {
+                  results.push(...findBaks(full));
+                } else if (e.isFile() && e.name.endsWith('.deploy-bak')) {
+                  results.push(full);
+                }
+              }
+              return results;
+            }
+            for (const f of ['next.config.ts', 'next.config.mjs', 'next.config.js']) {
+              const bak = f + '.deploy-bak';
+              if (fs.existsSync(bak)) {
+                fs.renameSync(bak, f);
+                console.log('Restored ' + f);
+                break;
+              }
+            }
+            for (const b of findBaks('app')) {
+              const orig = b.replace('.deploy-bak', '');
+              fs.renameSync(b, orig);
+              console.log('Restored ' + orig);
+            }
+            console.log('Restore complete');
+        """)
+
+        inject_b64 = base64.b64encode(inject_js.encode()).decode()
+        restore_b64 = base64.b64encode(restore_js.encode()).decode()
+
+        return (
+            f"echo '{inject_b64}' | base64 -d > /tmp/_deploy_inject.js "
+            f"&& echo '{restore_b64}' | base64 -d > /tmp/_deploy_restore.js"
+        )
 
     async def verify_build_output(
         self, user_id: str, project_id: str, framework: str | None = None

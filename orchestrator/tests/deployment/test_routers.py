@@ -60,7 +60,7 @@ class TestDeploymentCredentialsRouter:
             mock_credential.project_id = None
             mock_credential.provider = "vercel"
             mock_credential.access_token_encrypted = "encrypted_token"
-            mock_credential.metadata = {"team_id": "team_abc123"}
+            mock_credential.provider_metadata = {"team_id": "team_abc123"}
             mock_credential.created_at = datetime.now()
             mock_credential.updated_at = datetime.now()
 
@@ -113,7 +113,7 @@ class TestDeploymentCredentialsRouter:
         mock_credential.user_id = mock_user.id
         mock_credential.provider = "vercel"
         mock_credential.access_token_encrypted = "encrypted_token"
-        mock_credential.metadata = {"team_id": "team_123"}
+        mock_credential.provider_metadata = {"team_id": "team_123"}
 
         with patch(
             "app.routers.deployment_credentials.get_deployment_encryption_service"

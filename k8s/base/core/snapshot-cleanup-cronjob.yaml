@@ -15,9 +15,12 @@ spec:
   schedule: "0 3 * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  concurrencyPolicy: Forbid
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 3600  # Allow up to 1 hour late start
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 600  # Kill job after 10 minutes
+      backoffLimit: 1
       template:
         metadata:
           labels:

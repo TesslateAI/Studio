@@ -191,7 +191,7 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
           {credentials.length === 0 && (
             <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
               <p className="text-xs text-yellow-400">
-                You haven't connected any deployment providers yet. Go to Account Settings to connect Cloudflare, Vercel, or Netlify.
+                You haven't connected any deployment providers yet. Go to Account Settings to connect a deployment provider like Netlify.
               </p>
             </div>
           )}

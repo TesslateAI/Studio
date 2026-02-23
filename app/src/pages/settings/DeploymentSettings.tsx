@@ -361,58 +361,76 @@ export default function DeploymentSettings() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {providers
               .filter(provider => !isProviderConnected(provider.name))
-              .map((provider) => (
-                <div
-                  key={provider.name}
-                  className="p-4 bg-[var(--surface)] border border-white/10 rounded-xl hover:border-white/20 transition-all"
-                >
-                  <div className="flex items-start gap-3 mb-4">
-                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getProviderColor(provider.name)}`}>
-                      {getProviderIcon(provider.name)}
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-[var(--text)] mb-1">
-                        {provider.display_name}
-                      </h4>
-                      <p className="text-xs text-[var(--text)]/60">
-                        {provider.description}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      if (provider.auth_type === 'oauth') {
-                        handleOAuthConnect(provider);
-                      } else {
-                        handleManualConnect(provider);
-                      }
-                    }}
-                    className="w-full px-4 py-2.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg font-semibold transition-all flex items-center justify-center gap-2 min-h-[48px]"
+              .map((provider) => {
+                const isComingSoon = ['vercel', 'cloudflare'].includes(provider.name.toLowerCase());
+                return (
+                  <div
+                    key={provider.name}
+                    className={`p-4 bg-[var(--surface)] border border-white/10 rounded-xl transition-all ${isComingSoon ? 'opacity-60' : 'hover:border-white/20'}`}
                   >
-                    {provider.auth_type === 'oauth' ? (
-                      <>
-                        <LinkSimple size={18} weight="bold" />
-                        Connect with OAuth
-                      </>
-                    ) : (
-                      <>
-                        <Key size={18} weight="bold" />
-                        Add API Token
-                      </>
-                    )}
-                  </button>
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl ${getProviderColor(provider.name)}`}>
+                        {getProviderIcon(provider.name)}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-[var(--text)] mb-1 flex items-center gap-2">
+                          {provider.display_name}
+                          {isComingSoon && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full">
+                              Coming Soon
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-xs text-[var(--text)]/60">
+                          {provider.description}
+                        </p>
+                      </div>
+                    </div>
 
-                  <div className="mt-3 pt-3 border-t border-white/10">
-                    <div className="flex items-center gap-2 text-xs text-[var(--text)]/40">
-                      <ShieldCheck size={14} />
-                      {provider.auth_type === 'oauth'
-                        ? 'Secure OAuth 2.0 authentication'
-                        : 'Encrypted API token storage'}
+                    <button
+                      onClick={() => {
+                        if (isComingSoon) return;
+                        if (provider.auth_type === 'oauth') {
+                          handleOAuthConnect(provider);
+                        } else {
+                          handleManualConnect(provider);
+                        }
+                      }}
+                      disabled={isComingSoon}
+                      className={`w-full px-4 py-2.5 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 min-h-[48px] ${
+                        isComingSoon
+                          ? 'bg-white/5 text-[var(--text)]/30 cursor-not-allowed'
+                          : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white'
+                      }`}
+                    >
+                      {isComingSoon ? (
+                        'Coming Soon'
+                      ) : provider.auth_type === 'oauth' ? (
+                        <>
+                          <LinkSimple size={18} weight="bold" />
+                          Connect with OAuth
+                        </>
+                      ) : (
+                        <>
+                          <Key size={18} weight="bold" />
+                          Add API Token
+                        </>
+                      )}
+                    </button>
+
+                    <div className="mt-3 pt-3 border-t border-white/10">
+                      <div className="flex items-center gap-2 text-xs text-[var(--text)]/40">
+                        <ShieldCheck size={14} />
+                        {isComingSoon
+                          ? 'Provider integration in development'
+                          : provider.auth_type === 'oauth'
+                            ? 'Secure OAuth 2.0 authentication'
+                            : 'Encrypted API token storage'}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
           </div>
 
           {providers.filter(p => !isProviderConnected(p.name)).length === 0 && (

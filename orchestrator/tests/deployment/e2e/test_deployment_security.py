@@ -81,7 +81,7 @@ class TestEncryptionAtRest:
         # Create credential with encrypted token
         encrypted_token = encryption_service.encrypt(plaintext_token)
         credential = DeploymentCredential(
-            user_id=user.id, provider="vercel", access_token_encrypted=encrypted_token, metadata={}
+            user_id=user.id, provider="vercel", access_token_encrypted=encrypted_token, provider_metadata={}
         )
 
         test_db_session.add(credential)
@@ -135,7 +135,7 @@ class TestEncryptionAtRest:
             user_id=user.id,
             provider="vercel",
             access_token_encrypted="",  # Empty but valid
-            metadata={},
+            provider_metadata={},
         )
 
         test_db_session.add(credential)
@@ -165,7 +165,7 @@ class TestAuthenticationAuthorization:
             user_id=user1.id,
             provider="vercel",
             access_token_encrypted=encryption_service.encrypt("user1_token"),
-            metadata={},
+            provider_metadata={},
         )
         test_db_session.add(cred1)
         await test_db_session.commit()
@@ -343,7 +343,7 @@ class TestInjectionPrevention:
             user_id=user.id,
             provider=malicious_provider,  # SQLAlchemy will handle this safely
             access_token_encrypted=encryption_service.encrypt("token"),
-            metadata={},
+            provider_metadata={},
         )
 
         test_db_session.add(credential)

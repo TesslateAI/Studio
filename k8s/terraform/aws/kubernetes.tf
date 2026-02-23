@@ -482,23 +482,13 @@ resource "aws_db_instance" "tesslate" {
 # When create_rds=true, postgres deployment is scaled to 0 (RDS handles the database)
 # When create_rds=false, this resource doesn't exist and postgres runs at default replicas
 # -----------------------------------------------------------------------------
-resource "kubectl_manifest" "postgres_scale_down" {
+# Scale down K8s postgres if it exists (no-op if deployment doesn't exist)
+resource "null_resource" "postgres_scale_down" {
   count = var.create_rds ? 1 : 0
 
-  server_side_apply = true
-  force_conflicts   = true
-
-  yaml_body = yamlencode({
-    apiVersion = "apps/v1"
-    kind       = "Deployment"
-    metadata = {
-      name      = "postgres"
-      namespace = "tesslate"
-    }
-    spec = {
-      replicas = 0
-    }
-  })
+  provisioner "local-exec" {
+    command = "kubectl scale deployment/postgres -n tesslate --replicas=0 2>/dev/null || true"
+  }
 
   depends_on = [kubernetes_namespace.tesslate]
 }

@@ -67,7 +67,19 @@ module "eks" {
       max_size     = var.eks_node_max_size
       desired_size = var.eks_node_desired_size
 
-      disk_size = var.eks_node_disk_size
+      # disk_size is ignored when a launch template is created (EKS limitation).
+      # Use block_device_mappings to set root volume size in the launch template.
+      block_device_mappings = {
+        xvda = {
+          device_name = "/dev/xvda"
+          ebs = {
+            volume_size           = var.eks_node_disk_size
+            volume_type           = "gp3"
+            encrypted             = true
+            delete_on_termination = true
+          }
+        }
+      }
 
       # Use latest Amazon Linux 2023 AMI
       ami_type = "AL2023_x86_64_STANDARD"
@@ -99,7 +111,17 @@ module "eks" {
       max_size     = var.eks_spot_max_size
       desired_size = var.eks_spot_desired_size
 
-      disk_size = var.eks_node_disk_size
+      block_device_mappings = {
+        xvda = {
+          device_name = "/dev/xvda"
+          ebs = {
+            volume_size           = var.eks_node_disk_size
+            volume_type           = "gp3"
+            encrypted             = true
+            delete_on_termination = true
+          }
+        }
+      }
 
       ami_type = "AL2023_x86_64_STANDARD"
 

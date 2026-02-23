@@ -15,9 +15,12 @@ spec:
   schedule: "*/2 * * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
-  concurrencyPolicy: Forbid  # Don't run multiple cleanup jobs simultaneously
+  concurrencyPolicy: Replace  # Kill stuck job and start fresh if still running at next schedule
+  startingDeadlineSeconds: 120  # Allow up to 2 min late start if a run was missed
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 300  # Kill job after 5 minutes to prevent stuck runs
+      backoffLimit: 1  # Only retry once on failure
       template:
         metadata:
           labels:

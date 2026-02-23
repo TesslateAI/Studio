@@ -188,8 +188,15 @@ def build_target_response(
     target: DeploymentTarget,
     connected_containers: list[ContainerSummary],
     deployment_history: list[DeploymentSummary],
+    is_connected_override: bool | None = None,
 ) -> DeploymentTargetResponse:
-    """Build a response object for a deployment target."""
+    """Build a response object for a deployment target.
+
+    Args:
+        is_connected_override: If provided, uses this value instead of target.is_connected.
+            Used to reflect live credential status rather than the stale stored value.
+    """
+    is_connected = is_connected_override if is_connected_override is not None else target.is_connected
     provider_info = get_provider_info(target.provider)
     return DeploymentTargetResponse(
         id=target.id,
@@ -199,7 +206,7 @@ def build_target_response(
         name=target.name,
         position_x=target.position_x,
         position_y=target.position_y,
-        is_connected=target.is_connected,
+        is_connected=is_connected,
         credential_id=target.credential_id,
         provider_info=ProviderInfo(
             display_name=provider_info["display_name"] if provider_info else target.provider,
@@ -286,6 +293,14 @@ async def list_deployment_targets(
     """List all deployment targets for a project."""
     project = await get_project_or_404(slug, db, user)
 
+    # Fetch user's connected providers upfront so we can reflect live credential status
+    credentials_result = await db.execute(
+        select(DeploymentCredential.provider, DeploymentCredential.id).where(
+            DeploymentCredential.user_id == user.id
+        )
+    )
+    connected_providers = {row[0]: row[1] for row in credentials_result.all()}
+
     # Fetch targets with connected containers
     result = await db.execute(
         select(DeploymentTarget)
@@ -301,6 +316,14 @@ async def list_deployment_targets(
 
     responses = []
     for target in targets:
+        # Dynamically compute is_connected from live credentials
+        live_is_connected = target.provider in connected_providers
+
+        # Sync stale DB value if it diverged (credential added/removed after target creation)
+        if target.is_connected != live_is_connected:
+            target.is_connected = live_is_connected
+            target.credential_id = connected_providers.get(target.provider) if live_is_connected else None
+            # Non-blocking: commit happens at end
         # Get connected containers
         connected = []
         for conn in target.connected_containers:
@@ -351,7 +374,10 @@ async def list_deployment_targets(
                 )
             )
 
-        responses.append(build_target_response(target, connected, history))
+        responses.append(build_target_response(target, connected, history, is_connected_override=live_is_connected))
+
+    # Persist any stale is_connected updates (non-blocking best-effort)
+    await db.commit()
 
     return responses
 
@@ -402,6 +428,25 @@ async def get_deployment_target(
     """Get a specific deployment target."""
     project = await get_project_or_404(slug, db, user)
     target = await get_deployment_target_or_404(target_id, project.id, db)
+
+    # Dynamically check if user has credentials for this provider
+    credential_result = await db.execute(
+        select(DeploymentCredential).where(
+            and_(
+                DeploymentCredential.user_id == user.id,
+                DeploymentCredential.provider == target.provider,
+            )
+        )
+    )
+    credential = credential_result.scalar_one_or_none()
+    live_is_connected = credential is not None
+
+    # Sync stale DB value if it diverged
+    if target.is_connected != live_is_connected:
+        target.is_connected = live_is_connected
+        target.credential_id = credential.id if credential else None
+        await db.commit()
+        await db.refresh(target)
 
     # Get connected containers
     connected = []
@@ -456,7 +501,7 @@ async def get_deployment_target(
             )
         )
 
-    return build_target_response(target, connected, history)
+    return build_target_response(target, connected, history, is_connected_override=live_is_connected)
 
 
 @router.patch("/{slug}/deployment-targets/{target_id}", response_model=DeploymentTargetResponse)
@@ -701,7 +746,10 @@ async def deploy_target(
     # Get connected containers
     connections_result = await db.execute(
         select(DeploymentTargetConnection)
-        .options(selectinload(DeploymentTargetConnection.container))
+        .options(
+            selectinload(DeploymentTargetConnection.container)
+            .selectinload(Container.base)
+        )
         .where(DeploymentTargetConnection.deployment_target_id == target_id)
     )
     connections = connections_result.scalars().all()
@@ -799,12 +847,33 @@ async def deploy_target(
             provider_info = get_provider_info(target.provider)
             deployment_mode = provider_info["deployment_mode"] if provider_info else "source"
 
-            # Determine framework from connection settings or auto-detect
+            # Determine framework: connection settings > container base tech_stack > default
             framework = (
                 conn.deployment_settings.get("framework")
                 if conn.deployment_settings
                 else None
             )
+            if not framework and container.base and container.base.tech_stack:
+                tech_stack = container.base.tech_stack
+                if isinstance(tech_stack, list) and len(tech_stack) > 0:
+                    # Prefix match: "Next.js 16" -> "nextjs", "React 19" -> "vite", etc.
+                    framework_prefixes = [
+                        ("Next.js", "nextjs"),
+                        ("React", "vite"),
+                        ("Vue", "vite"),
+                        ("Svelte", "vite"),
+                        ("Astro", "astro"),
+                    ]
+                    primary = tech_stack[0]
+                    framework = "vite"  # default
+                    for prefix, fw in framework_prefixes:
+                        if primary.startswith(prefix):
+                            framework = fw
+                            break
+
+            from .deployments import resolve_container_directory
+
+            resolved_directory = resolve_container_directory(container)
 
             # Build if needed
             if deployment_mode == "pre-built":
@@ -818,8 +887,10 @@ async def deploy_target(
                     project_slug=project.slug,
                     framework=framework,
                     custom_build_command=custom_build_cmd,
-                    container_name=container.name,
+                    container_name=container.container_name,
                     volume_name=project.slug,
+                    container_directory=resolved_directory,
+                    deployment_mode=deployment_mode,
                 )
                 if not success:
                     raise Exception(f"Build failed: {build_output}")
@@ -835,8 +906,9 @@ async def deploy_target(
                 project_id=str(project.id),
                 framework=framework,
                 collect_source=(deployment_mode == "source"),
-                container_directory=container.directory,
+                container_directory=resolved_directory,
                 volume_name=project.slug,
+                container_name=container.container_name,
             )
 
             # Deploy to provider

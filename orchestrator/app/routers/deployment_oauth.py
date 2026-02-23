@@ -303,26 +303,61 @@ async def vercel_callback(
                 detail="Failed to obtain access token from Vercel",
             )
 
-        # Optionally fetch team information and store configuration ID
+        # Fetch team information and store configuration ID
         team_id = token_data.get("team_id") or teamId
         metadata = {}
-        if team_id:
-            metadata["team_id"] = team_id
         if configurationId:
             metadata["configuration_id"] = configurationId
 
-            # Fetch team name
+        # If no team_id from token response or callback, proactively fetch
+        # the user's teams. Without a team_id, Vercel API calls go to the
+        # personal/Hobby scope which may not have project creation permissions.
+        if not team_id:
             try:
-                async with httpx.AsyncClient() as client:
-                    team_response = await client.get(
-                        f"https://api.vercel.com/v2/teams/{team_id}",
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    teams_response = await client.get(
+                        "https://api.vercel.com/v2/teams",
                         headers={"Authorization": f"Bearer {access_token}"},
                     )
-                    if team_response.status_code == 200:
-                        team_data = team_response.json()
-                        metadata["account_name"] = team_data.get("name", team_data.get("slug"))
+                    if teams_response.status_code == 200:
+                        teams_data = teams_response.json()
+                        teams = teams_data.get("teams", [])
+                        if teams:
+                            # Use the first team (primary team)
+                            team_id = teams[0].get("id")
+                            metadata["account_name"] = teams[0].get("name", teams[0].get("slug"))
+                            logger.info(f"Auto-detected Vercel team: {team_id}")
             except Exception as e:
-                logger.warning(f"Failed to fetch Vercel team info: {e}")
+                logger.warning(f"Failed to fetch Vercel teams: {e}")
+
+        if team_id:
+            metadata["team_id"] = team_id
+            # Fetch team name if not already set
+            if "account_name" not in metadata:
+                try:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        team_response = await client.get(
+                            f"https://api.vercel.com/v2/teams/{team_id}",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                        )
+                        if team_response.status_code == 200:
+                            team_data = team_response.json()
+                            metadata["account_name"] = team_data.get("name", team_data.get("slug"))
+                except Exception as e:
+                    logger.warning(f"Failed to fetch Vercel team info: {e}")
+        else:
+            # Personal account — fetch user info for account_name
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    user_response = await client.get(
+                        "https://api.vercel.com/v2/user",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    if user_response.status_code == 200:
+                        user_data = user_response.json().get("user", {})
+                        metadata["account_name"] = user_data.get("name") or user_data.get("username")
+            except Exception as e:
+                logger.warning(f"Failed to fetch Vercel user info: {e}")
 
         # Encrypt and store credential
         encryption_service = get_deployment_encryption_service()
@@ -344,7 +379,7 @@ async def vercel_callback(
 
         if existing:
             existing.access_token_encrypted = encrypted_token
-            existing.metadata = metadata
+            existing.provider_metadata = metadata
             await db.commit()
             logger.info(f"Updated Vercel credential for user {user_id}")
         else:
@@ -353,7 +388,7 @@ async def vercel_callback(
                 project_id=project_id,
                 provider="vercel",
                 access_token_encrypted=encrypted_token,
-                metadata=metadata,
+                provider_metadata=metadata,
             )
             db.add(credential)
             await db.commit()
@@ -560,7 +595,7 @@ async def netlify_callback(
 
         if existing:
             existing.access_token_encrypted = encrypted_token
-            existing.metadata = metadata
+            existing.provider_metadata = metadata
             await db.commit()
             logger.info(f"Updated Netlify credential for user {user_id}")
         else:
@@ -569,7 +604,7 @@ async def netlify_callback(
                 project_id=project_id,
                 provider="netlify",
                 access_token_encrypted=encrypted_token,
-                metadata=metadata,
+                provider_metadata=metadata,
             )
             db.add(credential)
             await db.commit()

@@ -1934,6 +1934,50 @@ find /app -maxdepth 2 -name 'package.json' 2>/dev/null | head -1
         except Exception as e:
             logger.error(f"[K8S:CLEANUP] ❌ Database error: {e}")
 
+        # --- Orphan namespace scanner ---
+        # Clean up K8s namespaces that aren't tracked as 'active' in the database.
+        # This catches: failed hibernations, deleted projects with leftover namespaces,
+        # or namespaces created by crashes/bugs that the DB doesn't know about.
+        try:
+            all_ns = await asyncio.to_thread(self.k8s_client.core_v1.list_namespace)
+            proj_namespaces = [
+                ns.metadata.name
+                for ns in all_ns.items
+                if ns.metadata.name.startswith("proj-")
+                and ns.status.phase == "Active"
+            ]
+
+            if proj_namespaces:
+                logger.info(f"[K8S:CLEANUP] Scanning {len(proj_namespaces)} project namespaces for orphans")
+
+                async with AsyncSessionLocal() as db:
+                    # Get all project IDs that should have active namespaces
+                    result = await db.execute(
+                        select(Project.id).where(
+                            Project.environment_status.in_(["active", "hibernating", "starting"])
+                        )
+                    )
+                    active_project_ids = {f"proj-{row[0]}" for row in result.all()}
+
+                    for ns_name in proj_namespaces:
+                        if ns_name not in active_project_ids:
+                            logger.warning(
+                                f"[K8S:CLEANUP] Orphan namespace detected: {ns_name} (not active in DB)"
+                            )
+                            try:
+                                await asyncio.to_thread(
+                                    self.k8s_client.core_v1.delete_namespace, name=ns_name
+                                )
+                                logger.info(f"[K8S:CLEANUP] ✅ Deleted orphan namespace {ns_name}")
+                            except ApiException as e:
+                                if e.status != 404:
+                                    logger.error(
+                                        f"[K8S:CLEANUP] ❌ Failed to delete orphan {ns_name}: {e}"
+                                    )
+
+        except Exception as e:
+            logger.error(f"[K8S:CLEANUP] ❌ Orphan scan error: {e}")
+
         logger.info(f"[K8S:CLEANUP] ✅ Cleanup complete: Hibernated {len(hibernated)} environments")
         return hibernated
 

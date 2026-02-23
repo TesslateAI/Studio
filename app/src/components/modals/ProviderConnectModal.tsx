@@ -349,23 +349,26 @@ export function ProviderConnectModal({
               {providers.map((provider) => {
                 const info = PROVIDER_INFO[provider.name] || { icon: '🚀', color: 'text-white', bgColor: 'bg-purple-500' };
                 const connected = isProviderConnected(provider.name);
+                const isComingSoon = ['vercel', 'cloudflare'].includes(provider.name.toLowerCase());
 
                 return (
                   <button
                     key={provider.name}
                     onClick={() => {
-                      if (connected) return;
+                      if (connected || isComingSoon) return;
                       if (provider.auth_type === 'oauth') {
                         handleOAuthConnect(provider);
                       } else {
                         handleSelectProvider(provider);
                       }
                     }}
-                    disabled={connected}
+                    disabled={connected || isComingSoon}
                     className={`w-full p-3 rounded-xl border transition-all flex items-center gap-3 ${
                       connected
                         ? 'bg-green-500/10 border-green-500/30 cursor-default'
-                        : 'bg-white/5 border-white/10 hover:border-[var(--primary)] hover:bg-white/10'
+                        : isComingSoon
+                          ? 'bg-white/5 border-white/10 opacity-50 cursor-not-allowed'
+                          : 'bg-white/5 border-white/10 hover:border-[var(--primary)] hover:bg-white/10'
                     }`}
                   >
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold ${info.bgColor} ${info.color}`}>
@@ -379,6 +382,10 @@ export function ProviderConnectModal({
                       <span className="flex items-center gap-1 text-xs text-green-400">
                         <Check size={14} weight="bold" />
                         Connected
+                      </span>
+                    ) : isComingSoon ? (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full">
+                        Coming Soon
                       </span>
                     ) : (
                       <span className="text-xs text-[var(--text)]/40">

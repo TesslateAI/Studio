@@ -352,8 +352,9 @@ const ProjectGraphCanvasInner = () => {
           id: string;
           version: string;
           status: string;
-          url?: string;
-          deployed_at: string;
+          deployment_url?: string;
+          created_at: string;
+          completed_at?: string;
         }>;
       }> = [];
       try {
@@ -432,8 +433,9 @@ const ProjectGraphCanvasInner = () => {
             id: d.id,
             version: d.version,
             status: d.status,
-            url: d.url,
-            deployedAt: d.deployed_at,
+            deployment_url: d.deployment_url,
+            created_at: d.created_at,
+            completed_at: d.completed_at,
           })),
           onDeploy: handleDeployFromTarget,
           onConnect: handleConnectDeploymentTarget,
