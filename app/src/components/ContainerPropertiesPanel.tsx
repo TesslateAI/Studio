@@ -136,8 +136,8 @@ export const ContainerPropertiesPanel = ({
   const fetchDeploymentCredentials = useCallback(async () => {
     try {
       setIsLoadingCredentials(true);
-      const response = await api.get('/api/deployments/credentials');
-      const credentials = response.data || [];
+      const response = await api.get('/api/deployment-credentials');
+      const credentials = response.data?.credentials || [];
       const credMap: Record<string, boolean> = {};
       credentials.forEach((cred: { provider: string }) => {
         credMap[cred.provider] = true;

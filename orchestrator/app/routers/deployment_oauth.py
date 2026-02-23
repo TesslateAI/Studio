@@ -10,7 +10,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -119,7 +119,7 @@ async def vercel_callback(
         current_user: Current authenticated user (optional)
 
     Returns:
-        Redirect to frontend settings page
+        HTML page that closes the popup window
     """
     settings = get_settings()
 
@@ -233,30 +233,83 @@ async def vercel_callback(
             await db.commit()
             logger.info(f"Created Vercel credential for user {user_id}")
 
-        # Redirect to frontend settings page with success message
-        frontend_url = (
-            settings.cors_origins.split(",")[0]
-            if settings.cors_origins
-            else "http://localhost:5173"
-        )
-        redirect_url = f"{frontend_url}/settings?tab=deployments&success=vercel"
-
-        return RedirectResponse(url=redirect_url)
+        # Return HTML that closes the popup window (the opener is polling for credentials)
+        return HTMLResponse(content="""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vercel Connected</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .checkmark { font-size: 64px; margin-bottom: 16px; }
+        h1 { font-size: 24px; margin: 0 0 8px 0; }
+        p { color: #888; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="checkmark">&#10003;</div>
+    <h1>Vercel Connected!</h1>
+    <p>This window will close automatically...</p>
+    <script>
+        // Close the popup after a short delay
+        setTimeout(function() {
+            window.close();
+        }, 1500);
+    </script>
+</body>
+</html>
+        """, status_code=200)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Vercel OAuth callback failed: {e}", exc_info=True)
 
-        # Redirect to frontend with error
-        frontend_url = (
-            settings.cors_origins.split(",")[0]
-            if settings.cors_origins
-            else "http://localhost:5173"
-        )
-        redirect_url = f"{frontend_url}/settings?tab=deployments&error=vercel"
-
-        return RedirectResponse(url=redirect_url)
+        # Return HTML error page that closes the popup
+        return HTMLResponse(content="""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connection Failed</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .error { font-size: 64px; margin-bottom: 16px; }
+        h1 { font-size: 24px; margin: 0 0 8px 0; color: #f87171; }
+        p { color: #888; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="error">&#10007;</div>
+    <h1>Connection Failed</h1>
+    <p>Please close this window and try again.</p>
+    <script>
+        setTimeout(function() {
+            window.close();
+        }, 3000);
+    </script>
+</body>
+</html>
+        """, status_code=200)
 
 
 # ============================================================================
@@ -336,7 +389,7 @@ async def netlify_callback(
         db: Database session
 
     Returns:
-        Redirect to frontend settings page
+        HTML page that closes the popup window
     """
     settings = get_settings()
 
@@ -432,27 +485,80 @@ async def netlify_callback(
             await db.commit()
             logger.info(f"Created Netlify credential for user {user_id}")
 
-        # Redirect to frontend settings page with success message
-        frontend_url = (
-            settings.cors_origins.split(",")[0]
-            if settings.cors_origins
-            else "http://localhost:5173"
-        )
-        redirect_url = f"{frontend_url}/settings?tab=deployments&success=netlify"
-
-        return RedirectResponse(url=redirect_url)
+        # Return HTML that closes the popup window (the opener is polling for credentials)
+        return HTMLResponse(content="""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Netlify Connected</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .checkmark { font-size: 64px; margin-bottom: 16px; }
+        h1 { font-size: 24px; margin: 0 0 8px 0; }
+        p { color: #888; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="checkmark">&#10003;</div>
+    <h1>Netlify Connected!</h1>
+    <p>This window will close automatically...</p>
+    <script>
+        // Close the popup after a short delay
+        setTimeout(function() {
+            window.close();
+        }, 1500);
+    </script>
+</body>
+</html>
+        """, status_code=200)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Netlify OAuth callback failed: {e}", exc_info=True)
 
-        # Redirect to frontend with error
-        frontend_url = (
-            settings.cors_origins.split(",")[0]
-            if settings.cors_origins
-            else "http://localhost:5173"
-        )
-        redirect_url = f"{frontend_url}/settings?tab=deployments&error=netlify"
-
-        return RedirectResponse(url=redirect_url)
+        # Return HTML error page that closes the popup
+        return HTMLResponse(content="""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connection Failed</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .error { font-size: 64px; margin-bottom: 16px; }
+        h1 { font-size: 24px; margin: 0 0 8px 0; color: #f87171; }
+        p { color: #888; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="error">&#10007;</div>
+    <h1>Connection Failed</h1>
+    <p>Please close this window and try again.</p>
+    <script>
+        setTimeout(function() {
+            window.close();
+        }, 3000);
+    </script>
+</body>
+</html>
+        """, status_code=200)

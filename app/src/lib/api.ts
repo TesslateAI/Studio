@@ -1826,25 +1826,25 @@ export const deploymentsApi = {
 
   // Get deployment details
   get: async (deploymentId: string) => {
-    const response = await api.get(`/api/deployments/deployments/${deploymentId}`);
+    const response = await api.get(`/api/deployments/deployment/${deploymentId}`);
     return response.data;
   },
 
   // Get deployment status
   getStatus: async (deploymentId: string) => {
-    const response = await api.get(`/api/deployments/deployments/${deploymentId}/status`);
+    const response = await api.get(`/api/deployments/deployment/${deploymentId}/status`);
     return response.data;
   },
 
   // Get deployment logs
   getLogs: async (deploymentId: string) => {
-    const response = await api.get(`/api/deployments/deployments/${deploymentId}/logs`);
+    const response = await api.get(`/api/deployments/deployment/${deploymentId}/logs`);
     return response.data;
   },
 
   // Delete deployment
   delete: async (deploymentId: string) => {
-    const response = await api.delete(`/api/deployments/deployments/${deploymentId}`);
+    const response = await api.delete(`/api/deployments/deployment/${deploymentId}`);
     return response.data;
   },
 
@@ -1855,7 +1855,7 @@ export const deploymentsApi = {
     onError?: (error: Event) => void
   ) => {
     const eventSource = new EventSource(
-      `${API_URL}/api/deployments/deployments/${deploymentId}/stream`,
+      `${API_URL}/api/deployments/deployment/${deploymentId}/stream`,
       { withCredentials: true }
     );
 

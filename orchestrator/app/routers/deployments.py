@@ -25,8 +25,8 @@ from ..services.deployment_encryption import (
     get_deployment_encryption_service,
 )
 from ..services.framework_detector import FrameworkDetector
+from ..services.orchestration import get_orchestrator
 from ..users import current_active_user
-from ..utils.async_subprocess import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -367,14 +367,16 @@ async def deploy_project(
             deployment.logs.append(f"Verifying container {build_container_name} is running")
             await db.commit()
 
-            result = await run_async(
-                ["docker", "inspect", "--format", "{{.State.Running}}", build_container_name],
-                capture_output=True,
-                text=True,
-                timeout=10,
+            # Use orchestrator to check container status (works with both Docker and Kubernetes)
+            orchestrator = get_orchestrator()
+            container_status = await orchestrator.get_container_status(
+                project_slug=project.slug,
+                project_id=project.id,
+                container_name=build_container_name,
+                user_id=current_user.id
             )
 
-            is_running = result.stdout.strip() == "true"
+            is_running = container_status.get("status") == "running"
 
             if not is_running:
                 error_msg = f"Container {build_container_name} is not running. Please start your project containers first."
@@ -734,26 +736,30 @@ async def deploy_all_containers(
             )
 
             config = DeploymentConfig(
-                provider=provider,
+                project_id=str(project.id),
                 project_name=f"{project.slug}-{container.name}",
                 framework=framework,
-                use_source_deployment=(deployment_mode == "source")
+                deployment_mode=deployment_mode
             )
 
-            manager = DeploymentManager()
-            deploy_result = await manager.deploy(
-                provider=provider,
-                config=config,
-                credentials=prepared_creds,
-                project_path=builder._get_project_path(str(current_user.id), str(project.id)),
-                container_name=container.container_name,
-                working_directory=container.directory
+            provider_instance = DeploymentManager.get_provider(provider, prepared_creds)
+
+            # Collect files for deployment
+            files = await builder.collect_deployment_files(
+                user_id=str(current_user.id),
+                project_id=str(project.id),
+                framework=framework,
+                collect_source=(deployment_mode == "source"),
+                container_directory=container.directory,
+                volume_name=project.slug
             )
+
+            deploy_result = await provider_instance.deploy(files, config)
 
             # Update deployment record
             deployment.status = "success" if deploy_result.success else "failed"
             deployment.deployment_id = deploy_result.deployment_id
-            deployment.deployment_url = deploy_result.url
+            deployment.deployment_url = deploy_result.deployment_url
             deployment.error = deploy_result.error
             deployment.logs.extend(deploy_result.logs or [])
             deployment.completed_at = datetime.utcnow()
@@ -765,7 +771,7 @@ async def deploy_all_containers(
                 provider=provider,
                 status="success" if deploy_result.success else "failed",
                 deployment_id=deployment.id,
-                deployment_url=deploy_result.url,
+                deployment_url=deploy_result.deployment_url,
                 error=deploy_result.error
             )
 
@@ -984,26 +990,29 @@ async def deploy_single_container_endpoint(
         )
 
         config = DeploymentConfig(
-            provider=provider_name,
+            project_id=str(project.id),
             project_name=f"{project.slug}-{container.name}",
             framework=framework,
-            use_source_deployment=(deployment_mode == "source"),
+            deployment_mode=deployment_mode,
         )
 
-        manager = DeploymentManager()
-        deploy_result = await manager.deploy(
-            provider=provider_name,
-            config=config,
-            credentials=provider_credentials,
-            project_path=builder._get_project_path(str(current_user.id), str(project.id)),
-            container_name=container.container_name,
-            working_directory=container.directory,
+        # Collect files for deployment
+        files = await builder.collect_deployment_files(
+            user_id=str(current_user.id),
+            project_id=str(project.id),
+            framework=framework,
+            collect_source=(deployment_mode == "source"),
+            container_directory=container.directory,
+            volume_name=project.slug,
         )
+
+        provider_instance = DeploymentManager.get_provider(provider_name, provider_credentials)
+        deploy_result = await provider_instance.deploy(files, config)
 
         # 11. Update deployment record
         deployment.status = "success" if deploy_result.success else "failed"
         deployment.deployment_id = deploy_result.deployment_id
-        deployment.deployment_url = deploy_result.url
+        deployment.deployment_url = deploy_result.deployment_url
         deployment.error = deploy_result.error
         deployment.logs.extend(deploy_result.logs or [])
         deployment.completed_at = datetime.utcnow()

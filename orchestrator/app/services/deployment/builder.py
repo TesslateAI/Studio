@@ -114,43 +114,22 @@ class DeploymentBuilder:
 
             logger.info(f"Running build command in container: {build_command}")
 
-            # Execute build command in container
-            # Note: execute_command_in_container expects a List[str] and raises RuntimeError on failure
+            # Execute build command in container using orchestrator
+            # This works with both Docker and Kubernetes modes
             try:
-                # For multi-container projects, execute directly with docker exec
-                if container_name:
-                    from ...utils.async_subprocess import run_async
+                from ..orchestration import get_orchestrator
 
-                    logger.info(f"Executing build in specific container: {container_name}")
+                orchestrator = get_orchestrator()
+                logger.info(f"Executing build in container: {container_name or 'default'}")
 
-                    result = await run_async(
-                        [
-                            "docker",
-                            "exec",
-                            container_name,
-                            "/bin/sh",
-                            "-c",
-                            f"cd /app && {build_command}",
-                        ],
-                        timeout=300,
-                        capture_output=True,
-                        text=True,
-                    )
-
-                    output = result.stdout + result.stderr
-
-                    if result.returncode != 0:
-                        raise RuntimeError(
-                            f"Command failed with exit code {result.returncode}: {output}"
-                        )
-                else:
-                    # Single container project - use container manager
-                    output = await self.container_manager.execute_command_in_container(
-                        user_id=UUID(user_id),
-                        project_id=project_id,
-                        command=["/bin/sh", "-c", f"cd /app && {build_command}"],
-                        project_slug=project_slug,
-                    )
+                # Use orchestrator's execute_command method which handles both Docker and K8s
+                output = await orchestrator.execute_command(
+                    user_id=UUID(user_id),
+                    project_id=UUID(project_id),
+                    container_name=container_name or project_slug,
+                    command=["/bin/sh", "-c", f"cd /app && {build_command}"],
+                    timeout=300,
+                )
             except RuntimeError as e:
                 error_msg = f"Build failed: {str(e)}"
                 logger.error(error_msg)
