@@ -290,16 +290,28 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                           {/* Category Items */}
                           {isExpanded && categoryItems.length > 0 && (
                             <div className="px-3 pb-2 space-y-1">
-                              {categoryItems.map((item) => (
+                              {categoryItems.map((item) => {
+                                const isComingSoon = (item.type === 'deployment' || item.service_type === 'deployment_target') &&
+                                  ['vercel', 'cloudflare'].some(p => item.slug?.toLowerCase().includes(p));
+
+                                return (
                                 <div
                                   key={item.id}
-                                  draggable
-                                  onDragStart={(e) => onDragStart(e, item)}
+                                  draggable={!isComingSoon}
+                                  onDragStart={(e) => {
+                                    if (isComingSoon) { e.preventDefault(); return; }
+                                    onDragStart(e, item);
+                                  }}
                                   onClick={() => {
+                                    if (isComingSoon) return;
                                     onSelectItem?.(item);
                                     setIsOpen(false);
                                   }}
-                                  className="group cursor-move bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 hover:border-[var(--primary)] hover:shadow-md transition-all"
+                                  className={`group bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 transition-all ${
+                                    isComingSoon
+                                      ? 'opacity-50 cursor-not-allowed'
+                                      : 'cursor-move hover:border-[var(--primary)] hover:shadow-md'
+                                  }`}
                                 >
                                   <div className="flex items-start gap-2">
                                     <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-[var(--primary)]/10 rounded-lg text-[var(--primary)]">
@@ -311,9 +323,18 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                                       />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                      <h3 className="font-medium text-sm text-[var(--text)] truncate group-hover:text-[var(--primary)] transition-colors">
-                                        {item.name}
-                                      </h3>
+                                      <div className="flex items-center gap-1.5">
+                                        <h3 className={`font-medium text-sm truncate transition-colors ${
+                                          isComingSoon ? 'text-[var(--text)]/50' : 'text-[var(--text)] group-hover:text-[var(--primary)]'
+                                        }`}>
+                                          {item.name}
+                                        </h3>
+                                        {isComingSoon && (
+                                          <span className="flex-shrink-0 text-[9px] font-semibold bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-full">
+                                            Soon
+                                          </span>
+                                        )}
+                                      </div>
                                       <p className="text-[10px] text-[var(--text)]/60 line-clamp-1">
                                         {item.description}
                                       </p>
@@ -329,10 +350,13 @@ export const MarketplaceSidebar = ({ onSelectItem }: MarketplaceSidebarProps) =>
                                         )}
                                       </div>
                                     </div>
-                                    <Plus size={14} className="text-[var(--text)]/40 opacity-0 group-hover:opacity-100 transition-opacity" weight="bold" />
+                                    {!isComingSoon && (
+                                      <Plus size={14} className="text-[var(--text)]/40 opacity-0 group-hover:opacity-100 transition-opacity" weight="bold" />
+                                    )}
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
 
