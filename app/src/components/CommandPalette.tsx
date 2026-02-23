@@ -132,7 +132,7 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
         shortcut: [modKey, 'L'],
         action: () => navigate('/library'),
         context: 'global',
-        keywords: ['my agents', 'installed', 'api keys'],
+        keywords: ['my agents', 'installed', 'api keys', 'models'],
         group: 'Navigation',
       },
       {

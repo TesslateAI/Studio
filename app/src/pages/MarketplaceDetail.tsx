@@ -359,7 +359,7 @@ export default function MarketplaceDetail() {
     { name: 'Marketplace', url: `${baseUrl}/marketplace` },
     {
       name: item.category || 'Agents',
-      url: `${baseUrl}/marketplace/category/${item.category || 'builder'}`,
+      url: `${baseUrl}/marketplace/browse/agent?category=${item.category || 'builder'}`,
     },
     { name: item.name, url: `${baseUrl}/marketplace/${item.slug}` },
   ]);
@@ -438,30 +438,32 @@ export default function MarketplaceDetail() {
             {/* Content */}
             <div className="flex-1">
               {/* Title Row */}
-              <div className="flex items-start gap-3 mb-3">
+              <div className="flex flex-wrap items-start gap-2 sm:gap-3 mb-3">
                 <h1
-                  className={`font-heading text-3xl md:text-4xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                  className={`font-heading text-2xl sm:text-3xl md:text-4xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
                 >
                   {item.name}
                 </h1>
-                {item.source_type === 'open' && (
-                  <span className="flex items-center gap-1.5 px-3 py-1 bg-green-500/15 text-green-500 text-sm rounded-lg font-medium">
-                    <GitFork size={14} weight="bold" />
-                    Open Source
-                  </span>
-                )}
-                {item.creator_type === 'community' && (
-                  <span className="flex items-center gap-1.5 px-3 py-1 bg-purple-500/15 text-purple-400 text-sm rounded-lg font-medium">
-                    <Users size={14} weight="bold" />
-                    Community
-                  </span>
-                )}
-                {item.creator_type === 'official' && (
-                  <span className="flex items-center gap-1.5 px-3 py-1 bg-blue-500/15 text-blue-400 text-sm rounded-lg font-medium">
-                    <ShieldCheck size={14} weight="bold" />
-                    Official
-                  </span>
-                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {item.source_type === 'open' && (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-500/15 text-green-500 text-xs sm:text-sm rounded-lg font-medium whitespace-nowrap">
+                      <GitFork size={14} weight="bold" />
+                      Open Source
+                    </span>
+                  )}
+                  {item.creator_type === 'community' && (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/15 text-purple-400 text-xs sm:text-sm rounded-lg font-medium whitespace-nowrap">
+                      <Users size={14} weight="bold" />
+                      Community
+                    </span>
+                  )}
+                  {item.creator_type === 'official' && (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-500/15 text-blue-400 text-xs sm:text-sm rounded-lg font-medium whitespace-nowrap">
+                      <ShieldCheck size={14} weight="bold" />
+                      Official
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Description */}
@@ -473,9 +475,13 @@ export default function MarketplaceDetail() {
 
               {/* Author */}
               <div className="flex items-center gap-4 mb-6">
-                {creatorId ? (
+                {creatorId || item.creator_username ? (
                   <Link
-                    to={`/marketplace/creator/${creatorId}`}
+                    to={
+                      item.creator_username
+                        ? `/@${item.creator_username}`
+                        : `/marketplace/creator/${creatorId}`
+                    }
                     className={`
                     flex items-center gap-2 text-sm hover:text-[var(--primary)] transition-colors
                     ${theme === 'light' ? 'text-black/60' : 'text-white/60'}
@@ -502,7 +508,9 @@ export default function MarketplaceDetail() {
                     <span>
                       {item.creator_type === 'official'
                         ? 'Tesslate'
-                        : item.creator_name || 'Unknown'}
+                        : item.creator_username
+                          ? `@${item.creator_username}`
+                          : item.creator_name || 'Unknown'}
                     </span>
                   </Link>
                 ) : (
@@ -515,7 +523,7 @@ export default function MarketplaceDetail() {
               </div>
 
               {/* Install Button */}
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                 {item.is_purchased ? (
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-2 px-6 py-3 bg-green-500/15 text-green-500 rounded-xl text-sm font-semibold">

@@ -93,11 +93,13 @@ const loadData = async () => {
 
 ### Subscription Actions
 
+The billing page includes a **monthly/annual billing toggle**. When subscribing, the `billing_interval` parameter (`'monthly'` | `'annual'`) is passed to the subscribe endpoint to select the corresponding Stripe price.
+
 ```typescript
 // Upgrade subscription
-const handleUpgrade = async (tier: string) => {
+const handleUpgrade = async (tier: string, billingInterval: 'monthly' | 'annual' = 'monthly') => {
   try {
-    const { url } = await billingApi.subscribe(tier);
+    const { url } = await billingApi.subscribe(tier, billingInterval);
     window.location.href = url;  // Redirect to Stripe Checkout
   } catch (error) {
     toast.error('Failed to initiate upgrade');
@@ -159,6 +161,8 @@ useEffect(() => {
 
 ## Subscription Tiers Display
 
+> **Note**: The subscription tiers are now rendered via an inline `PlanSelectionModal` component within `BillingSettings.tsx`, not a separate `SubscriptionPlans` component. The modal is embedded directly in the billing page and displays all four tiers as comparison cards with upgrade/downgrade actions.
+
 ### Tier Configuration
 
 ```typescript
@@ -170,39 +174,39 @@ const TIERS = [
     features: [
       '3 projects',
       '1 deployment',
-      '1,000 credits/month',
+      '5 credits/day',
     ],
   },
   {
     id: 'basic',
     name: 'Basic',
-    price: 8,
+    price: 20,
     features: [
-      '5 projects',
-      '2 deployments',
-      '1,000 credits/month',
+      '7 projects',
+      '3 deployments',
+      '500 credits/month',
     ],
   },
   {
     id: 'pro',
     name: 'Pro',
-    price: 20,
+    price: 49,
     popular: true,
     features: [
-      '10 projects',
+      '15 projects',
       '5 deployments',
-      '2,500 credits/month',
+      '2,000 credits/month',
       'Bring Your Own API Key',
     ],
   },
   {
     id: 'ultra',
     name: 'Ultra',
-    price: 100,
+    price: 149,
     features: [
-      'Unlimited projects',
+      '40 projects',
       '20 deployments',
-      '12,000 credits/month',
+      '8,000 credits/month',
       'Bring Your Own API Key',
       'Priority support',
     ],

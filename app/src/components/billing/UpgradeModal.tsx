@@ -75,8 +75,9 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({
         };
       case 'byok':
         return {
-          defaultTitle: 'BYOK Requires Pro or Ultra',
-          defaultMessage: 'Bring Your Own Key (BYOK) is available on Pro and Ultra plans.',
+          defaultTitle: 'BYOK Requires a Paid Plan',
+          defaultMessage:
+            'Bring Your Own Key (BYOK) is available on all paid plans (Basic, Pro, and Ultra).',
         };
       case 'features':
         return {
@@ -196,12 +197,10 @@ const UpgradeModal: React.FC<UpgradeModalProps> = ({
                       <Check className="w-3 h-3 text-green-400" />
                       {SUBSCRIPTION_TIER_DEPLOYS[tier]} deploys
                     </div>
-                    {(tier === 'pro' || tier === 'ultra') && (
-                      <div className="flex items-center gap-1 text-[var(--text)]/60">
-                        <Check className="w-3 h-3 text-green-400" />
-                        BYOK enabled
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1 text-[var(--text)]/60">
+                      <Check className="w-3 h-3 text-green-400" />
+                      BYOK enabled
+                    </div>
                   </div>
                 </button>
               );

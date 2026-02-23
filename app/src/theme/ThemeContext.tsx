@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   loadThemes,
+  reloadThemes,
   getThemePreset,
   applyThemePreset,
   getThemePresetsByMode,
@@ -57,7 +58,8 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   const theme = themePreset.mode;
 
   // Derived ready state - true when we have usable themes
-  const isReady = loadingState === 'success' ||
+  const isReady =
+    loadingState === 'success' ||
     (loadingState === 'error' && availablePresets.length > 0) ||
     (loadingState === 'idle' && availablePresets.length > 0);
 
@@ -81,7 +83,9 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
           console.warn(`Filtered ${allPresets.length - validPresets.length} invalid themes`);
         }
 
-        setAvailablePresets(validPresets.length > 0 ? validPresets : [DEFAULT_FALLBACK_THEME as Theme]);
+        setAvailablePresets(
+          validPresets.length > 0 ? validPresets : [DEFAULT_FALLBACK_THEME as Theme]
+        );
 
         // Then load user's saved theme preference
         try {
@@ -141,11 +145,19 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
 
   // Set a specific theme preset
   const setThemePreset = useCallback(async (presetId: string) => {
-    // Verify the theme exists
-    const theme = getThemePreset(presetId);
+    // Verify the theme exists in cache
+    let theme = getThemePreset(presetId);
     if (theme.id !== presetId) {
-      console.warn(`Unknown theme preset: ${presetId}`);
-      return;
+      // Theme not in cache — reload from API (handles newly created/forked themes)
+      await reloadThemes();
+      theme = getThemePreset(presetId);
+      if (theme.id !== presetId) {
+        console.warn(`Unknown theme preset: ${presetId}`);
+        return;
+      }
+      // Update available presets after reload
+      const byMode = getThemePresetsByMode();
+      setAvailablePresets([...byMode.dark, ...byMode.light]);
     }
 
     setThemePresetIdState(presetId);

@@ -8,7 +8,6 @@ import {
   Settings,
   Shield,
   Cloud,
-  Key,
   CreditCard,
   ChevronLeft,
   ChevronRight,
@@ -41,10 +40,7 @@ const navSections: NavSection[] = [
   },
   {
     title: 'INTEGRATIONS',
-    items: [
-      { label: 'Deployment', path: '/settings/deployment', icon: Cloud },
-      { label: 'API Keys', path: '/settings/api-keys', icon: Key },
-    ],
+    items: [{ label: 'Deployment', path: '/settings/deployment', icon: Cloud }],
   },
   {
     title: 'BILLING',
@@ -140,7 +136,9 @@ export function SettingsSidebar({ onClose, showContent = true }: SettingsSidebar
                     key={item.path}
                     onClick={() => handleNavigation(item.path)}
                     className={`group flex items-center h-9 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                      isActive(item.path) ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                      isActive(item.path)
+                        ? 'bg-[var(--sidebar-active)]'
+                        : 'hover:bg-[var(--sidebar-hover)]'
                     }`}
                   >
                     <Icon
@@ -151,14 +149,18 @@ export function SettingsSidebar({ onClose, showContent = true }: SettingsSidebar
                           : 'text-[var(--sidebar-text)]/40 group-hover:text-[var(--sidebar-text)]'
                       }`}
                     />
-                    <span className="text-sm font-medium text-[var(--sidebar-text)]">{item.label}</span>
+                    <span className="text-sm font-medium text-[var(--sidebar-text)]">
+                      {item.label}
+                    </span>
                   </button>
                 ) : (
                   <Tooltip key={item.path} content={item.label} side="right" delay={200}>
                     <button
                       onClick={() => handleNavigation(item.path)}
                       className={`group flex items-center justify-center h-9 transition-colors w-full flex-shrink-0 ${
-                        isActive(item.path) ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                        isActive(item.path)
+                          ? 'bg-[var(--sidebar-active)]'
+                          : 'hover:bg-[var(--sidebar-hover)]'
                       }`}
                     >
                       <Icon
@@ -258,7 +260,9 @@ export function SettingsSidebarMobile({ onClose }: { onClose: () => void }) {
                     key={item.path}
                     onClick={() => handleNavigation(item.path)}
                     className={`group flex items-center h-11 transition-colors flex-shrink-0 gap-3 rounded-lg mx-2 px-3 ${
-                      isActive(item.path) ? 'bg-[var(--sidebar-active)]' : 'hover:bg-[var(--sidebar-hover)]'
+                      isActive(item.path)
+                        ? 'bg-[var(--sidebar-active)]'
+                        : 'hover:bg-[var(--sidebar-hover)]'
                     }`}
                   >
                     <Icon
@@ -269,7 +273,9 @@ export function SettingsSidebarMobile({ onClose }: { onClose: () => void }) {
                           : 'text-[var(--sidebar-text)]/40 group-hover:text-[var(--sidebar-text)]'
                       }`}
                     />
-                    <span className="text-sm font-medium text-[var(--sidebar-text)]">{item.label}</span>
+                    <span className="text-sm font-medium text-[var(--sidebar-text)]">
+                      {item.label}
+                    </span>
                   </button>
                 );
               })}

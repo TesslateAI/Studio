@@ -2,12 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tooltip } from './Tooltip';
 import { HelpMenu } from './HelpMenu';
-import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
   FolderOpen,
   Store,
-  Package,
   Settings,
   BookOpen,
   LogOut,
@@ -32,11 +30,13 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
     const saved = localStorage.getItem('navigationSidebarExpanded');
     return saved !== null ? JSON.parse(saved) : true;
   });
-  const [isPremium, setIsPremium] = useState(false);
-  const [, setLoadingSubscription] = useState(true);
+  const [subscriptionTier, setSubscriptionTier] = useState<string>('free');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
+
+  const isPaidPlan = subscriptionTier !== 'free';
+  const tierLabel = subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1);
 
   useEffect(() => {
     localStorage.setItem('navigationSidebarExpanded', JSON.stringify(isExpanded));
@@ -47,11 +47,9 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
     const checkSubscription = async () => {
       try {
         const subscription = await billingApi.getSubscription();
-        setIsPremium(subscription.tier === 'pro');
+        setSubscriptionTier(subscription.tier || 'free');
       } catch (error) {
         console.error('Failed to check subscription:', error);
-      } finally {
-        setLoadingSubscription(false);
       }
     };
     checkSubscription();
@@ -195,18 +193,6 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
           </button>
         </Tooltip>
 
-        <Tooltip content="Components" side="right" delay={200}>
-          <button
-            onClick={() => toast('Components library coming soon!')}
-            className={isExpanded ? inactiveNavButton : inactiveNavButtonCollapsed}
-          >
-            <Package size={18} className={inactiveIconClass} />
-            {isExpanded && (
-              <span className="text-sm font-medium text-[var(--sidebar-text)]">Components</span>
-            )}
-          </button>
-        </Tooltip>
-
         <Tooltip content="Documentation" side="right" delay={200}>
           <a
             href="https://docs.tesslate.com"
@@ -268,10 +254,14 @@ export function NavigationSidebar({ activePage, showContent = true }: Navigation
             </button>
             <button
               onClick={() => navigate('/settings/billing')}
-              className="flex-1 h-8 rounded-full bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] text-[var(--sidebar-text)]/70 hover:text-[var(--sidebar-text)] text-sm font-medium transition-colors flex items-center justify-center gap-1.5"
+              className={`flex-1 h-8 rounded-full text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${
+                isPaidPlan
+                  ? 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 hover:text-orange-300'
+                  : 'bg-[var(--sidebar-hover)] hover:bg-[var(--sidebar-active)] text-[var(--sidebar-text)]/70 hover:text-[var(--sidebar-text)]'
+              }`}
             >
               <ArrowUp size={14} strokeWidth={2} />
-              {isPremium ? 'Pro plan' : 'Free plan'}
+              {tierLabel}
             </button>
           </div>
         ) : (

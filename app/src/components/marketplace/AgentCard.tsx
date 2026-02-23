@@ -12,7 +12,7 @@ export interface MarketplaceItem {
   description: string;
   long_description?: string;
   category: string;
-  item_type: 'agent' | 'base' | 'tool' | 'integration';
+  item_type: 'agent' | 'base' | 'theme' | 'tool' | 'integration';
   mode?: string;
   agent_type?: string;
   model?: string;
@@ -35,9 +35,18 @@ export interface MarketplaceItem {
   is_purchased: boolean;
   creator_type?: 'official' | 'community';
   creator_name?: string;
+  creator_username?: string | null;
   creator_avatar_url?: string | null;
   created_by_user_id?: string;
   forked_by_user_id?: string;
+  // Theme-specific fields
+  theme_mode?: string;
+  color_swatches?: {
+    primary?: string;
+    accent?: string;
+    background?: string;
+    surface?: string;
+  };
 }
 
 interface AgentCardProps {
@@ -84,12 +93,18 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
 
     setForking(true);
     try {
-      await marketplaceApi.forkAgent(item.id);
-      toast.success(`Forked "${item.name}" to your library!`);
-      navigate('/library?tab=agents');
+      if (item.item_type === 'theme') {
+        await marketplaceApi.forkTheme(item.id);
+        toast.success(`Forked "${item.name}" to your library!`);
+        navigate('/library?tab=themes');
+      } else {
+        await marketplaceApi.forkAgent(item.id);
+        toast.success(`Forked "${item.name}" to your library!`);
+        navigate('/library?tab=agents');
+      }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to fork agent');
+      toast.error(err.response?.data?.detail || `Failed to fork ${item.item_type}`);
     } finally {
       setForking(false);
     }
@@ -99,7 +114,9 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
 
   const handleCreatorClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (creatorId) {
+    if (item.creator_username) {
+      navigate(`/@${item.creator_username}`);
+    } else if (creatorId) {
       navigate(`/marketplace/creator/${creatorId}`);
     }
   };
@@ -121,53 +138,77 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
         ${!item.is_active ? 'opacity-60' : ''}
       `}
     >
-      {/* Icon */}
+      {/* Icon / Theme Color Swatches */}
       <div className="mb-3">
-        <div
-          className={`
-          w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden
-          ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
-        `}
-        >
-          {item.avatar_url ? (
-            <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover" />
-          ) : (
-            <img src="/favicon.svg" alt="Tesslate" className="w-8 h-8" />
-          )}
-        </div>
+        {item.item_type === 'theme' && item.color_swatches ? (
+          <div className="flex gap-1.5">
+            {(['primary', 'background', 'surface', 'accent'] as const).map((key) => (
+              <div
+                key={key}
+                className="w-8 h-8 rounded-lg border border-black/20"
+                style={{ backgroundColor: item.color_swatches?.[key] || '#333' }}
+                title={key.charAt(0).toUpperCase() + key.slice(1)}
+              />
+            ))}
+            {item.theme_mode && (
+              <span
+                className={`ml-1 self-center text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                  item.theme_mode === 'dark'
+                    ? 'bg-white/10 text-white/60'
+                    : 'bg-black/10 text-black/60'
+                }`}
+              >
+                {item.theme_mode}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div
+            className={`
+            w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden
+            ${theme === 'light' ? 'bg-black/5' : 'bg-white/5'}
+          `}
+          >
+            {item.avatar_url ? (
+              <img src={item.avatar_url} alt={item.name} className="w-full h-full object-cover" />
+            ) : (
+              <img src="/favicon.svg" alt="Tesslate" className="w-8 h-8" />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Title & Badge Row */}
-      <div className="flex items-start justify-between gap-2 mb-1">
+      <div className="flex items-start justify-between gap-2 mb-1 overflow-hidden">
         <h3
           className={`
-          font-heading font-semibold text-sm sm:text-base leading-tight
+          font-heading font-semibold text-sm sm:text-base leading-tight truncate min-w-0
           group-hover:text-[var(--primary)] transition-colors
           ${theme === 'light' ? 'text-black' : 'text-white'}
         `}
         >
           {item.name}
         </h3>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0 flex-wrap justify-end max-w-[50%]">
           {item.source_type === 'open' && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/15 text-green-500 text-[10px] rounded font-medium">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/15 text-green-500 text-[10px] rounded font-medium whitespace-nowrap">
               <GitFork size={10} weight="bold" />
               Open
             </span>
           )}
           {item.source_type === 'archive' && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium whitespace-nowrap">
               Exported
             </span>
           )}
           {item.creator_type === 'community' && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-500/15 text-purple-400 text-[10px] rounded font-medium whitespace-nowrap">
               <Users size={10} weight="bold" />
               Community
             </span>
           )}
           {item.creator_type === 'official' && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/15 text-blue-400 text-[10px] rounded font-medium">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/15 text-blue-400 text-[10px] rounded font-medium whitespace-nowrap">
               <ShieldCheck size={10} weight="bold" />
               Official
             </span>
@@ -187,14 +228,14 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
 
       {/* Footer */}
       <div className="mt-auto pt-3 border-t border-white/5">
-        <div className="flex items-center justify-between flex-wrap gap-y-2">
+        <div className="flex items-center justify-between gap-y-2">
           {/* Author & Stats */}
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 min-w-0 overflow-hidden">
             {/* Creator Avatar */}
             <button
               onClick={handleCreatorClick}
               className={`
-                flex items-center gap-1.5 text-xs hover:text-[var(--primary)] transition-colors
+                flex items-center gap-1.5 text-xs hover:text-[var(--primary)] transition-colors min-w-0
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
               `}
             >
@@ -216,8 +257,12 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
                   </div>
                 )}
               </div>
-              <span className="truncate max-w-[60px] sm:max-w-[100px]">
-                {item.creator_type === 'official' ? 'Tesslate' : item.creator_name || 'Unknown'}
+              <span className="text-left line-clamp-2 leading-tight">
+                {item.creator_type === 'official'
+                  ? 'Tesslate'
+                  : item.creator_username
+                    ? `@${item.creator_username}`
+                    : item.creator_name || 'Unknown'}
               </span>
             </button>
 
@@ -225,11 +270,11 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
             {item.rating > 0 && (
               <div
                 className={`
-                flex items-center gap-1 text-xs
+                flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
               `}
               >
-                <Star size={12} weight="fill" className="text-amber-400" />
+                <Star size={12} weight="fill" className="text-amber-400 flex-shrink-0" />
                 <span>{item.rating.toFixed(1)}</span>
               </div>
             )}
@@ -237,11 +282,11 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
             {/* Uses Count */}
             <div
               className={`
-              flex items-center gap-1 text-xs
+              flex items-center gap-1 text-xs flex-shrink-0 whitespace-nowrap
               ${theme === 'light' ? 'text-black/40' : 'text-white/40'}
             `}
             >
-              <Lightning size={12} weight="fill" />
+              <Lightning size={12} weight="fill" className="flex-shrink-0" />
               <span>{formatInstalls(usageCount)} uses</span>
             </div>
           </div>

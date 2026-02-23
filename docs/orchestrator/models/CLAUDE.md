@@ -27,7 +27,7 @@
 ### Core Application Models
 **User** (models_auth.py)
 - Purpose: User accounts with subscription, billing, and profile data
-- Key fields: `email`, `username`, `subscription_tier`, `stripe_customer_id`, `credits_balance`, `theme_preset`, `two_fa_enabled`, `two_fa_method`
+- Key fields: `email`, `username`, `subscription_tier`, `stripe_customer_id`, `bundled_credits`, `purchased_credits`, `signup_bonus_credits`, `daily_credits`, `theme_preset`, `chat_position`, `disabled_models`, `two_fa_enabled`, `two_fa_method`
 - Related: FastAPI-Users compatible (email/password + OAuth), `created_bases` relationship for user-submitted bases
 - Theme: `theme_preset` field stores user's selected theme ID (default: "default-dark")
 - 2FA: `two_fa_enabled` (bool, default False), `two_fa_method` (string, default "email") - currently all email/password logins require 2FA regardless of the flag
@@ -461,8 +461,8 @@ usage_log = UsageLog(
 )
 db.add(usage_log)
 
-# Deduct from user credits
-user.credits_balance -= usage_log.cost_total
+# Deduct from user credits (multi-source: daily → bundled → signup_bonus → purchased)
+# Use credit_service.deduct_credits(user, usage_log.cost_total) for proper ordering
 await db.commit()
 ```
 
@@ -471,8 +471,13 @@ await db.commit()
 ### User Fields
 ```
 id, email, hashed_password, is_active, is_verified, name, username, slug
-subscription_tier, stripe_customer_id, credits_balance, total_spend
+subscription_tier, stripe_customer_id, total_spend
+bundled_credits, purchased_credits, signup_bonus_credits, signup_bonus_expires_at
+daily_credits, daily_credits_reset_date, credits_reset_date
+support_tier, @property total_credits (computed sum of all credit sources)
 litellm_api_key, avatar_url, bio, referral_code
+twitter_handle, github_username, website_url
+theme_preset, chat_position, disabled_models
 two_fa_enabled, two_fa_method
 ```
 

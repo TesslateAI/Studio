@@ -65,39 +65,38 @@ interface RouteSpec {
  */
 const ROUTE_CONFIG: RouteSpec[] = [
   // --- Public pages (no guard) ---
-  { path: '/',                         guard: 'public',     label: 'Landing page' },
-  { path: '/landing-old',             guard: 'public',     label: 'Old landing page' },
-  { path: '/forgot-password',         guard: 'public',     label: 'Forgot password' },
-  { path: '/reset-password',          guard: 'public',     label: 'Reset password' },
-  { path: '/logout',                  guard: 'public',     label: 'Logout' },
-  { path: '/oauth/callback',          guard: 'public',     label: 'OAuth callback' },
-  { path: '/marketplace',             guard: 'public',     label: 'Marketplace home' },
-  { path: '/marketplace/category/ai', guard: 'public',     label: 'Marketplace category' },
-  { path: '/marketplace/browse/agents', guard: 'public',   label: 'Marketplace browse' },
-  { path: '/marketplace/my-agent',    guard: 'public',     label: 'Marketplace detail' },
-  { path: '/marketplace/creator/u1',  guard: 'public',     label: 'Marketplace author' },
+  { path: '/', guard: 'public', label: 'Landing page' },
+  { path: '/landing-old', guard: 'public', label: 'Old landing page' },
+  { path: '/forgot-password', guard: 'public', label: 'Forgot password' },
+  { path: '/reset-password', guard: 'public', label: 'Reset password' },
+  { path: '/logout', guard: 'public', label: 'Logout' },
+  { path: '/oauth/callback', guard: 'public', label: 'OAuth callback' },
+  { path: '/marketplace', guard: 'public', label: 'Marketplace home' },
+  { path: '/marketplace/category/ai', guard: 'public', label: 'Marketplace category redirect' },
+  { path: '/marketplace/browse/agents', guard: 'public', label: 'Marketplace browse' },
+  { path: '/marketplace/my-agent', guard: 'public', label: 'Marketplace detail' },
+  { path: '/marketplace/creator/u1', guard: 'public', label: 'Marketplace author' },
 
   // --- Public-only pages (redirect away if authenticated) ---
-  { path: '/login',                   guard: 'publicOnly', label: 'Login' },
-  { path: '/register',               guard: 'publicOnly', label: 'Register' },
+  { path: '/login', guard: 'publicOnly', label: 'Login' },
+  { path: '/register', guard: 'publicOnly', label: 'Register' },
 
   // --- Private pages (redirect to login if not authenticated) ---
-  { path: '/dashboard',              guard: 'private',    label: 'Dashboard' },
-  { path: '/library',                guard: 'private',    label: 'Library' },
-  { path: '/feedback',               guard: 'private',    label: 'Feedback' },
-  { path: '/marketplace/success',    guard: 'private',    label: 'Marketplace success' },
-  { path: '/project/my-app',         guard: 'private',    label: 'Project graph' },
-  { path: '/project/my-app/builder', guard: 'private',    label: 'Project builder' },
-  { path: '/admin',                  guard: 'private',    label: 'Admin dashboard' },
-  { path: '/settings/profile',       guard: 'private',    label: 'Settings: profile' },
-  { path: '/settings/preferences',   guard: 'private',    label: 'Settings: preferences' },
-  { path: '/settings/security',      guard: 'private',    label: 'Settings: security' },
-  { path: '/settings/deployment',    guard: 'private',    label: 'Settings: deployment' },
-  { path: '/settings/api-keys',      guard: 'private',    label: 'Settings: API keys' },
-  { path: '/settings/billing',       guard: 'private',    label: 'Settings: billing' },
-  { path: '/auth/github/callback',   guard: 'private',    label: 'GitHub auth callback' },
-  { path: '/referral',               guard: 'private',    label: 'Referral' },
-  { path: '/referrals',              guard: 'private',    label: 'Referrals' },
+  { path: '/dashboard', guard: 'private', label: 'Dashboard' },
+  { path: '/library', guard: 'private', label: 'Library' },
+  { path: '/feedback', guard: 'private', label: 'Feedback' },
+  { path: '/marketplace/success', guard: 'private', label: 'Marketplace success' },
+  { path: '/project/my-app', guard: 'private', label: 'Project graph' },
+  { path: '/project/my-app/builder', guard: 'private', label: 'Project builder' },
+  { path: '/admin', guard: 'private', label: 'Admin dashboard' },
+  { path: '/settings/profile', guard: 'private', label: 'Settings: profile' },
+  { path: '/settings/preferences', guard: 'private', label: 'Settings: preferences' },
+  { path: '/settings/security', guard: 'private', label: 'Settings: security' },
+  { path: '/settings/deployment', guard: 'private', label: 'Settings: deployment' },
+  { path: '/settings/billing', guard: 'private', label: 'Settings: billing' },
+  { path: '/auth/github/callback', guard: 'private', label: 'GitHub auth callback' },
+  { path: '/referral', guard: 'private', label: 'Referral' },
+  { path: '/referrals', guard: 'private', label: 'Referrals' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -123,7 +122,7 @@ function renderGuardedRoute(path: string, guard: RouteGuard) {
         <Route path="/login" element={<div data-testid="login-page">Login</div>} />
         <Route path="/dashboard" element={<div data-testid="dashboard">Dashboard</div>} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -138,14 +137,11 @@ describe('Route protection – private routes', () => {
       mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
     });
 
-    it.each(privateRoutes.map((r) => [r.label, r.path]))(
-      '%s (%s)',
-      (_label, path) => {
-        renderGuardedRoute(path, 'private');
-        expect(screen.queryByTestId('page-content')).not.toBeInTheDocument();
-        expect(screen.getByTestId('login-page')).toBeInTheDocument();
-      },
-    );
+    it.each(privateRoutes.map((r) => [r.label, r.path]))('%s (%s)', (_label, path) => {
+      renderGuardedRoute(path, 'private');
+      expect(screen.queryByTestId('page-content')).not.toBeInTheDocument();
+      expect(screen.getByTestId('login-page')).toBeInTheDocument();
+    });
   });
 
   describe('render content when authenticated', () => {
@@ -153,14 +149,11 @@ describe('Route protection – private routes', () => {
       mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
     });
 
-    it.each(privateRoutes.map((r) => [r.label, r.path]))(
-      '%s (%s)',
-      (_label, path) => {
-        renderGuardedRoute(path, 'private');
-        expect(screen.getByTestId('page-content')).toBeInTheDocument();
-        expect(screen.queryByTestId('login-page')).not.toBeInTheDocument();
-      },
-    );
+    it.each(privateRoutes.map((r) => [r.label, r.path]))('%s (%s)', (_label, path) => {
+      renderGuardedRoute(path, 'private');
+      expect(screen.getByTestId('page-content')).toBeInTheDocument();
+      expect(screen.queryByTestId('login-page')).not.toBeInTheDocument();
+    });
   });
 });
 
@@ -175,14 +168,11 @@ describe('Route protection – public-only routes', () => {
       mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
     });
 
-    it.each(publicOnlyRoutes.map((r) => [r.label, r.path]))(
-      '%s (%s)',
-      (_label, path) => {
-        renderGuardedRoute(path, 'publicOnly');
-        expect(screen.queryByTestId('page-content')).not.toBeInTheDocument();
-        expect(screen.getByTestId('dashboard')).toBeInTheDocument();
-      },
-    );
+    it.each(publicOnlyRoutes.map((r) => [r.label, r.path]))('%s (%s)', (_label, path) => {
+      renderGuardedRoute(path, 'publicOnly');
+      expect(screen.queryByTestId('page-content')).not.toBeInTheDocument();
+      expect(screen.getByTestId('dashboard')).toBeInTheDocument();
+    });
   });
 
   describe('render content when unauthenticated', () => {
@@ -190,13 +180,10 @@ describe('Route protection – public-only routes', () => {
       mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
     });
 
-    it.each(publicOnlyRoutes.map((r) => [r.label, r.path]))(
-      '%s (%s)',
-      (_label, path) => {
-        renderGuardedRoute(path, 'publicOnly');
-        expect(screen.getByTestId('page-content')).toBeInTheDocument();
-      },
-    );
+    it.each(publicOnlyRoutes.map((r) => [r.label, r.path]))('%s (%s)', (_label, path) => {
+      renderGuardedRoute(path, 'publicOnly');
+      expect(screen.getByTestId('page-content')).toBeInTheDocument();
+    });
   });
 });
 
@@ -211,13 +198,10 @@ describe('Route protection – public routes always render', () => {
       mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
     });
 
-    it.each(publicRoutes.map((r) => [r.label, r.path]))(
-      '%s (%s)',
-      (_label, path) => {
-        renderGuardedRoute(path, 'public');
-        expect(screen.getByTestId('page-content')).toBeInTheDocument();
-      },
-    );
+    it.each(publicRoutes.map((r) => [r.label, r.path]))('%s (%s)', (_label, path) => {
+      renderGuardedRoute(path, 'public');
+      expect(screen.getByTestId('page-content')).toBeInTheDocument();
+    });
   });
 
   describe('when unauthenticated', () => {
@@ -225,13 +209,10 @@ describe('Route protection – public routes always render', () => {
       mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
     });
 
-    it.each(publicRoutes.map((r) => [r.label, r.path]))(
-      '%s (%s)',
-      (_label, path) => {
-        renderGuardedRoute(path, 'public');
-        expect(screen.getByTestId('page-content')).toBeInTheDocument();
-      },
-    );
+    it.each(publicRoutes.map((r) => [r.label, r.path]))('%s (%s)', (_label, path) => {
+      renderGuardedRoute(path, 'public');
+      expect(screen.getByTestId('page-content')).toBeInTheDocument();
+    });
   });
 });
 
@@ -256,7 +237,7 @@ describe('PrivateRoute – loading state', () => {
           />
           <Route path="/login" element={<div data-testid="login-page">Login</div>} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     expect(screen.queryByTestId('content')).not.toBeInTheDocument();
@@ -282,7 +263,7 @@ describe('PublicOnlyRoute – loading state', () => {
           />
           <Route path="/dashboard" element={<div data-testid="dashboard">Dashboard</div>} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     expect(screen.queryByTestId('login-form')).not.toBeInTheDocument();
@@ -308,7 +289,7 @@ describe('PrivateRoute – "from" state preservation', () => {
           />
           <Route path="/login" element={<LoginCapture />} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     expect(screen.getByTestId('redirect-from')).toHaveTextContent('/settings/billing');
@@ -320,9 +301,7 @@ describe('PublicOnlyRoute – "from" state redirect', () => {
     mockUseAuth.mockReturnValue({ isAuthenticated: true, isLoading: false });
 
     render(
-      <MemoryRouter
-        initialEntries={[{ pathname: '/login', state: { from: '/settings/billing' } }]}
-      >
+      <MemoryRouter initialEntries={[{ pathname: '/login', state: { from: '/settings/billing' } }]}>
         <Routes>
           <Route
             path="/login"
@@ -335,7 +314,7 @@ describe('PublicOnlyRoute – "from" state redirect', () => {
           <Route path="/dashboard" element={<div data-testid="dashboard">Dashboard</div>} />
           <Route path="/settings/billing" element={<div data-testid="billing">Billing</div>} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     expect(screen.queryByTestId('login-form')).not.toBeInTheDocument();
@@ -362,7 +341,7 @@ describe('PrivateRoute → PublicOnlyRoute round-trip', () => {
           />
           <Route path="/login" element={<LoginCapture />} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     expect(screen.getByTestId('redirect-from')).toHaveTextContent('/protected');
@@ -385,7 +364,7 @@ describe('PrivateRoute → PublicOnlyRoute round-trip', () => {
           <Route path="/protected" element={<div data-testid="destination">Made it!</div>} />
           <Route path="/dashboard" element={<div data-testid="dashboard">Dashboard</div>} />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     expect(screen.queryByTestId('login-form')).not.toBeInTheDocument();
@@ -413,6 +392,6 @@ describe('Route config sanity', () => {
   it('covers a minimum number of routes (catch missing entries)', () => {
     // Update this count when adding routes. If it fails, you added a route
     // to App.tsx but forgot to add it here.
-    expect(ROUTE_CONFIG.length).toBeGreaterThanOrEqual(28);
+    expect(ROUTE_CONFIG.length).toBeGreaterThanOrEqual(27);
   });
 });

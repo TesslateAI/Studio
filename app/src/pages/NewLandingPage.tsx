@@ -2074,29 +2074,31 @@ export default function NewLandingPage() {
                 Pricing
               </h2>
               <p className="text-xl text-gray-400 max-w-3xl mx-auto">
-                Open-source core. Affordable advanced tools.
+                Start free. Scale as you grow.
               </p>
+              {/* Signup Bonus Callout */}
+              <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--primary)]/10 border border-[var(--primary)]/30">
+                <Sparkles className="w-4 h-4 text-[var(--primary)]" />
+                <span className="text-sm font-medium text-[var(--primary)]">
+                  15,000 bonus credits on signup (valid for 60 days)
+                </span>
+              </div>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-6 sm:gap-8 max-w-6xl mx-auto">
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
               {/* Free Plan */}
               <div
                 style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-6 sm:p-8 flex flex-col"
               >
-                <h3 className="text-2xl font-bold text-white mb-2">Free</h3>
-                <p className="text-gray-400 mb-6">(Open Source)</p>
-                <div className="text-4xl font-bold text-white mb-6">$0</div>
-                <ul className="space-y-3 mb-8">
-                  {[
-                    'Full-stack generator',
-                    'Agent builder & editor',
-                    'Web interface access',
-                    'Self-hosting',
-                    'Community agents',
-                  ].map((feature, i) => (
-                    <li key={i} className="flex items-start gap-2 text-gray-300">
-                      <Check className="w-5 h-5 text-[var(--primary)] flex-shrink-0 mt-0.5" />
+                <h3 className="text-2xl font-bold text-white mb-1">Free</h3>
+                <p className="text-gray-400 text-sm mb-4">Get started</p>
+                <div className="text-4xl font-bold text-white mb-1">$0</div>
+                <p className="text-gray-400 text-sm mb-6">5 credits/day</p>
+                <ul className="space-y-2.5 mb-8 flex-1">
+                  {['3 projects', '5 credits/day', 'All AI models'].map((feature, i) => (
+                    <li key={i} className="flex items-start gap-2 text-gray-300 text-sm">
+                      <Check className="w-4 h-4 text-[var(--primary)] flex-shrink-0 mt-0.5" />
                       <span>{feature}</span>
                     </li>
                   ))}
@@ -2109,28 +2111,57 @@ export default function NewLandingPage() {
                 </button>
               </div>
 
+              {/* Basic Plan */}
+              <div
+                style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
+                className="rounded-2xl p-6 sm:p-8 flex flex-col"
+              >
+                <h3 className="text-2xl font-bold text-white mb-1">Basic</h3>
+                <p className="text-gray-400 text-sm mb-4">For hobbyists</p>
+                <div className="text-4xl font-bold text-white mb-1">$20</div>
+                <p className="text-gray-400 text-sm mb-6">500 credits/mo</p>
+                <ul className="space-y-2.5 mb-8 flex-1">
+                  {[
+                    '7 projects',
+                    '500 credits/mo',
+                    'All AI models',
+                    'BYOK (Bring Your Own Key)',
+                  ].map((feature, i) => (
+                    <li key={i} className="flex items-start gap-2 text-gray-300 text-sm">
+                      <Check className="w-4 h-4 text-[var(--primary)] flex-shrink-0 mt-0.5" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => navigate('/register')}
+                  className="w-full px-6 py-3 bg-white/10 border border-white/20 text-white font-semibold rounded-xl hover:bg-white/20 transition-colors"
+                >
+                  Get Started
+                </button>
+              </div>
+
               {/* Pro Plan */}
               <div
-                className="rounded-2xl p-8 transform scale-105 relative"
+                className="rounded-2xl p-6 sm:p-8 relative flex flex-col"
                 style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}
               >
                 <div className="absolute top-0 right-0 bg-white text-black px-3 py-1 rounded-bl-xl rounded-tr-xl text-sm font-bold">
-                  Popular
+                  POPULAR
                 </div>
-                <h3 className="text-2xl font-bold text-white mb-2">Pro</h3>
-                <p className="text-white/80 mb-6">For professionals and teams</p>
-                <div className="text-4xl font-bold text-white mb-1">$5</div>
-                <p className="text-white/80 mb-6">/month</p>
-                <ul className="space-y-3 mb-8">
+                <h3 className="text-2xl font-bold text-white mb-1">Pro</h3>
+                <p className="text-white/80 text-sm mb-4">For professionals</p>
+                <div className="text-4xl font-bold text-white mb-1">$49</div>
+                <p className="text-white/80 text-sm mb-6">2,000 credits/mo</p>
+                <ul className="space-y-2.5 mb-8 flex-1">
                   {[
-                    'Advanced agents',
-                    'Priority builds',
-                    'GPU-accelerated workflows',
-                    'Marketplace publishing',
-                    'Collaborative projects',
+                    '15 projects',
+                    '2,000 credits/mo',
+                    'All AI models',
+                    'BYOK (Bring Your Own Key)',
                   ].map((feature, i) => (
-                    <li key={i} className="flex items-start gap-2 text-white">
-                      <Check className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <li key={i} className="flex items-start gap-2 text-white text-sm">
+                      <Check className="w-4 h-4 flex-shrink-0 mt-0.5" />
                       <span>{feature}</span>
                     </li>
                   ))}
@@ -2143,25 +2174,24 @@ export default function NewLandingPage() {
                 </button>
               </div>
 
-              {/* Enterprise Plan */}
+              {/* Ultra Plan */}
               <div
                 style={{ backgroundColor: '#1a1a1a', border: '1px solid #2a2a2a' }}
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-6 sm:p-8 flex flex-col"
               >
-                <h3 className="text-2xl font-bold text-white mb-2">Enterprise</h3>
-                <p className="text-gray-400 mb-6">Custom solutions</p>
-                <div className="text-4xl font-bold text-white mb-6">Custom</div>
-                <ul className="space-y-3 mb-8">
+                <h3 className="text-2xl font-bold text-white mb-1">Ultra</h3>
+                <p className="text-gray-400 text-sm mb-4">For teams</p>
+                <div className="text-4xl font-bold text-white mb-1">$149</div>
+                <p className="text-gray-400 text-sm mb-6">8,000 credits/mo</p>
+                <ul className="space-y-2.5 mb-8 flex-1">
                   {[
-                    'Private runners',
-                    'Custom models',
-                    'RBAC & audit logs',
-                    'SSO & private agent repos',
-                    'Dedicated support',
-                    'On-prem deployment',
+                    '40 projects',
+                    '8,000 credits/mo',
+                    'All AI models',
+                    'BYOK (Bring Your Own Key)',
                   ].map((feature, i) => (
-                    <li key={i} className="flex items-start gap-2 text-gray-300">
-                      <Check className="w-5 h-5 text-[var(--primary)] flex-shrink-0 mt-0.5" />
+                    <li key={i} className="flex items-start gap-2 text-gray-300 text-sm">
+                      <Check className="w-4 h-4 text-[var(--primary)] flex-shrink-0 mt-0.5" />
                       <span>{feature}</span>
                     </li>
                   ))}
@@ -2171,10 +2201,14 @@ export default function NewLandingPage() {
                   style={{ border: '2px solid #f97316' }}
                   className="w-full px-6 py-3 text-[var(--primary)] font-semibold rounded-xl hover:bg-[var(--primary)] hover:text-white transition-colors"
                 >
-                  Request Pricing
+                  Get Started
                 </button>
               </div>
             </div>
+
+            <p className="text-center text-gray-500 text-sm mt-8">
+              All plans include access to all AI models. Annual billing saves up to 20%.
+            </p>
           </div>
         </section>
 

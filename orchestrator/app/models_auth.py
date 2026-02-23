@@ -11,6 +11,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.types import JSON
 
 from .database import Base
 
@@ -61,17 +62,42 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
 
     # Credit system: bundled = monthly allowance (resets), purchased = permanent (never expire)
     bundled_credits: Mapped[int] = mapped_column(
-        Integer, default=1000
+        Integer, default=0
     )  # Monthly allowance, resets on billing date
     purchased_credits: Mapped[int] = mapped_column(Integer, default=0)  # Never expire
     credits_reset_date: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )  # When bundled credits reset
 
+    # Signup bonus credits (expire after signup_bonus_expiry_days)
+    signup_bonus_credits: Mapped[int] = mapped_column(Integer, default=0)
+    signup_bonus_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Daily credits for free tier (reset each day)
+    daily_credits: Mapped[int] = mapped_column(Integer, default=0)
+    daily_credits_reset_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Support tier flag (community, email, priority)
+    support_tier: Mapped[str] = mapped_column(String(20), default="community")
+
     @property
     def total_credits(self) -> int:
-        """Total available credits (bundled + purchased)."""
-        return (self.bundled_credits or 0) + (self.purchased_credits or 0)
+        """Total available credits (daily + bundled + signup_bonus + purchased)."""
+        from datetime import UTC
+
+        bonus = self.signup_bonus_credits or 0
+        if self.signup_bonus_expires_at and datetime.now(UTC) > self.signup_bonus_expires_at:
+            bonus = 0
+        return (
+            (self.daily_credits or 0)
+            + (self.bundled_credits or 0)
+            + bonus
+            + (self.purchased_credits or 0)
+        )
 
     # Creator payouts (Stripe Connect)
     creator_stripe_account_id: Mapped[str | None] = mapped_column(
@@ -92,6 +118,9 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     chat_position: Mapped[str | None] = mapped_column(
         String(10), nullable=True, default="center"
     )  # Chat panel position: left, center, right
+    disabled_models: Mapped[list | None] = mapped_column(
+        JSON, nullable=True, default=list
+    )  # Model IDs the user has disabled (hidden from chat selector)
 
     # Public profile fields
     avatar_url: Mapped[str | None] = mapped_column(
@@ -173,6 +202,9 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
         "DeploymentCredential", back_populates="user", cascade="all, delete-orphan"
     )
     deployments = relationship("Deployment", back_populates="user", cascade="all, delete-orphan")
+    library_themes = relationship(
+        "UserLibraryTheme", back_populates="user", cascade="all, delete-orphan"
+    )
 
     # fastapi-users relationships
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(

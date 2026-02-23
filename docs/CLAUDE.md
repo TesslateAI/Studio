@@ -133,6 +133,8 @@ Load this root CLAUDE.md when:
 | Modify the AI agent | [orchestrator/agent/CLAUDE.md](orchestrator/agent/CLAUDE.md) |
 | Add a new tool for the agent | [orchestrator/agent/tools/CLAUDE.md](orchestrator/agent/tools/CLAUDE.md) |
 | Change container behavior | [orchestrator/orchestration/CLAUDE.md](orchestrator/orchestration/CLAUDE.md) |
+| Credit system & billing | [orchestrator/services/credit-system.md](orchestrator/services/credit-system.md) |
+| Model pricing | [orchestrator/services/model-pricing.md](orchestrator/services/model-pricing.md) |
 | Modify the chat UI | [app/components/chat/CLAUDE.md](app/components/chat/CLAUDE.md) |
 | Change the code editor | [app/components/editor/CLAUDE.md](app/components/editor/CLAUDE.md) |
 | Fix Kubernetes issues | [infrastructure/kubernetes/CLAUDE.md](infrastructure/kubernetes/CLAUDE.md) |

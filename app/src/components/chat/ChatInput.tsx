@@ -6,6 +6,7 @@ import { Gear } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
 import { type ChatAgent } from '../../types/chat';
+import { modKey } from '../../lib/keyboard-registry';
 
 // Width thresholds for responsive collapse
 // Below VERY_COMPACT: Only essential icons (agent icon, send button)
@@ -455,7 +456,9 @@ export function ChatInput({
             onClick={isExecuting ? onStop : sendMessage}
             disabled={!isExecuting && (!message.trim() || disabled)}
             className="w-7 h-7 bg-[var(--text)]/10 hover:bg-[var(--text)]/20 rounded-lg border-2 border-[var(--border-color)] text-[var(--text)] flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            title={isExecuting ? 'Stop execution (Escape)' : 'Send message (Enter or Ctrl+Enter)'}
+            title={
+              isExecuting ? 'Stop execution (Escape)' : `Send message (Enter or ${modKey}+Enter)`
+            }
           >
             {isExecuting ? (
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 256 256">

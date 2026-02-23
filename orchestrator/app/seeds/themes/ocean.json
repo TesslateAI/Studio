@@ -5,6 +5,9 @@
   "author": "Tesslate",
   "version": "1.0.0",
   "description": "Calm teal theme inspired by the sea",
+  "category": "vibrant",
+  "tags": ["dark", "blue", "ocean", "teal"],
+  "icon": "waves",
 
   "colors": {
     "primary": "#14b8a6",

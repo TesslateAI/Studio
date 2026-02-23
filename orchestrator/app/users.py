@@ -11,7 +11,7 @@ This module sets up:
 """
 
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 
 from fastapi import Depends, Request
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin
@@ -121,6 +121,28 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             logger.error(f"Failed to create LiteLLM key for user {user.username}: {e}")
             logger.warning(f"User {user.username} registered WITHOUT LiteLLM key")
 
+        # Grant signup bonus credits and initialize daily credits
+        try:
+            from datetime import timedelta
+
+            user.signup_bonus_credits = settings.signup_bonus_credits
+            user.signup_bonus_expires_at = datetime.now(UTC) + timedelta(
+                days=settings.signup_bonus_expiry_days
+            )
+            # Initialize daily credits for free tier
+            tier = user.subscription_tier or "free"
+            if tier == "free":
+                user.daily_credits = settings.tier_daily_credits_free
+                user.daily_credits_reset_date = datetime.now(UTC)
+            user.support_tier = settings.get_support_tier(tier)
+            await self.user_db.session.commit()
+            logger.info(
+                f"Granted {settings.signup_bonus_credits} signup bonus credits to {user.username} "
+                f"(expires in {settings.signup_bonus_expiry_days} days)"
+            )
+        except Exception as e:
+            logger.error(f"Failed to grant signup bonus to {user.username}: {e}")
+
         # Auto-add default agents (Tesslate Agent) to new users
         try:
             from sqlalchemy import select
@@ -148,6 +170,35 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             await self.user_db.session.commit()
         except Exception as e:
             logger.error(f"Failed to add default agents to user {user.username}: {e}")
+
+        # Auto-add default themes (default-dark, default-light) to new users
+        try:
+            from sqlalchemy import select
+
+            from .models import Theme, UserLibraryTheme
+
+            default_theme_ids = ["default-dark", "default-light"]
+
+            for theme_id in default_theme_ids:
+                result = await self.user_db.session.execute(
+                    select(Theme).where(Theme.id == theme_id)
+                )
+                theme = result.scalar_one_or_none()
+
+                if theme:
+                    library_entry = UserLibraryTheme(
+                        user_id=user.id, theme_id=theme.id, purchase_type="free", is_active=True
+                    )
+                    self.user_db.session.add(library_entry)
+                    logger.info(f"Auto-added theme {theme.name} to user {user.username}")
+                else:
+                    logger.warning(
+                        f"Theme {theme_id} not found - user registered without this default theme"
+                    )
+
+            await self.user_db.session.commit()
+        except Exception as e:
+            logger.error(f"Failed to add default themes to user {user.username}: {e}")
 
         # Send Discord signup notification
         try:
@@ -304,6 +355,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         *,
         associate_by_email: bool = False,
         is_verified_by_default: bool = False,
+        avatar_url: str | None = None,
     ) -> User:
         """
         Handle OAuth callback and create/update user.
@@ -323,6 +375,10 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         if user:
             logger.info(f"Found existing OAuth account for {oauth_name} user {account_id}")
+            # Backfill avatar if not already set
+            if avatar_url and not user.avatar_url:
+                user.avatar_url = avatar_url
+                await self.user_db.session.commit()
             return user
 
         # Try to find by email if associate_by_email is True
@@ -331,6 +387,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
                 user = await self.user_db.get_by_email(account_email)
                 if user:
                     logger.info(f"Associating existing user {user.id} with {oauth_name} account")
+                    # Backfill avatar if not already set
+                    if avatar_url and not user.avatar_url:
+                        user.avatar_url = avatar_url
                     # Create OAuth account link
                     await self.user_db.add_oauth_account(
                         user,
@@ -387,8 +446,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             "hashed_password": self.password_helper.hash(generate(size=32)),
             "subscription_tier": "free",
             "total_spend": 0,
-            "bundled_credits": 1000,
+            "bundled_credits": 0,
             "purchased_credits": 0,
+            "avatar_url": avatar_url,
         }
 
         user = User(**user_dict)

@@ -5,6 +5,9 @@
   "author": "Tesslate",
   "version": "1.0.0",
   "description": "Elegant pink theme for a softer aesthetic",
+  "category": "vibrant",
+  "tags": ["dark", "pink", "rose", "warm"],
+  "icon": "flower-lotus",
 
   "colors": {
     "primary": "#f43f5e",

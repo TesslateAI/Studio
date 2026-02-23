@@ -170,36 +170,51 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Tiers: free, basic, pro, ultra
     # Stripe Price IDs (set these in environment)
-    stripe_basic_price_id: str = ""  # $8/month
-    stripe_pro_price_id: str = ""  # $20/month
-    stripe_ultra_price_id: str = ""  # $100/month
+    stripe_basic_price_id: str = ""  # $20/month
+    stripe_pro_price_id: str = ""  # $49/month
+    stripe_ultra_price_id: str = ""  # $149/month
+
+    # Annual Stripe Price IDs
+    stripe_basic_annual_price_id: str = ""
+    stripe_pro_annual_price_id: str = ""
+    stripe_ultra_annual_price_id: str = ""
 
     # Tier Pricing (in cents)
     tier_price_free: int = 0
-    tier_price_basic: int = 800  # $8/month
-    tier_price_pro: int = 2000  # $20/month
-    tier_price_ultra: int = 10000  # $100/month
+    tier_price_basic: int = 2000  # $20/month
+    tier_price_pro: int = 4900  # $49/month
+    tier_price_ultra: int = 14900  # $149/month
 
     # Monthly Bundled Credits per Tier (1 credit = $0.01)
-    tier_bundled_credits_free: int = 1000  # $10 worth
-    tier_bundled_credits_basic: int = 1000  # $10 worth
-    tier_bundled_credits_pro: int = 2500  # $25 worth
-    tier_bundled_credits_ultra: int = 12000  # $120 worth
+    tier_bundled_credits_free: int = 0  # Free uses daily credits
+    tier_bundled_credits_basic: int = 500
+    tier_bundled_credits_pro: int = 2000
+    tier_bundled_credits_ultra: int = 8000
+
+    # Daily credits for free tier (expire at end of day)
+    tier_daily_credits_free: int = 5
+
+    # Signup bonus
+    signup_bonus_credits: int = 15000
+    signup_bonus_expiry_days: int = 60  # 2 months
 
     # Project Limits per Tier
     tier_max_projects_free: int = 3
-    tier_max_projects_basic: int = 5
-    tier_max_projects_pro: int = 10
-    tier_max_projects_ultra: int = 999  # Unlimited
+    tier_max_projects_basic: int = 7
+    tier_max_projects_pro: int = 15
+    tier_max_projects_ultra: int = 40
 
     # Deploy Limits per Tier
     tier_max_deploys_free: int = 1
-    tier_max_deploys_basic: int = 2
+    tier_max_deploys_basic: int = 3
     tier_max_deploys_pro: int = 5
     tier_max_deploys_ultra: int = 20
 
-    # BYOK (Bring Your Own Key) - Only available for Pro and Ultra tiers
-    byok_enabled_tiers: str = "pro,ultra"  # Comma-separated list
+    # BYOK (Bring Your Own Key) - Available for all paid tiers
+    byok_enabled_tiers: str = "basic,pro,ultra"  # Comma-separated list
+    # BYOK provider prefixes are derived at runtime from BUILTIN_PROVIDERS in agent/models.py.
+    # This env var is only used as override/fallback — the canonical list comes from the provider registry.
+    byok_provider_prefixes: str = ""
 
     @property
     def byok_tiers_list(self) -> list:
@@ -209,9 +224,11 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Credit Packages (for purchasing additional credits)
     # ==========================================================================
-    # Credit packages - 1 credit = $0.01, price in cents
+    # Credit packages - price in cents, 1:1 ratio ($1 = 100 credits)
     credit_package_small: int = 500  # $5 for 500 credits
-    credit_package_medium: int = 1000  # $10 for 1000 credits
+    credit_package_medium: int = 2500  # $25 for 2,500 credits
+    credit_package_large: int = 10000  # $100 for 10,000 credits
+    credit_package_team: int = 50000  # $500 for 50,000 credits
 
     # Low balance warning threshold (percentage of monthly allowance)
     credits_low_balance_threshold: float = 0.20  # 20%
@@ -257,12 +274,38 @@ class Settings(BaseSettings):
         }.get(tier, 0)
 
     def get_stripe_price_id(self, tier: str) -> str:
-        """Get Stripe Price ID for a tier."""
+        """Get Stripe Price ID for a tier (monthly)."""
         return {
             "basic": self.stripe_basic_price_id,
             "pro": self.stripe_pro_price_id,
             "ultra": self.stripe_ultra_price_id,
         }.get(tier, "")
+
+    def get_stripe_annual_price_id(self, tier: str) -> str:
+        """Get Stripe Annual Price ID for a tier."""
+        return {
+            "basic": self.stripe_basic_annual_price_id,
+            "pro": self.stripe_pro_annual_price_id,
+            "ultra": self.stripe_ultra_annual_price_id,
+        }.get(tier, "")
+
+    def get_support_tier(self, tier: str) -> str:
+        """Get support tier label for a subscription tier."""
+        return {
+            "free": "community",
+            "basic": "email",
+            "pro": "priority",
+            "ultra": "priority",
+        }.get(tier, "community")
+
+    def get_credit_package_amounts(self) -> dict[str, int]:
+        """Get credit package amounts (price in cents = credits granted)."""
+        return {
+            "small": self.credit_package_small,
+            "medium": self.credit_package_medium,
+            "large": self.credit_package_large,
+            "team": self.credit_package_team,
+        }
 
     # Revenue sharing (percentages)
     creator_revenue_share: float = 0.90  # 90% to creator

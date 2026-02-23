@@ -11,7 +11,6 @@ const routeTitles: Record<string, string> = {
   '/settings/preferences': 'Preferences',
   '/settings/security': 'Security',
   '/settings/deployment': 'Deployment',
-  '/settings/api-keys': 'API Keys',
   '/settings/billing': 'Billing',
 };
 
@@ -83,7 +82,7 @@ export function SettingsLayout() {
               transition={{
                 type: 'spring',
                 stiffness: 400,
-                damping: 30
+                damping: 30,
               }}
               className="md:hidden fixed inset-y-0 left-0 z-50 w-[70vw] max-w-[240px] min-w-[180px] pt-[env(safe-area-inset-top)]"
             >

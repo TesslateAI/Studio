@@ -31,7 +31,8 @@ export interface ShortcutGroup {
 }
 
 // Display helpers for different platforms
-export const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+export const isMac =
+  typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
 export const modKey = isMac ? '⌘' : 'Ctrl';
 export const altKey = isMac ? '⌥' : 'Alt';
@@ -81,6 +82,14 @@ export const shortcutGroups: ShortcutGroup[] = [
         label: 'Show keyboard shortcuts',
         keys: ['?'],
         hotkey: 'shift+/',
+        context: 'global',
+        category: 'General',
+      },
+      {
+        id: 'show-shortcuts-alt',
+        label: 'Show keyboard shortcuts',
+        keys: [modKey, '/'],
+        hotkey: 'ctrl+/',
         context: 'global',
         category: 'General',
       },

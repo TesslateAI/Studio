@@ -33,7 +33,9 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
 
   const handleCreatorClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (creatorId) {
+    if (item.creator_username) {
+      navigate(`/@${item.creator_username}`);
+    } else if (creatorId) {
       navigate(`/marketplace/creator/${creatorId}`);
     }
   };
@@ -56,7 +58,7 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
       `}
     >
       {/* Featured Badge */}
-      <div className="absolute top-4 right-4 flex items-center gap-1 px-2 py-1 bg-[var(--primary)]/20 text-[var(--primary)] text-xs rounded-full font-medium">
+      <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex items-center gap-1 px-2 py-1 bg-[var(--primary)]/20 text-[var(--primary)] text-[10px] sm:text-xs rounded-full font-medium z-10">
         <Star size={12} weight="fill" />
         Featured
       </div>
@@ -80,10 +82,10 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
       {/* Content */}
       <div className="flex-1 min-w-0">
         {/* Title Row */}
-        <div className="flex items-start gap-3 mb-2">
+        <div className="flex items-start gap-2 sm:gap-3 mb-2 overflow-hidden pr-16 sm:pr-20">
           <h3
             className={`
-            font-heading font-bold text-lg leading-tight
+            font-heading font-bold text-base sm:text-lg leading-tight truncate min-w-0
             group-hover:text-[var(--primary)] transition-colors
             ${theme === 'light' ? 'text-black' : 'text-white'}
           `}
@@ -91,7 +93,7 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
             {item.name}
           </h3>
           {item.source_type === 'open' && (
-            <span className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-green-500/15 text-green-500 text-xs rounded font-medium">
+            <span className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-green-500/15 text-green-500 text-[10px] sm:text-xs rounded font-medium whitespace-nowrap">
               <GitFork size={12} weight="bold" />
               Open Source
             </span>
@@ -101,7 +103,7 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
         {/* Description */}
         <p
           className={`
-          text-xs sm:text-sm leading-relaxed line-clamp-2 mb-4
+          text-xs sm:text-sm leading-relaxed line-clamp-2 mb-4 pr-16 sm:pr-20
           ${theme === 'light' ? 'text-black/60' : 'text-white/60'}
         `}
         >
@@ -109,20 +111,20 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
         </p>
 
         {/* Footer */}
-        <div className="flex flex-wrap items-center justify-between gap-3 md:gap-4">
+        <div className="flex items-center justify-between gap-3 md:gap-4">
           {/* Author & Stats */}
-          <div className="flex items-center gap-3 md:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 overflow-hidden">
             {/* Creator */}
             <button
               onClick={handleCreatorClick}
               className={`
-                flex items-center gap-2 text-xs sm:text-sm hover:text-[var(--primary)] transition-colors
+                flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm hover:text-[var(--primary)] transition-colors min-w-0
                 ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
               `}
             >
               <div
                 className={`
-                w-6 h-6 rounded-full overflow-hidden flex-shrink-0
+                w-5 h-5 sm:w-6 sm:h-6 rounded-full overflow-hidden flex-shrink-0
                 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}
               `}
               >
@@ -133,87 +135,103 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-xs font-medium">
+                  <div className="w-full h-full flex items-center justify-center text-[10px] sm:text-xs font-medium">
                     {item.creator_name?.charAt(0).toUpperCase() || 'T'}
                   </div>
                 )}
               </div>
-              <span>
-                {item.creator_type === 'official' ? 'Tesslate' : item.creator_name || 'Unknown'}
+              <span className="text-left line-clamp-2 leading-tight">
+                {item.creator_type === 'official'
+                  ? 'Tesslate'
+                  : item.creator_username
+                    ? `@${item.creator_username}`
+                    : item.creator_name || 'Unknown'}
               </span>
             </button>
 
             {/* Separator */}
-            <span className={theme === 'light' ? 'text-black/20' : 'text-white/20'}>•</span>
+            <span
+              className={`flex-shrink-0 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+            >
+              •
+            </span>
 
             {/* Rating */}
             {item.rating > 0 && (
               <>
                 <div
                   className={`
-                    flex items-center gap-1.5 text-xs sm:text-sm
+                    flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm flex-shrink-0 whitespace-nowrap
                     ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
                   `}
                 >
-                  <Star size={14} weight="fill" className="text-amber-400" />
+                  <Star size={14} weight="fill" className="text-amber-400 flex-shrink-0" />
                   <span>{item.rating.toFixed(1)}</span>
                   {item.reviews_count > 0 && (
-                    <span className={theme === 'light' ? 'text-black/30' : 'text-white/30'}>
+                    <span
+                      className={`hidden sm:inline ${theme === 'light' ? 'text-black/30' : 'text-white/30'}`}
+                    >
                       ({item.reviews_count})
                     </span>
                   )}
                 </div>
-                <span className={theme === 'light' ? 'text-black/20' : 'text-white/20'}>•</span>
+                <span
+                  className={`flex-shrink-0 ${theme === 'light' ? 'text-black/20' : 'text-white/20'}`}
+                >
+                  •
+                </span>
               </>
             )}
 
             {/* Uses Count */}
             <div
               className={`
-              flex items-center gap-1.5 text-xs sm:text-sm
+              flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm flex-shrink-0 whitespace-nowrap
               ${theme === 'light' ? 'text-black/50' : 'text-white/50'}
             `}
             >
-              <Lightning size={14} weight="fill" />
+              <Lightning size={14} weight="fill" className="flex-shrink-0" />
               <span>{formatInstalls(usageCount)} uses</span>
             </div>
           </div>
 
           {/* Install Button */}
-          {item.is_purchased && isAuthenticated ? (
-            <span className="flex items-center gap-1.5 px-4 py-2 bg-green-500/15 text-green-500 rounded-xl text-sm font-medium">
-              <Check size={16} weight="bold" />
-              Installed
-            </span>
-          ) : !isAuthenticated ? (
-            <button
-              onClick={handleInstall}
-              className="px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-md hover:shadow-lg"
-            >
-              Sign Up to Install
-            </button>
-          ) : (
-            <button
-              onClick={handleInstall}
-              disabled={!item.is_active}
-              className={`
-                px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all
-                ${
-                  item.is_active
-                    ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-md hover:shadow-lg'
-                    : theme === 'light'
-                      ? 'bg-black/5 text-black/40 cursor-not-allowed'
-                      : 'bg-white/5 text-white/40 cursor-not-allowed'
-                }
-              `}
-            >
-              {item.is_active
-                ? item.pricing_type === 'free'
-                  ? 'Install'
-                  : `$${item.price}/mo`
-                : 'Coming Soon'}
-            </button>
-          )}
+          <div className="flex-shrink-0 ml-auto">
+            {item.is_purchased && isAuthenticated ? (
+              <span className="flex items-center gap-1.5 px-4 py-2 bg-green-500/15 text-green-500 rounded-xl text-sm font-medium">
+                <Check size={16} weight="bold" />
+                Installed
+              </span>
+            ) : !isAuthenticated ? (
+              <button
+                onClick={handleInstall}
+                className="px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-md hover:shadow-lg"
+              >
+                Sign Up to Install
+              </button>
+            ) : (
+              <button
+                onClick={handleInstall}
+                disabled={!item.is_active}
+                className={`
+                  px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all
+                  ${
+                    item.is_active
+                      ? 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white shadow-md hover:shadow-lg'
+                      : theme === 'light'
+                        ? 'bg-black/5 text-black/40 cursor-not-allowed'
+                        : 'bg-white/5 text-white/40 cursor-not-allowed'
+                  }
+                `}
+              >
+                {item.is_active
+                  ? item.pricing_type === 'free'
+                    ? 'Install'
+                    : `$${item.price}/mo`
+                  : 'Coming Soon'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

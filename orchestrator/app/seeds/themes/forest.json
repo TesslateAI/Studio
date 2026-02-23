@@ -5,6 +5,9 @@
   "author": "Tesslate",
   "version": "1.0.0",
   "description": "Natural green theme for eco-friendly vibes",
+  "category": "vibrant",
+  "tags": ["dark", "green", "nature", "forest"],
+  "icon": "tree",
 
   "colors": {
     "primary": "#22c55e",

@@ -72,12 +72,16 @@ Load this context when:
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/ForgotPassword.tsx`**: Request password reset email
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/ResetPassword.tsx`**: Set new password via token from email
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/DeploymentSettings.tsx`**: Provider credentials
-- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/ApiKeysSettings.tsx`**: API key management
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/settings/BillingSettings.tsx`**: Subscription, invoices
 
 ### Marketplace Pages
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceBrowse.tsx`**: Browse with filtering
-- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceCategory.tsx`**: Category-specific browse
+
+### Other Pages
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/UserProfile.tsx`**: Username route resolver (`/@username`)
+
+### Modals
+- **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/modals/FeedbackModal.tsx`**: User feedback submission
 
 ### Settings Components
 - **`c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/components/settings/SettingsSection.tsx`**: Container with title
@@ -740,7 +744,6 @@ function ProfileSettings() {
   <Route path="preferences" element={<PreferencesSettings />} />
   <Route path="security" element={<SecuritySettings />} />
   <Route path="deployment" element={<DeploymentSettings />} />
-  <Route path="api-keys" element={<ApiKeysSettings />} />
   <Route path="billing" element={<BillingSettings />} />
 </Route>
 ```
@@ -926,7 +929,7 @@ function Header({ user }) {
     <header>
       <UserDropdown
         userName={user.name}
-        userCredits={user.credits_balance}
+        userCredits={user.total_credits}
         userTier={user.subscription_tier}
       />
     </header>

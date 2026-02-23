@@ -27,26 +27,27 @@ export function ReviewCard({ review, onEdit, onDelete }: ReviewCardProps) {
     return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
-      year: 'numeric'
+      year: 'numeric',
     });
   };
 
   return (
-    <div className={`
+    <div
+      className={`
       p-4 rounded-xl border
-      ${theme === 'light'
-        ? 'bg-white border-black/10'
-        : 'bg-white/5 border-white/10'
-      }
-    `}>
+      ${theme === 'light' ? 'bg-white border-black/10' : 'bg-white/5 border-white/10'}
+    `}
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         {/* User Info */}
         <div className="flex items-center gap-3">
-          <div className={`
+          <div
+            className={`
             w-10 h-10 rounded-full overflow-hidden flex-shrink-0
             ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}
-          `}>
+          `}
+          >
             {review.user_avatar_url ? (
               <img
                 src={review.user_avatar_url}
@@ -59,9 +60,11 @@ export function ReviewCard({ review, onEdit, onDelete }: ReviewCardProps) {
               </div>
             )}
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className={`font-semibold text-sm ${theme === 'light' ? 'text-black' : 'text-white'}`}>
+              <span
+                className={`font-semibold text-sm truncate ${theme === 'light' ? 'text-black' : 'text-white'}`}
+              >
                 {review.user_name}
               </span>
               {review.is_own_review && (
@@ -116,14 +119,22 @@ export function ReviewCard({ review, onEdit, onDelete }: ReviewCardProps) {
             key={star}
             size={16}
             weight={star <= review.rating ? 'fill' : 'regular'}
-            className={star <= review.rating ? 'text-yellow-400' : theme === 'light' ? 'text-black/20' : 'text-white/20'}
+            className={
+              star <= review.rating
+                ? 'text-yellow-400'
+                : theme === 'light'
+                  ? 'text-black/20'
+                  : 'text-white/20'
+            }
           />
         ))}
       </div>
 
       {/* Comment */}
       {review.comment && (
-        <p className={`text-sm leading-relaxed ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}>
+        <p
+          className={`text-sm leading-relaxed ${theme === 'light' ? 'text-black/70' : 'text-white/70'}`}
+        >
           {review.comment}
         </p>
       )}

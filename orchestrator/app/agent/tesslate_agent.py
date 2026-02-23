@@ -362,6 +362,64 @@ class TesslateAgent(AbstractAgent):
                 recorder.record_assistant(content, tool_calls, usage)
                 await writer.flush(recorder)
 
+                # --- Credit deduction (non-blocking) ---
+                try:
+                    from ..database import AsyncSessionLocal
+                    from ..services.credit_service import deduct_credits
+
+                    model_name = context.get("model_name", "")
+                    agent_id = context.get("agent_id")
+                    project_id = context.get("project_id")
+                    user_id = context.get("user_id")
+
+                    if user_id and model_name:
+                        tokens_in = usage.get("prompt_tokens", 0) if usage else 0
+                        tokens_out = usage.get("completion_tokens", 0) if usage else 0
+
+                        # Estimate tokens if provider didn't return usage
+                        if not tokens_in and not tokens_out:
+                            msg_text = " ".join(
+                                m.get("content", "")
+                                for m in messages
+                                if isinstance(m.get("content"), str)
+                            )
+                            tokens_in = max(1, len(msg_text) // 4)
+                            tokens_out = max(1, len(content or "") // 4)
+
+                        async with AsyncSessionLocal() as credit_db:
+                            credit_result = await deduct_credits(
+                                db=credit_db,
+                                user_id=user_id,
+                                model_name=model_name,
+                                tokens_in=tokens_in,
+                                tokens_out=tokens_out,
+                                agent_id=agent_id,
+                                project_id=project_id,
+                            )
+                            yield {"type": "credits_used", "data": credit_result}
+
+                            if (
+                                not credit_result.get("is_byok")
+                                and credit_result.get("new_balance", 1) <= 0
+                            ):
+                                yield {
+                                    "type": "error",
+                                    "content": "You have run out of credits. Please purchase more to continue.",
+                                }
+                                yield self._complete_event(
+                                    False,
+                                    iteration,
+                                    content or "",
+                                    "credits_exhausted",
+                                    tool_calls_count,
+                                    "credits_exhausted",
+                                    limits.get_stats(run_id),
+                                    session_id=session_id,
+                                )
+                                return
+                except Exception as e:
+                    logger.warning(f"[TesslateAgent] Credit deduction failed (non-blocking): {e}")
+
                 # No tool calls = done
                 if not tool_calls:
                     logger.info(f"[TesslateAgent] Complete in {iteration} iterations")

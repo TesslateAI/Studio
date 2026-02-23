@@ -23,8 +23,11 @@ Load this context when:
 | Graph Canvas | `ProjectGraphCanvas.tsx` | `/project/:slug` | XYFlow architecture visualization |
 | Marketplace | `Marketplace.tsx` | `/marketplace` | Browse agents/bases with filtering |
 | Library | `Library.tsx` | `/library` | User's purchased items and API keys |
-| Billing | `BillingDashboard.tsx` | `/billing` | Subscription management |
-| Account Settings | `AccountSettings.tsx` | `/settings` | Profile and preferences |
+| Billing | `BillingSettings.tsx` | `/settings/billing` | Subscription, credits, usage |
+| Profile | `ProfileSettings.tsx` | `/settings/profile` | Name, email, avatar, bio, socials |
+| Preferences | `PreferencesSettings.tsx` | `/settings/preferences` | Theme preset, chat position |
+| Security | `SecuritySettings.tsx` | `/settings/security` | Password, 2FA, sessions |
+| Deployment | `DeploymentSettings.tsx` | `/settings/deployment` | Provider credentials, API keys |
 | Login | `Login.tsx` | `/login` | JWT + email 2FA and OAuth authentication |
 | Forgot Password | `ForgotPassword.tsx` | `/forgot-password` | Request password reset email |
 | Reset Password | `ResetPassword.tsx` | `/reset-password` | Set new password via token |
@@ -354,8 +357,10 @@ const tab = searchParams.get('tab') || 'agents';
 setSearchParams({ tab: 'bases' });
 ```
 
-### Billing Dashboard (`BillingDashboard.tsx`)
-**Purpose**: Subscription and payment management
+### Billing Settings (`BillingSettings.tsx`)
+**Purpose**: Subscription management, credit balance, and usage
+
+**Route**: `/settings/billing`
 
 **Key Features**:
 - Current subscription overview
@@ -376,22 +381,17 @@ const [creditHistory, setCreditHistory] = useState<CreditPurchase[]>([]);
 
 See: `billing.md`
 
-### Account Settings (`AccountSettings.tsx`)
-**Purpose**: User profile and preferences
+### Settings Pages (Modular Architecture)
+**Purpose**: User account management split across dedicated pages under `/settings/*`
 
-**Sections**:
-1. **Profile**: Name, email, avatar
-2. **Security**: Password change
-3. **API Keys**: Personal API keys for Tesslate API
-4. **Preferences**: Theme, notifications, etc.
-5. **Danger Zone**: Delete account
+**Pages**:
+1. **ProfileSettings.tsx** (`/settings/profile`): Name, email, avatar upload, bio, social links (Twitter, GitHub, website)
+2. **PreferencesSettings.tsx** (`/settings/preferences`): Theme preset selection, chat position, diagram model
+3. **SecuritySettings.tsx** (`/settings/security`): Password change, 2FA status, active sessions
+4. **DeploymentSettings.tsx** (`/settings/deployment`): Provider credentials, external API keys (merged from old ApiKeysSettings)
+5. **BillingSettings.tsx** (`/settings/billing`): Subscription tiers, credit balance, usage, transactions
 
-**State Management**:
-```typescript
-const [user, setUser] = useState<User | null>(null);
-const [editMode, setEditMode] = useState(false);
-const [formData, setFormData] = useState({ name: '', email: '' });
-```
+**Layout**: Uses `SettingsLayout.tsx` with a sidebar (`SettingsSidebar.tsx`) for navigation between pages.
 
 ### Login (`Login.tsx`)
 **Purpose**: User authentication with mandatory email 2FA

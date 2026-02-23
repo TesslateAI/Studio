@@ -109,13 +109,16 @@ export function ChatContainer({
         for (const msg of pending) {
           const id = msg.approvalId!;
           if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'approval_response',
-              approval_id: id,
-              response: 'allow_all',
-            }));
+            wsRef.current.send(
+              JSON.stringify({
+                type: 'approval_response',
+                approval_id: id,
+                response: 'allow_all',
+              })
+            );
           } else {
-            chatApi.sendApprovalResponse(id, 'allow_all')
+            chatApi
+              .sendApprovalResponse(id, 'allow_all')
               .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
           }
         }
@@ -407,11 +410,13 @@ export function ChatContainer({
             // Auto-approve if user has switched to "Allow All Edits" mode
             if (editModeRef.current === 'allow') {
               if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  type: 'approval_response',
-                  approval_id: data.data.approval_id,
-                  response: 'allow_all',
-                }));
+                ws.send(
+                  JSON.stringify({
+                    type: 'approval_response',
+                    approval_id: data.data.approval_id,
+                    response: 'allow_all',
+                  })
+                );
               }
             } else {
               // Show approval prompt in "Ask" mode
@@ -882,7 +887,28 @@ export function ChatContainer({
 
               toast.success('Task completed successfully');
             }
+          } else if (event.type === 'credits_used') {
+            // Dispatch custom event so UserDropdown and other UI can update
+            window.dispatchEvent(
+              new CustomEvent('credits-updated', {
+                detail: {
+                  newBalance: event.data.new_balance,
+                  creditsUsed: event.data.credits_deducted,
+                  costTotal: event.data.cost_total,
+                },
+              })
+            );
           } else if (event.type === 'error') {
+            const errorData = event.data || {};
+            // Handle insufficient credits specifically
+            if (errorData.code === 'insufficient_credits') {
+              toast.error(
+                errorData.message || 'Insufficient credits. Please purchase more to continue.',
+                { duration: 6000 }
+              );
+              setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
+              return;
+            }
             const errorMsg =
               (event as { content?: string; data?: { message?: string } }).content ||
               event.data?.message ||
@@ -891,10 +917,9 @@ export function ChatContainer({
           } else if (event.type === 'approval_required') {
             // Auto-approve if user has switched to "Allow All Edits" mode
             if (editModeRef.current === 'allow') {
-              chatApi.sendApprovalResponse(
-                event.data.approval_id as string,
-                'allow_all'
-              ).catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
+              chatApi
+                .sendApprovalResponse(event.data.approval_id as string, 'allow_all')
+                .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
             } else {
               // Show approval prompt in "Ask" mode
               const approvalMessage: Message = {

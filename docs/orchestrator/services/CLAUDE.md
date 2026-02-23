@@ -38,6 +38,9 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - **litellm_service.py** (445 lines) - `LiteLLMService` for AI model routing
 - **stripe_service.py** (970 lines) - `StripeService` for payment processing
 - **usage_service.py** - AI usage tracking and billing
+- **credit_service.py** - Credit deduction with priority ordering (daily → bundled → signup_bonus → purchased), BYOK detection, SELECT FOR UPDATE locking
+- **model_pricing.py** - Dynamic model pricing from LiteLLM `/model/info` with 5-minute cache, Decimal arithmetic for financial precision
+- **daily_credit_reset.py** - Background hourly loop resetting daily credits for free-tier users (UTC midnight) and expiring signup bonuses
 
 ### Version Control
 - **git_manager.py** (684 lines) - `GitManager` for in-container Git operations
@@ -71,6 +74,8 @@ The services layer (`orchestrator/app/services/`) implements core business logic
 - [snapshot-manager.md](./snapshot-manager.md) - EBS VolumeSnapshot patterns
 - [deployment-providers.md](./deployment-providers.md) - External deployment docs
 - [cache.md](./cache.md) - Distributed cache with Redis + in-memory fallback
+- [credit-system.md](./credit-system.md) - Multi-source credit system architecture
+- [model-pricing.md](./model-pricing.md) - LiteLLM dynamic pricing
 
 ## Common Service Patterns
 
@@ -495,6 +500,11 @@ result = await litellm_service.create_user_key(user.id, user.username)
 from services.stripe_service import StripeService
 stripe = StripeService()
 checkout = await stripe.create_subscription_checkout(user, success_url, cancel_url, db)
+
+# Use credit service
+from services.credit_service import check_credits, deduct_credits
+ok, msg = await check_credits(user, model_name)
+result = await deduct_credits(db, user_id, model_name, tokens_in, tokens_out)
 
 # Use deployment manager
 from services.deployment.manager import DeploymentManager

@@ -2,10 +2,11 @@
 Billing and subscription management endpoints.
 """
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from ..services.stripe_service import stripe_service
 from ..services.usage_service import usage_service
 from ..users import current_active_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing", tags=["billing"])
 settings = get_settings()
 
@@ -40,13 +42,16 @@ class SubscriptionResponse(BaseModel):
     current_period_end: str | None = None  # ISO format date string
     cancel_at_period_end: bool | None = None
     cancel_at: str | None = None  # ISO format date string
-    # New fields for credit system
+    # Credit system
     bundled_credits: int = 0
     purchased_credits: int = 0
+    signup_bonus_credits: int = 0
+    daily_credits: int = 0
     total_credits: int = 0
     monthly_allowance: int = 0
     credits_reset_date: str | None = None
     byok_enabled: bool = False
+    support_tier: str = "community"
 
     class Config:
         from_attributes = True
@@ -64,9 +69,12 @@ class CreditBalanceResponse(BaseModel):
 
     bundled_credits: int = 0
     purchased_credits: int = 0
+    signup_bonus_credits: int = 0
+    daily_credits: int = 0
     total_credits: int = 0
     monthly_allowance: int = 0
     credits_reset_date: str | None = None
+    signup_bonus_expires_at: str | None = None
     tier: str = "free"
 
 
@@ -84,7 +92,7 @@ class CreditStatusResponse(BaseModel):
 class CreditPurchaseRequest(BaseModel):
     """Request model for credit purchase."""
 
-    package: str  # small, medium, large
+    package: str  # small, medium, large, team
 
 
 class UsageSummaryResponse(BaseModel):
@@ -140,7 +148,11 @@ async def get_subscription(
     # Calculate total credits
     bundled = user.bundled_credits or 0
     purchased = user.purchased_credits or 0
-    total_credits = bundled + purchased
+    daily = user.daily_credits or 0
+    bonus = user.signup_bonus_credits or 0
+    if user.signup_bonus_expires_at and datetime.now(UTC) > user.signup_bonus_expires_at:
+        bonus = 0
+    total_credits = daily + bundled + bonus + purchased
 
     # Check if BYOK is enabled for this tier
     byok_enabled = tier in settings.byok_tiers_list
@@ -189,10 +201,13 @@ async def get_subscription(
         cancel_at=cancel_at,
         bundled_credits=bundled,
         purchased_credits=purchased,
+        signup_bonus_credits=bonus,
+        daily_credits=daily,
         total_credits=total_credits,
         monthly_allowance=monthly_allowance,
         credits_reset_date=credits_reset_date,
         byok_enabled=byok_enabled,
+        support_tier=settings.get_support_tier(tier),
     )
 
 
@@ -200,6 +215,7 @@ class SubscriptionRequest(BaseModel):
     """Request model for subscription."""
 
     tier: str = "pro"  # basic, pro, or ultra
+    billing_interval: str = "monthly"  # monthly or annual
 
 
 @router.post("/subscribe", response_model=CheckoutSessionResponse)
@@ -211,10 +227,12 @@ async def create_subscription(
 ):
     """
     Create a checkout session for a subscription tier.
-    Supports: basic ($8/mo), pro ($20/mo), ultra ($100/mo)
+    Supports: basic ($20/mo), pro ($49/mo), ultra ($149/mo)
+    Also supports annual billing interval.
     """
     # Get requested tier from body or default to pro
     requested_tier = subscription_request.tier if subscription_request else "pro"
+    billing_interval = subscription_request.billing_interval if subscription_request else "monthly"
 
     # Validate tier
     valid_tiers = ["basic", "pro", "ultra"]
@@ -224,15 +242,37 @@ async def create_subscription(
             detail=f"Invalid tier. Must be one of: {', '.join(valid_tiers)}",
         )
 
-    # Get Stripe price ID for tier
-    price_id = settings.get_stripe_price_id(requested_tier)
-    if not price_id:
+    # Validate billing interval
+    if billing_interval not in ("monthly", "annual"):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Stripe price ID not configured for tier: {requested_tier}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid billing interval. Must be 'monthly' or 'annual'",
         )
 
-    # Check if already subscribed to same or higher tier
+    # Get Stripe price ID for tier and interval
+    if billing_interval == "annual":
+        price_id = settings.get_stripe_annual_price_id(requested_tier)
+        if not price_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Annual Stripe price ID not configured for tier: {requested_tier}",
+            )
+    else:
+        price_id = settings.get_stripe_price_id(requested_tier)
+        if not price_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Stripe price ID not configured for tier: {requested_tier}",
+            )
+
+    # Block if user already has an active Stripe subscription
+    if user.stripe_subscription_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You already have an active subscription. Use 'Manage Subscription' to change plans.",
+        )
+
+    # Block same or downgrade attempts
     tier_order = {"free": 0, "basic": 1, "pro": 2, "ultra": 3}
     current_tier_level = tier_order.get(user.subscription_tier, 0)
     requested_tier_level = tier_order.get(requested_tier, 0)
@@ -253,7 +293,12 @@ async def create_subscription(
     cancel_url = f"{origin}/settings/billing?cancelled=true"
 
     session = await stripe_service.create_subscription_checkout(
-        user=user, success_url=success_url, cancel_url=cancel_url, db=db, tier=requested_tier
+        user=user,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        db=db,
+        tier=requested_tier,
+        billing_interval=billing_interval,
     )
 
     if not session:
@@ -263,6 +308,93 @@ async def create_subscription(
         )
 
     return CheckoutSessionResponse(session_id=session["id"], url=session["url"])
+
+
+@router.post("/verify-checkout")
+async def verify_checkout(
+    request: Request,
+    user: AuthUser = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Verify a completed Stripe checkout session and apply its effects.
+    Called by the frontend after redirect from Stripe to handle cases
+    where webhooks haven't fired yet (e.g., localhost development).
+
+    Uses the same unified fulfillment methods as webhooks — whichever
+    fires first wins, the other is a safe no-op (idempotent).
+    """
+    body = await request.json()
+    session_id = body.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id required")
+
+    try:
+        import stripe
+
+        stripe.api_key = settings.stripe_secret_key
+        session = stripe.checkout.Session.retrieve(session_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid session: {e}"
+        ) from e
+
+    # Verify this session belongs to this user
+    meta = session.get("metadata", {})
+    if meta.get("user_id") != str(user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Session does not belong to this user",
+        )
+
+    if session.get("status") != "complete" or session.get("payment_status") != "paid":
+        return {"status": "pending", "message": "Checkout not yet completed"}
+
+    checkout_type = meta.get("type")
+
+    if checkout_type == "credit_purchase":
+        try:
+            result = await stripe_service.fulfill_credit_purchase(session, db)
+            logger.info(
+                f"Credit purchase fulfilled via verify-checkout: "
+                f"user {user.id}, {result['credits_added']} credits, "
+                f"already_fulfilled={result['already_fulfilled']}"
+            )
+            return {
+                "status": "ok",
+                "type": "credit_purchase",
+                "credits_added": result["credits_added"],
+                "already_fulfilled": result["already_fulfilled"],
+            }
+        except ValueError as e:
+            logger.error(f"Credit purchase verification failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment amount could not be verified. Please contact support.",
+            ) from e
+
+    elif checkout_type == "subscription" or checkout_type == "premium_subscription":
+        try:
+            result = await stripe_service.fulfill_subscription(session, db)
+            logger.info(
+                f"Subscription fulfilled via verify-checkout: "
+                f"user {user.id}, tier={result['tier']}, "
+                f"already_fulfilled={result['already_fulfilled']}"
+            )
+            return {
+                "status": "ok",
+                "type": "subscription",
+                "tier": result["tier"],
+                "already_fulfilled": result["already_fulfilled"],
+            }
+        except Exception as e:
+            logger.error(f"Subscription verification failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to apply subscription. Please contact support.",
+            ) from e
+
+    return {"status": "ok", "type": "unknown", "message": "No action needed"}
 
 
 @router.post("/cancel")
@@ -392,25 +524,39 @@ async def get_customer_portal(request: Request, user: AuthUser = Depends(current
 async def get_credits_balance(user: AuthUser = Depends(current_active_user)):
     """
     Get user's current credit balance.
-    Returns both bundled (monthly) and purchased (permanent) credits.
+    Returns bundled (monthly), purchased (permanent), signup bonus, and daily credits.
     """
     tier = user.subscription_tier or "free"
     bundled = user.bundled_credits or 0
     purchased = user.purchased_credits or 0
-    total = bundled + purchased
+    daily = user.daily_credits or 0
+
+    # Calculate effective signup bonus (zero if expired)
+    bonus = user.signup_bonus_credits or 0
+    if user.signup_bonus_expires_at and datetime.now(UTC) > user.signup_bonus_expires_at:
+        bonus = 0
+
+    total = daily + bundled + bonus + purchased
     monthly_allowance = settings.get_tier_bundled_credits(tier)
 
-    # Format credits reset date
+    # Format dates
     credits_reset_date = None
     if user.credits_reset_date:
         credits_reset_date = user.credits_reset_date.isoformat()
 
+    signup_bonus_expires_at = None
+    if user.signup_bonus_expires_at:
+        signup_bonus_expires_at = user.signup_bonus_expires_at.isoformat()
+
     return CreditBalanceResponse(
         bundled_credits=bundled,
         purchased_credits=purchased,
+        signup_bonus_credits=bonus,
+        daily_credits=daily,
         total_credits=total,
         monthly_allowance=monthly_allowance,
         credits_reset_date=credits_reset_date,
+        signup_bonus_expires_at=signup_bonus_expires_at,
         tier=tier,
     )
 
@@ -424,7 +570,11 @@ async def get_credit_status(user: AuthUser = Depends(current_active_user)):
     tier = user.subscription_tier or "free"
     bundled = user.bundled_credits or 0
     purchased = user.purchased_credits or 0
-    total = bundled + purchased
+    daily = user.daily_credits or 0
+    bonus = user.signup_bonus_credits or 0
+    if user.signup_bonus_expires_at and datetime.now(UTC) > user.signup_bonus_expires_at:
+        bonus = 0
+    total = daily + bundled + bonus + purchased
     monthly_allowance = settings.get_tier_bundled_credits(tier)
 
     # Calculate threshold (20% of monthly allowance)
@@ -450,17 +600,13 @@ async def purchase_credits(
     """
     Create a checkout session for purchasing credits.
     """
-    # Determine amount based on package
-    package_amounts = {
-        "small": settings.credit_package_small,
-        "medium": settings.credit_package_medium,
-        "large": settings.credit_package_large,
-    }
+    # Determine amount and credits based on package
+    package_amounts = settings.get_credit_package_amounts()
 
     if request.package not in package_amounts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid package. Must be: small, medium, or large",
+            detail="Invalid package. Must be: small, medium, large, or team",
         )
 
     amount_cents = package_amounts[request.package]
@@ -471,11 +617,15 @@ async def purchase_credits(
         or http_request.headers.get("referer", "").rstrip("/").split("?")[0].rsplit("/", 1)[0]
         or settings.get_app_base_url
     )
-    success_url = f"{origin}/billing/credits/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{origin}/billing/credits/cancel"
+    success_url = f"{origin}/settings/billing?success=true&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/settings/billing?cancelled=true"
 
     session = await stripe_service.create_credit_purchase_checkout(
-        user=user, amount_cents=amount_cents, success_url=success_url, cancel_url=cancel_url, db=db
+        user=user,
+        amount_cents=amount_cents,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        db=db,
     )
 
     if not session:
@@ -489,8 +639,8 @@ async def purchase_credits(
 
 @router.get("/credits/history")
 async def get_credit_purchase_history(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: AuthUser = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -584,8 +734,8 @@ async def sync_usage(
 
 @router.get("/usage/logs")
 async def get_usage_logs(
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     start_date: str | None = None,
     end_date: str | None = None,
     user: AuthUser = Depends(current_active_user),
@@ -636,8 +786,8 @@ async def get_usage_logs(
 
 @router.get("/transactions")
 async def get_transactions(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: AuthUser = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -772,42 +922,47 @@ async def get_billing_config():
     """
     Get public billing configuration for frontend.
     """
+
+    def _tier_config(tier: str) -> dict:
+        return {
+            "price_cents": settings.get_tier_price(tier),
+            "max_projects": settings.get_tier_max_projects(tier),
+            "max_deploys": settings.get_tier_max_deploys(tier),
+            "bundled_credits": settings.get_tier_bundled_credits(tier),
+            "daily_credits": settings.tier_daily_credits_free if tier == "free" else 0,
+            "byok_enabled": tier in settings.byok_tiers_list,
+            "support_tier": settings.get_support_tier(tier),
+        }
+
     return {
         "stripe_publishable_key": settings.stripe_publishable_key,
         "credit_packages": {
-            "small": {"credits": 500, "price_cents": settings.credit_package_small},
-            "medium": {"credits": 1000, "price_cents": settings.credit_package_medium},
+            "small": {
+                "credits": settings.credit_package_small,
+                "price_cents": settings.credit_package_small,
+            },
+            "medium": {
+                "credits": settings.credit_package_medium,
+                "price_cents": settings.credit_package_medium,
+            },
+            "large": {
+                "credits": settings.credit_package_large,
+                "price_cents": settings.credit_package_large,
+            },
+            "team": {
+                "credits": settings.credit_package_team,
+                "price_cents": settings.credit_package_team,
+            },
         },
         "deploy_price": settings.additional_deploy_price,
         "tiers": {
-            "free": {
-                "price_cents": settings.tier_price_free,
-                "max_projects": settings.tier_max_projects_free,
-                "max_deploys": settings.tier_max_deploys_free,
-                "bundled_credits": settings.tier_bundled_credits_free,
-                "byok_enabled": False,
-            },
-            "basic": {
-                "price_cents": settings.tier_price_basic,
-                "max_projects": settings.tier_max_projects_basic,
-                "max_deploys": settings.tier_max_deploys_basic,
-                "bundled_credits": settings.tier_bundled_credits_basic,
-                "byok_enabled": False,
-            },
-            "pro": {
-                "price_cents": settings.tier_price_pro,
-                "max_projects": settings.tier_max_projects_pro,
-                "max_deploys": settings.tier_max_deploys_pro,
-                "bundled_credits": settings.tier_bundled_credits_pro,
-                "byok_enabled": True,
-            },
-            "ultra": {
-                "price_cents": settings.tier_price_ultra,
-                "max_projects": settings.tier_max_projects_ultra,
-                "max_deploys": settings.tier_max_deploys_ultra,
-                "bundled_credits": settings.tier_bundled_credits_ultra,
-                "byok_enabled": True,
-            },
+            "free": _tier_config("free"),
+            "basic": _tier_config("basic"),
+            "pro": _tier_config("pro"),
+            "ultra": _tier_config("ultra"),
         },
+        "signup_bonus_credits": settings.signup_bonus_credits,
+        "signup_bonus_expiry_days": settings.signup_bonus_expiry_days,
         "low_balance_threshold": settings.credits_low_balance_threshold,
+        "daily_reset_timezone": "UTC",
     }

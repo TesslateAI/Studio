@@ -689,6 +689,13 @@ async def agent_chat(
 
         logger.info(f"[HTTP-AGENT] Using model: {model_name}")
 
+        # 2b. Pre-request credit check
+        from ..services.credit_service import check_credits as _check_credits
+
+        has_credits, credit_error = await _check_credits(current_user, model_name)
+        if not has_credits:
+            raise HTTPException(status_code=402, detail=credit_error)
+
         # 3. Create model adapter for IterativeAgent
         logger.info(
             f"[HTTP-AGENT] Creating model adapter for user_id: {current_user.id}, model: {model_name}"
@@ -834,6 +841,9 @@ async def agent_chat(
             # Multi-container support
             "container_id": container_id,
             "container_name": container_name,
+            # Credit deduction context
+            "model_name": model_name,
+            "agent_id": agent_model.id if agent_model else None,
         }
 
         # Get project context
@@ -1241,6 +1251,18 @@ async def agent_chat_stream(
                 else agent_model.model or settings.litellm_default_models.split(",")[0]
             )
 
+            # 2b. Pre-request credit check
+            from ..services.credit_service import check_credits as _check_credits
+
+            has_credits, credit_error = await _check_credits(current_user, model_name)
+            if not has_credits:
+                error_event = {
+                    "type": "error",
+                    "data": {"message": credit_error, "code": "insufficient_credits"},
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+                return
+
             # 3. Create model adapter
             model_adapter = await create_model_adapter(
                 model_name=model_name, user_id=current_user.id, db=db
@@ -1310,6 +1332,9 @@ async def agent_chat_stream(
                 "container_id": container_id,
                 "container_name": container_name,
                 "view_context": request.view_context,  # UI view for scoped tools
+                # Credit deduction context
+                "model_name": model_name,
+                "agent_id": agent_model.id if agent_model else None,
             }
 
             # Accumulate results for database persistence

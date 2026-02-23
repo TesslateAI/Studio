@@ -10,8 +10,9 @@ import {
   ChevronRight,
   Users,
   Smartphone,
-  Activity
+  Activity,
 } from 'lucide-react';
+import { modKey } from '../../lib/keyboard-registry';
 
 interface HelpMenuProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ interface HelpMenuProps {
 export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMenuProps) {
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [moreMenuPosition, setMoreMenuPosition] = useState({ top: 0, left: 0 });
@@ -33,7 +35,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       const rect = anchorRef.current.getBoundingClientRect();
       setPosition({
         top: rect.top - 8,
-        left: rect.right + 8
+        left: rect.right + 8,
       });
     }
     // Reset more menu when main menu closes
@@ -48,18 +50,20 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       const menuRect = menuRef.current.getBoundingClientRect();
       setMoreMenuPosition({
         top: buttonRect.top,
-        left: menuRect.right + 4
+        left: menuRect.right + 4,
       });
     }
   }, [showMoreMenu]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
       if (
         menuRef.current &&
-        !menuRef.current.contains(event.target as Node) &&
+        !menuRef.current.contains(target) &&
         anchorRef.current &&
-        !anchorRef.current.contains(event.target as Node)
+        !anchorRef.current.contains(target) &&
+        (!moreMenuRef.current || !moreMenuRef.current.contains(target))
       ) {
         onClose();
       }
@@ -91,7 +95,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       onClick: () => {
         window.open('https://docs.tesslate.com', '_blank');
         onClose();
-      }
+      },
     },
     {
       icon: MessageCircle,
@@ -99,7 +103,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       onClick: () => {
         navigate('/feedback');
         onClose();
-      }
+      },
     },
     {
       icon: FileText,
@@ -108,7 +112,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       onClick: () => {
         window.open('https://docs.tesslate.com', '_blank');
         onClose();
-      }
+      },
     },
     {
       icon: Settings,
@@ -117,19 +121,19 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       onClick: () => {
         navigate('/settings');
         onClose();
-      }
-    }
+      },
+    },
   ];
 
   const moreMenuItems = [
     {
       icon: Keyboard,
       label: 'Shortcuts',
-      shortcut: 'Ctrl /',
+      shortcut: `${modKey} /`,
       onClick: () => {
         onOpenShortcuts();
         onClose();
-      }
+      },
     },
     {
       icon: Users,
@@ -138,7 +142,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       onClick: () => {
         window.open('https://discord.gg/tesslate', '_blank');
         onClose();
-      }
+      },
     },
     {
       icon: Smartphone,
@@ -147,7 +151,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       onClick: () => {
         window.open('https://tesslate.com/mobile', '_blank');
         onClose();
-      }
+      },
     },
     {
       icon: Activity,
@@ -156,21 +160,21 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       onClick: () => {
         window.open('https://status.tesslate.com', '_blank');
         onClose();
-      }
-    }
+      },
+    },
   ];
 
   const whatsNew = [
     {
       label: 'News',
       external: true,
-      url: 'https://tesslate.com/news'
+      url: 'https://tesslate.com/news',
     },
     {
       label: 'Full changelog',
       external: true,
-      url: 'https://tesslate.com/changelog'
-    }
+      url: 'https://tesslate.com/changelog',
+    },
   ];
 
   return (
@@ -232,7 +236,9 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
                 }}
                 className="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--text)]/80 hover:text-[var(--text)] hover:bg-[var(--sidebar-hover)] rounded-md transition-colors"
               >
-                <span className="w-4 h-4 flex items-center justify-center text-[var(--text)]/30">•</span>
+                <span className="w-4 h-4 flex items-center justify-center text-[var(--text)]/30">
+                  •
+                </span>
                 <span className="flex-1 text-left">{item.label}</span>
                 {item.external && <ExternalLink size={12} className="text-[var(--text)]/40" />}
               </button>
@@ -244,6 +250,7 @@ export function HelpMenu({ isOpen, onClose, onOpenShortcuts, anchorRef }: HelpMe
       {/* More Submenu */}
       {showMoreMenu && (
         <div
+          ref={moreMenuRef}
           className="fixed z-50 w-48 bg-[var(--surface)] border border-[var(--sidebar-border)] rounded-lg shadow-xl overflow-hidden"
           style={{ top: moreMenuPosition.top, left: moreMenuPosition.left }}
           onMouseLeave={() => setShowMoreMenu(false)}

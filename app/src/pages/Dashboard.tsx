@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectsApi, authApi, tasksApi } from '../lib/api';
+import { projectsApi, tasksApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { MobileMenu, ProjectCard, UserDropdown } from '../components/ui';
 import type { Status, EnvironmentStatus } from '../components/ui';
@@ -10,7 +10,6 @@ import toast from 'react-hot-toast';
 import {
   Folder,
   Storefront,
-  Package,
   Gear,
   Sun,
   Moon,
@@ -43,27 +42,6 @@ export default function Dashboard() {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [userName, setUserName] = useState<string>('');
-  const [userCredits, setUserCredits] = useState<number>(0);
-  const [userTier, setUserTier] = useState<string>('free');
-
-  // Fetch current user data
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const user = await authApi.getCurrentUser();
-        setUserName(user.name || user.username || 'there');
-        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
-        setUserTier(user.subscription_tier || 'free');
-      } catch (e) {
-        console.error('Failed to fetch user data:', e);
-        setUserName('there');
-        setUserCredits(0);
-        setUserTier('free');
-      }
-    };
-    fetchUserData();
-  }, []);
 
   useEffect(() => {
     loadProjects();
@@ -327,11 +305,6 @@ export default function Dashboard() {
         title: 'Library',
         onClick: () => navigate('/library'),
       },
-      {
-        icon: <Package className="w-5 h-5" weight="fill" />,
-        title: 'Components',
-        onClick: () => toast('Components library coming soon!'),
-      },
     ],
     right: [
       {
@@ -379,7 +352,7 @@ export default function Dashboard() {
         {/* Right side - User Profile */}
         <div className="flex items-center gap-3">
           {/* User Dropdown */}
-          <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
+          <UserDropdown />
 
           {/* Mobile hamburger menu */}
           <button
@@ -552,7 +525,10 @@ export default function Dashboard() {
               toast.loading('Setting up project...', { id: creatingToast });
               try {
                 const result = await tasksApi.pollUntilComplete(taskId);
-                toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
+                toast.success('Project imported successfully!', {
+                  id: creatingToast,
+                  duration: 2000,
+                });
                 setShowImportDialog(false);
                 setIsCreating(false);
 
@@ -570,7 +546,10 @@ export default function Dashboard() {
                 navigate(`/project/${project.slug}`);
               }
             } else {
-              toast.success('Project imported successfully!', { id: creatingToast, duration: 2000 });
+              toast.success('Project imported successfully!', {
+                id: creatingToast,
+                duration: 2000,
+              });
               setShowImportDialog(false);
               setIsCreating(false);
               navigate(`/project/${project.slug}/builder`);

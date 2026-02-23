@@ -15,6 +15,8 @@ interface FeedbackDetail {
   id: string;
   user_id: string;
   user_name: string;
+  username: string | null;
+  avatar_url: string | null;
   type: string;
   title: string;
   description: string;
@@ -31,6 +33,8 @@ interface Comment {
   id: string;
   user_id: string;
   user_name: string;
+  username: string | null;
+  avatar_url: string | null;
   feedback_id: string;
   content: string;
   created_at: string;
@@ -105,7 +109,8 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
   const handleDelete = async () => {
     if (!feedback) return;
 
-    if (!confirm('Are you sure you want to delete this feedback? This action cannot be undone.')) return;
+    if (!confirm('Are you sure you want to delete this feedback? This action cannot be undone.'))
+      return;
 
     try {
       await feedbackApi.delete(feedback.id);
@@ -154,16 +159,21 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
                   <span
                     className={`
                       inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
-                      ${feedback.type === 'bug'
-                        ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                        : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
+                      ${
+                        feedback.type === 'bug'
+                          ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                          : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
                       }
                     `}
                   >
                     {feedback.type === 'bug' ? (
-                      <><Bug size={14} weight="fill" /> Bug</>
+                      <>
+                        <Bug size={14} weight="fill" /> Bug
+                      </>
                     ) : (
-                      <><Lightbulb size={14} weight="fill" /> Suggestion</>
+                      <>
+                        <Lightbulb size={14} weight="fill" /> Suggestion
+                      </>
                     )}
                   </span>
 
@@ -197,8 +207,24 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
                 {feedback.title}
               </h2>
 
-              <div className="flex items-center gap-4 text-sm text-[var(--text)]/60">
-                <span>Posted by {feedback.user_name}</span>
+              <div className="flex items-center gap-3 text-sm text-[var(--text)]/60">
+                {feedback.avatar_url ? (
+                  <img
+                    src={feedback.avatar_url}
+                    alt={feedback.user_name}
+                    className="w-6 h-6 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-[var(--primary)]/20 flex items-center justify-center text-[var(--primary)] text-xs font-bold">
+                    {feedback.user_name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span>
+                  {feedback.user_name}
+                  {feedback.username && (
+                    <span className="text-[var(--text)]/40 ml-1">@{feedback.username}</span>
+                  )}
+                </span>
                 <span>•</span>
                 <span>{formatDate(feedback.created_at)}</span>
               </div>
@@ -217,9 +243,10 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
                   onClick={handleUpvote}
                   className={`
                     mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all
-                    ${feedback.has_upvoted
-                      ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
-                      : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                    ${
+                      feedback.has_upvoted
+                        ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
+                        : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
                     }
                   `}
                 >
@@ -242,9 +269,27 @@ export function FeedbackModal({ isOpen, feedbackId, onClose, onUpdate }: Feedbac
                       className="bg-white/5 border border-white/10 rounded-xl p-4"
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-semibold text-[var(--text)]">
-                          {comment.user_name}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {comment.avatar_url ? (
+                            <img
+                              src={comment.avatar_url}
+                              alt={comment.user_name}
+                              className="w-5 h-5 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-5 h-5 rounded-full bg-[var(--primary)]/20 flex items-center justify-center text-[var(--primary)] text-[10px] font-bold">
+                              {comment.user_name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <span className="text-sm font-semibold text-[var(--text)]">
+                            {comment.user_name}
+                          </span>
+                          {comment.username && (
+                            <span className="text-xs text-[var(--text)]/40">
+                              @{comment.username}
+                            </span>
+                          )}
+                        </div>
                         <span className="text-xs text-[var(--text)]/40">
                           {formatDate(comment.created_at)}
                         </span>

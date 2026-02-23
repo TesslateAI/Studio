@@ -29,6 +29,7 @@ from ..schemas_feedback import (
     FeedbackPostUpdate,
     UpvoteResponse,
 )
+from ..username_validation import resolve_display_name
 from ..users import current_active_user, current_superuser
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
@@ -104,7 +105,11 @@ async def list_feedback(
             FeedbackPostRead(
                 id=post.id,
                 user_id=post.user_id,
-                user_name=post.user.name if post.user else "Unknown",
+                user_name=resolve_display_name(post.user.name, post.user.username, post.user.email)
+                if post.user
+                else "Unknown",
+                username=post.user.username if post.user else None,
+                avatar_url=post.user.avatar_url if post.user else None,
                 type=post.type,
                 title=post.title,
                 description=post.description,
@@ -157,7 +162,13 @@ async def get_feedback(
         FeedbackCommentRead(
             id=comment.id,
             user_id=comment.user_id,
-            user_name=comment.user.name if comment.user else "Unknown",
+            user_name=resolve_display_name(
+                comment.user.name, comment.user.username, comment.user.email
+            )
+            if comment.user
+            else "Unknown",
+            username=comment.user.username if comment.user else None,
+            avatar_url=comment.user.avatar_url if comment.user else None,
             feedback_id=comment.feedback_id,
             content=comment.content,
             created_at=comment.created_at,
@@ -169,7 +180,11 @@ async def get_feedback(
     return FeedbackPostDetail(
         id=post.id,
         user_id=post.user_id,
-        user_name=post.user.name if post.user else "Unknown",
+        user_name=resolve_display_name(post.user.name, post.user.username, post.user.email)
+        if post.user
+        else "Unknown",
+        username=post.user.username if post.user else None,
+        avatar_url=post.user.avatar_url if post.user else None,
         type=post.type,
         title=post.title,
         description=post.description,
@@ -216,7 +231,11 @@ async def create_feedback(
     return FeedbackPostRead(
         id=new_post.id,
         user_id=new_post.user_id,
-        user_name=current_user.name,
+        user_name=resolve_display_name(
+            current_user.name, current_user.username, current_user.email
+        ),
+        username=current_user.username,
+        avatar_url=current_user.avatar_url,
         type=new_post.type,
         title=new_post.title,
         description=new_post.description,
@@ -276,7 +295,11 @@ async def update_feedback(
     return FeedbackPostRead(
         id=post.id,
         user_id=post.user_id,
-        user_name=post.user.name if post.user else "Unknown",
+        user_name=resolve_display_name(post.user.name, post.user.username, post.user.email)
+        if post.user
+        else "Unknown",
+        username=post.user.username if post.user else None,
+        avatar_url=post.user.avatar_url if post.user else None,
         type=post.type,
         title=post.title,
         description=post.description,
@@ -409,7 +432,11 @@ async def create_comment(
     return FeedbackCommentRead(
         id=new_comment.id,
         user_id=new_comment.user_id,
-        user_name=current_user.name,
+        user_name=resolve_display_name(
+            current_user.name, current_user.username, current_user.email
+        ),
+        username=current_user.username,
+        avatar_url=current_user.avatar_url,
         feedback_id=new_comment.feedback_id,
         content=new_comment.content,
         created_at=new_comment.created_at,

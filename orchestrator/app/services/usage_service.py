@@ -3,6 +3,7 @@ Usage tracking service for syncing LiteLLM usage data and calculating costs.
 """
 
 import logging
+import math
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -172,56 +173,33 @@ class UsageService:
                 cost_input_per_million = agent.api_pricing_input  # $ per million tokens
                 cost_output_per_million = agent.api_pricing_output
 
-                cost_input = int(
-                    (tokens_input / 1_000_000) * cost_input_per_million * 100
-                )  # Convert to cents
-                cost_output = int((tokens_output / 1_000_000) * cost_output_per_million * 100)
+                raw_in = (tokens_input / 1_000_000) * cost_input_per_million * 100
+                raw_out = (tokens_output / 1_000_000) * cost_output_per_million * 100
+                cost_input = math.ceil(raw_in) if raw_in > 0 else 0
+                cost_output = math.ceil(raw_out) if raw_out > 0 else 0
 
                 creator_id = agent.created_by_user_id
                 return cost_input, cost_output, creator_id
 
-        # Default pricing from LiteLLM (using approximate values)
-        # This should ideally come from LiteLLM's model pricing data
-        default_pricing = self._get_default_model_pricing(model)
-        cost_input = int((tokens_input / 1_000_000) * default_pricing["input"] * 100)
-        cost_output = int((tokens_output / 1_000_000) * default_pricing["output"] * 100)
+        # Dynamic pricing from LiteLLM (cached, fetched from /model/info)
+        default_pricing = await self._get_default_model_pricing(model)
+        raw_in = (tokens_input / 1_000_000) * default_pricing["input"] * 100
+        raw_out = (tokens_output / 1_000_000) * default_pricing["output"] * 100
+        cost_input = math.ceil(raw_in) if raw_in > 0 else 0
+        cost_output = math.ceil(raw_out) if raw_out > 0 else 0
 
         return cost_input, cost_output, None
 
-    def _get_default_model_pricing(self, model: str) -> dict[str, float]:
+    async def _get_default_model_pricing(self, model: str) -> dict[str, float]:
         """
-        Get default pricing for a model.
+        Get default pricing for a model from LiteLLM (dynamic, cached).
 
-        Args:
-            model: Model name
-
-        Returns:
-            Dict with 'input' and 'output' prices per million tokens in USD
+        Delegates to the shared model_pricing module which fetches real
+        pricing from LiteLLM's /model/info endpoint.
         """
-        # Default pricing map (approximate values, should be updated from LiteLLM)
-        pricing_map = {
-            "gpt-4o": {"input": 2.50, "output": 10.00},
-            "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-            "gpt-4-turbo": {"input": 10.00, "output": 30.00},
-            "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
-            "claude-3-opus": {"input": 15.00, "output": 75.00},
-            "claude-3-sonnet": {"input": 3.00, "output": 15.00},
-            "claude-3-haiku": {"input": 0.25, "output": 1.25},
-            "gemini-pro": {"input": 0.50, "output": 1.50},
-        }
+        from .model_pricing import get_model_pricing
 
-        # Try exact match first
-        if model in pricing_map:
-            return pricing_map[model]
-
-        # Try partial match
-        for key in pricing_map:
-            if key in model.lower():
-                return pricing_map[key]
-
-        # Default fallback pricing
-        logger.warning(f"Unknown model pricing for {model}, using default")
-        return {"input": 1.00, "output": 3.00}
+        return await get_model_pricing(model)
 
     async def sync_all_users_usage(
         self, start_date: datetime, end_date: datetime | None = None, db: AsyncSession = None

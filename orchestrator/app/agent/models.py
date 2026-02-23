@@ -196,6 +196,18 @@ def get_builtin_provider_config(provider_slug: str) -> dict[str, Any] | None:
     return BUILTIN_PROVIDERS.get(provider_slug)
 
 
+def get_byok_provider_prefixes() -> tuple[str, ...]:
+    """Return all BYOK provider prefixes derived from BUILTIN_PROVIDERS.
+
+    This is the single source of truth for which model prefixes indicate
+    BYOK (user-supplied API key) routing. Any provider added to
+    BUILTIN_PROVIDERS that has requires_key=True is automatically included.
+    """
+    return tuple(
+        f"{slug}/" for slug, cfg in BUILTIN_PROVIDERS.items() if cfg.get("requires_key", False)
+    )
+
+
 async def get_user_api_key(
     user_id: UUID, provider_slug: str, db: AsyncSession
 ) -> dict[str, str | None]:
@@ -229,7 +241,7 @@ async def get_user_api_key(
         provider_name = BUILTIN_PROVIDERS.get(provider_slug, {}).get("name", provider_slug)
         raise ValueError(
             f"{provider_name} model selected but no API key configured. "
-            f"Please add your {provider_name} API key in Library → API Keys."
+            f"Please add your {provider_name} API key in Library → Models."
         )
 
     return {
@@ -247,7 +259,7 @@ async def get_llm_client(user_id: UUID, model_name: str, db: AsyncSession) -> As
     - "provider/model-name" → User's API key for that provider (BYOK)
     - No prefix → LiteLLM proxy (backward compat for old DB records)
 
-    Supported BYOK provider prefixes: openrouter, openai, anthropic, groq, together, deepseek, fireworks
+    Supported BYOK providers are derived from BUILTIN_PROVIDERS (see top of file).
 
     Args:
         user_id: The user ID
@@ -456,6 +468,7 @@ class OpenAIAdapter(ModelAdapter):
             "model": self.model_name,
             "messages": messages,
             "stream": True,  # Enable streaming
+            "stream_options": {"include_usage": True},
         }
 
         if max_tokens:
@@ -470,11 +483,18 @@ class OpenAIAdapter(ModelAdapter):
             stream = await self.client.chat.completions.create(**request_params)
 
             # Stream chunks as they arrive
+            self._last_usage = None
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
                     if delta.content:
                         yield delta.content
+                # Capture usage from the final chunk (no choices, has usage)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    self._last_usage = {
+                        "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
+                    }
 
             logger.debug(f"Streaming complete for {self.model_name}")
 
@@ -500,6 +520,7 @@ class OpenAIAdapter(ModelAdapter):
             "tools": tools,
             "tool_choice": tool_choice,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
 
         if self.max_tokens:
@@ -707,10 +728,14 @@ async def create_model_adapter(
         # Cerebras via LiteLLM
         adapter = await create_model_adapter("cerebras/llama3.1-8b", user_id=1, db=db)
     """
-    # Auto-detect provider if not specified
-    # anthropic/ prefix → native Anthropic adapter (BYOK); all others → OpenAI-compatible API
+    # Auto-detect API type from model prefix using the provider registry
     if not provider:
-        provider = "anthropic" if model_name.startswith("anthropic/") else "openai"
+        if "/" in model_name:
+            slug = model_name.split("/", 1)[0]
+            cfg = BUILTIN_PROVIDERS.get(slug)
+            provider = cfg["api_type"] if cfg else "openai"
+        else:
+            provider = "openai"
 
     if provider == "anthropic":
         # Native Anthropic API (not implemented for async client fetching yet)

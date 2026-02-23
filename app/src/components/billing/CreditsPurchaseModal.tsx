@@ -23,14 +23,26 @@ const CREDIT_PACKAGES: CreditPackageOption[] = [
     id: 'small',
     name: 'Starter',
     credits: 500,
-    price: 5,
+    price: 5.0,
   },
   {
     id: 'medium',
-    name: 'Popular',
-    credits: 1000,
-    price: 10,
+    name: 'Builder',
+    credits: 2500,
+    price: 25.0,
     popular: true,
+  },
+  {
+    id: 'large',
+    name: 'Power',
+    credits: 10000,
+    price: 100.0,
+  },
+  {
+    id: 'team',
+    name: 'Team',
+    credits: 50000,
+    price: 500.0,
   },
 ];
 
@@ -170,7 +182,9 @@ const CreditsPurchaseModal: React.FC<CreditsPurchaseModalProps> = ({
                           <div className="text-sm text-[var(--text)]/50">{pkg.name}</div>
                         </div>
                       </div>
-                      <div className="text-xl font-bold text-[var(--text)]">${pkg.price}</div>
+                      <div className="text-xl font-bold text-[var(--text)]">
+                        ${pkg.price.toFixed(2)}
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -184,7 +198,8 @@ const CreditsPurchaseModal: React.FC<CreditsPurchaseModalProps> = ({
                     <h4 className="font-medium text-[var(--text)] mb-1">How Credits Work</h4>
                     <ul className="text-sm text-[var(--text)]/60 space-y-1">
                       <li>• Purchased credits never expire</li>
-                      <li>• Bundled credits are used first each month</li>
+                      <li>• Daily credits (free tier) are used first</li>
+                      <li>• Then bundled, then signup bonus, then purchased</li>
                       <li>• 1 credit = $0.01 of AI usage</li>
                     </ul>
                   </div>
@@ -203,7 +218,7 @@ const CreditsPurchaseModal: React.FC<CreditsPurchaseModalProps> = ({
                     Processing...
                   </span>
                 ) : (
-                  `Purchase ${selectedPkg?.credits.toLocaleString()} Credits for $${selectedPkg?.price}`
+                  `Purchase ${selectedPkg?.credits.toLocaleString()} Credits for $${selectedPkg?.price.toFixed(2)}`
                 )}
               </button>
 

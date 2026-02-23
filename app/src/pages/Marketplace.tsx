@@ -8,6 +8,7 @@ import {
   Package,
   Wrench,
   Plug,
+  PaintBrush,
   CaretDown,
   Folder,
   Storefront,
@@ -26,14 +27,14 @@ import {
   SkeletonCard,
   type MarketplaceItem,
 } from '../components/marketplace';
-import { marketplaceApi, authApi } from '../lib/api';
+import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { isCanceledError } from '../lib/utils';
 import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateMarketplaceStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
-type ItemType = 'agent' | 'base' | 'tool' | 'integration';
+type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -92,11 +93,6 @@ export default function Marketplace() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [filtering, setFiltering] = useState(false);
 
-  // State - User (for dropdown)
-  const [userName, setUserName] = useState<string>('');
-  const [userCredits, setUserCredits] = useState<number>(0);
-  const [userTier, setUserTier] = useState<string>('free');
-
   // Intersection observer for infinite scroll
   const { ref: loadMoreRef, inView } = useInView({
     threshold: 0,
@@ -123,23 +119,6 @@ export default function Marketplace() {
     return () => document.removeEventListener('keydown', handleSlashKey);
   }, []);
 
-  // Fetch user data for dropdown (only when authenticated)
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const fetchUserData = async () => {
-      try {
-        const user = await authApi.getCurrentUser();
-        setUserName(user.name || user.username || 'there');
-        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
-        setUserTier(user.subscription_tier || 'free');
-      } catch (e) {
-        console.error('Failed to fetch user data:', e);
-      }
-    };
-    fetchUserData();
-  }, [isAuthenticated]);
-
   const logout = () => {
     localStorage.removeItem('token');
     navigate('/login');
@@ -163,11 +142,6 @@ export default function Marketplace() {
         icon: <Books className="w-5 h-5" weight="fill" />,
         title: 'Library',
         onClick: () => navigate('/library'),
-      },
-      {
-        icon: <Package className="w-5 h-5" weight="fill" />,
-        title: 'Components',
-        onClick: () => toast('Components library coming soon!'),
       },
     ],
     right: [
@@ -195,6 +169,7 @@ export default function Marketplace() {
     { id: 'base', label: 'Bases', icon: <Package size={16} /> },
     { id: 'tool', label: 'Tools', icon: <Wrench size={16} /> },
     { id: 'integration', label: 'Integrations', icon: <Plug size={16} /> },
+    { id: 'theme', label: 'Themes', icon: <PaintBrush size={16} /> },
   ];
 
   const sortOptions: { id: SortOption; label: string }[] = [
@@ -278,6 +253,21 @@ export default function Marketplace() {
             data = filterBasesClientSide(basesCache, { category, search, sort, pricing });
           }
           setHasMore(false); // Bases loaded all at once
+        } else if (itemType === 'theme') {
+          // Server-side filtering for themes
+          const result = await marketplaceApi.getMarketplaceThemes({
+            category: category !== 'all' ? category : undefined,
+            pricing: pricing !== 'all' ? pricing : undefined,
+            search: search || undefined,
+            sort,
+            page: pageNum,
+            limit: ITEMS_PER_PAGE,
+          });
+          data = (result.items || []).map((theme: Record<string, unknown>) => ({
+            ...theme,
+            item_type: 'theme' as ItemType,
+          }));
+          setHasMore(data.length === ITEMS_PER_PAGE);
         } else {
           // Tools and integrations - coming soon
           data = [];
@@ -474,9 +464,11 @@ export default function Marketplace() {
 
     try {
       const data =
-        item.item_type === 'base'
-          ? await marketplaceApi.purchaseBase(item.id)
-          : await marketplaceApi.purchaseAgent(item.id);
+        item.item_type === 'theme'
+          ? await marketplaceApi.addThemeToLibrary(item.id)
+          : item.item_type === 'base'
+            ? await marketplaceApi.purchaseBase(item.id)
+            : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
@@ -496,9 +488,15 @@ export default function Marketplace() {
     setPage(1);
   };
 
-  // Separate featured and regular items
-  const featuredItems = items.filter((item) => item.is_featured);
-  const regularItems = items.filter((item) => !item.is_featured);
+  // Featured = top 3 by rating (with downloads as tiebreaker), rest go to regular
+  const sortedByRating = [...items].sort((a, b) => {
+    const ratingDiff = (b.rating || 0) - (a.rating || 0);
+    if (ratingDiff !== 0) return ratingDiff;
+    return (b.downloads || b.usage_count || 0) - (a.downloads || a.usage_count || 0);
+  });
+  const featuredItems = sortedByRating.slice(0, 3);
+  const featuredIds = new Set(featuredItems.map((item) => item.id));
+  const regularItems = items.filter((item) => !featuredIds.has(item.id));
 
   // Check if any filters are active
   const hasActiveFilters = pricingFilter !== 'all' || searchQuery !== '';
@@ -538,9 +536,7 @@ export default function Marketplace() {
 
               <div className="flex items-center gap-3">
                 {/* User Dropdown - Only show when authenticated */}
-                {isAuthenticated && (
-                  <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
-                )}
+                {isAuthenticated && <UserDropdown />}
 
                 {/* Mobile hamburger */}
                 <button
@@ -579,11 +575,11 @@ export default function Marketplace() {
                 <input
                   ref={searchInputRef}
                   type="text"
-                  placeholder="Search extensions... (press / to focus)"
+                  placeholder="Search extensions..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className={`
-                    flex-1 bg-transparent outline-none focus-visible:outline-none text-sm
+                    flex-1 bg-transparent outline-none !outline-none focus:outline-none focus-visible:outline-none focus:ring-0 text-sm
                     ${theme === 'light' ? 'text-black placeholder-black/40' : 'text-white placeholder-white/40'}
                   `}
                 />
@@ -828,11 +824,25 @@ export default function Marketplace() {
               {/* Featured Section */}
               {featuredItems.length > 0 && (
                 <section className="mb-12">
-                  <h2
-                    className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                  >
-                    Featured
-                  </h2>
+                  <div className="flex items-center justify-between mb-6">
+                    <h2
+                      className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                    >
+                      Featured
+                    </h2>
+                    <button
+                      onClick={() =>
+                        navigate(`/marketplace/browse/${selectedItemType}?sort=rating`)
+                      }
+                      className={`
+                        flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-full transition-colors
+                        ${theme === 'light' ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/10 hover:bg-white/15 text-white/80 hover:text-white'}
+                      `}
+                    >
+                      See All
+                      <span className="text-lg">→</span>
+                    </button>
+                  </div>
                   <div className="space-y-4">
                     {featuredItems.slice(0, 3).map((item) => (
                       <FeaturedCard
@@ -848,16 +858,28 @@ export default function Marketplace() {
 
               {/* Browse by Category Section */}
               <section className="mb-12">
-                <h2
-                  className={`font-heading text-xl font-bold mb-6 ${theme === 'light' ? 'text-black' : 'text-white'}`}
-                >
-                  Browse by Category
-                </h2>
+                <div className="flex items-center justify-between mb-6">
+                  <h2
+                    className={`font-heading text-xl font-bold ${theme === 'light' ? 'text-black' : 'text-white'}`}
+                  >
+                    Browse by Category
+                  </h2>
+                  <button
+                    onClick={() => navigate('/marketplace/browse/agent')}
+                    className={`
+                      flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-full transition-colors
+                      ${theme === 'light' ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/10 hover:bg-white/15 text-white/80 hover:text-white'}
+                    `}
+                  >
+                    See All
+                    <span className="text-lg">→</span>
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
                   {categories.map((cat) => (
                     <button
                       key={cat.id}
-                      onClick={() => navigate(`/marketplace/category/${cat.id}`)}
+                      onClick={() => navigate(`/marketplace/browse/agent?category=${cat.id}`)}
                       className={`
                         p-4 rounded-xl border text-left transition-all group
                         ${

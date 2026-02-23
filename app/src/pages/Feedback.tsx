@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { feedbackApi, authApi } from '../lib/api';
+import { feedbackApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { MobileMenu, UserDropdown } from '../components/ui';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
@@ -15,7 +15,6 @@ import {
   Folder,
   Storefront,
   Books,
-  Package,
   Sun,
   Moon,
   Gear,
@@ -29,6 +28,8 @@ interface FeedbackPost {
   id: string;
   user_id: string;
   user_name: string;
+  username: string | null;
+  avatar_url: string | null;
   type: string;
   title: string;
   description: string;
@@ -50,30 +51,10 @@ export default function Feedback() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedFeedback, setSelectedFeedback] = useState<FeedbackPost | null>(null);
 
-  // User state for dropdown
-  const [userName, setUserName] = useState<string>('');
-  const [userCredits, setUserCredits] = useState<number>(0);
-  const [userTier, setUserTier] = useState<string>('free');
-
   useEffect(() => {
     loadFeedback();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, sortBy]);
-
-  // Fetch user data for dropdown
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const user = await authApi.getCurrentUser();
-        setUserName(user.name || user.username || 'there');
-        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
-        setUserTier(user.subscription_tier || 'free');
-      } catch (e) {
-        console.error('Failed to fetch user data:', e);
-      }
-    };
-    fetchUserData();
-  }, []);
 
   const loadFeedback = async () => {
     try {
@@ -150,11 +131,6 @@ export default function Feedback() {
         title: 'Feedback',
         onClick: () => {},
         active: true,
-      },
-      {
-        icon: <Package className="w-5 h-5" weight="fill" />,
-        title: 'Components',
-        onClick: () => toast('Components library coming soon!'),
       },
     ],
     right: [
@@ -245,7 +221,7 @@ export default function Feedback() {
           </button>
 
           {/* User Dropdown */}
-          <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
+          <UserDropdown />
         </div>
       </div>
 
@@ -289,11 +265,19 @@ export default function Feedback() {
           {/* Feedback Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {feedback.map((item) => (
-              <button
+              <div
                 key={item.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedFeedback(item)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedFeedback(item);
+                  }
+                }}
                 className={`
-                    group bg-[var(--surface)] rounded-2xl p-5 border-2 transition-all duration-300
+                    group bg-[var(--surface)] rounded-2xl p-5 border-2 transition-all duration-300 cursor-pointer
                     hover:transform hover:-translate-y-1 text-left
                     ${
                       item.type === 'bug'
@@ -302,35 +286,37 @@ export default function Feedback() {
                     }
                   `}
               >
-                {/* Type Badge */}
-                <div className="flex items-center gap-2 mb-3">
-                  <span
-                    className={`
-                        inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
-                        ${
-                          item.type === 'bug'
-                            ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                            : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
-                        }
-                      `}
-                  >
-                    {item.type === 'bug' ? (
-                      <>
-                        <Bug size={12} weight="fill" /> Bug
-                      </>
-                    ) : (
-                      <>
-                        <Lightbulb size={12} weight="fill" /> Suggestion
-                      </>
-                    )}
-                  </span>
-
-                  {/* Status Badge */}
-                  {item.status !== 'open' && (
-                    <span className="px-2 py-0.5 bg-white/10 text-[var(--text)]/60 text-xs rounded-md">
-                      {item.status}
+                {/* Type Badge & User */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`
+                          inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
+                          ${
+                            item.type === 'bug'
+                              ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                              : 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
+                          }
+                        `}
+                    >
+                      {item.type === 'bug' ? (
+                        <>
+                          <Bug size={12} weight="fill" /> Bug
+                        </>
+                      ) : (
+                        <>
+                          <Lightbulb size={12} weight="fill" /> Suggestion
+                        </>
+                      )}
                     </span>
-                  )}
+
+                    {/* Status Badge */}
+                    {item.status !== 'open' && (
+                      <span className="px-2 py-0.5 bg-white/10 text-[var(--text)]/60 text-xs rounded-md">
+                        {item.status}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Title */}
@@ -345,35 +331,55 @@ export default function Feedback() {
 
                 {/* Footer */}
                 <div className="flex items-center justify-between pt-3 border-t border-white/10">
-                  {/* Upvote Button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleUpvote(item.id);
-                    }}
-                    className={`
-                        flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all
-                        ${
-                          item.has_upvoted
-                            ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
-                            : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
-                        }
-                      `}
-                  >
-                    <Heart size={14} weight={item.has_upvoted ? 'fill' : 'regular'} />
-                    {item.upvote_count}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {/* Upvote Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleUpvote(item.id);
+                      }}
+                      className={`
+                          flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all
+                          ${
+                            item.has_upvoted
+                              ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
+                              : 'bg-white/5 text-[var(--text)]/60 hover:bg-white/10 hover:text-[var(--text)]'
+                          }
+                        `}
+                    >
+                      <Heart size={14} weight={item.has_upvoted ? 'fill' : 'regular'} />
+                      {item.upvote_count}
+                    </button>
 
-                  {/* Comments Count */}
-                  <div className="flex items-center gap-3 text-xs text-[var(--text)]/40">
-                    <span className="flex items-center gap-1">
+                    {/* Comments Count */}
+                    <span className="flex items-center gap-1 text-xs text-[var(--text)]/40">
                       <ChatCircleDots size={14} />
                       {item.comment_count}
                     </span>
-                    <span>{formatDate(item.created_at)}</span>
+                  </div>
+
+                  {/* User Info */}
+                  <div className="flex items-center gap-2">
+                    {item.avatar_url ? (
+                      <img
+                        src={item.avatar_url}
+                        alt={item.user_name}
+                        className="w-5 h-5 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-5 h-5 rounded-full bg-[var(--primary)]/20 flex items-center justify-center text-[var(--primary)] text-[10px] font-bold">
+                        {item.user_name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <span className="text-xs text-[var(--text)]/50 truncate max-w-[100px]">
+                      {item.username ? `@${item.username}` : item.user_name}
+                    </span>
+                    <span className="text-xs text-[var(--text)]/30">
+                      {formatDate(item.created_at)}
+                    </span>
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
 

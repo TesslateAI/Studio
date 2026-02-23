@@ -39,7 +39,12 @@ app/
 │   │   ├── MarketplaceDetail.tsx   # Agent/base details and purchase
 │   │   ├── MarketplaceAuthor.tsx   # Creator profile page
 │   │   ├── Library.tsx             # User's purchased agents and bases
-│   │   ├── AccountSettings.tsx     # Profile, API keys, preferences
+│   │   ├── settings/               # Modular settings pages
+│   │   │   ├── ProfileSettings.tsx       # Profile, avatar, bio
+│   │   │   ├── PreferencesSettings.tsx   # Theme, diagram model
+│   │   │   ├── SecuritySettings.tsx      # Password, 2FA, sessions
+│   │   │   ├── DeploymentSettings.tsx    # Provider credentials
+│   │   │   └── BillingSettings.tsx       # Subscription, invoices
 │   │   ├── Login.tsx               # JWT and OAuth login forms
 │   │   ├── Register.tsx            # User registration
 │   │   ├── Landing.tsx             # Marketing landing page (old)
@@ -75,7 +80,6 @@ app/
 │   │   │   └── MarketplacePanel.tsx    # In-project marketplace browser
 │   │   │
 │   │   ├── billing/                # Subscription and payment components
-│   │   │   ├── BillingDashboard.tsx     # Subscription overview
 │   │   │   ├── SubscriptionPlans.tsx    # Plan selection and upgrade
 │   │   │   ├── UsageDashboard.tsx       # Resource usage charts
 │   │   │   ├── TransactionHistory.tsx   # Payment history

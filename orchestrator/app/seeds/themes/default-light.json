@@ -5,6 +5,9 @@
   "author": "Tesslate",
   "version": "1.0.0",
   "description": "The default Tesslate light theme with orange accents",
+  "category": "general",
+  "tags": ["light", "default", "clean"],
+  "icon": "sun",
 
   "colors": {
     "primary": "#F89521",

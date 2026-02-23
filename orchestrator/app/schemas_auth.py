@@ -32,9 +32,11 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
     litellm_api_key: str | None = None
     litellm_user_id: str | None = None
     diagram_model: str | None = None
+    disabled_models: list[str] | None = None
     referral_code: str | None = None
     referred_by: str | None = None
     last_active_at: str | None = None
+    avatar_url: str | None = None
 
     class Config:
         from_attributes = True

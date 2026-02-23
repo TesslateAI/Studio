@@ -2,10 +2,12 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import User
+from ..username_validation import normalize_username, validate_username
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -29,12 +31,24 @@ AVATAR_URL_MAX_LENGTH = 512_000  # 500KB - generous limit for base64 data URIs
 
 
 class UserProfileUpdate(BaseModel):
+    username: str | None = None
     name: str | None = None
     avatar_url: str | None = None
     bio: str | None = None
     twitter_handle: str | None = None
     github_username: str | None = None
     website_url: str | None = None
+
+    @field_validator("username")
+    @classmethod
+    def validate_username_format(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        normalized = normalize_username(v)
+        valid, error = validate_username(normalized)
+        if not valid:
+            raise ValueError(error)
+        return normalized
 
     @field_validator("avatar_url")
     @classmethod
@@ -117,6 +131,7 @@ async def get_user_profile(current_user: User = Depends(current_active_user)):
     return {
         "id": str(current_user.id),
         "email": current_user.email,
+        "username": current_user.username,
         "name": current_user.name,
         "avatar_url": current_user.avatar_url,
         "bio": current_user.bio,
@@ -134,6 +149,25 @@ async def update_user_profile(
 ):
     """Update current user's profile information."""
     try:
+        # Handle username change with uniqueness check
+        if profile.username is not None:
+            normalized = normalize_username(profile.username)
+            valid, error = validate_username(normalized)
+            if not valid:
+                raise HTTPException(status_code=400, detail=error)
+
+            # Check uniqueness (exclude current user to avoid self-conflict)
+            existing = await db.execute(
+                select(User.id).where(
+                    func.lower(User.username) == normalized,
+                    User.id != current_user.id,
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise HTTPException(status_code=409, detail="Username is already taken")
+
+            current_user.username = normalized
+
         # Update fields if provided
         if profile.name is not None:
             current_user.name = profile.name
@@ -157,6 +191,7 @@ async def update_user_profile(
             "message": "Profile updated successfully",
             "id": str(current_user.id),
             "email": current_user.email,
+            "username": current_user.username,
             "name": current_user.name,
             "avatar_url": current_user.avatar_url,
             "bio": current_user.bio,
@@ -164,6 +199,8 @@ async def update_user_profile(
             "github_username": current_user.github_username,
             "website_url": current_user.website_url,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to update user profile: {e}", exc_info=True)

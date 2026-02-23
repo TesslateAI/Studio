@@ -159,10 +159,11 @@ export function ModelSelector({
     setIsOpen(false);
   };
 
-  // Build display list: ensure current model is always visible
+  // Build display list: filter disabled, ensure current model is always visible
   const allModels = useMemo(() => {
     if (!hasFetched) return [];
-    const list = [...models];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list = models.filter((m: any) => !m.disabled);
     if (activeModel && !list.some((m) => m.id === activeModel)) {
       list.unshift({ id: activeModel, pricing: null, provider: 'internal' });
     }

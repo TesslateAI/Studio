@@ -5,6 +5,9 @@
   "author": "Tesslate",
   "version": "1.0.0",
   "description": "Warm amber theme like a golden hour",
+  "category": "vibrant",
+  "tags": ["dark", "orange", "warm", "sunset"],
+  "icon": "sun-horizon",
 
   "colors": {
     "primary": "#f97316",

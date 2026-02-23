@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..database import get_db
 from ..models import User, UserAPIKey
 from ..services.deployment_encryption import (
@@ -20,6 +21,17 @@ from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+settings = get_settings()
+
+
+def _require_byok(user: User) -> None:
+    """Raise 403 if user's tier does not support BYOK."""
+    tier = user.subscription_tier or "free"
+    if tier not in settings.byok_tiers_list:
+        raise HTTPException(
+            status_code=403,
+            detail="BYOK (Bring Your Own Key) requires a paid plan. Please upgrade to Basic, Pro, or Ultra.",
+        )
 
 
 def encode_key(key: str) -> str:
@@ -105,6 +117,8 @@ async def add_api_key(
     """
     Add a new API key for a provider.
     """
+    _require_byok(current_user)
+
     # Default key_name to provider display name if not provided
     if not key_name:
         from ..agent.models import BUILTIN_PROVIDERS
@@ -378,6 +392,8 @@ async def create_custom_provider(
     Custom providers allow users to connect their own OpenAI-compatible or
     Anthropic-compatible API endpoints (e.g., local Ollama, vLLM, etc.)
     """
+    _require_byok(current_user)
+
     import re
 
     from ..agent.models import BUILTIN_PROVIDERS
@@ -535,3 +551,38 @@ async def delete_custom_provider(
     await db.commit()
 
     return {"message": "Custom provider deleted successfully", "success": True}
+
+
+# =============================================================================
+# Model Preferences Endpoints
+# =============================================================================
+
+
+@router.get("/model-preferences")
+async def get_model_preferences(user: User = Depends(current_active_user)):
+    """
+    Get the user's disabled model IDs.
+    """
+    return {"disabled_models": user.disabled_models or []}
+
+
+@router.put("/model-preferences")
+async def update_model_preferences(
+    model_id: str = Body(..., embed=True),
+    enabled: bool = Body(..., embed=True),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Toggle a single model on/off for the current user.
+    Disabled models are hidden from the chat model selector.
+    """
+    disabled = list(user.disabled_models or [])
+    if enabled and model_id in disabled:
+        disabled.remove(model_id)
+    elif not enabled and model_id not in disabled:
+        disabled.append(model_id)
+    user.disabled_models = disabled
+    db.add(user)
+    await db.commit()
+    return {"disabled_models": disabled}

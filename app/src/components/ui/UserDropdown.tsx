@@ -1,16 +1,60 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, CaretDown, Coins, CreditCard, Gear, SignOut } from '@phosphor-icons/react';
+import { billingApi } from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
 
-interface UserDropdownProps {
-  userName: string;
-  userCredits: number;
-  userTier: string;
-}
-
-export function UserDropdown({ userName, userCredits, userTier }: UserDropdownProps) {
+export function UserDropdown() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [showDropdown, setShowDropdown] = useState(false);
+  const [credits, setCredits] = useState<number>(0);
+  const [imgError, setImgError] = useState(false);
+
+  const userName = user?.name || 'User';
+
+  // Determine avatar source: user-set avatar → DiceBear identicon → fallback icon
+  const avatarSrc = user?.avatar_url
+    ? user.avatar_url
+    : user?.id
+      ? `https://api.dicebear.com/9.x/identicon/svg?seed=${user.id}`
+      : null;
+
+  // Reset img error state when avatar source changes
+  useEffect(() => {
+    setImgError(false);
+  }, [avatarSrc]);
+
+  // Fetch credits on mount
+  useEffect(() => {
+    billingApi
+      .getCreditsBalance()
+      .then((res) => setCredits(res.total_credits ?? 0))
+      .catch(() => {});
+  }, []);
+
+  // Refresh credits when dropdown opens
+  useEffect(() => {
+    if (showDropdown) {
+      billingApi
+        .getCreditsBalance()
+        .then((res) => setCredits(res.total_credits ?? 0))
+        .catch(() => {});
+    }
+  }, [showDropdown]);
+
+  // Listen for real-time credit updates from SSE events
+  const handleCreditsUpdated = useCallback((e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (typeof detail?.newBalance === 'number') {
+      setCredits(detail.newBalance);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('credits-updated', handleCreditsUpdated);
+    return () => window.removeEventListener('credits-updated', handleCreditsUpdated);
+  }, [handleCreditsUpdated]);
 
   return (
     <div className="relative">
@@ -18,13 +62,18 @@ export function UserDropdown({ userName, userCredits, userTier }: UserDropdownPr
         onClick={() => setShowDropdown(!showDropdown)}
         className="hidden md:flex items-center gap-2 px-3 py-1.5 hover:bg-white/5 rounded-lg transition-colors"
       >
-        <User size={18} className="text-[var(--text)]" weight="fill" />
-        <span className="text-sm font-medium text-[var(--text)]">{userName}</span>
-        {userTier === 'pro' && (
-          <span className="px-2 py-0.5 bg-gradient-to-r from-[var(--primary)] to-[var(--primary-hover)] text-white text-xs font-bold rounded-md">
-            PRO
-          </span>
+        {avatarSrc && !imgError ? (
+          <img
+            src={avatarSrc}
+            alt=""
+            className="w-6 h-6 rounded-full object-cover"
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <User size={18} className="text-[var(--text)]" weight="fill" />
         )}
+        <span className="text-sm font-medium text-[var(--text)]">{userName}</span>
         <CaretDown
           size={14}
           className={`text-[var(--text)]/60 transition-transform ${showDropdown ? 'rotate-180' : ''}`}
@@ -44,7 +93,7 @@ export function UserDropdown({ userName, userCredits, userTier }: UserDropdownPr
               <button
                 onClick={() => {
                   setShowDropdown(false);
-                  navigate('/billing');
+                  navigate('/settings/billing');
                 }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left"
               >
@@ -52,7 +101,7 @@ export function UserDropdown({ userName, userCredits, userTier }: UserDropdownPr
                 <div className="flex-1">
                   <div className="text-sm font-medium text-[var(--text)]">Credits</div>
                   <div className="text-xs text-[var(--text)]/60">
-                    {userCredits.toLocaleString()} available
+                    {credits.toLocaleString()} available
                   </div>
                 </div>
               </button>

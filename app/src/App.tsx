@@ -1,9 +1,9 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ThemeProvider, useTheme } from './theme';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthProvider } from './contexts/AuthContext';
 import { ChatPositionProvider } from './contexts/ChatPositionContext';
 import { CommandProvider } from './contexts/CommandContext';
 import { DashboardLayout } from './components/DashboardLayout';
@@ -20,7 +20,6 @@ import { ProjectGraphCanvas } from './pages/ProjectGraphCanvas';
 import Marketplace from './pages/Marketplace';
 import MarketplaceDetail from './pages/MarketplaceDetail';
 import MarketplaceAuthor from './pages/MarketplaceAuthor';
-import MarketplaceCategory from './pages/MarketplaceCategory';
 import MarketplaceBrowse from './pages/MarketplaceBrowse';
 import Library from './pages/Library';
 import Feedback from './pages/Feedback';
@@ -35,13 +34,18 @@ import ProfileSettings from './pages/settings/ProfileSettings';
 import PreferencesSettings from './pages/settings/PreferencesSettings';
 import SecuritySettings from './pages/settings/SecuritySettings';
 import DeploymentSettings from './pages/settings/DeploymentSettings';
-import ApiKeysSettings from './pages/settings/ApiKeysSettings';
 import BillingSettings from './pages/settings/BillingSettings';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import MarketplaceSuccess from './pages/MarketplaceSuccess';
+import UserProfilePage from './pages/UserProfile';
+
+function CategoryRedirect() {
+  const { category } = useParams();
+  return <Navigate to={`/marketplace/browse/agent?category=${category}`} replace />;
+}
 
 function AppContent() {
   // Track referrals (must be inside BrowserRouter)
@@ -102,6 +106,20 @@ function AppContent() {
     },
     { enableOnFormTags: false }
   );
+
+  // Ctrl+/ (or Cmd+/ on Mac) to open keyboard shortcuts panel
+  // Using native keydown because react-hotkeys-hook doesn't reliably parse ctrl+/
+  const handleShortcutsKey = useCallback((e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+      e.preventDefault();
+      setShowShortcuts((prev) => !prev);
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleShortcutsKey);
+    return () => document.removeEventListener('keydown', handleShortcutsKey);
+  }, [handleShortcutsKey]);
 
   return (
     <>
@@ -223,19 +241,50 @@ function AppContent() {
       <Routes>
         <Route path="/" element={<NewLandingPage />} />
         <Route path="/landing-old" element={<Landing />} />
-        <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
-        <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
+        <Route
+          path="/login"
+          element={
+            <PublicOnlyRoute>
+              <Login />
+            </PublicOnlyRoute>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <PublicOnlyRoute>
+              <Register />
+            </PublicOnlyRoute>
+          }
+        />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/logout" element={<Logout />} />
-        <Route path="/referral" element={<PrivateRoute><Referrals /></PrivateRoute>} />
-        <Route path="/referrals" element={<PrivateRoute><Referrals /></PrivateRoute>} />
+        <Route
+          path="/referral"
+          element={
+            <PrivateRoute>
+              <Referrals />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/referrals"
+          element={
+            <PrivateRoute>
+              <Referrals />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Public @username profile resolver — redirects to /marketplace/creator/{uuid} */}
+        <Route path="/@:username" element={<UserProfilePage />} />
 
         {/* Marketplace Routes - Adaptive layout based on auth state */}
         {/* Non-blocking: defaults to public view, upgrades to authenticated view if logged in */}
         <Route element={<MarketplaceLayout />}>
           <Route path="/marketplace" element={<Marketplace />} />
-          <Route path="/marketplace/category/:category" element={<MarketplaceCategory />} />
+          <Route path="/marketplace/category/:category" element={<CategoryRedirect />} />
           <Route path="/marketplace/browse/:itemType" element={<MarketplaceBrowse />} />
           <Route path="/marketplace/:slug" element={<MarketplaceDetail />} />
           <Route path="/marketplace/creator/:userId" element={<MarketplaceAuthor />} />
@@ -295,7 +344,7 @@ function AppContent() {
           <Route path="preferences" element={<PreferencesSettings />} />
           <Route path="security" element={<SecuritySettings />} />
           <Route path="deployment" element={<DeploymentSettings />} />
-          <Route path="api-keys" element={<ApiKeysSettings />} />
+          <Route path="api-keys" element={<Navigate to="/library?tab=models" replace />} />
           <Route path="billing" element={<BillingSettings />} />
         </Route>
 

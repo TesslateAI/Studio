@@ -45,7 +45,7 @@ import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector } from '../components/ContainerSelector';
-import { projectsApi, marketplaceApi, authApi } from '../lib/api';
+import { projectsApi, marketplaceApi } from '../lib/api';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
 import toast from 'react-hot-toast';
@@ -89,12 +89,6 @@ export default function Project() {
 
   // Chat panel width for Discord button positioning (stored in localStorage by react-resizable-panels)
   const [chatPanelWidth, _setChatPanelWidth] = useState(400);
-
-  // User state for dropdown
-  const [userName, setUserName] = useState<string>('');
-  const [userCredits, setUserCredits] = useState<number>(0);
-  const [userTier, setUserTier] = useState<string>('free');
-  // Note: We still have projectId for internal use, but it comes from the loaded project object
 
   const refreshTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
@@ -253,21 +247,6 @@ export default function Project() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
-
-  // Fetch user data for dropdown
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const user = await authApi.getCurrentUser();
-        setUserName(user.name || user.username || 'there');
-        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
-        setUserTier(user.subscription_tier || 'free');
-      } catch (e) {
-        console.error('Failed to fetch user data:', e);
-      }
-    };
-    fetchUserData();
-  }, []);
 
   // Load containers on mount and when containerId changes
   useEffect(() => {
@@ -1079,7 +1058,7 @@ export default function Project() {
             </div>
 
             {/* User Dropdown */}
-            <UserDropdown userName={userName} userCredits={userCredits} userTier={userTier} />
+            <UserDropdown />
 
             {/* Mobile hamburger menu */}
             <button

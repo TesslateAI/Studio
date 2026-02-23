@@ -142,6 +142,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name?: string;
+  username?: string;
   avatar_url?: string;
   subscription_tier?: string;
   bundled_credits?: number;

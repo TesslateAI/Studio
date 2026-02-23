@@ -4,7 +4,6 @@
  * Export all billing-related components for easy importing
  */
 
-export { default as SubscriptionPlans } from './SubscriptionPlans';
 export { default as SubscriptionStatus } from './SubscriptionStatus';
 export { default as CreditsPurchaseModal } from './CreditsPurchaseModal';
 export { default as UpgradeModal } from './UpgradeModal';

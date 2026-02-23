@@ -1,8 +1,9 @@
 """
 Seed UI themes from bundled JSON files.
 
-Loads 7 theme definitions (default-dark, default-light, midnight, ocean,
-forest, rose, sunset) and upserts them into the themes table.
+Reads all *.json theme definitions from the themes/ directory and upserts
+them into the themes table. Each JSON file is self-contained with all
+metadata (category, tags, icon, etc.).
 
 Can be run standalone or called from the startup seeder.
 """
@@ -16,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+# Sort order for built-in Tesslate themes (defaults first, then originals).
+# VS Code community themes get auto-assigned sort_order from the JSON or default 50.
 SORT_ORDERS = {
     "default-dark": 0,
     "default-light": 1,
@@ -24,6 +27,17 @@ SORT_ORDERS = {
     "forest": 4,
     "rose": 5,
     "sunset": 6,
+}
+
+FEATURED_THEMES = {
+    "midnight",
+    "ocean",
+    "dracula",
+    "github-dark",
+    "catppuccin-mocha",
+    "tokyo-night",
+    "nord",
+    "one-dark-pro",
 }
 
 
@@ -70,7 +84,14 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                 logger.warning("Skipping %s: missing 'id' field", theme_file.name)
                 continue
 
-            sort_order = SORT_ORDERS.get(theme_id, 99)
+            # Sort order: explicit override > JSON field > default 50
+            sort_order = SORT_ORDERS.get(theme_id, theme_data.get("sort_order", 50))
+
+            # Metadata: read from JSON, fall back to sensible defaults
+            category = theme_data.get("category", "general")
+            tags = theme_data.get("tags", [])
+            icon = theme_data.get("icon", "palette")
+            is_featured = theme_id in FEATURED_THEMES or theme_data.get("is_featured", False)
 
             theme_json = {
                 "colors": theme_data.get("colors", {}),
@@ -81,10 +102,19 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
 
             await db.execute(
                 text("""
-                    INSERT INTO themes (id, name, mode, author, version, description, theme_json, sort_order, is_default, is_active)
-                    VALUES (:id, :name, :mode, :author, :version, :description, :theme_json, :sort_order, :is_default, true)
+                    INSERT INTO themes (
+                        id, name, slug, mode, author, version, description, theme_json,
+                        sort_order, is_default, is_active, icon, pricing_type, price,
+                        downloads, rating, is_featured, is_published, category, tags, source_type
+                    )
+                    VALUES (
+                        :id, :name, :slug, :mode, :author, :version, :description, :theme_json,
+                        :sort_order, :is_default, true, :icon, 'free', 0,
+                        0, 5.0, :is_featured, true, :category, :tags, 'open'
+                    )
                     ON CONFLICT (id) DO UPDATE SET
                         name = EXCLUDED.name,
+                        slug = EXCLUDED.slug,
                         mode = EXCLUDED.mode,
                         author = EXCLUDED.author,
                         version = EXCLUDED.version,
@@ -92,18 +122,28 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                         theme_json = EXCLUDED.theme_json,
                         sort_order = EXCLUDED.sort_order,
                         is_default = EXCLUDED.is_default,
+                        icon = EXCLUDED.icon,
+                        category = EXCLUDED.category,
+                        tags = EXCLUDED.tags,
+                        source_type = EXCLUDED.source_type,
+                        is_published = true,
                         updated_at = NOW()
                 """),
                 {
                     "id": theme_id,
                     "name": theme_data.get("name", theme_id),
+                    "slug": theme_id,
                     "mode": theme_data.get("mode", "dark"),
-                    "author": theme_data.get("author", "Tesslate"),
+                    "author": theme_data.get("author", "Community"),
                     "version": theme_data.get("version", "1.0.0"),
                     "description": theme_data.get("description"),
                     "theme_json": json.dumps(theme_json),
                     "sort_order": sort_order,
                     "is_default": theme_id in ("default-dark", "default-light"),
+                    "icon": icon,
+                    "is_featured": is_featured,
+                    "category": category,
+                    "tags": json.dumps(tags),
                 },
             )
             seeded += 1

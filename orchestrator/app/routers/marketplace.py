@@ -23,18 +23,27 @@ from ..models import (
     MarketplaceBase,
     Project,
     ProjectAgent,
+    Theme,
     User,
+    UserLibraryTheme,
     UserPurchasedAgent,
     UserPurchasedBase,
 )
 from ..schemas import BaseSubmitRequest, BaseUpdateRequest
 from ..services.cache_service import cache
 from ..services.recommendations import get_related_agents, update_co_install_counts
+from ..username_validation import resolve_display_name
 from ..users import current_active_user, current_optional_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+
+def _resolve_display_name(user: User) -> str:
+    """Return the best display name for a user: name > username > email prefix."""
+    return resolve_display_name(user.name, user.username, user.email)
+
 
 # Cache TTL for LiteLLM models (5 minutes - models rarely change)
 _MODELS_CACHE_TTL = 300
@@ -79,39 +88,11 @@ async def _get_cached_model_pricing() -> dict[str, dict[str, float]]:
     """
     Build a model-id → {input, output} pricing map from LiteLLM /model/info.
 
-    Prices are returned in USD per 1M tokens.  The proxy reports per-token
-    costs, so we multiply by 1_000_000 here.  Results are cached alongside
-    the model list.
+    Delegates to the shared model_pricing module.
     """
-    cache_key = "litellm_model_pricing"
+    from ..services.model_pricing import get_cached_model_pricing_map
 
-    cached = await cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    from ..services.litellm_service import litellm_service
-
-    info_list = await litellm_service.get_model_info()
-
-    pricing_map: dict[str, dict[str, float]] = {}
-    for entry in info_list:
-        model_info = entry.get("model_info") or {}
-        model_name = entry.get("model_name") or model_info.get("id")
-        if not model_name:
-            continue
-
-        input_cost = model_info.get("input_cost_per_token")
-        output_cost = model_info.get("output_cost_per_token")
-        if input_cost is not None or output_cost is not None:
-            pricing_map[model_name] = {
-                "input": round((input_cost or 0) * 1_000_000, 4),
-                "output": round((output_cost or 0) * 1_000_000, 4),
-            }
-
-    await cache.set(cache_key, pricing_map, ttl=_MODELS_CACHE_TTL)
-    logger.info(f"Refreshed model pricing cache ({len(pricing_map)} models with pricing)")
-
-    return pricing_map
+    return await get_cached_model_pricing_map()
 
 
 # ============================================================================
@@ -170,12 +151,15 @@ async def get_available_models(
     custom_models = result.scalars().all()
 
     # Convert custom models to response format
+    # Custom models for built-in providers get source="provider" so they group
+    # with that provider's default models. Others remain source="custom".
     custom_models_data = [
         {
             "id": model.model_id,
             "name": model.model_name,
-            "source": "custom",
+            "source": "provider" if model.provider in BUILTIN_PROVIDERS else "custom",
             "provider": model.provider,
+            "provider_name": BUILTIN_PROVIDERS.get(model.provider, {}).get("name", model.provider),
             "pricing": {"input": model.pricing_input or 0.0, "output": model.pricing_output or 0.0},
             "available": True,
             "custom_id": model.id,
@@ -184,32 +168,9 @@ async def get_available_models(
         for model in custom_models
     ]
 
-    # Build provider models from BYOK providers the user has keys for
-    # Each provider's models are prefixed with provider slug for routing
+    # Build provider models from user-added custom models and custom providers
+    # (hardcoded default_models are no longer populated — users add models themselves)
     provider_models: list[dict] = []
-
-    for provider_slug in user_providers_set:
-        builtin_config = BUILTIN_PROVIDERS.get(provider_slug)
-        if not builtin_config:
-            continue  # custom providers handled below
-
-        provider_name = builtin_config["name"]
-        known_models = builtin_config.get("default_models", [])
-
-        for model_id in known_models:
-            full_id = f"{provider_slug}/{model_id}"
-            provider_models.append(
-                {
-                    "id": full_id,
-                    "name": model_id,
-                    "source": "provider",
-                    "provider": provider_slug,
-                    "provider_name": provider_name,
-                    "pricing": None,
-                    "available": True,
-                    "health": None,
-                }
-            )
 
     # Custom user providers with available_models
     custom_providers_query = select(UserProvider).where(
@@ -237,16 +198,20 @@ async def get_available_models(
                 }
             )
 
-    # Add information about available external providers
+    # Build external providers list dynamically from the provider registry
+    from ..agent.models import BUILTIN_PROVIDERS
+
     external_providers = [
         {
-            "provider": "openrouter",
-            "name": "OpenRouter",
-            "description": "Access 200+ models through OpenRouter",
-            "has_key": "openrouter" in user_providers_set,
-            "setup_required": "openrouter" not in user_providers_set,
-            "models_count": "200+",
+            "provider": slug,
+            "name": cfg["name"],
+            "description": cfg["description"],
+            "has_key": slug in user_providers_set,
+            "setup_required": slug not in user_providers_set,
+            "website": cfg.get("website", ""),
         }
+        for slug, cfg in BUILTIN_PROVIDERS.items()
+        if cfg.get("requires_key", False)
     ]
 
     # Fallback to config if LiteLLM call fails
@@ -269,6 +234,11 @@ async def get_available_models(
     # Combine all model sources
     all_models = system_models + provider_models + custom_models_data
 
+    # Add disabled flag based on user preferences
+    disabled_set = set(current_user.disabled_models or [])
+    for model in all_models:
+        model["disabled"] = model["id"] in disabled_set
+
     return {
         "models": all_models,
         "default": system_models[0]["id"] if system_models else None,
@@ -283,20 +253,30 @@ async def get_available_models(
 async def add_custom_model(
     model_id: str = Body(...),
     model_name: str = Body(...),
+    provider: str = Body(default="openrouter"),
     pricing_input: float | None = Body(None),
     pricing_output: float | None = Body(None),
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Add a custom OpenRouter model to the user's account.
+    Add a custom model to the user's account.
+    Provider can be explicitly specified, or inferred from the model_id prefix.
     """
+    from ..agent.models import BUILTIN_PROVIDERS
     from ..models import UserCustomModel
 
-    # Check if model already exists for this user
+    # If provider not explicitly set (still default) but model_id has a known prefix, infer it
+    if provider == "openrouter" and "/" in model_id:
+        prefix = model_id.split("/", 1)[0]
+        if prefix in BUILTIN_PROVIDERS:
+            provider = prefix
+
+    # Check if model already exists for this user + provider combo
     existing_query = select(UserCustomModel).where(
         UserCustomModel.user_id == current_user.id,
         UserCustomModel.model_id == model_id,
+        UserCustomModel.provider == provider,
         UserCustomModel.is_active,
     )
     result = await db.execute(existing_query)
@@ -310,7 +290,7 @@ async def add_custom_model(
         user_id=current_user.id,
         model_id=model_id,
         model_name=model_name,
-        provider="openrouter",
+        provider=provider,
         pricing_input=pricing_input,
         pricing_output=pricing_output,
     )
@@ -324,7 +304,7 @@ async def add_custom_model(
         "model": {
             "id": custom_model.model_id,
             "name": custom_model.model_name,
-            "source": "custom",
+            "source": "provider" if provider in BUILTIN_PROVIDERS else "custom",
             "provider": custom_model.provider,
             "pricing": {
                 "input": custom_model.pricing_input or 0.0,
@@ -373,7 +353,9 @@ async def get_marketplace_agents(
     category: str | None = None,
     pricing_type: str | None = None,
     search: str | None = None,
-    sort: str = Query(default="featured", regex="^(featured|popular|newest|price_asc|price_desc)$"),
+    sort: str = Query(
+        default="featured", regex="^(featured|popular|newest|name|rating|price_asc|price_desc)$"
+    ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
@@ -413,19 +395,27 @@ async def get_marketplace_agents(
             | func.lower(cast(MarketplaceAgent.tags, String)).like(func.lower(search_filter))
         )
 
-    # Apply sorting
+    # Apply sorting — always include id as tiebreaker for stable pagination
     if sort == "featured":
         query = query.order_by(
-            MarketplaceAgent.is_featured.desc(), MarketplaceAgent.downloads.desc()
+            MarketplaceAgent.is_featured.desc(),
+            MarketplaceAgent.downloads.desc(),
+            MarketplaceAgent.id,
         )
     elif sort == "popular":
-        query = query.order_by(MarketplaceAgent.downloads.desc())
+        query = query.order_by(MarketplaceAgent.downloads.desc(), MarketplaceAgent.id)
     elif sort == "newest":
-        query = query.order_by(MarketplaceAgent.created_at.desc())
+        query = query.order_by(MarketplaceAgent.created_at.desc(), MarketplaceAgent.id)
+    elif sort == "name":
+        query = query.order_by(MarketplaceAgent.name.asc(), MarketplaceAgent.id)
+    elif sort == "rating":
+        query = query.order_by(
+            MarketplaceAgent.rating.desc(), MarketplaceAgent.downloads.desc(), MarketplaceAgent.id
+        )
     elif sort == "price_asc":
-        query = query.order_by(MarketplaceAgent.price.asc())
+        query = query.order_by(MarketplaceAgent.price.asc(), MarketplaceAgent.id)
     elif sort == "price_desc":
-        query = query.order_by(MarketplaceAgent.price.desc())
+        query = query.order_by(MarketplaceAgent.price.desc(), MarketplaceAgent.id)
 
     # Pagination
     offset = (page - 1) * limit
@@ -452,13 +442,12 @@ async def get_marketplace_agents(
         creator_type = "official"  # Tesslate
         creator_name = "Tesslate"
 
+        creator_username = None
         if agent.forked_by_user_id:
             creator_type = "community"
-            # Get creator's name
             if agent.forked_by_user:
-                creator_name = agent.forked_by_user.email.split("@")[
-                    0
-                ]  # Use email username as display name
+                creator_name = _resolve_display_name(agent.forked_by_user)
+                creator_username = agent.forked_by_user.username
 
         # Get creator avatar URL
         creator_avatar_url = None
@@ -492,7 +481,8 @@ async def get_marketplace_agents(
             "is_featured": agent.is_featured,
             "is_purchased": agent.id in purchased_agent_ids,
             "creator_type": creator_type,  # "official" or "community"
-            "creator_name": creator_name,  # "Tesslate" or username
+            "creator_name": creator_name,  # "Tesslate" or display name
+            "creator_username": creator_username,
             "created_by_user_id": str(agent.created_by_user_id)
             if agent.created_by_user_id
             else None,
@@ -551,11 +541,13 @@ async def get_agent_details(
     creator_type = "official"
     creator_name = "Tesslate"
     creator_avatar_url = None
+    creator_username = None
     if agent.forked_by_user_id:
         creator_type = "community"
         if agent.forked_by_user:
-            creator_name = agent.forked_by_user.email.split("@")[0]
+            creator_name = _resolve_display_name(agent.forked_by_user)
             creator_avatar_url = agent.forked_by_user.avatar_url
+            creator_username = agent.forked_by_user.username
 
     # Format response
     return {
@@ -591,6 +583,7 @@ async def get_agent_details(
         "forked_by_user_id": str(agent.forked_by_user_id) if agent.forked_by_user_id else None,
         "creator_type": creator_type,
         "creator_name": creator_name,
+        "creator_username": creator_username,
         "creator_avatar_url": creator_avatar_url,
         "reviews": [
             {
@@ -1424,6 +1417,7 @@ async def get_user_agents(
         select(MarketplaceAgent, UserPurchasedAgent)
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
         .where(UserPurchasedAgent.user_id == current_user.id)
+        .options(selectinload(MarketplaceAgent.forked_by_user))
         .order_by(UserPurchasedAgent.purchase_date.desc())
     )
 
@@ -1431,6 +1425,18 @@ async def get_user_agents(
 
     response = []
     for agent, purchase in agents_data:
+        # Resolve creator info
+        creator_type = "official"
+        creator_name = "Tesslate"
+        creator_username = None
+        creator_avatar_url = None
+        if agent.forked_by_user_id:
+            creator_type = "community"
+            if agent.forked_by_user:
+                creator_name = _resolve_display_name(agent.forked_by_user)
+                creator_username = agent.forked_by_user.username
+                creator_avatar_url = agent.forked_by_user.avatar_url
+
         response.append(
             {
                 "id": agent.id,
@@ -1459,6 +1465,16 @@ async def get_user_agents(
                 "is_enabled": purchase.is_active,  # Using is_active as is_enabled
                 "is_published": agent.is_published,  # Whether agent is published to marketplace
                 "usage_count": agent.usage_count or 0,  # Number of messages sent
+                "creator_type": creator_type,
+                "creator_name": creator_name,
+                "creator_username": creator_username,
+                "creator_avatar_url": creator_avatar_url,
+                "created_by_user_id": str(agent.created_by_user_id)
+                if agent.created_by_user_id
+                else None,
+                "forked_by_user_id": str(agent.forked_by_user_id)
+                if agent.forked_by_user_id
+                else None,
             }
         )
 
@@ -2291,7 +2307,7 @@ async def get_agent_reviews(
                 "comment": review.comment,
                 "created_at": review.created_at.isoformat() if review.created_at else None,
                 "user_id": str(user.id),
-                "user_name": user.name or user.email.split("@")[0],
+                "user_name": _resolve_display_name(user),
                 "user_avatar_url": user.avatar_url,
                 "is_own_review": (str(user.id) == str(current_user.id)) if current_user else False,
             }
@@ -2357,7 +2373,9 @@ async def get_marketplace_bases(
     category: str | None = None,
     pricing_type: str | None = None,
     search: str | None = None,
-    sort: str = Query(default="featured", regex="^(featured|popular|newest|price_asc|price_desc)$"),
+    sort: str = Query(
+        default="featured", regex="^(featured|popular|newest|name|rating|price_asc|price_desc)$"
+    ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
@@ -2397,6 +2415,10 @@ async def get_marketplace_bases(
         query = query.order_by(MarketplaceBase.downloads.desc())
     elif sort == "newest":
         query = query.order_by(MarketplaceBase.created_at.desc())
+    elif sort == "name":
+        query = query.order_by(MarketplaceBase.name.asc())
+    elif sort == "rating":
+        query = query.order_by(MarketplaceBase.rating.desc(), MarketplaceBase.downloads.desc())
     elif sort == "price_asc":
         query = query.order_by(MarketplaceBase.price.asc())
     elif sort == "price_desc":
@@ -2737,7 +2759,7 @@ async def get_base_reviews(
                 "comment": review.comment,
                 "created_at": review.created_at.isoformat() if review.created_at else None,
                 "user_id": str(user.id),
-                "user_name": user.name or user.email.split("@")[0],
+                "user_name": _resolve_display_name(user),
                 "user_avatar_url": user.avatar_url,
                 "is_own_review": (str(user.id) == str(current_user.id)) if current_user else False,
             }
@@ -3351,3 +3373,649 @@ async def get_service_definition(
         raise HTTPException(status_code=404, detail="Service not found")
 
     return service_to_dict(service)
+
+
+# ============================================================================
+# Theme Marketplace Endpoints
+# ============================================================================
+
+
+def _theme_to_dict(
+    theme: Theme,
+    is_in_library: bool = False,
+    creator_avatar_url: str | None = None,
+) -> dict:
+    """Convert a Theme model to a marketplace-compatible dict."""
+    colors = {}
+    if theme.theme_json and isinstance(theme.theme_json, dict):
+        raw_colors = theme.theme_json.get("colors", {})
+        colors = {
+            "primary": raw_colors.get("primary", ""),
+            "accent": raw_colors.get("accent", ""),
+            "background": raw_colors.get("background", ""),
+            "surface": raw_colors.get("surface", ""),
+        }
+
+    # Resolve creator info dynamically from user relationship when available
+    creator_user = getattr(theme, "creator", None)
+    if creator_user:
+        resolved_name = _resolve_display_name(creator_user)
+        resolved_username = creator_user.username
+        resolved_avatar = creator_avatar_url or creator_user.avatar_url
+    else:
+        resolved_name = theme.author or "Tesslate"
+        resolved_username = None
+        resolved_avatar = creator_avatar_url
+
+    return {
+        "id": theme.id,
+        "name": theme.name,
+        "slug": theme.slug or theme.id,
+        "description": theme.description or "",
+        "long_description": theme.long_description or "",
+        "category": theme.category or "general",
+        "item_type": "theme",
+        "mode": theme.mode,
+        "source_type": theme.source_type or "open",
+        "is_forkable": (theme.source_type or "open") == "open",
+        "is_active": theme.is_active,
+        "icon": theme.icon or "palette",
+        "preview_image": theme.preview_image,
+        "pricing_type": theme.pricing_type or "free",
+        "price": theme.price or 0,
+        "downloads": theme.downloads or 0,
+        "rating": theme.rating or 5.0,
+        "reviews_count": theme.reviews_count or 0,
+        "usage_count": theme.downloads or 0,
+        "features": [],
+        "tags": theme.tags or [],
+        "tools": None,
+        "is_featured": theme.is_featured or False,
+        "is_purchased": is_in_library,
+        "is_in_library": is_in_library,
+        "is_published": theme.is_published if theme.is_published is not None else True,
+        "creator_type": "community" if theme.created_by_user_id else "official",
+        "creator_name": resolved_name,
+        "creator_username": resolved_username,
+        "creator_avatar_url": resolved_avatar,
+        "created_by_user_id": str(theme.created_by_user_id) if theme.created_by_user_id else None,
+        "forked_by_user_id": None,  # Themes don't track forked_by separately
+        "parent_theme_id": theme.parent_theme_id,
+        "color_swatches": colors,
+        "theme_mode": theme.mode,
+        "theme_json": None,  # Excluded from browse listings for size
+        "author": resolved_name,
+        "version": theme.version or "1.0.0",
+        "sort_order": theme.sort_order or 0,
+    }
+
+
+@router.get("/themes")
+async def browse_themes(
+    category: str | None = Query(None),
+    mode: str | None = Query(None),
+    pricing: str | None = Query(None),
+    search: str | None = Query(None),
+    sort: str = Query("featured"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User | None = Depends(current_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Browse marketplace themes with filtering, search, and pagination."""
+    query = select(Theme).where(Theme.is_active == True)  # noqa: E712
+
+    # Only show official themes + published community themes
+    query = query.where(
+        or_(
+            Theme.created_by_user_id == None,  # noqa: E711
+            Theme.is_published == True,  # noqa: E712
+        )
+    )
+
+    if category and category != "all":
+        query = query.where(Theme.category == category)
+
+    if mode and mode != "all":
+        query = query.where(Theme.mode == mode)
+
+    if pricing and pricing != "all":
+        query = query.where(Theme.pricing_type == pricing)
+
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                Theme.name.ilike(search_pattern),
+                Theme.description.ilike(search_pattern),
+                cast(Theme.tags, String).ilike(search_pattern),
+            )
+        )
+
+    # Sorting — always include Theme.id as tiebreaker for stable pagination
+    if sort == "popular":
+        query = query.order_by(Theme.downloads.desc(), Theme.id)
+    elif sort == "newest":
+        query = query.order_by(Theme.created_at.desc(), Theme.id)
+    elif sort == "rating":
+        query = query.order_by(Theme.rating.desc(), Theme.id)
+    elif sort == "price_asc":
+        query = query.order_by(Theme.price.asc(), Theme.id)
+    elif sort == "price_desc":
+        query = query.order_by(Theme.price.desc(), Theme.id)
+    else:  # featured
+        query = query.order_by(Theme.is_featured.desc(), Theme.downloads.desc(), Theme.id)
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Apply pagination
+    offset = (page - 1) * limit
+    query = query.offset(offset).limit(limit)
+
+    result = await db.execute(query)
+    themes = result.scalars().all()
+
+    # Check which themes are in user's library
+    user_theme_ids: set[str] = set()
+    if current_user:
+        lib_result = await db.execute(
+            select(UserLibraryTheme.theme_id).where(
+                UserLibraryTheme.user_id == current_user.id,
+                UserLibraryTheme.is_active == True,  # noqa: E712
+            )
+        )
+        user_theme_ids = {row[0] for row in lib_result.fetchall()}
+
+    # Batch-lookup creator info for community themes
+    creator_ids = {t.created_by_user_id for t in themes if t.created_by_user_id}
+    creator_info: dict[str, User] = {}
+    if creator_ids:
+        creator_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
+        creator_info = {u.id: u for u in creator_result.scalars().all()}
+
+    items = []
+    for theme in themes:
+        # Attach creator user object so _theme_to_dict can resolve name dynamically
+        if theme.created_by_user_id and theme.created_by_user_id in creator_info:
+            theme.creator = creator_info[theme.created_by_user_id]
+        avatar = (
+            creator_info[theme.created_by_user_id].avatar_url
+            if theme.created_by_user_id and theme.created_by_user_id in creator_info
+            else None
+        )
+        item = _theme_to_dict(
+            theme, is_in_library=theme.id in user_theme_ids, creator_avatar_url=avatar
+        )
+        items.append(item)
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit,
+    }
+
+
+@router.get("/themes/{slug}")
+async def get_theme_detail(
+    slug: str,
+    current_user: User | None = Depends(current_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get full theme detail by slug."""
+    result = await db.execute(select(Theme).where(or_(Theme.slug == slug, Theme.id == slug)))
+    theme = result.scalar_one_or_none()
+
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    is_in_library = False
+    if current_user:
+        lib_result = await db.execute(
+            select(UserLibraryTheme).where(
+                UserLibraryTheme.user_id == current_user.id,
+                UserLibraryTheme.theme_id == theme.id,
+                UserLibraryTheme.is_active == True,  # noqa: E712
+            )
+        )
+        is_in_library = lib_result.scalar_one_or_none() is not None
+
+    # Load creator user for dynamic name resolution
+    if theme.created_by_user_id:
+        creator_result = await db.execute(select(User).where(User.id == theme.created_by_user_id))
+        creator_user = creator_result.scalar_one_or_none()
+        if creator_user:
+            theme.creator = creator_user
+
+    item = _theme_to_dict(theme, is_in_library=is_in_library)
+    # Include full theme_json for detail view
+    item["theme_json"] = theme.theme_json
+
+    return item
+
+
+@router.get("/my-themes")
+async def get_user_library_themes(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Get themes in the current user's library."""
+    result = await db.execute(
+        select(Theme, UserLibraryTheme)
+        .join(UserLibraryTheme, UserLibraryTheme.theme_id == Theme.id)
+        .where(UserLibraryTheme.user_id == current_user.id)
+        .order_by(Theme.sort_order.asc(), Theme.name.asc())
+    )
+    rows = result.all()
+
+    # Batch-load creator users for dynamic name resolution
+    theme_list = [theme for theme, _ in rows]
+    creator_ids = {t.created_by_user_id for t in theme_list if t.created_by_user_id}
+    if creator_ids:
+        creator_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
+        creator_map = {u.id: u for u in creator_result.scalars().all()}
+        for theme in theme_list:
+            if theme.created_by_user_id and theme.created_by_user_id in creator_map:
+                theme.creator = creator_map[theme.created_by_user_id]
+
+    themes = []
+    for theme, lib_entry in rows:
+        item = _theme_to_dict(theme, is_in_library=True)
+        item["theme_json"] = theme.theme_json
+        item["is_enabled"] = lib_entry.is_active
+        item["is_custom"] = theme.created_by_user_id is not None
+        item["added_date"] = lib_entry.added_date.isoformat() if lib_entry.added_date else None
+        themes.append(item)
+
+    return {"themes": themes}
+
+
+@router.post("/themes/{theme_id}/add")
+async def add_theme_to_library(
+    theme_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Add a free theme to user's library."""
+    result = await db.execute(select(Theme).where(Theme.id == theme_id))
+    theme = result.scalar_one_or_none()
+
+    if not theme or not theme.is_active:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    # Check if already in library
+    existing_result = await db.execute(
+        select(UserLibraryTheme).where(
+            UserLibraryTheme.user_id == current_user.id,
+            UserLibraryTheme.theme_id == theme_id,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+
+    if existing and existing.is_active:
+        return {"message": "Theme already in your library", "theme_id": theme_id}
+
+    if existing:
+        # Reactivate
+        existing.is_active = True
+        existing.added_date = datetime.now(UTC)
+    else:
+        lib_entry = UserLibraryTheme(
+            user_id=current_user.id,
+            theme_id=theme_id,
+            purchase_type="free",
+            is_active=True,
+        )
+        db.add(lib_entry)
+
+    theme.downloads = (theme.downloads or 0) + 1
+    await db.commit()
+
+    return {
+        "message": "Theme added to your library",
+        "theme_id": theme_id,
+        "success": True,
+    }
+
+
+@router.delete("/themes/{theme_id}/remove")
+async def remove_theme_from_library(
+    theme_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Remove a theme from user's library. Cannot remove default-dark or default-light."""
+    if theme_id in ("default-dark", "default-light"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot remove default themes from your library",
+        )
+
+    result = await db.execute(
+        select(UserLibraryTheme).where(
+            UserLibraryTheme.user_id == current_user.id,
+            UserLibraryTheme.theme_id == theme_id,
+        )
+    )
+    lib_entry = result.scalar_one_or_none()
+
+    if not lib_entry:
+        raise HTTPException(status_code=404, detail="Theme not in your library")
+
+    lib_entry.is_active = False
+
+    # If user is currently using this theme, reset to default-dark
+    if current_user.theme_preset == theme_id:
+        current_user.theme_preset = "default-dark"
+
+    await db.commit()
+
+    return {
+        "message": "Theme removed from library",
+        "theme_id": theme_id,
+        "success": True,
+        "reset_theme": current_user.theme_preset == "default-dark",
+    }
+
+
+@router.post("/themes/{theme_id}/toggle")
+async def toggle_library_theme(
+    theme_id: str,
+    enabled: bool = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Toggle a theme enabled/disabled in user's library."""
+    result = await db.execute(
+        select(UserLibraryTheme).where(
+            UserLibraryTheme.user_id == current_user.id,
+            UserLibraryTheme.theme_id == theme_id,
+        )
+    )
+    lib_entry = result.scalar_one_or_none()
+
+    if not lib_entry:
+        raise HTTPException(status_code=404, detail="Theme not in your library")
+
+    lib_entry.is_active = enabled
+    await db.commit()
+
+    return {
+        "message": f"Theme {'enabled' if enabled else 'disabled'} successfully",
+        "theme_id": theme_id,
+        "enabled": enabled,
+        "success": True,
+    }
+
+
+@router.post("/themes/create")
+async def create_custom_theme(
+    name: str = Body(...),
+    description: str = Body(""),
+    mode: str = Body("dark"),
+    theme_json: dict = Body(...),
+    icon: str = Body("palette"),
+    category: str = Body("general"),
+    tags: list[str] = Body(default=[]),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Create a custom theme and add it to user's library."""
+    import time
+
+    # Generate a slug from name + user + timestamp
+    slug_base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    slug = f"{slug_base}-{int(time.time())}"
+
+    # Use slug as the theme ID (String PK)
+    theme_id = slug
+
+    theme = Theme(
+        id=theme_id,
+        name=name,
+        slug=slug,
+        mode=mode,
+        author=current_user.username or current_user.name or "Community",
+        description=description,
+        theme_json=theme_json,
+        icon=icon,
+        category=category,
+        tags=tags,
+        source_type="open",
+        pricing_type="free",
+        is_published=False,
+        is_active=True,
+        created_by_user_id=current_user.id,
+    )
+    db.add(theme)
+
+    # Auto-add to user's library
+    lib_entry = UserLibraryTheme(
+        user_id=current_user.id,
+        theme_id=theme_id,
+        purchase_type="free",
+        is_active=True,
+    )
+    db.add(lib_entry)
+
+    await db.commit()
+    await db.refresh(theme)
+    theme.creator = current_user
+
+    item = _theme_to_dict(theme, is_in_library=True)
+    item["theme_json"] = theme.theme_json
+
+    return {"message": "Theme created successfully", "theme": item, "success": True}
+
+
+@router.patch("/themes/{theme_id}")
+async def update_theme(
+    theme_id: str,
+    name: str | None = Body(None),
+    description: str | None = Body(None),
+    long_description: str | None = Body(None),
+    mode: str | None = Body(None),
+    theme_json: dict | None = Body(None),
+    icon: str | None = Body(None),
+    category: str | None = Body(None),
+    tags: list[str] | None = Body(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Update a custom theme. Only the creator can edit their themes.
+    If the user edits an open-source theme they don't own, auto-fork it."""
+    result = await db.execute(select(Theme).where(Theme.id == theme_id))
+    theme = result.scalar_one_or_none()
+
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    # If user doesn't own this theme, auto-fork if open source
+    is_owner = theme.created_by_user_id and theme.created_by_user_id == current_user.id
+    if not is_owner:
+        if (theme.source_type or "open") == "open":
+            # Auto-fork (works for both built-in and community open-source themes)
+            fork_data = {
+                "name": name or f"{theme.name} (Fork)",
+                "description": description or theme.description,
+                "mode": mode or theme.mode,
+                "theme_json": theme_json or theme.theme_json,
+                "icon": icon or theme.icon,
+                "category": category or theme.category,
+                "tags": tags or theme.tags,
+            }
+            return await fork_theme(theme_id, db=db, current_user=current_user, **fork_data)
+        else:
+            raise HTTPException(status_code=403, detail="Cannot edit themes you don't own")
+
+    # Apply updates
+    if name is not None:
+        theme.name = name
+    if description is not None:
+        theme.description = description
+    if long_description is not None:
+        theme.long_description = long_description
+    if mode is not None:
+        theme.mode = mode
+    if theme_json is not None:
+        theme.theme_json = theme_json
+    if icon is not None:
+        theme.icon = icon
+    if category is not None:
+        theme.category = category
+    if tags is not None:
+        theme.tags = tags
+
+    await db.commit()
+    await db.refresh(theme)
+    theme.creator = current_user
+
+    item = _theme_to_dict(theme, is_in_library=True)
+    item["theme_json"] = theme.theme_json
+
+    return {"message": "Theme updated successfully", "theme": item, "success": True}
+
+
+@router.delete("/themes/{theme_id}")
+async def delete_custom_theme(
+    theme_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Delete a custom theme. Only unpublished themes owned by the creator can be deleted."""
+    result = await db.execute(select(Theme).where(Theme.id == theme_id))
+    theme = result.scalar_one_or_none()
+
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    if not theme.created_by_user_id or theme.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Can only delete your own custom themes")
+
+    if theme.is_published:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete a published theme. Unpublish it first.",
+        )
+
+    await db.delete(theme)
+    await db.commit()
+
+    return {"message": "Theme deleted successfully", "success": True}
+
+
+@router.post("/themes/{theme_id}/publish")
+async def publish_theme(
+    theme_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Publish a custom theme to the marketplace."""
+    result = await db.execute(select(Theme).where(Theme.id == theme_id))
+    theme = result.scalar_one_or_none()
+
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    if not theme.created_by_user_id or theme.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Can only publish your own themes")
+
+    theme.is_published = True
+    await db.commit()
+
+    return {"message": "Theme published to marketplace", "success": True}
+
+
+@router.post("/themes/{theme_id}/unpublish")
+async def unpublish_theme(
+    theme_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+):
+    """Unpublish a theme from the marketplace."""
+    result = await db.execute(select(Theme).where(Theme.id == theme_id))
+    theme = result.scalar_one_or_none()
+
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    if not theme.created_by_user_id or theme.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Can only unpublish your own themes")
+
+    theme.is_published = False
+    await db.commit()
+
+    return {"message": "Theme unpublished from marketplace", "success": True}
+
+
+@router.post("/themes/{theme_id}/fork")
+async def fork_theme(
+    theme_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(current_active_user),
+    name: str | None = None,
+    description: str | None = None,
+    mode: str | None = None,
+    theme_json: dict | None = None,
+    icon: str | None = None,
+    category: str | None = None,
+    tags: list[str] | None = None,
+):
+    """Fork an open-source theme. Creates a copy owned by the current user."""
+    import time
+
+    result = await db.execute(select(Theme).where(Theme.id == theme_id))
+    original = result.scalar_one_or_none()
+
+    if not original:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    if original.source_type != "open":
+        raise HTTPException(status_code=400, detail="Cannot fork a closed-source theme")
+
+    fork_name = name or f"{original.name} (Fork)"
+    slug_base = re.sub(r"[^a-z0-9]+", "-", fork_name.lower()).strip("-")
+    slug = f"{slug_base}-{int(time.time())}"
+    fork_id = slug
+
+    forked = Theme(
+        id=fork_id,
+        name=fork_name,
+        slug=slug,
+        mode=mode or original.mode,
+        author=current_user.username or current_user.name or "Community",
+        description=description or original.description,
+        theme_json=theme_json or original.theme_json,
+        icon=icon or original.icon or "palette",
+        category=category or original.category or "general",
+        tags=tags or original.tags or [],
+        source_type="open",
+        pricing_type="free",
+        is_published=False,
+        is_active=True,
+        created_by_user_id=current_user.id,
+        parent_theme_id=original.id,
+    )
+    db.add(forked)
+
+    # Auto-add to user's library
+    lib_entry = UserLibraryTheme(
+        user_id=current_user.id,
+        theme_id=fork_id,
+        purchase_type="free",
+        is_active=True,
+    )
+    db.add(lib_entry)
+
+    await db.commit()
+    await db.refresh(forked)
+    forked.creator = current_user
+
+    item = _theme_to_dict(forked, is_in_library=True)
+    item["theme_json"] = forked.theme_json
+
+    return {"message": "Theme forked successfully", "theme": item, "success": True}

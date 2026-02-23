@@ -14,7 +14,6 @@ import {
   FolderOpen,
   Store,
   BookOpen,
-  Package,
   Settings,
   Sun,
   Moon,
@@ -72,36 +71,31 @@ export default function ProjectOverview() {
       {
         icon: <Store className="w-5 h-5" />,
         title: 'Marketplace',
-        onClick: () => navigate('/marketplace')
+        onClick: () => navigate('/marketplace'),
       },
       {
         icon: <BookOpen className="w-5 h-5" />,
         title: 'Library',
-        onClick: () => navigate('/library')
+        onClick: () => navigate('/library'),
       },
-      {
-        icon: <Package className="w-5 h-5" />,
-        title: 'Components',
-        onClick: () => toast('Components library coming soon!')
-      }
     ],
     right: [
       {
         icon: theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />,
         title: theme === 'dark' ? 'Light Mode' : 'Dark Mode',
-        onClick: toggleTheme
+        onClick: toggleTheme,
       },
       {
         icon: <Settings className="w-5 h-5" />,
         title: 'Settings',
-        onClick: () => navigate('/settings')
+        onClick: () => navigate('/settings'),
       },
       {
         icon: <LogOut className="w-5 h-5" />,
         title: 'Logout',
-        onClick: logout
-      }
-    ]
+        onClick: logout,
+      },
+    ],
   };
 
   const tabs: Tab[] = [
@@ -149,10 +143,7 @@ export default function ProjectOverview() {
         {/* Top Bar */}
         <div className="h-12 bg-[var(--surface)] border-b border-[var(--sidebar-border)] flex items-center px-4 md:px-6 justify-between">
           <Breadcrumbs
-            items={[
-              { label: 'Projects', href: '/dashboard' },
-              { label: projectName }
-            ]}
+            items={[{ label: 'Projects', href: '/dashboard' }, { label: projectName }]}
           />
         </div>
 
@@ -175,7 +166,8 @@ export default function ProjectOverview() {
                     <h2 className="text-xl sm:text-2xl font-bold text-[var(--text)]">Plan</h2>
                   </div>
                   <p className="text-gray-400 text-sm sm:text-base">
-                    Planning features coming soon. This is where you'll manage your project roadmap, milestones, and requirements.
+                    Planning features coming soon. This is where you'll manage your project roadmap,
+                    milestones, and requirements.
                   </p>
                 </div>
               </div>
@@ -192,7 +184,8 @@ export default function ProjectOverview() {
                     <h2 className="text-xl sm:text-2xl font-bold text-[var(--text)]">Build</h2>
                   </div>
                   <p className="text-gray-400 text-sm sm:text-base mb-6">
-                    Access your full development environment with code editor, preview, terminal, and more.
+                    Access your full development environment with code editor, preview, terminal,
+                    and more.
                   </p>
                   <button
                     onClick={handleOpenBuilder}
@@ -225,7 +218,8 @@ export default function ProjectOverview() {
                     <h2 className="text-xl sm:text-2xl font-bold text-[var(--text)]">Deploy</h2>
                   </div>
                   <p className="text-gray-400 text-sm sm:text-base">
-                    Deployment features coming soon. This is where you'll configure and manage your deployment pipelines.
+                    Deployment features coming soon. This is where you'll configure and manage your
+                    deployment pipelines.
                   </p>
                 </div>
               </div>
@@ -242,7 +236,8 @@ export default function ProjectOverview() {
                     <h2 className="text-xl sm:text-2xl font-bold text-[var(--text)]">Launch</h2>
                   </div>
                   <p className="text-gray-400 text-sm sm:text-base">
-                    Launch features coming soon. This is where you'll manage your launch checklist, marketing, and analytics.
+                    Launch features coming soon. This is where you'll manage your launch checklist,
+                    marketing, and analytics.
                   </p>
                 </div>
               </div>
@@ -259,7 +254,8 @@ export default function ProjectOverview() {
                     <h2 className="text-xl sm:text-2xl font-bold text-[var(--text)]">Sell</h2>
                   </div>
                   <p className="text-gray-400 text-sm sm:text-base">
-                    Monetization features coming soon. This is where you'll manage pricing, payments, and sales analytics.
+                    Monetization features coming soon. This is where you'll manage pricing,
+                    payments, and sales analytics.
                   </p>
                 </div>
               </div>

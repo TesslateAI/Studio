@@ -2,12 +2,13 @@
 
 ## Overview
 
-The marketplace browse pages provide advanced filtering, search, and discovery capabilities for marketplace items. There are two main browse pages:
+The marketplace browse page provides advanced filtering, search, and discovery capabilities for marketplace items.
 
-1. **MarketplaceBrowse** (`/marketplace/browse/:itemType`) - Browse all items of a specific type (agents, bases, tools, integrations)
-2. **MarketplaceCategory** (`/marketplace/category/:category`) - Browse agents within a specific category (builder, frontend, fullstack, etc.)
+**MarketplaceBrowse** (`/marketplace/browse/:itemType`) handles browsing all item types (agents, bases, tools, integrations) with category filtering via query parameters (e.g., `/marketplace/browse/agent?category=frontend`).
 
-Both pages share common patterns for infinite scroll, search debouncing, request cancellation, and SEO integration.
+> **Note**: The former `MarketplaceCategory` page (`/marketplace/category/:category`) has been removed. Category-specific browsing is now handled entirely by `MarketplaceBrowse` using the `?category=` query parameter.
+
+This page implements infinite scroll, search debouncing, request cancellation, and SEO integration.
 
 ---
 
@@ -90,61 +91,6 @@ const categories = [
   { id: 'devops', label: 'DevOps' },
   { id: 'mobile', label: 'Mobile' },
 ];
-```
-
----
-
-## MarketplaceCategory (`MarketplaceCategory.tsx`)
-
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/app/src/pages/MarketplaceCategory.tsx`
-**Route**: `/marketplace/category/:category`
-**Categories**: `builder`, `frontend`, `fullstack`, `backend`, `data`, `devops`, `mobile`
-
-### Purpose
-
-Focused browsing of agents within a specific category. Simpler UI than MarketplaceBrowse since category is fixed.
-
-### Features
-
-- **Category-Specific**: Title and description from category metadata
-- **Price Filtering**: Dropdown for All/Free/Paid
-- **Sorting**: Dropdown for sort options
-- **Search**: Full-text search within category
-- **Infinite Scroll**: Load more items as user scrolls
-- **User Info Dropdown**: Shows credits and subscription tier when authenticated
-
-### Category Metadata
-
-```typescript
-const categoryMeta: Record<string, { label: string; description: string }> = {
-  builder: { label: 'Builder', description: 'General-purpose AI coding assistants for any project' },
-  frontend: { label: 'Frontend', description: 'Build beautiful user interfaces with modern frameworks' },
-  fullstack: { label: 'Fullstack', description: 'End-to-end web application development' },
-  backend: { label: 'Backend', description: 'APIs, databases, and server-side logic' },
-  data: { label: 'Data', description: 'Data analysis, visualization, and machine learning' },
-  devops: { label: 'DevOps', description: 'CI/CD, infrastructure, and deployment automation' },
-  mobile: { label: 'Mobile', description: 'iOS, Android, and cross-platform mobile apps' },
-};
-```
-
-### State Management
-
-```typescript
-const { category } = useParams<{ category: string }>();
-const meta = category ? categoryMeta[category] : null;
-
-// Filter State
-const [searchQuery, setSearchQuery] = useState('');
-const [sortBy, setSortBy] = useState<SortOption>('popular');
-const [pricingFilter, setPricingFilter] = useState<PricingFilter>('all');
-const [showSortDropdown, setShowSortDropdown] = useState(false);
-const [showPriceDropdown, setShowPriceDropdown] = useState(false);
-
-// Data State
-const [items, setItems] = useState<MarketplaceItem[]>([]);
-const [page, setPage] = useState(1);
-const [hasMore, setHasMore] = useState(true);
-const [totalCount, setTotalCount] = useState<number | null>(null);
 ```
 
 ---
@@ -262,7 +208,7 @@ const filterBasesClientSide = (
 
 ## Infinite Scroll Implementation
 
-Both pages use `react-intersection-observer` for infinite scroll:
+MarketplaceBrowse uses `react-intersection-observer` for infinite scroll:
 
 ```typescript
 import { useInView } from 'react-intersection-observer';
@@ -360,7 +306,7 @@ useEffect(() => {
 
 ### "/" Key Focus Shortcut
 
-Both pages implement a keyboard shortcut to focus the search input:
+MarketplaceBrowse implements a keyboard shortcut to focus the search input:
 
 ```typescript
 const searchInputRef = useRef<HTMLInputElement>(null);
@@ -414,7 +360,7 @@ useEffect(() => {
 
 ## AbortController for Request Cancellation
 
-Both pages use `AbortController` to cancel in-flight requests when new requests are made:
+MarketplaceBrowse uses `AbortController` to cancel in-flight requests when new requests are made:
 
 ```typescript
 import { isCanceledError } from '../lib/utils';
@@ -465,7 +411,7 @@ useEffect(() => {
 
 ## SEO Integration
 
-Both pages include SEO meta tags and structured data:
+MarketplaceBrowse includes SEO meta tags and structured data:
 
 ```typescript
 import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
@@ -488,28 +434,15 @@ const breadcrumbData = generateBreadcrumbStructuredData([
 />
 ```
 
-**MarketplaceCategory SEO**:
+**Category-filtered SEO** (when `?category=` query param is present):
 
-```typescript
-const breadcrumbData = generateBreadcrumbStructuredData([
-  { name: 'Marketplace', url: `${baseUrl}/marketplace` },
-  { name: meta.label, url: `${baseUrl}/marketplace/category/${category}` },
-]);
-
-<SEO
-  title={`${meta.label} AI Agents & Templates`}
-  description={`${meta.description}. Discover the best ${meta.label.toLowerCase()} AI agents and templates on Tesslate Marketplace.`}
-  keywords={[meta.label, `${meta.label.toLowerCase()} agents`, 'AI agents', 'coding agents', 'project templates', 'Tesslate']}
-  url={`${baseUrl}/marketplace/category/${category}`}
-  structuredData={breadcrumbData}
-/>
-```
+Category-specific SEO is handled within `MarketplaceBrowse` using the `?category=` query parameter. For example, `/marketplace/browse/agent?category=frontend` will generate appropriate SEO tags for browsing frontend agents.
 
 ---
 
 ## User Info Dropdown
 
-When authenticated, both pages show a user dropdown with credits and tier:
+When authenticated, MarketplaceBrowse shows a user dropdown with credits and tier:
 
 ```typescript
 import { UserDropdown } from '../components/ui';

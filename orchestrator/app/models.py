@@ -1242,8 +1242,11 @@ class UsageLog(Base):
     creator_revenue = Column(Integer, default=0)  # Creator's 90% share in cents
     platform_revenue = Column(Integer, default=0)  # Platform's 10% share in cents
 
+    # Whether user was using their own API key (BYOK) — no credit charge
+    is_byok = Column(Boolean, default=False, server_default="false")
+
     # Billing status
-    billed_status = Column(String, default="pending")  # pending, invoiced, paid
+    billed_status = Column(String, default="pending")  # pending, invoiced, paid, credited, exempt
     invoice_id = Column(String, nullable=True)  # Stripe invoice ID
     billed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -1270,10 +1273,12 @@ class Theme(Base):
 
     id = Column(String(100), primary_key=True, index=True)  # e.g., "midnight-dark"
     name = Column(String(100), nullable=False)  # Display name: "Midnight"
+    slug = Column(String(200), unique=True, index=True, nullable=True)  # URL-safe identifier
     mode = Column(String(10), nullable=False)  # "dark" or "light"
     author = Column(String(100), default="Tesslate")
     version = Column(String(20), default="1.0.0")
     description = Column(Text, nullable=True)
+    long_description = Column(Text, nullable=True)  # Full marketplace description
 
     # Full theme JSON (colors, typography, spacing, animation)
     theme_json = Column(JSON, nullable=False)
@@ -1283,8 +1288,55 @@ class Theme(Base):
     is_active = Column(Boolean, default=True)  # Can be disabled without deletion
     sort_order = Column(Integer, default=0)  # For ordering in UI
 
+    # Marketplace fields
+    icon = Column(String(50), default="palette")
+    preview_image = Column(String, nullable=True)  # Screenshot URL
+    pricing_type = Column(String(20), default="free")  # free / one_time
+    price = Column(Integer, default=0)  # In cents
+    stripe_price_id = Column(String, nullable=True)
+    stripe_product_id = Column(String, nullable=True)
+    downloads = Column(Integer, default=0)
+    rating = Column(Float, default=5.0)
+    reviews_count = Column(Integer, default=0)
+    is_featured = Column(Boolean, default=False)
+    is_published = Column(Boolean, default=True)
+    created_by_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    tags = Column(JSON, nullable=True)  # e.g. ["dark", "minimal", "neon"]
+    category = Column(String(50), default="general")  # general / minimal / vibrant / professional
+    source_type = Column(String(20), default="open")  # open / closed
+    parent_theme_id = Column(
+        String(100), ForeignKey("themes.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    creator = relationship("User", foreign_keys=[created_by_user_id])
+    library_entries = relationship(
+        "UserLibraryTheme", back_populates="theme", cascade="all, delete-orphan"
+    )
+
+
+class UserLibraryTheme(Base):
+    """Tracks which themes users have added to their library."""
+
+    __tablename__ = "user_library_themes"
+    __table_args__ = (UniqueConstraint("user_id", "theme_id", name="uq_user_library_theme"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    theme_id = Column(String(100), ForeignKey("themes.id", ondelete="CASCADE"), nullable=False)
+    added_date = Column(DateTime(timezone=True), server_default=func.now())
+    purchase_type = Column(String(20), nullable=False, default="free")  # free / purchased
+    stripe_payment_intent = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    user = relationship("User", back_populates="library_themes")
+    theme = relationship("Theme", back_populates="library_entries")
 
 
 # ============================================================================

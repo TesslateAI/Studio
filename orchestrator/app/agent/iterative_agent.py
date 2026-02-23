@@ -244,6 +244,68 @@ class IterativeAgent(AbstractAgent):
                     logger.debug(f"  {response}")
                     logger.debug(f"[IterativeAgent] Model response complete: {response[:200]}...")
 
+                    # --- Credit deduction (non-blocking) ---
+                    try:
+                        from ..database import AsyncSessionLocal
+                        from ..services.credit_service import deduct_credits
+
+                        model_name = context.get("model_name", "")
+                        agent_id = context.get("agent_id")
+                        project_id = context.get("project_id")
+                        user_id = context.get("user_id")
+
+                        if user_id and model_name:
+                            usage_data = getattr(self.model, "_last_usage", None)
+                            tokens_in = usage_data.get("prompt_tokens", 0) if usage_data else 0
+                            tokens_out = usage_data.get("completion_tokens", 0) if usage_data else 0
+
+                            # Estimate tokens if provider didn't return usage
+                            if not tokens_in and not tokens_out:
+                                msg_text = " ".join(
+                                    m.get("content", "")
+                                    for m in self.messages
+                                    if isinstance(m.get("content"), str)
+                                )
+                                tokens_in = max(1, len(msg_text) // 4)
+                                tokens_out = max(1, len(response) // 4)
+
+                            async with AsyncSessionLocal() as credit_db:
+                                credit_result = await deduct_credits(
+                                    db=credit_db,
+                                    user_id=user_id,
+                                    model_name=model_name,
+                                    tokens_in=tokens_in,
+                                    tokens_out=tokens_out,
+                                    agent_id=agent_id,
+                                    project_id=project_id,
+                                )
+                                yield {"type": "credits_used", "data": credit_result}
+
+                                if (
+                                    not credit_result.get("is_byok")
+                                    and credit_result.get("new_balance", 1) <= 0
+                                ):
+                                    yield {
+                                        "type": "error",
+                                        "content": "You have run out of credits. Please purchase more to continue.",
+                                    }
+                                    yield {
+                                        "type": "complete",
+                                        "data": {
+                                            "success": False,
+                                            "iterations": iteration,
+                                            "final_response": response,
+                                            "error": "credits_exhausted",
+                                            "tool_calls_made": self.tool_calls_count,
+                                            "completion_reason": "credits_exhausted",
+                                        },
+                                    }
+                                    return
+                    except Exception as e:
+                        logger.warning(
+                            f"[IterativeAgent] Credit deduction failed (non-blocking): {e}"
+                        )
+
                     # Step 2: Parse response
                     tool_calls = self.parser.parse(response)
                     thought = self.parser.extract_thought(response)

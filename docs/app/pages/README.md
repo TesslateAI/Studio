@@ -24,12 +24,13 @@ This directory contains all top-level route components that make up the Tesslate
 | `/marketplace/creator/:userId` | `MarketplaceAuthor.tsx` | Creator profile | Yes |
 | `/library` | `Library.tsx` | User's purchased items | Yes |
 | `/feedback` | `Feedback.tsx` | Submit feedback | Yes |
-| `/settings` | `AccountSettings.tsx` | User profile and preferences | Yes |
+| `/settings` | — | Redirects to `/settings/profile` | Yes |
+| `/settings/profile` | `ProfileSettings.tsx` | User profile, avatar, bio, socials | Yes |
+| `/settings/preferences` | `PreferencesSettings.tsx` | Theme preset, chat position | Yes |
+| `/settings/security` | `SecuritySettings.tsx` | Password, 2FA, sessions | Yes |
+| `/settings/deployment` | `DeploymentSettings.tsx` | Provider credentials, API keys | Yes |
+| `/settings/billing` | `BillingSettings.tsx` | Subscription, credits, usage, transactions | Yes |
 | `/admin` | `AdminDashboard.tsx` | Platform administration | Yes (Admin) |
-| `/billing` | `BillingDashboard.tsx` | Subscription overview | Yes |
-| `/billing/plans` | `SubscriptionPlans.tsx` | Plan selection | Yes |
-| `/billing/usage` | `UsageDashboard.tsx` | Resource usage | Yes |
-| `/billing/transactions` | `TransactionHistory.tsx` | Payment history | Yes |
 | `/auth/github/callback` | `AuthCallback.tsx` | GitHub OAuth for git | Yes |
 
 ## Layout Hierarchy
@@ -57,7 +58,7 @@ Routes using this layout:
 - `/marketplace/creator/:userId`
 - `/library`
 - `/feedback`
-- `/settings`
+- `/settings/*` (profile, preferences, security, deployment, billing)
 
 ### Standalone Routes
 These routes have their own layouts:
@@ -65,7 +66,6 @@ These routes have their own layouts:
 - **Project Builder** (`/project/:slug/builder`): Full-screen editor with chat sidebar
 - **Graph Canvas** (`/project/:slug`): Full-screen XYFlow canvas with floating panels
 - **Admin Dashboard** (`/admin`): Custom admin layout
-- **Billing Pages**: Custom billing layouts
 - **Auth Pages**: Minimal centered layouts
 
 ## Page Categories
@@ -96,16 +96,18 @@ See: `dashboard.md`, `project-graph.md`, `project-builder.md`
 See: `marketplace.md`
 
 ### 4. Billing & Subscription
-- **BillingDashboard**: Subscription overview and management
-- **SubscriptionPlans**: Plan comparison and upgrade
-- **UsageDashboard**: Resource usage charts and limits
-- **TransactionHistory**: Payment and credit history
+- **BillingSettings** (`/settings/billing`): Consolidated billing page with subscription overview, credit balance, usage, and transaction history
 
 See: `billing.md`
 
-### 5. User Account
-- **AccountSettings**: Profile, API keys, preferences
+### 5. User Account (Settings)
+- **ProfileSettings** (`/settings/profile`): Name, email, avatar, bio, socials
+- **PreferencesSettings** (`/settings/preferences`): Theme preset, chat position
+- **SecuritySettings** (`/settings/security`): Password, 2FA, sessions
+- **DeploymentSettings** (`/settings/deployment`): Provider credentials, API keys
 - **Feedback**: Submit feature requests and bug reports
+
+See: `settings.md`
 
 ### 6. Admin
 - **AdminDashboard**: User management, marketplace approval, analytics

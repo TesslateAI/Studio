@@ -4,7 +4,7 @@ This document describes the modular settings architecture used in Tesslate Studi
 
 ## Overview
 
-The settings system is organized as a **modular tab-based architecture** with 6 independent settings pages. Each page is a standalone component that handles its own state and API calls, rendered within a shared layout that provides consistent navigation.
+The settings system is organized as a **modular tab-based architecture** with 5 independent settings pages. Each page is a standalone component that handles its own state and API calls, rendered within a shared layout that provides consistent navigation.
 
 ### Architecture Diagram
 
@@ -19,7 +19,6 @@ The settings system is organized as a **modular tab-based architecture** with 6 
 ├── /preferences  → PreferencesSettings
 ├── /security     → SecuritySettings
 ├── /deployment   → DeploymentSettings
-├── /api-keys     → ApiKeysSettings
 └── /billing      → BillingSettings
 ```
 
@@ -41,7 +40,6 @@ Settings routes are defined in `app/src/App.tsx` as nested routes under `/settin
   <Route path="preferences" element={<PreferencesSettings />} />
   <Route path="security" element={<SecuritySettings />} />
   <Route path="deployment" element={<DeploymentSettings />} />
-  <Route path="api-keys" element={<ApiKeysSettings />} />
   <Route path="billing" element={<BillingSettings />} />
 </Route>
 ```
@@ -58,8 +56,7 @@ Settings routes are defined in `app/src/App.tsx` as nested routes under `/settin
 | `/settings/profile` | `ProfileSettings` | User profile information |
 | `/settings/preferences` | `PreferencesSettings` | Theme, AI settings, notifications |
 | `/settings/security` | `SecuritySettings` | Password, 2FA, sessions |
-| `/settings/deployment` | `DeploymentSettings` | Cloud provider connections |
-| `/settings/api-keys` | `ApiKeysSettings` | LLM API key management |
+| `/settings/deployment` | `DeploymentSettings` | Cloud provider connections and LLM API key management |
 | `/settings/billing` | `BillingSettings` | Subscription management |
 
 ## SettingsLayout Pattern
@@ -120,7 +117,6 @@ const routeTitles: Record<string, string> = {
   '/settings/preferences': 'Preferences',
   '/settings/security': 'Security',
   '/settings/deployment': 'Deployment',
-  '/settings/api-keys': 'API Keys',
   '/settings/billing': 'Billing',
 };
 ```
@@ -181,10 +177,11 @@ Security-related settings (currently placeholders):
 
 **File:** `app/src/pages/settings/DeploymentSettings.tsx`
 
-Manages cloud deployment provider connections:
+Manages cloud deployment provider connections and LLM API keys (merged from the former ApiKeysSettings page):
 - **Connected Providers** - Shows currently linked accounts with metadata
 - **Available Providers** - OAuth or API token connection options
 - **Provider Types** - Cloudflare, Vercel, Netlify
+- **LLM API Keys** - OpenRouter, Anthropic, OpenAI key management
 
 **Features:**
 - OAuth flow initiation for supported providers
@@ -216,15 +213,7 @@ executeAll(
 );
 ```
 
-### 5. ApiKeysSettings
-
-**File:** `app/src/pages/settings/ApiKeysSettings.tsx`
-
-LLM provider API key management (placeholder):
-- Displays "Coming Soon" notice
-- Will support OpenRouter, Anthropic, OpenAI keys
-
-### 6. BillingSettings
+### 5. BillingSettings
 
 **File:** `app/src/pages/settings/BillingSettings.tsx`
 
@@ -582,7 +571,6 @@ const routeTitles: Record<string, string> = {
 | `app/src/pages/settings/ProfileSettings.tsx` | Profile management page |
 | `app/src/pages/settings/PreferencesSettings.tsx` | Theme and preferences page |
 | `app/src/pages/settings/SecuritySettings.tsx` | Security settings page |
-| `app/src/pages/settings/DeploymentSettings.tsx` | Cloud provider connections page |
-| `app/src/pages/settings/ApiKeysSettings.tsx` | API key management page |
+| `app/src/pages/settings/DeploymentSettings.tsx` | Cloud provider connections and API key management page |
 | `app/src/pages/settings/BillingSettings.tsx` | Billing quick links page |
 | `app/src/hooks/useCancellableRequest.ts` | Hook for safe API requests |

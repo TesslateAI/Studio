@@ -44,7 +44,7 @@ export function PublicMarketplaceFooter() {
               </li>
               <li>
                 <a
-                  href="/marketplace/category/frontend"
+                  href="/marketplace/browse/agent?category=frontend"
                   className={`text-sm ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}`}
                 >
                   Frontend
@@ -52,7 +52,7 @@ export function PublicMarketplaceFooter() {
               </li>
               <li>
                 <a
-                  href="/marketplace/category/backend"
+                  href="/marketplace/browse/agent?category=backend"
                   className={`text-sm ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}`}
                 >
                   Backend
@@ -69,7 +69,7 @@ export function PublicMarketplaceFooter() {
             <ul className="space-y-2">
               <li>
                 <a
-                  href="/marketplace/category/builder"
+                  href="/marketplace/browse/agent?category=builder"
                   className={`text-sm ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}`}
                 >
                   Builder
@@ -77,7 +77,7 @@ export function PublicMarketplaceFooter() {
               </li>
               <li>
                 <a
-                  href="/marketplace/category/fullstack"
+                  href="/marketplace/browse/agent?category=fullstack"
                   className={`text-sm ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}`}
                 >
                   Fullstack
@@ -85,7 +85,7 @@ export function PublicMarketplaceFooter() {
               </li>
               <li>
                 <a
-                  href="/marketplace/category/data"
+                  href="/marketplace/browse/agent?category=data"
                   className={`text-sm ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}`}
                 >
                   Data & ML
@@ -93,7 +93,7 @@ export function PublicMarketplaceFooter() {
               </li>
               <li>
                 <a
-                  href="/marketplace/category/devops"
+                  href="/marketplace/browse/agent?category=devops"
                   className={`text-sm ${theme === 'light' ? 'text-black/60 hover:text-black' : 'text-white/60 hover:text-white'}`}
                 >
                   DevOps

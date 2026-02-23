@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -109,7 +110,13 @@ class StripeService:
     # ========================================================================
 
     async def create_subscription_checkout(
-        self, user: User, success_url: str, cancel_url: str, db: AsyncSession, tier: str = "pro"
+        self,
+        user: User,
+        success_url: str,
+        cancel_url: str,
+        db: AsyncSession,
+        tier: str = "pro",
+        billing_interval: str = "monthly",
     ) -> dict[str, Any] | None:
         """
         Create a checkout session for a subscription tier.
@@ -120,6 +127,7 @@ class StripeService:
             cancel_url: Cancel redirect URL
             db: Database session
             tier: Subscription tier (basic, pro, ultra)
+            billing_interval: "monthly" or "annual"
 
         Returns:
             Checkout session with URL
@@ -135,10 +143,16 @@ class StripeService:
             if not customer_id:
                 raise ValueError("Failed to create Stripe customer")
 
-            # Get Stripe price ID for tier
-            price_id = settings.get_stripe_price_id(tier)
+            # Get Stripe price ID for tier and interval
+            if billing_interval == "annual":
+                price_id = settings.get_stripe_annual_price_id(tier)
+            else:
+                price_id = settings.get_stripe_price_id(tier)
+
             if not price_id:
-                raise ValueError(f"No Stripe price ID configured for tier: {tier}")
+                raise ValueError(
+                    f"No Stripe price ID configured for tier: {tier} ({billing_interval})"
+                )
 
             # Create checkout session
             session = self.stripe.checkout.Session.create(
@@ -148,10 +162,18 @@ class StripeService:
                 mode="subscription",
                 success_url=success_url,
                 cancel_url=cancel_url,
-                metadata={"user_id": str(user.id), "type": "subscription", "tier": tier},
+                metadata={
+                    "user_id": str(user.id),
+                    "type": "subscription",
+                    "tier": tier,
+                    "billing_interval": billing_interval,
+                    "price_id": price_id,
+                },
             )
 
-            logger.info(f"Created {tier} subscription checkout for user {user.id}")
+            logger.info(
+                f"Created {tier} ({billing_interval}) subscription checkout for user {user.id}"
+            )
             return session
 
         except Exception as e:
@@ -213,14 +235,20 @@ class StripeService:
     # ========================================================================
 
     async def create_credit_purchase_checkout(
-        self, user: User, amount_cents: int, success_url: str, cancel_url: str, db: AsyncSession
+        self,
+        user: User,
+        amount_cents: int,
+        success_url: str,
+        cancel_url: str,
+        db: AsyncSession,
     ) -> dict[str, Any] | None:
         """
         Create a checkout session for purchasing credits.
+        Credits are 1:1 with cents ($1 = 100 credits).
 
         Args:
             user: User purchasing credits
-            amount_cents: Amount in cents ($5 = 500, $10 = 1000, $50 = 5000)
+            amount_cents: Price in cents (= number of credits granted)
             success_url: Success redirect URL
             cancel_url: Cancel redirect URL
             db: Database session
@@ -248,8 +276,8 @@ class StripeService:
                         "price_data": {
                             "currency": "usd",
                             "product_data": {
-                                "name": f"${amount_cents / 100:.2f} Credits",
-                                "description": f"Purchase ${amount_cents / 100:.2f} in credits for AI usage",
+                                "name": f"{amount_cents:,} Credits",
+                                "description": f"Purchase {amount_cents:,} credits for AI usage",
                             },
                             "unit_amount": amount_cents,
                         },
@@ -267,7 +295,8 @@ class StripeService:
             )
 
             logger.info(
-                f"Created credit purchase checkout for user {user.id}: ${amount_cents / 100}"
+                f"Created credit purchase checkout for user {user.id}: "
+                f"{amount_cents} credits for ${amount_cents / 100:.2f}"
             )
             return session
 
@@ -439,6 +468,124 @@ class StripeService:
             raise
 
     # ========================================================================
+    # Unified Fulfillment (single source of truth for credit + subscription)
+    # ========================================================================
+
+    async def fulfill_credit_purchase(
+        self, session: dict[str, Any], db: AsyncSession
+    ) -> dict[str, Any]:
+        """
+        Fulfill a credit purchase from a completed Stripe checkout session.
+        This is the single source of truth — called by both verify-checkout and webhooks.
+
+        Returns:
+            {"credits_added": N, "already_fulfilled": bool}
+        Raises:
+            ValueError: If amount cross-validation fails
+        """
+        metadata = session.get("metadata", {})
+        user_id = UUID(metadata["user_id"])
+        amount_cents = int(metadata["amount_cents"])
+        credits_amount = int(metadata.get("credits_amount", amount_cents))
+        payment_intent = session.get("payment_intent")
+
+        # Cross-validate: Stripe's amount_total must match metadata
+        stripe_amount = session.get("amount_total")
+        if stripe_amount is not None and stripe_amount != amount_cents:
+            logger.critical(
+                f"AMOUNT MISMATCH: session {session['id']} — "
+                f"stripe amount_total={stripe_amount}, metadata amount_cents={amount_cents}"
+            )
+            raise ValueError("Payment amount mismatch — fulfillment blocked for safety")
+
+        # Idempotency: check if already fulfilled
+        existing = await db.execute(
+            select(CreditPurchase).where(CreditPurchase.stripe_payment_intent == payment_intent)
+        )
+        if existing.scalar_one_or_none():
+            logger.info(f"Credit purchase already fulfilled: {payment_intent}")
+            return {"credits_added": credits_amount, "already_fulfilled": True}
+
+        # Create record + update user
+        purchase = CreditPurchase(
+            user_id=user_id,
+            amount_cents=amount_cents,
+            credits_amount=credits_amount,
+            stripe_payment_intent=payment_intent,
+            stripe_checkout_session=session["id"],
+            status="completed",
+            completed_at=datetime.now(UTC),
+        )
+        db.add(purchase)
+
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one()
+        user.purchased_credits = (user.purchased_credits or 0) + credits_amount
+        user.total_spend = (user.total_spend or 0) + amount_cents
+
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Race condition: webhook and verify-checkout fired simultaneously
+            await db.rollback()
+            logger.info(
+                f"Credit purchase race condition resolved (already inserted): {payment_intent}"
+            )
+            return {"credits_added": credits_amount, "already_fulfilled": True}
+
+        logger.info(
+            f"Credit purchase fulfilled: user {user_id}, "
+            f"{credits_amount} credits for ${amount_cents / 100:.2f}"
+        )
+        return {"credits_added": credits_amount, "already_fulfilled": False}
+
+    async def fulfill_subscription(
+        self, session: dict[str, Any], db: AsyncSession
+    ) -> dict[str, Any]:
+        """
+        Fulfill a subscription upgrade from a completed Stripe checkout session.
+        This is the single source of truth — called by both verify-checkout and webhooks.
+
+        Returns:
+            {"tier": str, "already_fulfilled": bool}
+        """
+        from datetime import timedelta
+
+        metadata = session.get("metadata", {})
+        user_id = UUID(metadata["user_id"])
+        subscription_id = session.get("subscription")
+        tier = metadata.get("tier", "basic")
+
+        valid_tiers = ["basic", "pro", "ultra"]
+        if tier not in valid_tiers:
+            logger.warning(f"Invalid tier in session: {tier}, defaulting to basic")
+            tier = "basic"
+
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one()
+
+        # Idempotency: if already set to this subscription, skip
+        if user.stripe_subscription_id == subscription_id:
+            logger.info(f"Subscription already fulfilled: user {user_id}, tier {tier}")
+            return {"tier": tier, "already_fulfilled": True}
+
+        user.subscription_tier = tier
+        user.stripe_subscription_id = subscription_id
+        user.support_tier = settings.get_support_tier(tier)
+
+        bundled_credits = settings.get_tier_bundled_credits(tier)
+        user.bundled_credits = bundled_credits
+        user.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
+
+        await db.commit()
+
+        logger.info(
+            f"Subscription fulfilled: user {user_id} upgraded to {tier} "
+            f"with {bundled_credits} bundled credits"
+        )
+        return {"tier": tier, "already_fulfilled": False}
+
+    # ========================================================================
     # Usage Invoicing (for API-based agents)
     # ========================================================================
 
@@ -474,20 +621,45 @@ class StripeService:
                 logger.info(f"No charges for user {user.id} this month")
                 return None
 
-            # Deduct from credits: bundled first, then purchased
+            # Deduct from credits in order: daily → bundled → signup_bonus → purchased
             remaining_cost = total_cost
-            total_available = user.total_credits  # bundled + purchased
+            total_available = user.total_credits
 
             if total_available >= total_cost:
-                # Fully covered by credits - deduct bundled first, then purchased
+                # Fully covered by credits - deduct in priority order
                 to_deduct = total_cost
-                if user.bundled_credits >= to_deduct:
-                    user.bundled_credits -= to_deduct
-                else:
-                    # Use all bundled, then purchased
-                    to_deduct -= user.bundled_credits
-                    user.bundled_credits = 0
-                    user.purchased_credits -= to_deduct
+
+                # 1. Daily credits first (expire soonest)
+                daily = user.daily_credits or 0
+                if daily > 0:
+                    used = min(daily, to_deduct)
+                    user.daily_credits = daily - used
+                    to_deduct -= used
+
+                # 2. Bundled credits
+                if to_deduct > 0:
+                    bundled = user.bundled_credits or 0
+                    used = min(bundled, to_deduct)
+                    user.bundled_credits = bundled - used
+                    to_deduct -= used
+
+                # 3. Signup bonus credits
+                if to_deduct > 0:
+                    bonus = user.signup_bonus_credits or 0
+                    # Check if bonus is still valid
+                    if (
+                        user.signup_bonus_expires_at
+                        and datetime.now(UTC) > user.signup_bonus_expires_at
+                    ):
+                        bonus = 0
+                    if bonus > 0:
+                        used = min(bonus, to_deduct)
+                        user.signup_bonus_credits = bonus - used
+                        to_deduct -= used
+
+                # 4. Purchased credits (never expire)
+                if to_deduct > 0:
+                    user.purchased_credits = (user.purchased_credits or 0) - to_deduct
 
                 await db.commit()
                 logger.info(f"Usage paid from credits for user {user.id}: ${total_cost / 100:.2f}")
@@ -501,7 +673,9 @@ class StripeService:
             elif total_available > 0:
                 # Partially covered by credits - use all available
                 remaining_cost = total_cost - total_available
+                user.daily_credits = 0
                 user.bundled_credits = 0
+                user.signup_bonus_credits = 0
                 user.purchased_credits = 0
                 await db.commit()
 
@@ -693,9 +867,17 @@ class StripeService:
 
             return {"success": True, "message": f"Handled {event_type}"}
 
-        except Exception as e:
-            logger.error(f"Webhook processing failed: {e}")
-            return {"success": False, "message": str(e)}
+        except self.stripe.error.SignatureVerificationError:
+            logger.warning("Webhook signature verification failed")
+            return {"success": False, "message": "Invalid signature"}
+
+        except IntegrityError:
+            logger.info("Webhook event already processed (idempotent)")
+            return {"success": True, "message": "Already processed (idempotent)"}
+
+        except Exception:
+            logger.error("Webhook processing failed", exc_info=True)
+            return {"success": False, "message": "Internal webhook processing error"}
 
     async def _handle_checkout_completed(self, session: dict[str, Any], db: AsyncSession):
         """Handle successful checkout completion."""
@@ -715,75 +897,27 @@ class StripeService:
 
     async def _handle_subscription_checkout(self, session: dict[str, Any], db: AsyncSession):
         """Handle subscription checkout completion for any tier."""
-        from datetime import timedelta
-
-        user_id = UUID(session["metadata"]["user_id"])
-        subscription_id = session.get("subscription")
-        tier = session["metadata"].get("tier", "pro")  # Default to pro for legacy
-
-        # Validate tier
-        valid_tiers = ["basic", "pro", "ultra"]
-        if tier not in valid_tiers:
-            logger.warning(f"Invalid tier in webhook: {tier}, defaulting to pro")
-            tier = "pro"
-
-        # Update user to new tier
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one()
-
-        # Set the subscription tier
-        user.subscription_tier = tier
-        user.stripe_subscription_id = subscription_id
-
-        # Set bundled credits for the tier
-        bundled_credits = settings.get_tier_bundled_credits(tier)
-        user.bundled_credits = bundled_credits
-
-        # Set credits reset date to 30 days from now
-        user.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
-
-        await db.commit()
-
-        logger.info(
-            f"User {user_id} upgraded to {tier} tier with {bundled_credits} bundled credits"
-        )
+        try:
+            result = await self.fulfill_subscription(session, db)
+            source = "webhook" if result["already_fulfilled"] else "webhook (first)"
+            logger.info(f"Subscription fulfilled via {source}: tier={result['tier']}")
+        except Exception as e:
+            logger.critical(f"Subscription fulfillment failed in webhook: {e}")
+            # Don't re-raise — Stripe will retry the webhook
 
     async def _handle_credit_purchase_checkout(self, session: dict[str, Any], db: AsyncSession):
         """Handle credit purchase checkout completion."""
-        user_id = UUID(session["metadata"]["user_id"])
-        amount_cents = int(session["metadata"]["amount_cents"])
-        payment_intent = session.get("payment_intent")
-
-        # Check if already processed (idempotency)
-        existing = await db.execute(
-            select(CreditPurchase).where(CreditPurchase.stripe_payment_intent == payment_intent)
-        )
-        if existing.scalar_one_or_none():
-            logger.info(f"Credit purchase already processed: {payment_intent}")
-            return
-
-        # Create credit purchase record
-        purchase = CreditPurchase(
-            user_id=user_id,
-            amount_cents=amount_cents,
-            credits_amount=amount_cents,  # 1:1 ratio (1 credit = $0.01)
-            stripe_payment_intent=payment_intent,
-            stripe_checkout_session=session["id"],
-            status="completed",
-            completed_at=datetime.now(UTC),
-        )
-        db.add(purchase)
-
-        # Update user credits - purchased credits never expire
-        user_result = await db.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one()
-
-        # Add to purchased_credits (permanent, never expire)
-        user.purchased_credits = (user.purchased_credits or 0) + amount_cents
-        user.total_spend += amount_cents
-
-        await db.commit()
-        logger.info(f"User {user_id} purchased {amount_cents} credits (${amount_cents / 100})")
+        try:
+            result = await self.fulfill_credit_purchase(session, db)
+            source = "webhook" if result["already_fulfilled"] else "webhook (first)"
+            logger.info(
+                f"Credit purchase fulfilled via {source}: {result['credits_added']} credits"
+            )
+        except ValueError as e:
+            logger.critical(f"Credit purchase fulfillment blocked in webhook: {e}")
+            # Don't re-raise — log for manual review
+        except Exception as e:
+            logger.critical(f"Credit purchase fulfillment failed in webhook: {e}")
 
     async def _handle_agent_purchase_checkout(self, session: dict[str, Any], db: AsyncSession):
         """Handle agent purchase checkout completion."""
@@ -890,6 +1024,7 @@ class StripeService:
             old_tier = user.subscription_tier
             user.subscription_tier = "free"
             user.stripe_subscription_id = None
+            user.support_tier = settings.get_support_tier("free")
 
             # Reset bundled credits to free tier amount
             user.bundled_credits = settings.get_tier_bundled_credits("free")

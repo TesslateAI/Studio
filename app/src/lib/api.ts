@@ -1,5 +1,21 @@
 import axios from 'axios';
 import type { AgentChatRequest, AgentChatResponse, Agent, AgentCreate } from '../types/agent';
+import type {
+  BillingConfig,
+  SubscriptionResponse,
+  CheckoutSessionResponse,
+  CreditStatusResponse,
+  VerifyCheckoutResponse,
+  CreditBalanceResponse,
+  CreditPackage,
+  CreditPurchaseHistoryResponse,
+  UsageSummaryResponse,
+  UsageLogsResponse,
+  TransactionsResponse,
+  CreatorEarningsResponse,
+  CustomerPortalResponse,
+  StripeConnectResponse,
+} from '../types/billing';
 import { config } from '../config';
 
 const API_URL = config.API_URL;
@@ -700,10 +716,11 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  // Add custom OpenRouter model
+  // Add custom model to a provider
   addCustomModel: async (data: {
     model_id: string;
     model_name: string;
+    provider?: string;
     pricing_input?: number;
     pricing_output?: number;
   }) => {
@@ -712,7 +729,7 @@ export const marketplaceApi = {
   },
 
   // Delete custom model
-  deleteCustomModel: async (modelId: number) => {
+  deleteCustomModel: async (modelId: string) => {
     const response = await api.delete(`/api/marketplace/models/custom/${modelId}`);
     return response.data;
   },
@@ -910,6 +927,91 @@ export const marketplaceApi = {
     const response = await api.delete(`/api/marketplace/agents/${agentId}/subagents/${subagentId}`);
     return response.data;
   },
+
+  // Theme marketplace endpoints
+  getMarketplaceThemes: async (params?: {
+    category?: string;
+    mode?: string;
+    pricing?: string;
+    search?: string;
+    sort?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.mode) queryParams.append('mode', params.mode);
+    if (params?.pricing) queryParams.append('pricing', params.pricing);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.sort) queryParams.append('sort', params.sort);
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    const response = await api.get(`/api/marketplace/themes?${queryParams}`);
+    return response.data;
+  },
+
+  getThemeDetail: async (slug: string) => {
+    const response = await api.get(`/api/marketplace/themes/${slug}`);
+    return response.data;
+  },
+
+  getUserLibraryThemes: async () => {
+    const response = await api.get('/api/marketplace/my-themes');
+    return response.data;
+  },
+
+  addThemeToLibrary: async (themeId: string) => {
+    const response = await api.post(`/api/marketplace/themes/${themeId}/add`);
+    return response.data;
+  },
+
+  removeThemeFromLibrary: async (themeId: string) => {
+    const response = await api.delete(`/api/marketplace/themes/${themeId}/remove`);
+    return response.data;
+  },
+
+  toggleTheme: async (themeId: string, enabled: boolean) => {
+    const response = await api.post(`/api/marketplace/themes/${themeId}/toggle`, { enabled });
+    return response.data;
+  },
+
+  createCustomTheme: async (data: {
+    name: string;
+    description?: string;
+    mode?: string;
+    theme_json: Record<string, unknown>;
+    icon?: string;
+    category?: string;
+    tags?: string[];
+  }) => {
+    const response = await api.post('/api/marketplace/themes/create', data);
+    return response.data;
+  },
+
+  updateTheme: async (themeId: string, data: Record<string, unknown>) => {
+    const response = await api.patch(`/api/marketplace/themes/${themeId}`, data);
+    return response.data;
+  },
+
+  deleteTheme: async (themeId: string) => {
+    const response = await api.delete(`/api/marketplace/themes/${themeId}`);
+    return response.data;
+  },
+
+  publishTheme: async (themeId: string) => {
+    const response = await api.post(`/api/marketplace/themes/${themeId}/publish`);
+    return response.data;
+  },
+
+  unpublishTheme: async (themeId: string) => {
+    const response = await api.post(`/api/marketplace/themes/${themeId}/unpublish`);
+    return response.data;
+  },
+
+  forkTheme: async (themeId: string, data?: Record<string, unknown>) => {
+    const response = await api.post(`/api/marketplace/themes/${themeId}/fork`, data || {});
+    return response.data;
+  },
 };
 
 // Creator/Author profile API
@@ -917,6 +1019,20 @@ export const creatorsApi = {
   // Get creator public profile
   getProfile: async (userId: string) => {
     const response = await api.get(`/api/creators/${userId}`);
+    return response.data;
+  },
+
+  // Get creator public profile by @username
+  getProfileByUsername: async (username: string) => {
+    const response = await api.get(`/api/creators/by-username/${encodeURIComponent(username)}`);
+    return response.data;
+  },
+
+  // Check username availability
+  checkUsername: async (
+    username: string
+  ): Promise<{ available: boolean; reason: string | null }> => {
+    const response = await api.get(`/api/creators/check-username/${encodeURIComponent(username)}`);
     return response.data;
   },
 
@@ -1053,11 +1169,27 @@ export const secretsApi = {
     const response = await api.delete(`/api/secrets/providers/custom/${providerId}`);
     return response.data;
   },
+
+  // Get model preferences (disabled models list)
+  getModelPreferences: async () => {
+    const response = await api.get('/api/secrets/model-preferences');
+    return response.data;
+  },
+
+  // Toggle a model on/off
+  toggleModel: async (modelId: string, enabled: boolean) => {
+    const response = await api.put('/api/secrets/model-preferences', {
+      model_id: modelId,
+      enabled,
+    });
+    return response.data;
+  },
 };
 
 export interface UserProfile {
   id: string;
   email: string;
+  username?: string;
   name?: string;
   avatar_url?: string;
   bio?: string;
@@ -1067,6 +1199,7 @@ export interface UserProfile {
 }
 
 export interface UserProfileUpdate {
+  username?: string;
   name?: string;
   avatar_url?: string;
   bio?: string;
@@ -1361,59 +1494,77 @@ export const configApi = {
 
 export const billingApi = {
   // Get public billing configuration
-  getConfig: async () => {
+  getConfig: async (): Promise<BillingConfig> => {
     const response = await api.get('/api/billing/config');
     return response.data;
   },
 
   // Subscription management
-  getSubscription: async () => {
+  getSubscription: async (): Promise<SubscriptionResponse> => {
     const response = await api.get('/api/billing/subscription');
     return response.data;
   },
 
-  subscribe: async (tier: 'basic' | 'pro' | 'ultra' = 'pro') => {
-    const response = await api.post('/api/billing/subscribe', { tier });
+  subscribe: async (
+    tier: 'basic' | 'pro' | 'ultra' = 'pro',
+    billingInterval: 'monthly' | 'annual' = 'monthly'
+  ): Promise<CheckoutSessionResponse> => {
+    const response = await api.post('/api/billing/subscribe', {
+      tier,
+      billing_interval: billingInterval,
+    });
     return response.data;
   },
 
   // Get credit status for low balance warning
-  getCreditStatus: async () => {
+  getCreditStatus: async (): Promise<CreditStatusResponse> => {
     const response = await api.get('/api/billing/credits/status');
     return response.data;
   },
 
-  cancelSubscription: async (atPeriodEnd: boolean = true) => {
+  verifyCheckout: async (sessionId: string): Promise<VerifyCheckoutResponse> => {
+    const response = await api.post('/api/billing/verify-checkout', {
+      session_id: sessionId,
+    });
+    return response.data;
+  },
+
+  cancelSubscription: async (
+    atPeriodEnd: boolean = true
+  ): Promise<{ success: boolean; message: string }> => {
     const response = await api.post(`/api/billing/cancel`, null, {
       params: { at_period_end: atPeriodEnd },
     });
     return response.data;
   },
 
-  renewSubscription: async () => {
+  renewSubscription: async (): Promise<{ success: boolean; message: string }> => {
     const response = await api.post('/api/billing/renew');
     return response.data;
   },
 
-  getCustomerPortal: async () => {
+  getCustomerPortal: async (): Promise<CustomerPortalResponse> => {
     const response = await api.get('/api/billing/portal');
     return response.data;
   },
 
   // Credits management
-  getCreditsBalance: async () => {
+  getCreditsBalance: async (): Promise<CreditBalanceResponse> => {
     const response = await api.get('/api/billing/credits');
     return response.data;
   },
 
-  purchaseCredits: async (packageType: 'small' | 'medium') => {
+  purchaseCredits: async (packageType: CreditPackage): Promise<CheckoutSessionResponse> => {
     const response = await api.post('/api/billing/credits/purchase', {
       package: packageType,
     });
     return response.data;
   },
 
-  getCreditsHistory: async (limit: number = 50, offset: number = 0) => {
+  getCreditsHistory: async (
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<CreditPurchaseHistoryResponse> => {
     const response = await api.get('/api/billing/credits/history', {
       params: { limit, offset },
     });
@@ -1421,14 +1572,16 @@ export const billingApi = {
   },
 
   // Usage tracking
-  getUsage: async (startDate?: string, endDate?: string) => {
+  getUsage: async (startDate?: string, endDate?: string): Promise<UsageSummaryResponse> => {
     const response = await api.get('/api/billing/usage', {
       params: { start_date: startDate, end_date: endDate },
     });
     return response.data;
   },
 
-  syncUsage: async (startDate?: string) => {
+  syncUsage: async (
+    startDate?: string
+  ): Promise<{ success: boolean; logs_synced: number; message: string }> => {
     const response = await api.post('/api/billing/usage/sync', {
       start_date: startDate,
     });
@@ -1440,7 +1593,7 @@ export const billingApi = {
     offset: number = 0,
     startDate?: string,
     endDate?: string
-  ) => {
+  ): Promise<UsageLogsResponse> => {
     const response = await api.get('/api/billing/usage/logs', {
       params: { limit, offset, start_date: startDate, end_date: endDate },
     });
@@ -1448,7 +1601,10 @@ export const billingApi = {
   },
 
   // Transactions
-  getTransactions: async (limit: number = 50, offset: number = 0) => {
+  getTransactions: async (
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<TransactionsResponse> => {
     const response = await api.get('/api/billing/transactions', {
       params: { limit, offset },
     });
@@ -1456,14 +1612,14 @@ export const billingApi = {
   },
 
   // Creator earnings
-  getEarnings: async (startDate?: string, endDate?: string) => {
+  getEarnings: async (startDate?: string, endDate?: string): Promise<CreatorEarningsResponse> => {
     const response = await api.get('/api/billing/earnings', {
       params: { start_date: startDate, end_date: endDate },
     });
     return response.data;
   },
 
-  connectStripe: async () => {
+  connectStripe: async (): Promise<StripeConnectResponse> => {
     const response = await api.post('/api/billing/connect');
     return response.data;
   },

@@ -100,34 +100,88 @@ class StreamAgent(AbstractAgent):
 
             # Prepare request parameters
             # Strip routing prefix before sending to LLM API
-            from .models import BUILTIN_PREFIX
+            from .models import BUILTIN_PREFIX, BUILTIN_PROVIDERS
 
             if model.startswith(BUILTIN_PREFIX):
                 model_id = model[len(BUILTIN_PREFIX) :]
-            elif model.startswith("openrouter/"):
-                model_id = model.removeprefix("openrouter/")
+            elif "/" in model:
+                # For BYOK models ("provider/model-name"), strip the provider prefix
+                provider_slug = model.split("/", 1)[0]
+                if provider_slug in BUILTIN_PROVIDERS:
+                    model_id = model.removeprefix(f"{provider_slug}/")
+                else:
+                    model_id = model
             else:
                 model_id = model
 
-            stream_params = {"model": model_id, "messages": messages, "stream": True}
+            stream_params = {
+                "model": model_id,
+                "messages": messages,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
 
-            # Add OpenRouter-specific headers if needed
-            if model.startswith("openrouter/"):
-                stream_params["extra_headers"] = {
-                    "HTTP-Referer": "https://tesslate.com",
-                    "X-Title": "Tesslate Studio",
-                }
+            # Add provider-specific default headers if configured
+            if "/" in model:
+                provider_slug = model.split("/", 1)[0]
+                provider_cfg = BUILTIN_PROVIDERS.get(provider_slug)
+                if provider_cfg and provider_cfg.get("default_headers"):
+                    stream_params["extra_headers"] = provider_cfg["default_headers"]
 
             stream = await client.chat.completions.create(**stream_params)
 
             # Stream chunks to the frontend
+            stream_usage = None
             async for chunk in stream:
-                if chunk.choices[0].delta.content:
+                if chunk.choices and chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
                     full_response += content
                     yield {"type": "stream", "content": content}
+                # Capture usage from final chunk
+                if hasattr(chunk, "usage") and chunk.usage:
+                    stream_usage = {
+                        "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
+                    }
 
             logger.info(f"[StreamAgent] Streaming complete, response length: {len(full_response)}")
+
+            # --- Credit deduction (non-blocking) ---
+            try:
+                from ..database import AsyncSessionLocal
+                from ..services.credit_service import deduct_credits
+
+                user_id_val = context.get("user_id") or (user.id if user else None)
+                model_name_ctx = context.get("model_name", model)
+                agent_id = context.get("agent_id")
+
+                if user_id_val:
+                    tokens_in = stream_usage.get("prompt_tokens", 0) if stream_usage else 0
+                    tokens_out = stream_usage.get("completion_tokens", 0) if stream_usage else 0
+
+                    # Estimate tokens if provider didn't return usage
+                    if not tokens_in and not tokens_out:
+                        msg_text = " ".join(
+                            m.get("content", "")
+                            for m in messages
+                            if isinstance(m.get("content"), str)
+                        )
+                        tokens_in = max(1, len(msg_text) // 4)
+                        tokens_out = max(1, len(full_response) // 4)
+
+                    async with AsyncSessionLocal() as credit_db:
+                        credit_result = await deduct_credits(
+                            db=credit_db,
+                            user_id=user_id_val,
+                            model_name=model_name_ctx,
+                            tokens_in=tokens_in,
+                            tokens_out=tokens_out,
+                            agent_id=agent_id,
+                            project_id=project_id,
+                        )
+                        yield {"type": "credits_used", "data": credit_result}
+            except Exception as e:
+                logger.warning(f"[StreamAgent] Credit deduction failed (non-blocking): {e}")
 
             # Process all code blocks and save files
             if project_id:

@@ -5,10 +5,10 @@
 ### 4-Tier System
 | Tier | Price | Projects | Deploys | Credits | BYOK |
 |------|-------|----------|---------|---------|------|
-| Free | $0 | 3 | 1 | 1,000 | No |
-| Basic | $8 | 5 | 2 | 1,000 | No |
-| Pro | $20 | 10 | 5 | 2,500 | Yes |
-| Ultra | $100 | Unlimited | 20 | 12,000 | Yes |
+| Free | $0 | 3 | 1 | 5/day | No |
+| Basic | $20 | 7 | 3 | 500/mo | No |
+| Pro | $49 | 15 | 5 | 2,000/mo | Yes |
+| Ultra | $149 | 40 | 20 | 8,000/mo | Yes |
 
 ### Credit System
 - **1 credit = $0.01 USD**
@@ -17,7 +17,19 @@
 
 ### Credit Packages
 - Small: 500 credits / $5
-- Medium: 1,000 credits / $10
+- Medium: 2,500 credits / $25
+- Large: 10,000 credits / $100
+- Team: 50,000 credits / $500
+
+---
+
+## Component Notes
+
+### SubscriptionPlans.tsx (Deleted)
+`SubscriptionPlans.tsx` has been deleted. Its plan selection functionality is now inline in `BillingSettings.tsx` as a `PlanSelectionModal`.
+
+### CreditsPurchaseModal.tsx
+`CreditsPurchaseModal.tsx` renders the credit purchase options (Small, Medium, Large, Team packages). It displays a loading spinner during checkout initiation while the Stripe session is being created.
 
 ---
 
@@ -147,7 +159,7 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 ### Frontend
 
 ```typescript
-const handleCreditsPurchase = async (packageId: 'small' | 'medium') => {
+const handleCreditsPurchase = async (packageId: 'small' | 'medium' | 'large' | 'team') => {
   try {
     const { url } = await billingApi.purchaseCredits(packageId);
     window.location.href = url;

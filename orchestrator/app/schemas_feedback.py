@@ -34,6 +34,8 @@ class FeedbackPostRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     user_name: str  # From relationship
+    username: str | None = None  # @username handle
+    avatar_url: str | None = None  # Profile picture URL
     type: str
     title: str
     description: str
@@ -72,6 +74,8 @@ class FeedbackCommentRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     user_name: str  # From relationship
+    username: str | None = None  # @username handle
+    avatar_url: str | None = None  # Profile picture URL
     feedback_id: uuid.UUID
     content: str
     created_at: datetime
@@ -92,6 +96,8 @@ class FeedbackPostDetail(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     user_name: str
+    username: str | None = None
+    avatar_url: str | None = None
     type: str
     title: str
     description: str

@@ -5,6 +5,9 @@
   "author": "Tesslate",
   "version": "1.0.0",
   "description": "The default Tesslate dark theme with orange accents",
+  "category": "general",
+  "tags": ["dark", "default", "neutral"],
+  "icon": "moon",
 
   "colors": {
     "primary": "#F89521",

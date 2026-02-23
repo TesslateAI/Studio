@@ -5,6 +5,9 @@
   "author": "Tesslate",
   "version": "1.0.0",
   "description": "Deep indigo theme for late night coding",
+  "category": "minimal",
+  "tags": ["dark", "deep", "blue", "minimal"],
+  "icon": "moon-stars",
 
   "colors": {
     "primary": "#6366f1",

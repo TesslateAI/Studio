@@ -6,14 +6,14 @@ import { ArrowLeft, MagnifyingGlass, X, Package, Plus } from '@phosphor-icons/re
 import { AgentCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
 import { UserDropdown } from '../components/ui';
 import { SubmitBaseModal } from '../components/modals';
-import { marketplaceApi, authApi } from '../lib/api';
+import { marketplaceApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { isCanceledError } from '../lib/utils';
 import { useTheme } from '../theme/ThemeContext';
 import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
-type ItemType = 'agent' | 'base' | 'tool' | 'integration';
+type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -42,6 +42,7 @@ const categories = [
 const itemTypeLabels: Record<ItemType, string> = {
   agent: 'Agents',
   base: 'Bases',
+  theme: 'Themes',
   tool: 'Tools',
   integration: 'Integrations',
 };
@@ -54,7 +55,9 @@ export default function MarketplaceBrowse() {
   const { isAuthenticated } = useMarketplaceAuth();
 
   // Validate item type
-  const itemType: ItemType = ['agent', 'base', 'tool', 'integration'].includes(itemTypeParam || '')
+  const itemType: ItemType = ['agent', 'base', 'theme', 'tool', 'integration'].includes(
+    itemTypeParam || ''
+  )
     ? (itemTypeParam as ItemType)
     : 'agent';
 
@@ -86,11 +89,6 @@ export default function MarketplaceBrowse() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [filtering, setFiltering] = useState(false);
 
-  // State - User (for dropdown)
-  const [userName, setUserName] = useState<string>('');
-  const [userCredits, setUserCredits] = useState<number>(0);
-  const [userTier, setUserTier] = useState<string>('free');
-
   // State - Submit base modal
   const [showSubmitBaseModal, setShowSubmitBaseModal] = useState(false);
 
@@ -117,23 +115,6 @@ export default function MarketplaceBrowse() {
     document.addEventListener('keydown', handleSlashKey);
     return () => document.removeEventListener('keydown', handleSlashKey);
   }, []);
-
-  // Fetch user data for dropdown (only when authenticated)
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const fetchUserData = async () => {
-      try {
-        const user = await authApi.getCurrentUser();
-        setUserName(user.name || user.username || 'there');
-        setUserCredits((user.bundled_credits || 0) + (user.purchased_credits || 0));
-        setUserTier(user.subscription_tier || 'free');
-      } catch (e) {
-        console.error('Failed to fetch user data:', e);
-      }
-    };
-    fetchUserData();
-  }, [isAuthenticated]);
 
   const sortOptions: { id: SortOption; label: string }[] = [
     { id: 'popular', label: 'Most Popular' },
@@ -225,6 +206,24 @@ export default function MarketplaceBrowse() {
             setTotalCount(data.length);
           }
           setHasMore(false);
+        } else if (itemType === 'theme') {
+          // Server-side filtering for themes
+          const result = await marketplaceApi.getMarketplaceThemes({
+            category: category !== 'all' ? category : undefined,
+            pricing: pricing !== 'all' ? pricing : undefined,
+            search: search || undefined,
+            sort,
+            page: pageNum,
+            limit: ITEMS_PER_PAGE,
+          });
+          data = (result.items || []).map((theme: Record<string, unknown>) => ({
+            ...theme,
+            item_type: 'theme' as ItemType,
+          }));
+          if (pageNum === 1) {
+            setTotalCount(result.total || data.length);
+          }
+          setHasMore(data.length === ITEMS_PER_PAGE);
         } else {
           data = [];
           setTotalCount(0);
@@ -232,7 +231,11 @@ export default function MarketplaceBrowse() {
         }
 
         if (append && pageNum > 1) {
-          setItems((prev) => [...prev, ...data]);
+          setItems((prev) => {
+            const existingIds = new Set(prev.map((i) => i.id));
+            const newItems = data.filter((i) => !existingIds.has(i.id));
+            return [...prev, ...newItems];
+          });
         } else {
           setItems(data);
         }
@@ -410,9 +413,11 @@ export default function MarketplaceBrowse() {
 
     try {
       const data =
-        item.item_type === 'base'
-          ? await marketplaceApi.purchaseBase(item.id)
-          : await marketplaceApi.purchaseAgent(item.id);
+        item.item_type === 'theme'
+          ? await marketplaceApi.addThemeToLibrary(item.id)
+          : item.item_type === 'base'
+            ? await marketplaceApi.purchaseBase(item.id)
+            : await marketplaceApi.purchaseAgent(item.id);
 
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
@@ -541,13 +546,7 @@ export default function MarketplaceBrowse() {
                   </div>
 
                   {/* User Dropdown - Only show when authenticated */}
-                  {isAuthenticated && (
-                    <UserDropdown
-                      userName={userName}
-                      userCredits={userCredits}
-                      userTier={userTier}
-                    />
-                  )}
+                  {isAuthenticated && <UserDropdown />}
                 </div>
               </div>
             </div>

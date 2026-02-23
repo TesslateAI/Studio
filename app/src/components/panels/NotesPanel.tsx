@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { modKey } from '../../lib/keyboard-registry';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -218,7 +219,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
                   ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]'
                   : 'text-[var(--text)]/60'
               }`}
-              title="Bold (Ctrl+B)"
+              title={`Bold (${modKey}+B)`}
             >
               <TextB size={18} weight="bold" />
             </button>
@@ -229,7 +230,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
                   ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]'
                   : 'text-[var(--text)]/60'
               }`}
-              title="Italic (Ctrl+I)"
+              title={`Italic (${modKey}+I)`}
             >
               <TextItalic size={18} weight="bold" />
             </button>
@@ -240,7 +241,7 @@ export function NotesPanel({ projectSlug }: NotesPanelProps) {
                   ? 'bg-[rgba(var(--primary-rgb),0.2)] text-[var(--primary)]'
                   : 'text-[var(--text)]/60'
               }`}
-              title="Underline (Ctrl+U)"
+              title={`Underline (${modKey}+U)`}
             >
               <TextUnderline size={18} weight="bold" />
             </button>

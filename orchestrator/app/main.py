@@ -292,13 +292,9 @@ async def add_security_headers(request: Request, call_next):
 async def log_requests(request: Request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url.path}")
     if request.url.path == "/api/users/me":
-        logger.info(f"Cookie header: {request.headers.get('cookie', 'NO COOKIE')}")
+        logger.info(f"Cookie present: {bool(request.headers.get('cookie'))}")
     if "/api/tasks/" in request.url.path:
-        auth_header = request.headers.get("authorization", "NO AUTH HEADER")
-        logger.info(
-            f"[TASK_REQUEST] Authorization header: {auth_header[:50] if auth_header != 'NO AUTH HEADER' else auth_header}..."
-        )
-        logger.info(f"[TASK_REQUEST] All headers: {dict(request.headers)}")
+        logger.info(f"[TASK_REQUEST] auth_present={bool(request.headers.get('authorization'))}")
     try:
         response = await call_next(request)
         logger.info(f"Response status: {response.status_code}")
@@ -345,6 +341,18 @@ def run_alembic_migrations():
 @app.on_event("startup")
 async def startup():
     import asyncio
+
+    # Log warnings for optional-but-important env vars that are missing
+    _optional_env_checks = {
+        "stripe_secret_key": "Stripe payments will not work",
+        "stripe_webhook_secret": "Stripe webhooks will not be verified",
+        "stripe_publishable_key": "Frontend cannot initialize Stripe checkout",
+        "litellm_api_base": "LiteLLM proxy not configured — AI features will not work",
+        "litellm_master_key": "LiteLLM master key not set — user key creation will fail",
+    }
+    for attr, message in _optional_env_checks.items():
+        if not getattr(settings, attr, ""):
+            logger.warning(f"[STARTUP] {attr} is not configured: {message}")
 
     # Retry database connection and run migrations up to 5 times with exponential backoff
     max_retries = 5
@@ -399,6 +407,11 @@ async def startup():
     from .services.model_health import model_health_check_loop
 
     asyncio.create_task(model_health_check_loop())
+
+    # Start daily credit reset background task
+    from .services.daily_credit_reset import daily_credit_reset_loop
+
+    asyncio.create_task(daily_credit_reset_loop())
 
     # Initialize base cache (Docker mode only - async - doesn't block startup)
     if is_docker_mode():
@@ -595,6 +608,32 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
                     detail="OAUTH_NOT_AVAILABLE_EMAIL",
                 )
 
+            # Fetch profile picture URL from OAuth provider (non-blocking)
+            avatar_url: str | None = None
+            try:
+                import httpx
+
+                async with httpx.AsyncClient() as http_client:
+                    if provider_name == "google":
+                        resp = await http_client.get(
+                            "https://openidconnect.googleapis.com/v1/userinfo",
+                            headers={"Authorization": f"Bearer {token['access_token']}"},
+                        )
+                        if resp.status_code == 200:
+                            avatar_url = resp.json().get("picture")
+                    elif provider_name == "github":
+                        resp = await http_client.get(
+                            "https://api.github.com/user",
+                            headers={
+                                "Authorization": f"Bearer {token['access_token']}",
+                                "Accept": "application/vnd.github+json",
+                            },
+                        )
+                        if resp.status_code == 200:
+                            avatar_url = resp.json().get("avatar_url")
+            except Exception as e:
+                logger.warning(f"Failed to fetch avatar for {provider_name} user: {e}")
+
             # Verify state token
             from fastapi_users.jwt import decode_jwt
 
@@ -638,6 +677,7 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
                 request,
                 associate_by_email=True,
                 is_verified_by_default=True,
+                avatar_url=avatar_url,
             )
 
             if not user.is_active:

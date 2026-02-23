@@ -29,25 +29,25 @@ export function CustomProviderCard({
   const modelCount = provider.available_models?.length || 0;
 
   return (
-    <div className="bg-[var(--surface)] border border-[var(--text)]/10 rounded-lg p-4">
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="p-2.5 bg-purple-500/10 rounded-lg flex-shrink-0">
-            <Server className="w-5 h-5 text-purple-400" />
+          <div className="p-2.5 bg-[rgba(var(--primary-rgb),0.1)] rounded-lg flex-shrink-0">
+            <Server className="w-5 h-5 text-[var(--primary)]" />
           </div>
           <div className="min-w-0">
             <div className="text-sm font-medium text-[var(--text)]">{provider.name}</div>
-            <div className="text-xs text-[var(--text)]/40 font-mono mt-0.5">
+            <div className="text-xs text-[var(--text-subtle)] font-mono mt-0.5">
               {provider.base_url}
             </div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-[var(--text)]/50">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-hover)] text-[var(--text-muted)]">
                 {provider.slug}
               </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-[var(--text)]/50">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-hover)] text-[var(--text-muted)]">
                 {provider.api_type}
               </span>
-              <span className="text-[10px] text-[var(--text)]/40">
+              <span className="text-[10px] text-[var(--text-subtle)]">
                 {modelCount} model{modelCount !== 1 ? 's' : ''}
               </span>
             </div>
@@ -56,7 +56,7 @@ export function CustomProviderCard({
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={onEdit}
-            className="p-1.5 hover:bg-white/10 rounded-lg text-[var(--text)]/40 hover:text-[var(--text)] transition-colors"
+            className="p-1.5 hover:bg-[var(--surface-hover)] rounded-lg text-[var(--text-subtle)] hover:text-[var(--text)] transition-colors"
           >
             <Pencil className="w-4 h-4" />
           </button>
@@ -64,13 +64,13 @@ export function CustomProviderCard({
             <div className="flex items-center gap-1">
               <button
                 onClick={() => onDelete(provider.id)}
-                className="px-2 py-1 text-xs bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors"
+                className="px-2 py-1 text-xs bg-[var(--status-error)]/20 text-[var(--status-error)] rounded hover:bg-[var(--status-error)]/30 transition-colors"
               >
                 Delete
               </button>
               <button
                 onClick={() => setConfirmDelete(false)}
-                className="px-2 py-1 text-xs bg-white/5 text-[var(--text)]/60 rounded hover:bg-white/10 transition-colors"
+                className="px-2 py-1 text-xs bg-[var(--surface-hover)] text-[var(--text-muted)] rounded hover:bg-[var(--surface-hover)] transition-colors"
               >
                 No
               </button>
@@ -78,7 +78,7 @@ export function CustomProviderCard({
           ) : (
             <button
               onClick={() => setConfirmDelete(true)}
-              className="p-1.5 hover:bg-red-500/10 rounded-lg text-[var(--text)]/40 hover:text-red-400 transition-colors"
+              className="p-1.5 hover:bg-[var(--status-error)]/10 rounded-lg text-[var(--text-subtle)] hover:text-[var(--status-error)] transition-colors"
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -90,7 +90,7 @@ export function CustomProviderCard({
           {provider.available_models.map((model) => (
             <span
               key={model}
-              className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 text-[var(--text)]/60 font-mono"
+              className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--surface-hover)] text-[var(--text-muted)] font-mono"
             >
               {model}
             </span>
@@ -180,14 +180,14 @@ export function CustomProviderModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--text)]/15 rounded-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-[var(--text)]">
             {isEdit ? 'Edit Provider' : 'Add Custom Provider'}
           </h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[var(--text)]/60 text-sm"
+            className="p-2 hover:bg-[var(--surface-hover)] rounded-lg transition-colors text-[var(--text-muted)] text-sm"
           >
             Cancel
           </button>
@@ -203,7 +203,7 @@ export function CustomProviderModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 text-sm"
+              className="w-full px-4 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 text-sm"
               placeholder="My Ollama Server"
               required
             />
@@ -216,12 +216,12 @@ export function CustomProviderModal({
               type="text"
               value={slug}
               onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm disabled:opacity-50"
+              className="w-full px-4 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm disabled:opacity-50"
               placeholder="my-ollama"
               required
               disabled={isEdit}
             />
-            <p className="mt-1 text-xs text-[var(--text)]/40">
+            <p className="mt-1 text-xs text-[var(--text-subtle)]">
               Used as model prefix: <span className="font-mono">{slug || 'slug'}/model-name</span>
             </p>
           </div>
@@ -233,7 +233,7 @@ export function CustomProviderModal({
               type="url"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
+              className="w-full px-4 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
               placeholder="http://localhost:11434/v1"
               required
             />
@@ -245,7 +245,7 @@ export function CustomProviderModal({
             <select
               value={apiType}
               onChange={(e) => setApiType(e.target.value)}
-              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
+              className="w-full px-4 py-2 bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 [&>option]:bg-[var(--surface)] [&>option]:text-[var(--text)]"
             >
               <option value="openai">OpenAI Compatible</option>
               <option value="anthropic">Anthropic Compatible</option>
@@ -257,7 +257,7 @@ export function CustomProviderModal({
             <label className="block text-sm font-medium text-[var(--text)] mb-2">
               Available Models
             </label>
-            <p className="text-xs text-[var(--text)]/40 mb-3">
+            <p className="text-xs text-[var(--text-subtle)] mb-3">
               Add the model IDs available on this provider. These will appear in the model selector.
             </p>
 
@@ -266,13 +266,13 @@ export function CustomProviderModal({
                 {models.map((model) => (
                   <span
                     key={model}
-                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-white/5 border border-[var(--text)]/10 text-[var(--text)]/70 font-mono"
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text-muted)] font-mono"
                   >
                     {model}
                     <button
                       type="button"
                       onClick={() => removeModel(model)}
-                      className="p-0.5 hover:bg-red-500/20 rounded-full text-[var(--text)]/40 hover:text-red-400 transition-colors"
+                      className="p-0.5 hover:bg-[var(--status-error)]/20 rounded-full text-[var(--text-subtle)] hover:text-[var(--status-error)] transition-colors"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -292,29 +292,29 @@ export function CustomProviderModal({
                     addModel();
                   }
                 }}
-                className="flex-1 px-3 py-2 bg-white/5 border border-[var(--text)]/15 rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
+                className="flex-1 px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 font-mono text-sm"
                 placeholder="llama3.1:70b"
               />
               <button
                 type="button"
                 onClick={addModel}
                 disabled={!modelInput.trim()}
-                className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-[var(--text)]/70 text-sm transition-colors disabled:opacity-30"
+                className="px-3 py-2 bg-[var(--surface-hover)] hover:bg-[var(--surface-hover)] border border-[var(--border)] rounded-lg text-[var(--text-muted)] text-sm transition-colors disabled:opacity-30"
               >
                 Add
               </button>
             </div>
-            <p className="mt-1 text-xs text-[var(--text)]/30">
+            <p className="mt-1 text-xs text-[var(--text-subtle)]">
               Press Enter to add. Model IDs should match what the API expects.
             </p>
           </div>
 
           {/* Submit */}
-          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--text)]/10">
+          <div className="flex items-center gap-3 justify-end pt-4 border-t border-[var(--border)]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-[var(--text)]/80 text-sm transition-colors"
+              className="px-4 py-2 bg-[var(--surface-hover)] hover:bg-[var(--surface-hover)] rounded-lg text-[var(--text-muted)] text-sm transition-colors"
               disabled={loading}
             >
               Cancel

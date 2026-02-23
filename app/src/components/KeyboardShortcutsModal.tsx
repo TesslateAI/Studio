@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { MagnifyingGlass, X } from '@phosphor-icons/react';
 import { useTheme } from '../theme/ThemeContext';
-import { shortcutGroups, type ShortcutGroup } from '../lib/keyboard-registry';
+import { shortcutGroups, modKey, type ShortcutGroup } from '../lib/keyboard-registry';
 
 interface KeyboardShortcutsModalProps {
   open: boolean;
@@ -120,9 +120,9 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           </h2>
           <div className="flex items-center gap-2">
             <div
-              className={`p-2 rounded-lg ${isDark ? 'bg-white/10 text-white/60' : 'bg-black/5 text-black/60'}`}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg ${isDark ? 'bg-white/10 text-white/60' : 'bg-black/5 text-black/60'}`}
             >
-              <span className="font-mono text-sm">?</span>
+              <span className="font-mono text-sm">{modKey}+/</span>
             </div>
             <button
               onClick={onClose}
@@ -150,9 +150,10 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search shortcuts..."
               className={`
-                flex-1 bg-transparent outline-none focus-visible:outline-none text-sm
+                flex-1 bg-transparent text-sm
                 ${isDark ? 'text-white placeholder-white/40' : 'text-black placeholder-black/40'}
               `}
+              style={{ outline: 'none', boxShadow: 'none' }}
             />
             {search && (
               <button
@@ -222,6 +223,12 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
         >
           <span>
             Press{' '}
+            <kbd
+              className={`px-1.5 py-0.5 rounded font-mono ${isDark ? 'bg-white/10' : 'bg-black/10'}`}
+            >
+              {modKey}+/
+            </kbd>{' '}
+            or{' '}
             <kbd
               className={`px-1.5 py-0.5 rounded font-mono ${isDark ? 'bg-white/10' : 'bg-black/10'}`}
             >

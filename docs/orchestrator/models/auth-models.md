@@ -34,12 +34,22 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     slug: str                   # URL-safe identifier (unique)
 
     # Subscription & billing
-    subscription_tier: str      # free, pro, enterprise
+    subscription_tier: str      # free, basic, pro, ultra
     stripe_customer_id: str     # Stripe customer ID
     stripe_subscription_id: str # Active subscription
     total_spend: int            # Lifetime spend in cents
-    credits_balance: int        # Prepaid credits in cents
     deployed_projects_count: int # Deployed projects
+
+    # Multi-source credit system (replaces old credits_balance)
+    bundled_credits: int        # Monthly allowance, resets on billing date
+    purchased_credits: int      # Never expire
+    credits_reset_date: datetime # When bundled credits reset
+    signup_bonus_credits: int   # Expires after N days
+    signup_bonus_expires_at: datetime # When signup bonus expires
+    daily_credits: int          # Free tier daily allowance
+    daily_credits_reset_date: datetime # When daily credits reset
+    support_tier: str           # "community" | "email" | "priority"
+    # @property total_credits   # Computed sum: daily + bundled + signup_bonus + purchased
 
     # Creator payouts
     creator_stripe_account_id: str  # Stripe Connect account
@@ -50,13 +60,20 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
 
     # User preferences
     diagram_model: str          # Model for architecture diagrams
+    theme_preset: str           # Current theme ID (default: "default-dark")
+    chat_position: str          # Chat panel position: "left" | "center" | "right"
+    disabled_models: list       # Model IDs hidden from chat selector (JSON)
 
     # Public profile
-    avatar_url: str
-    bio: str
-    twitter_handle: str
-    github_username: str
-    website_url: str
+    avatar_url: str             # Profile picture URL or base64 data URI
+    bio: str                    # Short bio/description
+    twitter_handle: str         # Twitter username
+    github_username: str        # GitHub username
+    website_url: str            # Personal website URL
+
+    # Two-Factor Authentication
+    two_fa_enabled: bool        # Whether 2FA is enabled (default: False)
+    two_fa_method: str          # "email", "totp", etc.
 
     # Referral system
     referral_code: str          # Unique referral code
