@@ -19,6 +19,10 @@ resource "kubernetes_namespace" "tesslate" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [metadata[0].labels]
+  }
+
   depends_on = [module.eks]
 }
 
@@ -38,6 +42,10 @@ resource "kubernetes_service_account" "tesslate_backend" {
       "app.kubernetes.io/name"      = "tesslate-backend"
       "app.kubernetes.io/component" = "backend"
     }
+  }
+
+  lifecycle {
+    ignore_changes = [metadata[0].labels]
   }
 }
 
@@ -446,4 +454,30 @@ resource "aws_db_instance" "tesslate" {
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-postgres"
   })
+}
+
+# -----------------------------------------------------------------------------
+# Scale down K8s-managed PostgreSQL when using RDS
+# When create_rds=true, postgres deployment is scaled to 0 (RDS handles the database)
+# When create_rds=false, this resource doesn't exist and postgres runs at default replicas
+# -----------------------------------------------------------------------------
+resource "kubectl_manifest" "postgres_scale_down" {
+  count = var.create_rds ? 1 : 0
+
+  server_side_apply = true
+  force_conflicts   = true
+
+  yaml_body = yamlencode({
+    apiVersion = "apps/v1"
+    kind       = "Deployment"
+    metadata = {
+      name      = "postgres"
+      namespace = "tesslate"
+    }
+    spec = {
+      replicas = 0
+    }
+  })
+
+  depends_on = [kubernetes_namespace.tesslate]
 }

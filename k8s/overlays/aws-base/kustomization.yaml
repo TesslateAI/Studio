@@ -12,4 +12,3 @@ resources:
 patches:
   - path: frontend-patch.yaml
   - path: backend-patch.yaml
-  - path: postgres-disable-patch.yaml
