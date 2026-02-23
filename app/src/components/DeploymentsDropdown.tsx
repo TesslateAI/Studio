@@ -56,6 +56,11 @@ export function DeploymentsDropdown({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Check if there's an active deployment in progress
+  const hasActiveDeployment = deployments.some(
+    d => d.status === 'building' || d.status === 'deploying' || d.status === 'pending'
+  );
+
   useEffect(() => {
     if (isOpen) {
       loadDeployments();
@@ -221,13 +226,30 @@ export function DeploymentsDropdown({
 
           <button
             onClick={() => {
-              onClose();
-              onOpenDeployModal();
+              if (!hasActiveDeployment) {
+                onClose();
+                onOpenDeployModal();
+              }
             }}
-            className="w-full flex items-center justify-center gap-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-4 py-2.5 rounded-lg font-semibold transition-all text-sm"
+            disabled={hasActiveDeployment}
+            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all text-sm ${
+              hasActiveDeployment
+                ? 'bg-gray-600 cursor-not-allowed text-gray-400'
+                : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white'
+            }`}
+            title={hasActiveDeployment ? 'A deployment is already in progress' : undefined}
           >
-            <Plus size={16} weight="bold" />
-            New Deployment
+            {hasActiveDeployment ? (
+              <>
+                <Spinner size={16} className="animate-spin" />
+                Deployment in Progress
+              </>
+            ) : (
+              <>
+                <Plus size={16} weight="bold" />
+                New Deployment
+              </>
+            )}
           </button>
         </div>
 

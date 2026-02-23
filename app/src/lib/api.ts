@@ -1789,6 +1789,25 @@ export const deploymentsApi = {
     return response.data;
   },
 
+  // Deploy a single container to its assigned provider
+  deployContainer: async (projectSlug: string, containerId: string): Promise<{
+    id: string;
+    project_id: string;
+    user_id: string;
+    provider: string;
+    deployment_id: string | null;
+    deployment_url: string | null;
+    status: string;
+    logs: string[] | null;
+    error: string | null;
+    created_at: string;
+    updated_at: string;
+    completed_at: string | null;
+  }> => {
+    const response = await api.post(`/api/deployments/${projectSlug}/containers/${containerId}/deploy`);
+    return response.data;
+  },
+
   // List project deployments
   listProjectDeployments: async (
     projectSlug: string,

@@ -435,6 +435,32 @@ kubectl logs -f deployment/tesslate-backend -n tesslate
 kubectl logs -f deployment/tesslate-backend -n tesslate
 ```
 
+## Common Gotchas
+
+### deployments.py - Build Trigger Parameters
+
+When calling `DeploymentBuilder.trigger_build()`, ensure parameter names match exactly:
+
+```python
+# CORRECT
+success, build_output = await builder.trigger_build(
+    user_id=str(current_user.id),
+    project_id=str(project.id),
+    project_slug=project.slug,
+    framework=framework,
+    custom_build_command=None,  # NOT build_command
+    container_name=container.container_name,
+    volume_name=project.slug    # NOT working_directory
+)
+
+# WRONG - will cause unexpected keyword argument error
+success, build_output = await builder.trigger_build(
+    ...
+    build_command=None,         # WRONG parameter name
+    working_directory=path      # WRONG parameter name
+)
+```
+
 ## Examples
 
 See individual router documentation files for detailed examples:

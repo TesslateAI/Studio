@@ -294,6 +294,67 @@ const handleClose = () => {
 };
 ```
 
+## OAuth Popup Pattern (ProviderConnectModal)
+
+For OAuth flows without page redirect:
+
+```typescript
+// Use refs for interval management to prevent race conditions
+const oauthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+const oauthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+// Cleanup helper
+const clearOAuthPolling = useCallback(() => {
+  if (oauthCheckIntervalRef.current) {
+    clearInterval(oauthCheckIntervalRef.current);
+    oauthCheckIntervalRef.current = null;
+  }
+  if (oauthTimeoutRef.current) {
+    clearTimeout(oauthTimeoutRef.current);
+    oauthTimeoutRef.current = null;
+  }
+}, []);
+
+// Cleanup on unmount
+useEffect(() => {
+  return () => clearOAuthPolling();
+}, [clearOAuthPolling]);
+
+// Open OAuth popup
+const handleOAuthConnect = async (provider: Provider) => {
+  const result = await api.startOAuth(provider.name);
+
+  // Open popup centered on screen
+  const popup = window.open(
+    result.auth_url,
+    `Connect ${provider.display_name}`,
+    `width=600,height=700,left=${left},top=${top},popup=1`
+  );
+
+  // Poll for completion
+  oauthCheckIntervalRef.current = setInterval(() => {
+    if (popup?.closed) {
+      clearOAuthPolling();
+      checkForNewCredential(provider.name);
+    } else {
+      checkForNewCredential(provider.name);
+    }
+  }, 2000);
+
+  // Timeout after 5 minutes
+  oauthTimeoutRef.current = setTimeout(() => {
+    clearOAuthPolling();
+    toast.error('OAuth authorization timed out');
+  }, 5 * 60 * 1000);
+};
+```
+
+Key points:
+- Use `useRef` instead of `useState` for intervals to avoid race conditions
+- Always cleanup on unmount and completion
+- Add timeout for abandoned OAuth flows
+- Poll backend to check if credentials were created
+
 ---
 
 **Remember**: Modals should be lightweight and focused. For complex flows, consider using separate pages instead.

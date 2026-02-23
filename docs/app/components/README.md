@@ -473,7 +473,8 @@ app/src/components/
 │   ├── RepoImportModal/         # Multi-provider import
 │   ├── ConfirmDialog.tsx        # Generic confirmation
 │   ├── FeedbackModal.tsx        # User feedback
-│   └── CreateFeedbackModal.tsx  # Bug reports
+│   ├── CreateFeedbackModal.tsx  # Bug reports
+│   └── ProviderConnectModal.tsx # Inline OAuth for deployment providers
 └── edges/
     ├── DatabaseEdge.tsx         # Green edge for DB
     ├── HttpApiEdge.tsx          # Orange edge for REST

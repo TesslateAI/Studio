@@ -702,9 +702,9 @@ async def deploy_all_containers(
                     project_id=str(project.id),
                     project_slug=project.slug,
                     framework=framework,
-                    build_command=None,
+                    custom_build_command=None,
                     container_name=container.container_name,
-                    working_directory=container.directory
+                    volume_name=project.slug
                 )
 
                 if not success:
@@ -797,6 +797,263 @@ async def deploy_all_containers(
         skipped=skipped,
         results=results
     )
+
+
+@router.post("/{project_slug}/containers/{container_id}/deploy", response_model=DeploymentResponse)
+async def deploy_single_container_endpoint(
+    project_slug: str,
+    container_id: UUID,
+    current_user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Deploy a single container to its assigned deployment provider.
+
+    This endpoint allows deploying an individual container that has a deployment
+    target assigned (vercel, netlify, or cloudflare).
+
+    Args:
+        project_slug: Project slug
+        container_id: Container UUID to deploy
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        Deployment information
+
+    Raises:
+        HTTPException: If project/container not found, no deployment target, or no credentials
+    """
+    from sqlalchemy.orm import selectinload
+
+    # 1. Verify project ownership
+    result = await db.execute(
+        select(Project).where(
+            and_(
+                Project.slug == project_slug,
+                Project.owner_id == current_user.id,
+            )
+        )
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    # 2. Get the container with its base loaded
+    result = await db.execute(
+        select(Container)
+        .where(
+            and_(
+                Container.id == container_id,
+                Container.project_id == project.id,
+            )
+        )
+        .options(selectinload(Container.base))
+    )
+    container = result.scalar_one_or_none()
+
+    if not container:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Container not found",
+        )
+
+    # 3. Check if container has a deployment target
+    if not container.deployment_provider:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Container has no deployment target assigned. Please assign a deployment provider first.",
+        )
+
+    provider_name = container.deployment_provider
+
+    # 4. Check container type - only base containers can be deployed
+    if container.container_type != "base":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Service containers (databases, caches) cannot be deployed to external providers",
+        )
+
+    # 5. Get credentials for the provider
+    encryption_service = get_deployment_encryption_service()
+    try:
+        credential = await get_credential_for_deployment(
+            db, current_user.id, project.id, provider_name
+        )
+        decrypted_token = encryption_service.decrypt(credential.access_token_encrypted)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No credentials found for {provider_name}. Please connect your {provider_name} account first.",
+        )
+
+    # 6. Create deployment record
+    deployment = Deployment(
+        project_id=project.id,
+        user_id=current_user.id,
+        provider=provider_name,
+        status="building",
+        logs=[f"Deploying {container.name} to {provider_name}..."],
+        metadata={"container_id": str(container.id), "container_name": container.name},
+    )
+    db.add(deployment)
+    await db.commit()
+    await db.refresh(deployment)
+
+    logger.info(f"Created deployment {deployment.id} for container {container.name} to {provider_name}")
+
+    try:
+        # 7. Get builder and determine framework
+        builder = get_deployment_builder()
+
+        framework = "vite"  # Default
+        if container.base and container.base.tech_stack:
+            tech_stack = container.base.tech_stack
+            if isinstance(tech_stack, list) and len(tech_stack) > 0:
+                framework_map = {
+                    "Next.js": "nextjs",
+                    "React": "vite",
+                    "Vue": "vite",
+                    "Svelte": "vite",
+                    "Astro": "astro",
+                    "FastAPI": "static",  # For backends, we just serve static files
+                }
+                framework = framework_map.get(tech_stack[0], "vite")
+
+        # 8. Determine deployment mode
+        default_modes = {
+            "vercel": "source",
+            "netlify": "pre-built",
+            "cloudflare": "pre-built",
+        }
+        deployment_mode = default_modes.get(provider_name, "pre-built")
+
+        # 9. Build if needed
+        if deployment_mode == "pre-built":
+            deployment.logs.append(f"Building {container.name} locally...")
+            await db.commit()
+
+            success, build_output = await builder.trigger_build(
+                user_id=str(current_user.id),
+                project_id=str(project.id),
+                project_slug=project.slug,
+                framework=framework,
+                custom_build_command=None,
+                container_name=container.container_name,
+                volume_name=project.slug,
+            )
+
+            if not success:
+                deployment.status = "failed"
+                deployment.error = "Build failed"
+                deployment.logs.append(
+                    f"Build failed: {build_output[:500] if build_output else 'Unknown error'}"
+                )
+                deployment.completed_at = datetime.utcnow()
+                await db.commit()
+                await db.refresh(deployment)
+
+                return DeploymentResponse(
+                    id=deployment.id,
+                    project_id=deployment.project_id,
+                    user_id=deployment.user_id,
+                    provider=deployment.provider,
+                    deployment_id=deployment.deployment_id,
+                    deployment_url=deployment.deployment_url,
+                    status=deployment.status,
+                    logs=deployment.logs,
+                    error=deployment.error,
+                    created_at=deployment.created_at.isoformat(),
+                    updated_at=deployment.updated_at.isoformat(),
+                    completed_at=deployment.completed_at.isoformat()
+                    if deployment.completed_at
+                    else None,
+                )
+
+        # 10. Deploy to provider
+        deployment.logs.append(f"Deploying to {provider_name}...")
+        deployment.status = "deploying"
+        await db.commit()
+
+        provider_credentials = prepare_provider_credentials(
+            provider_name, decrypted_token, credential.metadata
+        )
+
+        config = DeploymentConfig(
+            provider=provider_name,
+            project_name=f"{project.slug}-{container.name}",
+            framework=framework,
+            use_source_deployment=(deployment_mode == "source"),
+        )
+
+        manager = DeploymentManager()
+        deploy_result = await manager.deploy(
+            provider=provider_name,
+            config=config,
+            credentials=provider_credentials,
+            project_path=builder._get_project_path(str(current_user.id), str(project.id)),
+            container_name=container.container_name,
+            working_directory=container.directory,
+        )
+
+        # 11. Update deployment record
+        deployment.status = "success" if deploy_result.success else "failed"
+        deployment.deployment_id = deploy_result.deployment_id
+        deployment.deployment_url = deploy_result.url
+        deployment.error = deploy_result.error
+        deployment.logs.extend(deploy_result.logs or [])
+        deployment.completed_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(deployment)
+
+        logger.info(f"Deployment {deployment.id} completed with status: {deployment.status}")
+
+        return DeploymentResponse(
+            id=deployment.id,
+            project_id=deployment.project_id,
+            user_id=deployment.user_id,
+            provider=deployment.provider,
+            deployment_id=deployment.deployment_id,
+            deployment_url=deployment.deployment_url,
+            status=deployment.status,
+            logs=deployment.logs,
+            error=deployment.error,
+            created_at=deployment.created_at.isoformat(),
+            updated_at=deployment.updated_at.isoformat(),
+            completed_at=deployment.completed_at.isoformat()
+            if deployment.completed_at
+            else None,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to deploy container {container.name}: {e}", exc_info=True)
+        deployment.status = "failed"
+        deployment.error = str(e)
+        deployment.logs.append(f"Error: {str(e)}")
+        deployment.completed_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(deployment)
+
+        return DeploymentResponse(
+            id=deployment.id,
+            project_id=deployment.project_id,
+            user_id=deployment.user_id,
+            provider=deployment.provider,
+            deployment_id=deployment.deployment_id,
+            deployment_url=deployment.deployment_url,
+            status=deployment.status,
+            logs=deployment.logs,
+            error=deployment.error,
+            created_at=deployment.created_at.isoformat(),
+            updated_at=deployment.updated_at.isoformat(),
+            completed_at=deployment.completed_at.isoformat()
+            if deployment.completed_at
+            else None,
+        )
 
 
 @router.get("/{project_slug}/deployments", response_model=list[DeploymentResponse])

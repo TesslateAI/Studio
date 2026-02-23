@@ -13,15 +13,18 @@ import {
   Rocket,
   Link,
   LinkBreak,
+  CloudArrowUp,
+  Spinner,
   Gear,
 } from '@phosphor-icons/react';
-import api, { projectsApi } from '../lib/api';
+import api, { projectsApi, deploymentsApi } from '../lib/api';
 import { toast } from 'react-hot-toast';
 import { connectionEvents } from '../utils/connectionEvents';
 import {
   ExternalServiceCredentialModal,
   type ExternalServiceItem,
 } from './ExternalServiceCredentialModal';
+import { ProviderConnectModal } from './modals/ProviderConnectModal';
 
 interface SavedEnvVar {
   key: string;
@@ -81,6 +84,11 @@ export const ContainerPropertiesPanel = ({
   );
   const [hasDeploymentCredentials, setHasDeploymentCredentials] = useState<Record<string, boolean>>({});
   const [isLoadingCredentials, setIsLoadingCredentials] = useState(false);
+  const [showProviderConnectModal, setShowProviderConnectModal] = useState(false);
+  const [connectModalDefaultProvider, setConnectModalDefaultProvider] = useState<'vercel' | 'netlify' | 'cloudflare' | undefined>(undefined);
+  const [pendingTargetChange, setPendingTargetChange] = useState<'vercel' | 'netlify' | 'cloudflare' | null>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
 
   const isExternalService = deploymentMode === 'external' && !!serviceSlug;
 
@@ -125,7 +133,7 @@ export const ContainerPropertiesPanel = ({
   }, [containerId, fetchContainerDetailsCallback]);
 
   // Fetch deployment credentials status
-  const fetchDeploymentCredentials = async () => {
+  const fetchDeploymentCredentials = useCallback(async () => {
     try {
       setIsLoadingCredentials(true);
       const response = await api.get('/api/deployments/credentials');
@@ -140,9 +148,21 @@ export const ContainerPropertiesPanel = ({
     } finally {
       setIsLoadingCredentials(false);
     }
+  }, []);
+
+  // Handle requesting to assign a deployment target (with confirmation if needed)
+  const handleRequestAssignTarget = (provider: 'vercel' | 'netlify' | 'cloudflare') => {
+    // If there's already a deployment target, show confirmation
+    if (deploymentProvider && deploymentProvider !== provider) {
+      setPendingTargetChange(provider);
+      setShowConfirmDialog(true);
+    } else {
+      // No existing target, assign directly
+      handleAssignDeploymentTarget(provider);
+    }
   };
 
-  // Handle assigning a deployment target
+  // Handle the actual assignment
   const handleAssignDeploymentTarget = async (provider: 'vercel' | 'netlify' | 'cloudflare') => {
     try {
       await projectsApi.assignDeploymentTarget(projectSlug, containerId, provider);
@@ -154,6 +174,33 @@ export const ContainerPropertiesPanel = ({
     }
   };
 
+  // Confirm target change
+  const handleConfirmTargetChange = async () => {
+    if (pendingTargetChange) {
+      await handleAssignDeploymentTarget(pendingTargetChange);
+    }
+    setShowConfirmDialog(false);
+    setPendingTargetChange(null);
+  };
+
+  // Cancel target change
+  const handleCancelTargetChange = () => {
+    setShowConfirmDialog(false);
+    setPendingTargetChange(null);
+  };
+
+  // Handle opening the connect modal
+  const handleOpenConnectModal = (provider?: 'vercel' | 'netlify' | 'cloudflare') => {
+    setConnectModalDefaultProvider(provider);
+    setShowProviderConnectModal(true);
+  };
+
+  // Handle provider connected - refresh credentials and auto-assign if this was for the current deployment provider
+  const handleProviderConnected = async (provider: string) => {
+    await fetchDeploymentCredentials();
+    // If this provider is the current deployment target, the status will now show as connected
+  };
+
   // Handle removing a deployment target
   const handleRemoveDeploymentTarget = async () => {
     try {
@@ -163,6 +210,35 @@ export const ContainerPropertiesPanel = ({
     } catch (error) {
       console.error('Failed to remove deployment target:', error);
       toast.error('Failed to remove deployment target');
+    }
+  };
+
+  // Handle deploying a single container
+  const handleDeployContainer = async () => {
+    if (!deploymentProvider || !hasDeploymentCredentials[deploymentProvider]) {
+      toast.error('Please connect your deployment provider first');
+      return;
+    }
+
+    setIsDeploying(true);
+    try {
+      const result = await deploymentsApi.deployContainer(projectSlug, containerId);
+
+      if (result.status === 'success') {
+        toast.success(`Deployed to ${deploymentProvider}!`);
+        if (result.deployment_url) {
+          // Open deployment URL in new tab
+          window.open(result.deployment_url, '_blank', 'noopener,noreferrer');
+        }
+      } else {
+        toast.error(result.error || `Deployment failed: ${result.status}`);
+      }
+    } catch (error) {
+      console.error('Failed to deploy container:', error);
+      const err = error as { response?: { data?: { detail?: string } } };
+      toast.error(err.response?.data?.detail || 'Failed to deploy container');
+    } finally {
+      setIsDeploying(false);
     }
   };
 
@@ -547,14 +623,32 @@ export const ContainerPropertiesPanel = ({
                   </button>
                 </div>
 
-                {!hasDeploymentCredentials[deploymentProvider] && (
-                  <a
-                    href="/settings?tab=deployments"
-                    className="flex items-center justify-center gap-1.5 px-2 py-1.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-xs font-medium transition-colors"
+                {!hasDeploymentCredentials[deploymentProvider] ? (
+                  <button
+                    onClick={() => handleOpenConnectModal(deploymentProvider)}
+                    className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-xs font-medium transition-colors"
                   >
-                    <Gear size={12} />
+                    <Link size={12} />
                     Connect {DEPLOYMENT_PROVIDERS[deploymentProvider].name} Account
-                  </a>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleDeployContainer}
+                    disabled={isDeploying}
+                    className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-xs font-medium transition-colors"
+                  >
+                    {isDeploying ? (
+                      <>
+                        <Spinner size={12} className="animate-spin" />
+                        Deploying...
+                      </>
+                    ) : (
+                      <>
+                        <CloudArrowUp size={12} weight="bold" />
+                        Deploy to {DEPLOYMENT_PROVIDERS[deploymentProvider].name}
+                      </>
+                    )}
+                  </button>
                 )}
               </div>
             ) : (
@@ -566,7 +660,7 @@ export const ContainerPropertiesPanel = ({
                 {Object.entries(DEPLOYMENT_PROVIDERS).map(([key, provider]) => (
                   <button
                     key={key}
-                    onClick={() => handleAssignDeploymentTarget(key as 'vercel' | 'netlify' | 'cloudflare')}
+                    onClick={() => handleRequestAssignTarget(key as 'vercel' | 'netlify' | 'cloudflare')}
                     className="w-full flex items-center gap-2 p-2 rounded-lg border border-[var(--border-color)] hover:border-[var(--primary)] hover:bg-[var(--bg)] transition-colors"
                   >
                     <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${provider.color}`}>
@@ -732,6 +826,50 @@ export const ContainerPropertiesPanel = ({
           mode="edit"
         />
       )}
+
+      {/* Confirmation Dialog for Changing Deployment Target */}
+      {showConfirmDialog && pendingTargetChange && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[55]"
+          onClick={handleCancelTargetChange}
+        >
+          <div
+            className="bg-[var(--surface)] rounded-xl w-full max-w-sm shadow-2xl border border-white/10 p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-[var(--text)] mb-2">
+              Change Deployment Target?
+            </h3>
+            <p className="text-xs text-[var(--text)]/60 mb-4">
+              This container is currently assigned to <strong className="text-[var(--text)]">{deploymentProvider && DEPLOYMENT_PROVIDERS[deploymentProvider].name}</strong>.
+              Do you want to change it to <strong className="text-[var(--text)]">{DEPLOYMENT_PROVIDERS[pendingTargetChange].name}</strong>?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCancelTargetChange}
+                className="flex-1 px-3 py-2 bg-white/5 border border-white/10 text-[var(--text)] rounded-lg text-xs font-medium hover:bg-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmTargetChange}
+                className="flex-1 px-3 py-2 bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white rounded-lg text-xs font-medium transition-colors"
+              >
+                Change Target
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Provider Connect Modal */}
+      <ProviderConnectModal
+        isOpen={showProviderConnectModal}
+        onClose={() => setShowProviderConnectModal(false)}
+        onConnected={handleProviderConnected}
+        defaultProvider={connectModalDefaultProvider}
+        connectedProviders={Object.keys(hasDeploymentCredentials).filter(k => hasDeploymentCredentials[k])}
+      />
     </>
   );
 };

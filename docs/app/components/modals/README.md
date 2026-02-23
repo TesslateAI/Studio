@@ -216,6 +216,50 @@ interface ConfirmDialogProps {
 - Expected vs actual behavior
 - Browser/OS info auto-collected
 
+---
+
+### ProviderConnectModal.tsx
+
+**Inline OAuth Connection**: Modal for connecting deployment provider accounts (Vercel, Netlify, Cloudflare) without leaving the current page.
+
+**Props**:
+```typescript
+interface ProviderConnectModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConnected: (provider: string) => void;
+  defaultProvider?: 'vercel' | 'netlify' | 'cloudflare';
+  connectedProviders?: string[];
+}
+```
+
+**Features**:
+- Provider selection with connection status
+- OAuth flow via popup window (no redirect)
+- Polling for OAuth completion
+- API token manual entry for providers that support it
+- Automatic cleanup on unmount
+- 5-minute timeout for OAuth flows
+
+**Usage**:
+```typescript
+<ProviderConnectModal
+  isOpen={showProviderConnectModal}
+  onClose={() => setShowProviderConnectModal(false)}
+  onConnected={handleProviderConnected}
+  defaultProvider="vercel"
+  connectedProviders={['netlify']}
+/>
+```
+
+**Key Implementation Details**:
+- Uses `useRef` for interval/timeout management to prevent race conditions
+- Polls backend every 2 seconds to check for new credentials
+- Shows loading state while waiting for OAuth completion
+- Supports both OAuth and API token authentication types
+
+---
+
 ## Common Modal Pattern
 
 All modals follow this structure:

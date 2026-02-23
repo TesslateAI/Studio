@@ -50,6 +50,7 @@ export function DeploymentModal({
   const [customDomain, setCustomDomain] = useState('');
   const [isDeploying, setIsDeploying] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [hasActiveDeployment, setHasActiveDeployment] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -74,12 +75,20 @@ export function DeploymentModal({
 
   const loadData = async () => {
     try {
-      const [providersData, credentialsData] = await Promise.all([
+      const [providersData, credentialsData, deploymentsData] = await Promise.all([
         deploymentCredentialsApi.getProviders(),
         deploymentCredentialsApi.list(),
+        deploymentsApi.listProjectDeployments(projectSlug, { limit: 10, offset: 0 }),
       ]);
       setProviders(providersData.providers || []);
       setCredentials(credentialsData.credentials || []);
+
+      // Check if there's an active deployment in progress
+      const deployments = Array.isArray(deploymentsData) ? deploymentsData : [];
+      const activeDeployment = deployments.find(
+        (d: { status: string }) => d.status === 'building' || d.status === 'deploying' || d.status === 'pending'
+      );
+      setHasActiveDeployment(!!activeDeployment);
 
       // Auto-select provider: prefer defaultProvider, then first connected provider
       if (defaultProvider && credentialsData.credentials?.some((c: DeploymentCredential) => c.provider === defaultProvider)) {
@@ -510,49 +519,64 @@ export function DeploymentModal({
 
         {/* Footer */}
         {hasConnectedProviders && (
-          <div className="p-6 border-t border-white/10 flex justify-end gap-3">
-            <button
-              onClick={onClose}
-              disabled={isDeploying}
-              className="px-6 py-3 bg-white/5 border border-white/10 text-[var(--text)] rounded-lg font-semibold hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleDeploy}
-              disabled={isDeploying || !selectedProvider}
-              className="px-6 py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all flex items-center gap-2"
-            >
-              {isDeploying ? (
-                <>
-                  <svg
-                    className="w-4 h-4 animate-spin"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  Deploying...
-                </>
-              ) : (
-                <>
-                  <Rocket size={18} weight="bold" />
-                  Deploy Project
-                </>
-              )}
-            </button>
+          <div className="p-6 border-t border-white/10">
+            {/* Active Deployment Warning */}
+            {hasActiveDeployment && (
+              <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-start gap-2">
+                <Warning size={18} className="text-yellow-400 mt-0.5 flex-shrink-0" />
+                <div className="text-xs text-yellow-400">
+                  <p className="font-semibold">Deployment in progress</p>
+                  <p className="text-yellow-400/80">
+                    Wait for the current deployment to complete before starting a new one.
+                  </p>
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={onClose}
+                disabled={isDeploying}
+                className="px-6 py-3 bg-white/5 border border-white/10 text-[var(--text)] rounded-lg font-semibold hover:bg-white/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeploy}
+                disabled={isDeploying || !selectedProvider || hasActiveDeployment}
+                className="px-6 py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all flex items-center gap-2"
+                title={hasActiveDeployment ? 'A deployment is already in progress' : undefined}
+              >
+                {isDeploying ? (
+                  <>
+                    <svg
+                      className="w-4 h-4 animate-spin"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Deploying...
+                  </>
+                ) : (
+                  <>
+                    <Rocket size={18} weight="bold" />
+                    Deploy Project
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
       </div>

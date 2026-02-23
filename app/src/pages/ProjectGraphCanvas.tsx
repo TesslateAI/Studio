@@ -138,6 +138,9 @@ const ProjectGraphCanvasInner = () => {
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
 
+  // Deploy All state to prevent double-clicks
+  const [isDeployingAll, setIsDeployingAll] = useState(false);
+
   // External service credential modal state
   const [externalServiceModal, setExternalServiceModal] = useState<{
     isOpen: boolean;
@@ -686,6 +689,11 @@ const ProjectGraphCanvasInner = () => {
                   : node
               )
             );
+
+            // Also update selectedContainer if this is the selected container
+            if (selectedContainer && selectedContainer.id === targetNode.id) {
+              setSelectedContainer({ ...selectedContainer, deploymentProvider: provider });
+            }
 
             toast.success(`${item.name} assigned to ${targetNode.data.name}`);
           } catch (error: unknown) {
@@ -1276,8 +1284,9 @@ const ProjectGraphCanvasInner = () => {
   }, [nodes]);
 
   const handleDeployAll = async () => {
-    if (!slug || deployableCount === 0) return;
+    if (!slug || deployableCount === 0 || isDeployingAll) return;
 
+    setIsDeployingAll(true);
     try {
       toast.loading(`Deploying ${deployableCount} container(s)...`, { id: 'deploy-all' });
       const result = await deploymentsApi.deployAll(slug);
@@ -1301,6 +1310,8 @@ const ProjectGraphCanvasInner = () => {
     } catch (error) {
       console.error('Failed to deploy containers:', error);
       toast.error('Deployment failed', { id: 'deploy-all' });
+    } finally {
+      setIsDeployingAll(false);
     }
   };
 
@@ -1729,14 +1740,32 @@ const ProjectGraphCanvasInner = () => {
             {/* Deploy All Button */}
             <button
               onClick={handleDeployAll}
-              disabled={deployableCount === 0}
+              disabled={deployableCount === 0 || isDeployingAll}
               className="flex items-center gap-2 px-3 md:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              title={deployableCount > 0 ? `Deploy ${deployableCount} container(s) with targets` : 'No containers have deployment targets assigned'}
+              title={
+                isDeployingAll
+                  ? 'Deployment in progress...'
+                  : deployableCount > 0
+                    ? `Deploy ${deployableCount} container(s) with targets`
+                    : 'No containers have deployment targets assigned'
+              }
             >
-              <Rocket size={16} weight="fill" />
-              <span className="hidden md:inline">Deploy All</span>
-              {deployableCount > 0 && (
-                <span className="bg-white/20 px-1.5 py-0.5 rounded text-xs">{deployableCount}</span>
+              {isDeployingAll ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span className="hidden md:inline">Deploying...</span>
+                </>
+              ) : (
+                <>
+                  <Rocket size={16} weight="fill" />
+                  <span className="hidden md:inline">Deploy All</span>
+                  {deployableCount > 0 && (
+                    <span className="bg-white/20 px-1.5 py-0.5 rounded text-xs">{deployableCount}</span>
+                  )}
+                </>
               )}
             </button>
           </div>
