@@ -382,7 +382,7 @@ class DeploymentTarget(Base):
     deployments = relationship(
         "Deployment",
         back_populates="deployment_target",
-        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 

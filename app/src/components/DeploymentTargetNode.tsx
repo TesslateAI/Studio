@@ -211,6 +211,7 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
           {/* Delete button */}
           {data.onDelete && (
             <button
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 data.onDelete?.(id);

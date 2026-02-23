@@ -435,10 +435,10 @@ const ProjectGraphCanvasInner = () => {
             url: d.url,
             deployedAt: d.deployed_at,
           })),
-          onDeploy: () => handleDeployFromTarget(target.id),
-          onConnect: () => handleConnectDeploymentTarget(target.id),
-          onDelete: () => handleDeleteDeploymentTarget(target.id),
-          onRollback: (deploymentId: string) => handleRollbackDeployment(target.id, deploymentId),
+          onDeploy: handleDeployFromTarget,
+          onConnect: handleConnectDeploymentTarget,
+          onDelete: handleDeleteDeploymentTarget,
+          onRollback: handleRollbackDeployment,
         },
       }));
 
@@ -902,10 +902,10 @@ const ProjectGraphCanvasInner = () => {
             isConnected: false,
             connectedContainers: [],
             deploymentHistory: [],
-            onDeploy: () => handleDeployFromTarget(tempId),
-            onConnect: () => handleConnectDeploymentTarget(tempId),
-            onDelete: () => handleDeleteDeploymentTarget(tempId),
-            onRollback: (deploymentId: string) => handleRollbackDeployment(tempId, deploymentId),
+            onDeploy: handleDeployFromTarget,
+            onConnect: handleConnectDeploymentTarget,
+            onDelete: handleDeleteDeploymentTarget,
+            onRollback: handleRollbackDeployment,
           },
         };
 
@@ -931,10 +931,10 @@ const ProjectGraphCanvasInner = () => {
                     data: {
                       ...node.data,
                       isConnected: newTarget.is_connected,
-                      onDeploy: () => handleDeployFromTarget(newTarget.id),
-                      onConnect: () => handleConnectDeploymentTarget(newTarget.id),
-                      onDelete: () => handleDeleteDeploymentTarget(newTarget.id),
-                      onRollback: (deploymentId: string) => handleRollbackDeployment(newTarget.id, deploymentId),
+                      onDeploy: handleDeployFromTarget,
+                      onConnect: handleConnectDeploymentTarget,
+                      onDelete: handleDeleteDeploymentTarget,
+                      onRollback: handleRollbackDeployment,
                     },
                   }
                 : node
