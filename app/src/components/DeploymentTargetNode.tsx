@@ -33,7 +33,7 @@ interface ConnectedContainer {
   name: string;
   container_type?: string;
   framework?: string;
-  status: string;
+  status?: string;
 }
 
 // Deployment history entry
@@ -54,7 +54,7 @@ interface DeploymentTargetNodeData extends Record<string, unknown> {
   environment: 'production' | 'staging' | 'preview';
   name?: string;
   isConnected: boolean;
-  providerInfo: ProviderInfo;
+  providerInfo?: ProviderInfo;
   connectedContainers: ConnectedContainer[];
   deploymentHistory: DeploymentHistoryEntry[];
   onDeploy?: (targetId: string) => void;

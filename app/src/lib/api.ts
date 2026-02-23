@@ -1720,10 +1720,6 @@ export const deploymentCredentialsApi = {
 
     // Make authenticated API call to get OAuth URL
     const response = await api.get(`/api/deployment-oauth/${provider}/authorize${query}`);
-    const { auth_url } = response.data;
-
-    // Redirect to the OAuth provider
-    window.location.href = auth_url;
     return response.data;
   },
 
@@ -1901,7 +1897,7 @@ export interface DeploymentTargetConnectedContainer {
   name: string;
   container_type?: string;
   framework?: string;
-  status: string;
+  status?: string;
 }
 
 export interface DeploymentTargetDeploymentHistory {

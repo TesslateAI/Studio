@@ -8,7 +8,6 @@ to for external deployment (Vercel, Netlify, Cloudflare, DigitalOcean K8s, etc.)
 
 import logging
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -52,7 +51,7 @@ class DeploymentTargetCreate(BaseModel):
         ..., description="Deployment provider: vercel, netlify, cloudflare, digitalocean, railway, fly"
     )
     environment: str = Field(default="production", description="Environment: production, staging, preview")
-    name: Optional[str] = Field(None, description="Optional custom display name")
+    name: str | None = Field(None, description="Optional custom display name")
     position_x: float = Field(default=0, description="X position on canvas")
     position_y: float = Field(default=0, description="Y position on canvas")
 
@@ -60,10 +59,10 @@ class DeploymentTargetCreate(BaseModel):
 class DeploymentTargetUpdate(BaseModel):
     """Request to update a deployment target node."""
 
-    environment: Optional[str] = Field(None, description="Environment: production, staging, preview")
-    name: Optional[str] = Field(None, description="Optional custom display name")
-    position_x: Optional[float] = Field(None, description="X position on canvas")
-    position_y: Optional[float] = Field(None, description="Y position on canvas")
+    environment: str | None = Field(None, description="Environment: production, staging, preview")
+    name: str | None = Field(None, description="Optional custom display name")
+    position_x: float | None = Field(None, description="X position on canvas")
+    position_y: float | None = Field(None, description="Y position on canvas")
 
 
 class ContainerSummary(BaseModel):
@@ -71,8 +70,8 @@ class ContainerSummary(BaseModel):
 
     id: UUID
     name: str
-    container_type: Optional[str] = None
-    framework: Optional[str] = None
+    container_type: str | None = None
+    framework: str | None = None
     status: str
 
 
@@ -80,13 +79,13 @@ class DeploymentSummary(BaseModel):
     """Summary of a deployment for history."""
 
     id: UUID
-    version: Optional[str] = None
+    version: str | None = None
     status: str
-    deployment_url: Optional[str] = None
-    container_id: Optional[UUID] = None
-    container_name: Optional[str] = None
+    deployment_url: str | None = None
+    container_id: UUID | None = None
+    container_name: str | None = None
     created_at: str
-    completed_at: Optional[str] = None
+    completed_at: str | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -110,11 +109,11 @@ class DeploymentTargetResponse(BaseModel):
     project_id: UUID
     provider: str
     environment: str
-    name: Optional[str] = None
+    name: str | None = None
     position_x: float
     position_y: float
     is_connected: bool
-    credential_id: Optional[UUID] = None
+    credential_id: UUID | None = None
     provider_info: ProviderInfo
     connected_containers: list[ContainerSummary]
     deployment_history: list[DeploymentSummary]
@@ -136,7 +135,7 @@ class DeployRequest(BaseModel):
     """Request to deploy connected containers."""
 
     env_vars: dict[str, str] = Field(default_factory=dict, description="Additional environment variables")
-    build_command: Optional[str] = Field(None, description="Custom build command override")
+    build_command: str | None = Field(None, description="Custom build command override")
 
 
 # ============================================================================
@@ -355,6 +354,42 @@ async def list_deployment_targets(
         responses.append(build_target_response(target, connected, history))
 
     return responses
+
+
+@router.get("/{slug}/deployment-targets/providers")
+async def list_providers(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_active_user),
+):
+    """List all available deployment providers with their capabilities."""
+    await get_project_or_404(slug, db, user)
+
+    # Get user's connected providers
+    credentials_result = await db.execute(
+        select(DeploymentCredential.provider).where(
+            DeploymentCredential.user_id == user.id
+        )
+    )
+    connected_providers = set(r[0] for r in credentials_result.all())
+
+    providers = []
+    for provider_slug, info in list_all_providers().items():
+        providers.append({
+            "slug": provider_slug,
+            "display_name": info["display_name"],
+            "icon": info["icon"],
+            "color": info["color"],
+            "types": info["types"],
+            "frameworks": info["frameworks"],
+            "supports_serverless": info["supports_serverless"],
+            "supports_static": info["supports_static"],
+            "supports_fullstack": info["supports_fullstack"],
+            "deployment_mode": info["deployment_mode"],
+            "is_connected": provider_slug in connected_providers,
+        })
+
+    return providers
 
 
 @router.get("/{slug}/deployment-targets/{target_id}", response_model=DeploymentTargetResponse)
@@ -640,7 +675,7 @@ async def validate_connection(
 async def deploy_target(
     slug: str,
     target_id: UUID,
-    request: DeployRequest = None,
+    request: DeployRequest | None = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_active_user),
 ):
@@ -648,7 +683,7 @@ async def deploy_target(
     from ..services.deployment.builder import get_deployment_builder
     from ..services.deployment.manager import DeploymentManager
     from ..services.deployment_encryption import get_deployment_encryption_service
-    from ..services.orchestration import get_orchestrator
+    from .deployments import prepare_provider_credentials
 
     project = await get_project_or_404(slug, db, user)
     target = await get_deployment_target_or_404(target_id, project.id, db)
@@ -706,9 +741,13 @@ async def deploy_target(
 
     # Deploy each connected container
     results = []
-    orchestrator = get_orchestrator()
-    builder = await get_deployment_builder()
-    manager = DeploymentManager()
+    builder = get_deployment_builder()
+
+    # Prepare provider credentials
+    provider_metadata = credential.provider_metadata if hasattr(credential, 'provider_metadata') else None
+    provider_credentials = prepare_provider_credentials(
+        target.provider, access_token, provider_metadata
+    )
 
     # Generate next version number
     version_result = await db.execute(
@@ -753,56 +792,79 @@ async def deploy_target(
         try:
             # Update status
             deployment.status = "building"
-            deployment.logs.append(f"Building {container.name}...")
+            deployment.logs = deployment.logs + [f"Building {container.name}..."]
             await db.commit()
 
             # Get deployment config from provider capabilities
             provider_info = get_provider_info(target.provider)
             deployment_mode = provider_info["deployment_mode"] if provider_info else "source"
 
+            # Determine framework from connection settings or auto-detect
+            framework = (
+                conn.deployment_settings.get("framework")
+                if conn.deployment_settings
+                else None
+            )
+
             # Build if needed
             if deployment_mode == "pre-built":
-                # Build in container
-                build_result = await builder.trigger_build(
-                    project_slug=project.slug,
-                    container_name=container.name,
-                    build_command=request.build_command or conn.deployment_settings.get("build_command") if conn.deployment_settings else None,
-                    framework=conn.deployment_settings.get("framework") if conn.deployment_settings else None,
-                    orchestrator=orchestrator,
+                custom_build_cmd = (
+                    request.build_command
+                    or (conn.deployment_settings.get("build_command") if conn.deployment_settings else None)
                 )
-                deployment.logs.extend(build_result.logs)
+                success, build_output = await builder.trigger_build(
+                    user_id=str(user.id),
+                    project_id=str(project.id),
+                    project_slug=project.slug,
+                    framework=framework,
+                    custom_build_command=custom_build_cmd,
+                    container_name=container.name,
+                    volume_name=project.slug,
+                )
+                if not success:
+                    raise Exception(f"Build failed: {build_output}")
+                deployment.logs = deployment.logs + [f"Build completed: {build_output[:200]}"]
 
             # Collect files
             deployment.status = "deploying"
-            deployment.logs.append("Collecting deployment files...")
+            deployment.logs = deployment.logs + ["Collecting deployment files..."]
             await db.commit()
 
             files = await builder.collect_deployment_files(
-                project_slug=project.slug,
-                container_name=container.name,
+                user_id=str(user.id),
+                project_id=str(project.id),
+                framework=framework,
                 collect_source=(deployment_mode == "source"),
+                container_directory=container.directory,
+                volume_name=project.slug,
             )
 
             # Deploy to provider
             from ..services.deployment.base import DeploymentConfig
 
+            env_vars = {
+                **(request.env_vars or {}),
+                **(conn.deployment_settings.get("env_vars", {}) if conn.deployment_settings else {}),
+            }
+
             config = DeploymentConfig(
-                provider=target.provider,
+                project_id=str(project.id),
                 project_name=f"{project.slug}-{container.name}",
-                access_token=access_token,
-                team_id=credential.provider_metadata.get("team_id") if credential.provider_metadata else None,
-                account_id=credential.provider_metadata.get("account_id") if credential.provider_metadata else None,
-                env_vars={**(request.env_vars or {}), **(conn.deployment_settings.get("env_vars", {}) if conn.deployment_settings else {})},
+                framework=framework or "vite",
+                deployment_mode=deployment_mode,
+                build_command=request.build_command,
+                env_vars=env_vars,
             )
 
-            result = await manager.deploy(files, config)
+            provider = DeploymentManager.get_provider(target.provider, provider_credentials)
+            result = await provider.deploy(files, config)
 
             # Update deployment record
             deployment.status = "success" if result.success else "failed"
             deployment.deployment_id = result.deployment_id
             deployment.deployment_url = result.deployment_url
             deployment.error = result.error
-            deployment.logs.extend(result.logs)
+            deployment.logs = deployment.logs + result.logs
             deployment.completed_at = datetime.utcnow()
             await db.commit()
 
@@ -819,7 +881,7 @@ async def deploy_target(
             logger.error(f"Deployment failed for {container.name}: {e}")
             deployment.status = "failed"
             deployment.error = str(e)
-            deployment.logs.append(f"Deployment failed: {e}")
+            deployment.logs = deployment.logs + [f"Deployment failed: {e}"]
             deployment.completed_at = datetime.utcnow()
             await db.commit()
 
@@ -968,42 +1030,3 @@ async def rollback_deployment(
     }
 
 
-# ============================================================================
-# Utility Endpoints
-# ============================================================================
-
-
-@router.get("/{slug}/deployment-targets/providers")
-async def list_providers(
-    slug: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(current_active_user),
-):
-    """List all available deployment providers with their capabilities."""
-    await get_project_or_404(slug, db, user)
-
-    # Get user's connected providers
-    credentials_result = await db.execute(
-        select(DeploymentCredential.provider).where(
-            DeploymentCredential.user_id == user.id
-        )
-    )
-    connected_providers = set(r[0] for r in credentials_result.all())
-
-    providers = []
-    for provider_slug, info in list_all_providers().items():
-        providers.append({
-            "slug": provider_slug,
-            "display_name": info["display_name"],
-            "icon": info["icon"],
-            "color": info["color"],
-            "types": info["types"],
-            "frameworks": info["frameworks"],
-            "supports_serverless": info["supports_serverless"],
-            "supports_static": info["supports_static"],
-            "supports_fullstack": info["supports_fullstack"],
-            "deployment_mode": info["deployment_mode"],
-            "is_connected": provider_slug in connected_providers,
-        })
-
-    return providers

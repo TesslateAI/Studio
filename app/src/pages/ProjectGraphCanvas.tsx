@@ -582,8 +582,8 @@ const ProjectGraphCanvasInner = () => {
       toast.loading('Starting deployment...', { id: `deploy-${targetId}` });
       const result = await deploymentTargetsApi.deploy(slugRef.current!, targetId);
 
-      if (result.status === 'success') {
-        toast.success(`Deployed successfully!`, { id: `deploy-${targetId}` });
+      if (result.failed === 0 && result.success > 0) {
+        toast.success(`Deployed ${result.success} container(s) successfully!`, { id: `deploy-${targetId}` });
         // Refresh the deployment history
         const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
         setNodes((nds) =>
@@ -594,7 +594,9 @@ const ProjectGraphCanvasInner = () => {
           )
         );
       } else {
-        toast.error(`Deployment failed: ${result.error || 'Unknown error'}`, { id: `deploy-${targetId}` });
+        const failedResults = result.results.filter((r) => r.status === 'failed');
+        const errorMsg = failedResults[0]?.error || 'Unknown error';
+        toast.error(`Deployment failed: ${errorMsg}`, { id: `deploy-${targetId}` });
       }
     } catch (error) {
       console.error('Failed to deploy:', error);
@@ -1473,6 +1475,11 @@ const ProjectGraphCanvasInner = () => {
       const updates = layoutedNodes.map((node) => {
         if (node.type === 'browserPreview') {
           return api.patch(`/api/projects/${slug}/browser-previews/${node.id}`, {
+            position_x: Math.round(node.position.x),
+            position_y: Math.round(node.position.y),
+          });
+        } else if (node.type === 'deploymentTarget') {
+          return deploymentTargetsApi.update(slug!, node.id, {
             position_x: Math.round(node.position.x),
             position_y: Math.round(node.position.y),
           });
