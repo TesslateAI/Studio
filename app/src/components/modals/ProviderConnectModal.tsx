@@ -97,7 +97,7 @@ export function ProviderConnectModal({
 
   const initializeCredentialsForm = (provider: Provider) => {
     const form: Record<string, string> = {};
-    provider.required_fields.forEach(field => {
+    (provider.required_fields || []).forEach(field => {
       form[field] = '';
     });
     setManualCredentials(form);

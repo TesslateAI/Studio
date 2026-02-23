@@ -26,6 +26,7 @@ from .routers import (
     creators,
     deployment_credentials,
     deployment_oauth,
+    deployment_targets,
     deployments,
     feedback,
     git,
@@ -895,6 +896,7 @@ app.include_router(tasks.router)
 app.include_router(deployments.router)
 app.include_router(deployment_credentials.router)
 app.include_router(deployment_oauth.router)
+app.include_router(deployment_targets.router)  # Deployment target nodes in React Flow
 app.include_router(snapshots.router, prefix="/api")  # /api/projects/{id}/snapshots
 app.include_router(themes.router, prefix="/api/themes", tags=["themes"])  # Public theme API
 

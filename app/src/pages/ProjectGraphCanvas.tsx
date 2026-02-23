@@ -29,11 +29,11 @@ import {
   Article,
   Kanban,
   TreeStructure,
-  Rocket,
 } from '@phosphor-icons/react';
 import { motion } from 'framer-motion';
 import { ContainerNode } from '../components/ContainerNode';
 import { BrowserPreviewNode } from '../components/BrowserPreviewNode';
+import { DeploymentTargetNode } from '../components/DeploymentTargetNode';
 import { GraphCanvas } from '../components/GraphCanvas';
 import { MarketplaceSidebar } from '../components/MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../components/ContainerPropertiesPanel';
@@ -46,7 +46,7 @@ import { GitHubPanel, NotesPanel, SettingsPanel, KanbanPanel } from '../componen
 import { DiscordSupport } from '../components/DiscordSupport';
 import CodeEditor from '../components/CodeEditor';
 import { ExternalServiceCredentialModal } from '../components/ExternalServiceCredentialModal';
-import api, { projectsApi, configApi, deploymentsApi } from '../lib/api';
+import api, { projectsApi, configApi, deploymentTargetsApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { fileEvents } from '../utils/fileEvents';
 import { connectionEvents } from '../utils/connectionEvents';
@@ -57,6 +57,7 @@ import {
   DatabaseEdge,
   CacheEdge,
   BrowserPreviewEdge,
+  DeploymentEdge,
   getEdgeType,
 } from '../components/edges';
 import { getLayoutedElements } from '../utils/autoLayout';
@@ -64,6 +65,7 @@ import { getLayoutedElements } from '../utils/autoLayout';
 const nodeTypes: NodeTypes = {
   containerNode: ContainerNode,
   browserPreview: BrowserPreviewNode,
+  deploymentTarget: DeploymentTargetNode,
 };
 
 // Custom edge types for different connector semantics
@@ -73,6 +75,7 @@ const edgeTypes = {
   database: DatabaseEdge,
   cache: CacheEdge,
   browser_preview: BrowserPreviewEdge,
+  deployment: DeploymentEdge,
 };
 
 type PanelType = 'github' | 'notes' | 'settings' | null;
@@ -86,8 +89,7 @@ interface Container {
   position_y: number;
   status: 'stopped' | 'starting' | 'running' | 'failed';
   port?: number;
-  container_type?: string;
-  deployment_provider?: 'vercel' | 'netlify' | 'cloudflare' | null;
+  container_type?: 'base' | 'service';
 }
 
 interface ContainerConnection {
@@ -131,15 +133,11 @@ const ProjectGraphCanvasInner = () => {
     status: string;
     port?: number;
     containerType?: 'base' | 'service';
-    deploymentProvider?: 'vercel' | 'netlify' | 'cloudflare' | null;
   } | null>(null);
 
   // Drag state for pausing polling during drag operations - critical for performance
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
-
-  // Deploy All state to prevent double-clicks
-  const [isDeployingAll, setIsDeployingAll] = useState(false);
 
   // External service credential modal state
   const [externalServiceModal, setExternalServiceModal] = useState<{
@@ -336,6 +334,36 @@ const ProjectGraphCanvasInner = () => {
       const browserPreviewsRes = await api.get(`/api/projects/${slug}/browser-previews`);
       const browserPreviews = browserPreviewsRes.data || [];
 
+      // Fetch deployment targets
+      let deploymentTargets: Array<{
+        id: string;
+        provider: string;
+        environment: string;
+        name?: string;
+        position_x: number;
+        position_y: number;
+        is_connected: boolean;
+        connected_containers?: Array<{
+          id: string;
+          name: string;
+          framework?: string;
+        }>;
+        deployment_history?: Array<{
+          id: string;
+          version: string;
+          status: string;
+          url?: string;
+          deployed_at: string;
+        }>;
+      }> = [];
+      try {
+        const deploymentTargetsRes = await deploymentTargetsApi.list(slug!);
+        deploymentTargets = deploymentTargetsRes || [];
+      } catch {
+        // Deployment targets might not exist yet - that's OK
+        console.debug('No deployment targets found');
+      }
+
       // Convert containers to React Flow nodes
       const containerNodes: Node[] = containers.map((container: Container) => ({
         id: container.id,
@@ -348,7 +376,6 @@ const ProjectGraphCanvasInner = () => {
           baseIcon: '📦', // TODO: Get from base info
           techStack: [], // TODO: Get from base info
           containerType: container.container_type || 'base',
-          deploymentProvider: container.deployment_provider || null,
           onDelete: handleDeleteContainer,
           onClick: handleContainerClick,
           onDoubleClick: handleOpenBuilder,
@@ -390,8 +417,33 @@ const ProjectGraphCanvasInner = () => {
         };
       });
 
+      // Convert deployment targets to React Flow nodes
+      const deploymentTargetNodes: Node[] = deploymentTargets.map((target) => ({
+        id: target.id,
+        type: 'deploymentTarget',
+        position: { x: target.position_x, y: target.position_y },
+        data: {
+          provider: target.provider,
+          environment: target.environment,
+          name: target.name,
+          isConnected: target.is_connected,
+          connectedContainers: target.connected_containers || [],
+          deploymentHistory: (target.deployment_history || []).map((d) => ({
+            id: d.id,
+            version: d.version,
+            status: d.status,
+            url: d.url,
+            deployedAt: d.deployed_at,
+          })),
+          onDeploy: () => handleDeployFromTarget(target.id),
+          onConnect: () => handleConnectDeploymentTarget(target.id),
+          onDelete: () => handleDeleteDeploymentTarget(target.id),
+          onRollback: (deploymentId: string) => handleRollbackDeployment(target.id, deploymentId),
+        },
+      }));
+
       // Combine all nodes
-      const flowNodes: Node[] = [...containerNodes, ...browserNodes];
+      const flowNodes: Node[] = [...containerNodes, ...browserNodes, ...deploymentTargetNodes];
 
       // Convert to React Flow edges - animations disabled for performance
       const flowEdges: Edge[] = connections.map((connection) => ({
@@ -419,6 +471,19 @@ const ProjectGraphCanvasInner = () => {
             animated: false,
           });
         }
+      });
+
+      // Add deployment target edges for connected containers
+      deploymentTargets.forEach((target) => {
+        (target.connected_containers || []).forEach((container) => {
+          flowEdges.push({
+            id: `deploy-edge-${container.id}-${target.id}`,
+            source: container.id,
+            target: target.id,
+            type: 'deployment',
+            animated: false,
+          });
+        });
       });
 
       setNodes(flowNodes);
@@ -491,6 +556,110 @@ const ProjectGraphCanvasInner = () => {
       }
     },
     [slug, setNodes, setEdges]
+  );
+
+  // Stable callback for deleting deployment target nodes
+  const handleDeleteDeploymentTarget = useCallback(async (targetId: string) => {
+    if (!confirm('Delete this deployment target? Connected containers will be disconnected.')) return;
+
+    try {
+      await deploymentTargetsApi.delete(slugRef.current!, targetId);
+
+      // Remove the deployment target node
+      setNodes((nds) => nds.filter((node) => node.id !== targetId));
+      // Remove any edges connected to this target
+      setEdges((eds) => eds.filter((edge) => edge.source !== targetId && edge.target !== targetId));
+      toast.success('Deployment target removed');
+    } catch (error) {
+      console.error('Failed to delete deployment target:', error);
+      toast.error('Failed to delete deployment target');
+    }
+  }, [setNodes, setEdges]);
+
+  // Stable callback for deploying from a deployment target
+  const handleDeployFromTarget = useCallback(async (targetId: string) => {
+    try {
+      toast.loading('Starting deployment...', { id: `deploy-${targetId}` });
+      const result = await deploymentTargetsApi.deploy(slugRef.current!, targetId);
+
+      if (result.status === 'success') {
+        toast.success(`Deployed successfully!`, { id: `deploy-${targetId}` });
+        // Refresh the deployment history
+        const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
+        setNodes((nds) =>
+          nds.map((node) =>
+            node.id === targetId
+              ? { ...node, data: { ...node.data, deploymentHistory: history } }
+              : node
+          )
+        );
+      } else {
+        toast.error(`Deployment failed: ${result.error || 'Unknown error'}`, { id: `deploy-${targetId}` });
+      }
+    } catch (error) {
+      console.error('Failed to deploy:', error);
+      toast.error('Deployment failed', { id: `deploy-${targetId}` });
+    }
+  }, [setNodes]);
+
+  // Stable callback for connecting OAuth to deployment target
+  const handleConnectDeploymentTarget = useCallback(async (targetId: string) => {
+    try {
+      // This will return the OAuth URL to redirect to
+      const result = await deploymentTargetsApi.startOAuth(slugRef.current!, targetId);
+      if (result.oauth_url) {
+        // Open OAuth in a popup window
+        window.open(result.oauth_url, '_blank', 'width=600,height=700');
+        toast.success('Complete OAuth in the popup window');
+      }
+    } catch (error) {
+      console.error('Failed to start OAuth:', error);
+      toast.error('Failed to start OAuth connection');
+    }
+  }, []);
+
+  // Stable callback for rolling back a deployment
+  const handleRollbackDeployment = useCallback(async (targetId: string, deploymentId: string) => {
+    if (!confirm('Rollback to this deployment? This will redeploy the previous version.')) return;
+
+    try {
+      toast.loading('Rolling back...', { id: `rollback-${deploymentId}` });
+      const result = await deploymentTargetsApi.rollback(slugRef.current!, targetId, deploymentId);
+
+      if (result.status === 'success') {
+        toast.success('Rollback successful!', { id: `rollback-${deploymentId}` });
+        // Refresh the deployment history
+        const history = await deploymentTargetsApi.getHistory(slugRef.current!, targetId);
+        setNodes((nds) =>
+          nds.map((node) =>
+            node.id === targetId
+              ? { ...node, data: { ...node.data, deploymentHistory: history } }
+              : node
+          )
+        );
+      } else {
+        toast.error(`Rollback failed: ${result.error || 'Unknown error'}`, { id: `rollback-${deploymentId}` });
+      }
+    } catch (error) {
+      console.error('Failed to rollback:', error);
+      toast.error('Rollback failed', { id: `rollback-${deploymentId}` });
+    }
+  }, [setNodes]);
+
+  // Debounced position update for deployment targets
+  const debouncedDeploymentTargetPositionUpdate = useMemo(
+    () =>
+      debounce(async (targetId: string, x: number, y: number) => {
+        try {
+          await deploymentTargetsApi.update(slugRef.current!, targetId, {
+            position_x: Math.round(x),
+            position_y: Math.round(y),
+          });
+        } catch (error) {
+          console.error('Failed to update deployment target position:', error);
+        }
+      }, 300),
+    []
   );
 
   const onConnect: OnConnect = useCallback(
@@ -567,6 +736,67 @@ const ProjectGraphCanvasInner = () => {
         return;
       }
 
+      // Handle connection to deployment target node
+      if (targetNode?.type === 'deploymentTarget' && sourceNode?.type === 'containerNode') {
+        const containerName = sourceNode.data.name;
+        const provider = targetNode.data.provider;
+
+        try {
+          // Validate the connection first
+          const validation = await deploymentTargetsApi.validate(
+            slug!,
+            connection.target!,
+            connection.source!
+          );
+
+          if (!validation.allowed) {
+            toast.error(validation.reason || `Cannot deploy ${containerName} to ${provider}`);
+            return;
+          }
+
+          // Connect the container to the deployment target
+          await deploymentTargetsApi.connect(slug!, connection.target!, connection.source!);
+
+          // Update the deployment target node with the new connected container
+          const connectedContainers = targetNode.data.connectedContainers || [];
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === connection.target
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      connectedContainers: [
+                        ...connectedContainers,
+                        {
+                          id: connection.source,
+                          name: containerName,
+                          framework: sourceNode.data.techStack?.[0] || null,
+                        },
+                      ],
+                    },
+                  }
+                : node
+            )
+          );
+
+          // Add the edge with deployment type
+          setEdges((eds) => addEdge({
+            ...connection,
+            type: 'deployment',
+            animated: false,
+          }, eds));
+
+          toast.success(`Connected ${containerName} to ${provider}`);
+        } catch (error) {
+          console.error('Failed to connect container to deployment target:', error);
+          const axiosError = error as { response?: { data?: { detail?: string } } };
+          const errorMessage = axiosError.response?.data?.detail || 'Failed to connect';
+          toast.error(errorMessage);
+        }
+        return;
+      }
+
       // Prevent duplicate connections between the same two containers
       const duplicate = edgesRef.current.some(
         (e) => e.source === connection.source && e.target === connection.target
@@ -632,81 +862,80 @@ const ProjectGraphCanvasInner = () => {
         y: event.clientY,
       });
 
-      // Handle deployment target drops - must be dropped on an existing container
+      // Handle deployment target drops - create standalone deployment target node
       if (nodeType === 'deploymentTarget') {
-        // Convert screen coordinates to flow coordinates
+        // Convert screen coordinates to flow coordinates for accurate positioning
         const flowPosition = reactFlowInstance.screenToFlowPosition({
           x: event.clientX,
           y: event.clientY,
         });
 
-        // Find which container node the drop position is inside
-        // Use generous bounds since nodes can vary in height with tech stacks
-        const NODE_WIDTH = 220;
-        const NODE_HEIGHT = 180;
+        // Extract provider name from the deployment target slug (e.g., 'vercel-deploy' -> 'vercel')
+        const provider = item.slug.replace('-deploy', '');
 
-        // Also try to find node from DOM element under cursor
-        const elementsUnderCursor = document.elementsFromPoint(event.clientX, event.clientY);
-        const nodeElement = elementsUnderCursor.find(el => el.closest('.react-flow__node'));
-        const nodeIdFromDom = nodeElement?.closest('.react-flow__node')?.getAttribute('data-id');
+        // Generate temporary ID for optimistic update
+        const tempId = `temp-target-${Date.now()}`;
 
-        // Try DOM-based detection first, then fall back to coordinate calculation
-        let targetNode = nodeIdFromDom ? nodes.find(n => n.id === nodeIdFromDom && n.type === 'containerNode') : null;
+        // Optimistically add the deployment target node
+        const optimisticNode: Node = {
+          id: tempId,
+          type: 'deploymentTarget',
+          position: flowPosition,
+          data: {
+            provider: provider,
+            environment: 'production',
+            name: item.name,
+            isConnected: false,
+            connectedContainers: [],
+            deploymentHistory: [],
+            onDeploy: () => handleDeployFromTarget(tempId),
+            onConnect: () => handleConnectDeploymentTarget(tempId),
+            onDelete: () => handleDeleteDeploymentTarget(tempId),
+            onRollback: (deploymentId: string) => handleRollbackDeployment(tempId, deploymentId),
+          },
+        };
 
-        // Fall back to coordinate-based detection with generous bounds
-        if (!targetNode) {
-          targetNode = nodes.find(n => {
-            if (n.type !== 'containerNode') return false;
-            const nodeX = n.position.x;
-            const nodeY = n.position.y;
-            return (
-              flowPosition.x >= nodeX - 20 &&
-              flowPosition.x <= nodeX + NODE_WIDTH &&
-              flowPosition.y >= nodeY - 20 &&
-              flowPosition.y <= nodeY + NODE_HEIGHT
-            );
+        setNodes((nds) => [...nds, optimisticNode]);
+
+        try {
+          // Create deployment target in backend
+          const newTarget = await deploymentTargetsApi.create(slug!, {
+            provider: provider,
+            environment: 'production',
+            name: item.name,
+            position_x: flowPosition.x,
+            position_y: flowPosition.y,
           });
+
+          // Update the temporary node with real ID and refresh callbacks
+          setNodes((nds) =>
+            nds.map((node) =>
+              node.id === tempId
+                ? {
+                    ...node,
+                    id: newTarget.id,
+                    data: {
+                      ...node.data,
+                      isConnected: newTarget.is_connected,
+                      onDeploy: () => handleDeployFromTarget(newTarget.id),
+                      onConnect: () => handleConnectDeploymentTarget(newTarget.id),
+                      onDelete: () => handleDeleteDeploymentTarget(newTarget.id),
+                      onRollback: (deploymentId: string) => handleRollbackDeployment(newTarget.id, deploymentId),
+                    },
+                  }
+                : node
+            )
+          );
+
+          toast.success(`${item.name} added to canvas`);
+        } catch (error: unknown) {
+          console.error('Failed to create deployment target:', error);
+          // Remove the optimistic node on error
+          setNodes((nds) => nds.filter((node) => node.id !== tempId));
+          const axiosError = error as { response?: { data?: { detail?: string } } };
+          const errorMessage = axiosError.response?.data?.detail || (error instanceof Error ? error.message : 'Unknown error');
+          toast.error(`Failed to create deployment target: ${errorMessage}`);
         }
-
-        if (targetNode) {
-          // Validate compatibility - only base containers can have deployment targets
-          if (targetNode.data.containerType !== 'base') {
-            toast.error('Deploy targets can only be assigned to base containers, not services');
-            return;
-          }
-
-          // Extract provider name from the deployment target slug (e.g., 'vercel-deploy' -> 'vercel')
-          const provider = item.slug.replace('-deploy', '');
-
-          try {
-            await projectsApi.assignDeploymentTarget(slug!, targetNode.id, provider);
-
-            // Update node data locally
-            setNodes((nds) =>
-              nds.map((node) =>
-                node.id === targetNode.id
-                  ? { ...node, data: { ...node.data, deploymentProvider: provider } }
-                  : node
-              )
-            );
-
-            // Also update selectedContainer if this is the selected container
-            if (selectedContainer && selectedContainer.id === targetNode.id) {
-              setSelectedContainer({ ...selectedContainer, deploymentProvider: provider });
-            }
-
-            toast.success(`${item.name} assigned to ${targetNode.data.name}`);
-          } catch (error: unknown) {
-            console.error('Failed to assign deployment target:', error);
-            // Extract detailed error message from axios response
-            const axiosError = error as { response?: { data?: { detail?: string } } };
-            const errorMessage = axiosError.response?.data?.detail || (error instanceof Error ? error.message : 'Unknown error');
-            toast.error(`Failed to assign deployment target: ${errorMessage}`);
-          }
-          return;
-        }
-
-        toast.error('Drop deployment target onto a container node to assign it');
         return;
       }
 
@@ -763,7 +992,7 @@ const ProjectGraphCanvasInner = () => {
       // For container services and bases, create immediately
       await createContainerNode(item, dropPosition);
     },
-    [slug, project, setNodes, handleDeleteBrowser, nodes, reactFlowInstance]
+    [slug, project, setNodes, handleDeleteBrowser, reactFlowInstance, handleDeployFromTarget, handleConnectDeploymentTarget, handleDeleteDeploymentTarget, handleRollbackDeployment]
   );
 
   // Instantiate a workflow template (creates multiple nodes and connections)
@@ -1078,7 +1307,6 @@ const ProjectGraphCanvasInner = () => {
         status: containerNode.data.status,
         port: containerNode.data.port,
         containerType: containerNode.data.containerType,
-        deploymentProvider: containerNode.data.deploymentProvider,
       });
     }
   }, []); // Empty deps - uses ref
@@ -1198,14 +1426,16 @@ const ProjectGraphCanvasInner = () => {
         return;
       }
 
-      // Use debounced update for better performance - different endpoint for browser vs container
+      // Use debounced update for better performance - different endpoint based on node type
       if (node.type === 'browserPreview') {
         debouncedBrowserPositionUpdate(node.id, node.position.x, node.position.y);
+      } else if (node.type === 'deploymentTarget') {
+        debouncedDeploymentTargetPositionUpdate(node.id, node.position.x, node.position.y);
       } else {
         debouncedContainerPositionUpdate(node.id, node.position.x, node.position.y);
       }
     },
-    [debouncedContainerPositionUpdate, debouncedBrowserPositionUpdate]
+    [debouncedContainerPositionUpdate, debouncedBrowserPositionUpdate, debouncedDeploymentTargetPositionUpdate]
   );
 
   // Auto layout handler - arranges nodes using dagre algorithm
@@ -1278,43 +1508,6 @@ const ProjectGraphCanvasInner = () => {
     }
   };
 
-  // Count containers with deployment targets
-  const deployableCount = useMemo(() => {
-    return nodes.filter(n => n.type === 'containerNode' && n.data?.deploymentProvider).length;
-  }, [nodes]);
-
-  const handleDeployAll = async () => {
-    if (!slug || deployableCount === 0 || isDeployingAll) return;
-
-    setIsDeployingAll(true);
-    try {
-      toast.loading(`Deploying ${deployableCount} container(s)...`, { id: 'deploy-all' });
-      const result = await deploymentsApi.deployAll(slug);
-
-      if (result.failed === 0) {
-        toast.success(`Successfully deployed ${result.deployed} container(s)!`, { id: 'deploy-all' });
-      } else if (result.deployed > 0) {
-        toast.success(`${result.deployed} deployed, ${result.failed} failed`, { id: 'deploy-all' });
-      } else {
-        toast.error(`All ${result.failed} deployment(s) failed`, { id: 'deploy-all' });
-      }
-
-      // Show individual results
-      result.results.forEach(r => {
-        if (r.status === 'success' && r.deployment_url) {
-          console.log(`${r.container_name} deployed to: ${r.deployment_url}`);
-        } else if (r.status === 'failed') {
-          console.error(`${r.container_name} failed: ${r.error}`);
-        }
-      });
-    } catch (error) {
-      console.error('Failed to deploy containers:', error);
-      toast.error('Deployment failed', { id: 'deploy-all' });
-    } finally {
-      setIsDeployingAll(false);
-    }
-  };
-
   // Stable callback - uses ref for slug
   const handleOpenBuilder = useCallback(
     (containerId: string) => {
@@ -1326,8 +1519,8 @@ const ProjectGraphCanvasInner = () => {
   // Stable callbacks for ReactFlow to prevent re-renders
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      // Don't try to select browser preview nodes as containers
-      if (node.type === 'browserPreview') {
+      // Don't try to select browser preview or deployment target nodes as containers
+      if (node.type === 'browserPreview' || node.type === 'deploymentTarget') {
         return;
       }
       handleContainerClick(node.id);
@@ -1337,9 +1530,9 @@ const ProjectGraphCanvasInner = () => {
 
   const handleNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      // Only allow double-click navigation for base containers, not services or browser previews
-      if (node.type === 'browserPreview') {
-        return; // Don't open builder for browser preview nodes
+      // Only allow double-click navigation for base containers, not services, browser previews, or deployment targets
+      if (node.type === 'browserPreview' || node.type === 'deploymentTarget') {
+        return; // Don't open builder for these node types
       }
       const containerType = node.data?.containerType || 'base';
       if (containerType === 'base') {
@@ -1388,6 +1581,28 @@ const ProjectGraphCanvasInner = () => {
                         connectedContainerName: undefined,
                         connectedPort: undefined,
                         baseUrl: undefined,
+                      },
+                    }
+                  : node
+              )
+            );
+          } else if (edge.type === 'deployment' || edge.id.startsWith('deploy-edge-')) {
+            // Find the deployment target node and disconnect the container
+            const deploymentTargetId = edge.target;
+            const containerId = edge.source;
+            await deploymentTargetsApi.disconnect(slugRef.current!, deploymentTargetId, containerId);
+
+            // Update the deployment target node to remove the connected container
+            setNodes((nds) =>
+              nds.map((node) =>
+                node.id === deploymentTargetId
+                  ? {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        connectedContainers: (node.data.connectedContainers || []).filter(
+                          (c: { id: string }) => c.id !== containerId
+                        ),
                       },
                     }
                   : node
@@ -1736,38 +1951,6 @@ const ProjectGraphCanvasInner = () => {
                 <span className="hidden md:inline">Start All</span>
               </button>
             )}
-
-            {/* Deploy All Button */}
-            <button
-              onClick={handleDeployAll}
-              disabled={deployableCount === 0 || isDeployingAll}
-              className="flex items-center gap-2 px-3 md:px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              title={
-                isDeployingAll
-                  ? 'Deployment in progress...'
-                  : deployableCount > 0
-                    ? `Deploy ${deployableCount} container(s) with targets`
-                    : 'No containers have deployment targets assigned'
-              }
-            >
-              {isDeployingAll ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  <span className="hidden md:inline">Deploying...</span>
-                </>
-              ) : (
-                <>
-                  <Rocket size={16} weight="fill" />
-                  <span className="hidden md:inline">Deploy All</span>
-                  {deployableCount > 0 && (
-                    <span className="bg-white/20 px-1.5 py-0.5 rounded text-xs">{deployableCount}</span>
-                  )}
-                </>
-              )}
-            </button>
           </div>
 
           {/* Mobile hamburger menu */}
@@ -1832,7 +2015,6 @@ const ProjectGraphCanvasInner = () => {
                 projectSlug={slug || ''}
                 port={selectedContainer.port}
                 containerType={selectedContainer.containerType}
-                deploymentProvider={selectedContainer.deploymentProvider}
                 onClose={() => setSelectedContainer(null)}
                 onStatusChange={(newStatus) => {
                   setNodes((nds) =>
@@ -1856,18 +2038,6 @@ const ProjectGraphCanvasInner = () => {
                   // Update selected container state
                   setSelectedContainer({ ...selectedContainer, name: newName });
                   // PERFORMANCE: Removed fetchProjectData() - local state is sufficient
-                }}
-                onDeploymentProviderChange={(provider) => {
-                  // Update node data locally
-                  setNodes((nds) =>
-                    nds.map((node) =>
-                      node.id === selectedContainer.id
-                        ? { ...node, data: { ...node.data, deploymentProvider: provider } }
-                        : node
-                    )
-                  );
-                  // Update selected container state
-                  setSelectedContainer({...selectedContainer, deploymentProvider: provider});
                 }}
               />
             )}

@@ -106,6 +106,9 @@ class Project(Base):
         "DeploymentCredential", back_populates="project", cascade="all, delete-orphan"
     )
     deployments = relationship("Deployment", back_populates="project", cascade="all, delete-orphan")
+    deployment_targets = relationship(
+        "DeploymentTarget", back_populates="project", cascade="all, delete-orphan"
+    )
     snapshots = relationship(
         "ProjectSnapshot", back_populates="project", cascade="all, delete-orphan"
     )
@@ -246,6 +249,11 @@ class Container(Base):
         back_populates="target_container",
         cascade="all, delete-orphan",
     )
+    deployment_target_connections = relationship(
+        "DeploymentTargetConnection",
+        back_populates="container",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def env_var_keys(self) -> list:
@@ -325,6 +333,98 @@ class BrowserPreview(Base):
     # Relationships
     project = relationship("Project", back_populates="browser_previews")
     connected_container = relationship("Container")
+
+
+class DeploymentTarget(Base):
+    """Deployment target nodes in the React Flow graph.
+
+    Represents external deployment providers (Vercel, Netlify, Cloudflare, DigitalOcean K8s,
+    Railway, Fly.io) as standalone nodes that containers can connect to for deployment.
+    """
+
+    __tablename__ = "deployment_targets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Provider configuration
+    provider = Column(
+        String(50), nullable=False
+    )  # vercel, netlify, cloudflare, digitalocean, railway, fly
+    environment = Column(String(50), default="production")  # production, staging, preview
+    name = Column(String(255), nullable=True)  # Optional custom display name
+
+    # React Flow position
+    position_x = Column(Float, default=0)
+    position_y = Column(Float, default=0)
+
+    # OAuth connection status
+    is_connected = Column(Boolean, default=False)  # Whether OAuth is connected for this provider
+    credential_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("deployment_credentials.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # Link to stored credentials
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project", back_populates="deployment_targets")
+    credential = relationship("DeploymentCredential")
+    connected_containers = relationship(
+        "DeploymentTargetConnection",
+        back_populates="deployment_target",
+        cascade="all, delete-orphan",
+    )
+    deployments = relationship(
+        "Deployment",
+        back_populates="deployment_target",
+        cascade="all, delete-orphan",
+    )
+
+
+class DeploymentTargetConnection(Base):
+    """Connections from containers to deployment targets.
+
+    Represents an edge in the React Flow graph connecting a container to a deployment target.
+    Each connection can have custom deployment settings (build command, env vars, etc.).
+    """
+
+    __tablename__ = "deployment_target_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    container_id = Column(
+        UUID(as_uuid=True), ForeignKey("containers.id", ondelete="CASCADE"), nullable=False
+    )
+    deployment_target_id = Column(
+        UUID(as_uuid=True), ForeignKey("deployment_targets.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Deployment settings for this container-target pair (overrides defaults)
+    # {"build_command": "npm run build", "env_vars": {"NODE_ENV": "production"}}
+    deployment_settings = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    container = relationship("Container", back_populates="deployment_target_connections")
+    deployment_target = relationship("DeploymentTarget", back_populates="connected_containers")
+
+    # Unique constraint: one connection per container-target pair
+    __table_args__ = (
+        Index(
+            "ix_deployment_target_connections_container_target",
+            "container_id",
+            "deployment_target_id",
+            unique=True,
+        ),
+    )
 
 
 class ProjectFile(Base):
@@ -664,11 +764,28 @@ class Deployment(Base):
     )
     provider = Column(String(50), nullable=False, index=True)  # cloudflare, vercel, netlify
 
+    # Link to new deployment target system (nullable for backwards compatibility)
+    deployment_target_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("deployment_targets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    container_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("containers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )  # Which container was deployed (for multi-container deployments)
+
     # Deployment identifiers
     deployment_id = Column(
         String(255), nullable=True
     )  # Provider's deployment ID (e.g., Vercel deployment ID)
     deployment_url = Column(String(500), nullable=True)  # Live deployment URL
+
+    # Versioning for rollback support
+    version = Column(String(50), nullable=True)  # Semantic version or auto-generated (v1.0.0, v1.0.1)
 
     # Deployment status
     status = Column(
@@ -692,6 +809,8 @@ class Deployment(Base):
     # Relationships
     project = relationship("Project", back_populates="deployments")
     user = relationship("User", back_populates="deployments")
+    deployment_target = relationship("DeploymentTarget", back_populates="deployments")
+    container = relationship("Container")
 
 
 # ============================================================================

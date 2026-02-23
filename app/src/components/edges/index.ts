@@ -7,6 +7,7 @@
  * - database: Database connections (green solid)
  * - cache: Cache/Redis connections (red dashed)
  * - browser_preview: Container to browser preview (purple dashed)
+ * - deployment: Container to deployment target (orange dashed with arrow)
  * - depends_on: Startup dependency (gray solid) - uses default
  */
 
@@ -15,6 +16,7 @@ import { HttpApiEdge } from './HttpApiEdge';
 import { DatabaseEdge } from './DatabaseEdge';
 import { CacheEdge } from './CacheEdge';
 import { BrowserPreviewEdge } from './BrowserPreviewEdge';
+import { DeploymentEdge } from './DeploymentEdge';
 
 // Re-export components
 export { EnvInjectionEdge } from './EnvInjectionEdge';
@@ -22,6 +24,7 @@ export { HttpApiEdge } from './HttpApiEdge';
 export { DatabaseEdge } from './DatabaseEdge';
 export { CacheEdge } from './CacheEdge';
 export { BrowserPreviewEdge } from './BrowserPreviewEdge';
+export { DeploymentEdge } from './DeploymentEdge';
 export { EdgeDeleteButton } from './EdgeDeleteButton';
 
 // Edge type mapping for React Flow
@@ -31,6 +34,7 @@ export const edgeTypes = {
   database: DatabaseEdge,
   cache: CacheEdge,
   browser_preview: BrowserPreviewEdge,
+  deployment: DeploymentEdge,
 };
 
 // Helper to determine edge type from connector_type
@@ -46,6 +50,8 @@ export const getEdgeType = (connectorType: string): string => {
       return 'cache';
     case 'browser_preview':
       return 'browser_preview';
+    case 'deployment':
+      return 'deployment';
     default:
       return 'default';
   }

@@ -1879,6 +1879,233 @@ export const deploymentsApi = {
   },
 };
 
+// ============================================================================
+// Deployment Targets API (New Node-Based UX)
+// ============================================================================
+
+// Types for deployment targets
+export interface DeploymentTargetProviderInfo {
+  display_name: string;
+  icon: string;
+  color: string;
+  types: string[];
+  frameworks: string[];
+  supports_serverless: boolean;
+  supports_static: boolean;
+  supports_fullstack: boolean;
+  deployment_mode: string;
+}
+
+export interface DeploymentTargetConnectedContainer {
+  id: string;
+  name: string;
+  container_type?: string;
+  framework?: string;
+  status: string;
+}
+
+export interface DeploymentTargetDeploymentHistory {
+  id: string;
+  version?: string;
+  status: 'success' | 'failed' | 'deploying' | 'pending' | 'building';
+  deployment_url?: string;
+  container_id?: string;
+  container_name?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface DeploymentTarget {
+  id: string;
+  project_id: string;
+  provider: 'vercel' | 'netlify' | 'cloudflare' | 'digitalocean' | 'railway' | 'fly';
+  environment: 'production' | 'staging' | 'preview';
+  name?: string;
+  position_x: number;
+  position_y: number;
+  is_connected: boolean;
+  credential_id?: string;
+  provider_info: DeploymentTargetProviderInfo;
+  connected_containers: DeploymentTargetConnectedContainer[];
+  deployment_history: DeploymentTargetDeploymentHistory[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeploymentTargetProvider {
+  slug: string;
+  display_name: string;
+  icon: string;
+  color: string;
+  types: string[];
+  frameworks: string[];
+  supports_serverless: boolean;
+  supports_static: boolean;
+  supports_fullstack: boolean;
+  deployment_mode: string;
+  is_connected: boolean;
+}
+
+export const deploymentTargetsApi = {
+  // List all deployment targets for a project
+  list: async (projectSlug: string): Promise<DeploymentTarget[]> => {
+    const response = await api.get(`/api/projects/${projectSlug}/deployment-targets`);
+    return response.data;
+  },
+
+  // Get a specific deployment target
+  get: async (projectSlug: string, targetId: string): Promise<DeploymentTarget> => {
+    const response = await api.get(`/api/projects/${projectSlug}/deployment-targets/${targetId}`);
+    return response.data;
+  },
+
+  // Create a new deployment target
+  create: async (
+    projectSlug: string,
+    data: {
+      provider: string;
+      environment?: string;
+      name?: string;
+      position_x?: number;
+      position_y?: number;
+    }
+  ): Promise<DeploymentTarget> => {
+    const response = await api.post(`/api/projects/${projectSlug}/deployment-targets`, data);
+    return response.data;
+  },
+
+  // Update a deployment target (position, name, environment)
+  update: async (
+    projectSlug: string,
+    targetId: string,
+    data: {
+      environment?: string;
+      name?: string;
+      position_x?: number;
+      position_y?: number;
+    }
+  ): Promise<DeploymentTarget> => {
+    const response = await api.patch(`/api/projects/${projectSlug}/deployment-targets/${targetId}`, data);
+    return response.data;
+  },
+
+  // Delete a deployment target
+  delete: async (projectSlug: string, targetId: string): Promise<{ status: string; id: string }> => {
+    const response = await api.delete(`/api/projects/${projectSlug}/deployment-targets/${targetId}`);
+    return response.data;
+  },
+
+  // Connect a container to a deployment target
+  connect: async (
+    projectSlug: string,
+    targetId: string,
+    containerId: string
+  ): Promise<{
+    status: string;
+    container_id: string;
+    target_id: string;
+    container_name: string;
+    provider: string;
+  }> => {
+    const response = await api.post(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}/connect/${containerId}`
+    );
+    return response.data;
+  },
+
+  // Disconnect a container from a deployment target
+  disconnect: async (
+    projectSlug: string,
+    targetId: string,
+    containerId: string
+  ): Promise<{ status: string; container_id: string; target_id: string }> => {
+    const response = await api.delete(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}/disconnect/${containerId}`
+    );
+    return response.data;
+  },
+
+  // Validate if a container can connect to a deployment target
+  validate: async (
+    projectSlug: string,
+    targetId: string,
+    containerId: string
+  ): Promise<{ allowed: boolean; reason: string }> => {
+    const response = await api.get(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}/validate/${containerId}`
+    );
+    return response.data;
+  },
+
+  // Deploy all connected containers to a deployment target
+  deploy: async (
+    projectSlug: string,
+    targetId: string,
+    data?: {
+      env_vars?: Record<string, string>;
+      build_command?: string;
+    }
+  ): Promise<{
+    target_id: string;
+    provider: string;
+    version: string;
+    total: number;
+    success: number;
+    failed: number;
+    results: Array<{
+      container_id: string;
+      container_name: string;
+      status: 'success' | 'failed';
+      deployment_id: string;
+      deployment_url?: string;
+      error?: string;
+    }>;
+  }> => {
+    const response = await api.post(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}/deploy`,
+      data || {}
+    );
+    return response.data;
+  },
+
+  // Get deployment history for a target
+  getHistory: async (
+    projectSlug: string,
+    targetId: string,
+    params?: { limit?: number; offset?: number }
+  ): Promise<DeploymentTargetDeploymentHistory[]> => {
+    const response = await api.get(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}/history`,
+      { params }
+    );
+    return response.data;
+  },
+
+  // Rollback to a previous deployment
+  rollback: async (
+    projectSlug: string,
+    targetId: string,
+    deploymentId: string
+  ): Promise<{
+    status: string;
+    target_id: string;
+    deployment_id: string;
+    rollback_to_version: string;
+    message: string;
+  }> => {
+    const response = await api.post(
+      `/api/projects/${projectSlug}/deployment-targets/${targetId}/rollback/${deploymentId}`
+    );
+    return response.data;
+  },
+
+  // List all available deployment providers
+  listProviders: async (projectSlug: string): Promise<DeploymentTargetProvider[]> => {
+    const response = await api.get(`/api/projects/${projectSlug}/deployment-targets/providers`);
+    return response.data;
+  },
+};
+
 export const feedbackApi = {
   // List all feedback posts
   list: async (params?: {
