@@ -2104,6 +2104,26 @@ export const deploymentTargetsApi = {
     const response = await api.get(`/api/projects/${projectSlug}/deployment-targets/providers`);
     return response.data;
   },
+
+  // Start OAuth flow for a deployment target
+  startOAuth: async (
+    projectSlug: string,
+    targetId: string
+  ): Promise<{ oauth_url?: string; auth_url?: string; error?: string }> => {
+    // First get the target to determine the provider
+    const target = await deploymentTargetsApi.get(projectSlug, targetId);
+    const provider = target.provider;
+
+    // Map provider to OAuth endpoint (only Vercel and Netlify support OAuth)
+    const oauthProviders = ['vercel', 'netlify'];
+    if (!oauthProviders.includes(provider)) {
+      return { error: `${provider} does not support OAuth. Please configure credentials manually.` };
+    }
+
+    // Call the existing OAuth authorize endpoint
+    const response = await api.get(`/api/deployment-oauth/${provider}/authorize`);
+    return { oauth_url: response.data.auth_url };
+  },
 };
 
 export const feedbackApi = {

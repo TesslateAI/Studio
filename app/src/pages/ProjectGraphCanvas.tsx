@@ -607,14 +607,26 @@ const ProjectGraphCanvasInner = () => {
     try {
       // This will return the OAuth URL to redirect to
       const result = await deploymentTargetsApi.startOAuth(slugRef.current!, targetId);
-      if (result.oauth_url) {
+
+      // Check for error response (provider doesn't support OAuth)
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+
+      const oauthUrl = result.oauth_url || result.auth_url;
+      if (oauthUrl) {
         // Open OAuth in a popup window
-        window.open(result.oauth_url, '_blank', 'width=600,height=700');
+        window.open(oauthUrl, '_blank', 'width=600,height=700');
         toast.success('Complete OAuth in the popup window');
+      } else {
+        toast.error('No OAuth URL returned. Please check provider configuration.');
       }
     } catch (error) {
       console.error('Failed to start OAuth:', error);
-      toast.error('Failed to start OAuth connection');
+      const axiosError = error as { response?: { data?: { detail?: string } } };
+      const errorMessage = axiosError.response?.data?.detail || 'Failed to start OAuth connection';
+      toast.error(errorMessage);
     }
   }, []);
 
