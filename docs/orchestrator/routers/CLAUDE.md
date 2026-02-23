@@ -12,7 +12,7 @@ Located in `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/`:
 - `projects.py` (5218 lines) - Project CRUD, file operations, container lifecycle, assets, deployment target assignment
 - `chat.py` (~2050 lines) - Chat management, agent streaming, WebSocket support (max_iterations default: unlimited, cost limit: $5/run)
 - `marketplace.py` (~2800 lines) - Agent/base marketplace, purchases, reviews, user-submitted bases, community bases browse with pagination, base versioning (git tags)
-- `admin.py` (1163 lines) - Platform metrics, user management, moderation
+- `admin.py` (~3700 lines) - Platform metrics, user management, moderation, audit logs, project admin, billing admin, deployment monitoring
 - `deployments.py` (1,197 lines) - External deployments (Vercel, Netlify, Cloudflare), deploy-all endpoint
 - `kanban.py` (757 lines) - Project task board management
 - `billing.py` (702 lines) - Subscriptions, credits, usage tracking, Stripe webhooks

@@ -14,11 +14,21 @@ import {
   ArrowUp,
   ArrowDown,
   Calendar,
-  RefreshCw
+  RefreshCw,
+  Heart,
+  FileText
 } from 'lucide-react';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import toast from 'react-hot-toast';
 import { getAuthHeaders } from '../lib/api';
+// Admin feature components
+import UserManagement from '../components/admin/UserManagement';
+import SystemHealth from '../components/admin/SystemHealth';
+import TokenAnalytics from '../components/admin/TokenAnalytics';
+import AuditLogViewer from '../components/admin/AuditLogViewer';
+import ProjectAdmin from '../components/admin/ProjectAdmin';
+import BillingAdmin from '../components/admin/BillingAdmin';
+import DeploymentMonitor from '../components/admin/DeploymentMonitor';
 // Using simple chart placeholders for now
 // Will integrate charts later
 
@@ -75,7 +85,9 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    if (activeTab !== 'overview' && activeTab !== 'agents') {
+    // Skip loading metrics for tabs that handle their own data fetching
+    const selfLoadingTabs = ['user-management', 'system-health', 'token-analytics', 'audit-logs', 'projects-admin', 'billing', 'deployments'];
+    if (activeTab !== 'overview' && activeTab !== 'agents' && !selfLoadingTabs.includes(activeTab)) {
       loadDetailedMetrics(activeTab);
     }
   }, [activeTab, selectedPeriod]);
@@ -288,18 +300,33 @@ export default function AdminDashboard() {
       {/* Tabs */}
       <div className="bg-gray-800 border-b border-[var(--text)]/15">
         <div className="container mx-auto px-4">
-          <div className="flex space-x-8">
-            {['overview', 'users', 'projects', 'sessions', 'tokens', 'marketplace', 'agents'].map(tab => (
+          <div className="flex space-x-8 overflow-x-auto">
+            {[
+              { id: 'overview', label: 'Overview' },
+              { id: 'user-management', label: 'User Management' },
+              { id: 'system-health', label: 'System Health' },
+              { id: 'token-analytics', label: 'Token Analytics' },
+              { id: 'audit-logs', label: 'Audit Logs' },
+              { id: 'projects-admin', label: 'Project Admin' },
+              { id: 'billing', label: 'Billing' },
+              { id: 'deployments', label: 'Deployments' },
+              { id: 'users', label: 'User Metrics' },
+              { id: 'projects', label: 'Projects' },
+              { id: 'sessions', label: 'Sessions' },
+              { id: 'tokens', label: 'Token Metrics' },
+              { id: 'marketplace', label: 'Marketplace' },
+              { id: 'agents', label: 'Agents' }
+            ].map(tab => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`py-3 px-1 capitalize border-b-2 transition-colors ${
-                  activeTab === tab
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`py-3 px-1 whitespace-nowrap border-b-2 transition-colors ${
+                  activeTab === tab.id
                     ? 'border-blue-500 text-blue-500'
                     : 'border-transparent text-gray-400 hover:text-white'
                 }`}
               >
-                {tab}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -308,6 +335,16 @@ export default function AdminDashboard() {
 
       {/* Content */}
       <div className="container mx-auto px-4 py-8">
+        {/* Admin Feature Tabs */}
+        {activeTab === 'user-management' && <UserManagement />}
+        {activeTab === 'system-health' && <SystemHealth />}
+        {activeTab === 'token-analytics' && <TokenAnalytics />}
+        {activeTab === 'audit-logs' && <AuditLogViewer />}
+        {activeTab === 'projects-admin' && <ProjectAdmin />}
+        {activeTab === 'billing' && <BillingAdmin />}
+        {activeTab === 'deployments' && <DeploymentMonitor />}
+
+        {/* Metrics Tabs */}
         {activeTab === 'overview' && summary && (
           <>
             {/* Key Metrics Grid */}

@@ -154,6 +154,23 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    # Suspension fields (for admin user management)
+    is_suspended: Mapped[bool] = mapped_column(default=False)
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    suspended_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suspended_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Soft delete fields (for admin user management)
+    is_deleted: Mapped[bool] = mapped_column(default=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    scheduled_hard_delete_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Relationships (preserve existing relationships)
     projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
     chats = relationship("Chat", back_populates="user", cascade="all, delete-orphan")

@@ -1,17 +1,21 @@
 # Admin Router
 
-**File**: `c:/Users/Smirk/Downloads/Tesslate-Studio/orchestrator/app/routers/admin.py` (1163 lines)
+**File**: `orchestrator/app/routers/admin.py` (~3500+ lines)
 
-The admin router provides platform metrics, user management, and moderation tools for superusers.
+The admin router provides comprehensive platform administration capabilities for superusers.
 
 ## Overview
 
 Admin endpoints are restricted to superusers only (checked via `current_superuser` dependency). They provide:
-- User metrics (DAU, MAU, growth, retention)
-- Project metrics
-- Agent usage statistics
-- Marketplace moderation
-- System health monitoring
+
+### Core Features
+- **User Management**: Search, suspend, unsuspend, delete users, adjust credits
+- **System Health**: Database, Kubernetes, LiteLLM, S3 monitoring
+- **Token Analytics**: Usage by model, user, tier with anomaly detection
+- **Audit Logs**: View, filter, export admin action logs
+- **Project Administration**: List, hibernate, transfer, delete projects
+- **Billing Administration**: Revenue overview, credit purchases, creator payouts
+- **Deployment Monitoring**: Stats by provider, deployment list with filters
 
 ## Base Path
 
@@ -617,6 +621,323 @@ GET /api/admin/export/metrics
 Exports metrics to JSON.
 
 **Response**: JSON file with all metrics
+
+## Audit Logs
+
+### Get Audit Logs
+
+```
+GET /api/admin/audit-logs
+```
+
+Returns paginated list of admin action logs.
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Results per page (default: 50)
+- `action_type`: Filter by action type (e.g., "user_suspend", "project_delete")
+- `target_type`: Filter by target type (user/project/agent/base)
+- `start_date`: Filter from date (ISO format)
+- `end_date`: Filter to date (ISO format)
+- `search`: Search in details
+
+**Response**:
+```json
+{
+  "logs": [
+    {
+      "id": "uuid",
+      "admin_id": "uuid",
+      "admin_username": "admin@example.com",
+      "action_type": "user_suspend",
+      "target_type": "user",
+      "target_id": "uuid",
+      "details": {"reason": "Violation of TOS"},
+      "ip_address": "192.168.1.1",
+      "created_at": "2025-01-09T10:00:00Z"
+    }
+  ],
+  "total": 542,
+  "page": 1,
+  "page_size": 50,
+  "total_pages": 11
+}
+```
+
+### Export Audit Logs
+
+```
+GET /api/admin/audit-logs/export
+```
+
+Exports audit logs to CSV file.
+
+**Query Parameters**: Same as Get Audit Logs
+
+**Response**: CSV file download
+
+## Project Administration
+
+### Get Admin Projects
+
+```
+GET /api/admin/projects
+```
+
+Returns paginated list of all projects with admin details.
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Results per page (default: 50)
+- `search`: Search in project name/slug
+- `status`: Filter by status (active/hibernated/deleted)
+- `deployment_status`: Filter by deployment status
+
+**Response**:
+```json
+{
+  "projects": [
+    {
+      "id": "uuid",
+      "name": "My App",
+      "slug": "my-app-k3x8n2",
+      "owner_id": "uuid",
+      "owner_username": "johndoe",
+      "status": "active",
+      "created_at": "2025-01-05T10:00:00Z",
+      "containers_count": 3,
+      "deployment_status": "deployed"
+    }
+  ],
+  "total": 3842,
+  "page": 1,
+  "page_size": 50,
+  "total_pages": 77
+}
+```
+
+### Hibernate Project
+
+```
+POST /api/admin/projects/{project_id}/hibernate
+```
+
+Hibernates a project (stops containers, preserves data).
+
+**Request Body**:
+```json
+{
+  "reason": "Resource optimization"
+}
+```
+
+### Transfer Project
+
+```
+POST /api/admin/projects/{project_id}/transfer
+```
+
+Transfers project ownership to another user.
+
+**Request Body**:
+```json
+{
+  "new_owner_id": "uuid",
+  "reason": "Account migration"
+}
+```
+
+### Delete Project (Admin)
+
+```
+DELETE /api/admin/projects/{project_id}
+```
+
+Permanently deletes a project.
+
+**Request Body**:
+```json
+{
+  "reason": "DMCA takedown request"
+}
+```
+
+## Billing Administration
+
+### Get Billing Overview
+
+```
+GET /api/admin/billing/overview
+```
+
+Returns comprehensive billing statistics.
+
+**Query Parameters**:
+- `days`: Period to analyze (default: 30)
+
+**Response**:
+```json
+{
+  "total_revenue_cents": 125000,
+  "subscription_revenue_cents": 80000,
+  "credit_revenue_cents": 45000,
+  "subscriptions_by_tier": {
+    "free": 1200,
+    "pro": 342
+  },
+  "daily_revenue": [
+    {"date": "2025-01-01T00:00:00Z", "revenue_cents": 4200},
+    {"date": "2025-01-02T00:00:00Z", "revenue_cents": 3800}
+  ],
+  "period_days": 30
+}
+```
+
+### Get Credit Purchases
+
+```
+GET /api/admin/billing/purchases
+```
+
+Returns paginated list of credit purchases.
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Results per page (default: 50)
+- `start_date`: Filter from date
+- `end_date`: Filter to date
+
+**Response**:
+```json
+{
+  "purchases": [
+    {
+      "id": "uuid",
+      "user_id": "uuid",
+      "username": "johndoe",
+      "amount_cents": 1000,
+      "credits_purchased": 500,
+      "created_at": "2025-01-09T10:00:00Z"
+    }
+  ],
+  "total": 420,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+### Get Creator Earnings
+
+```
+GET /api/admin/billing/creators
+```
+
+Returns paginated list of creator earnings.
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Results per page (default: 50)
+
+**Response**:
+```json
+{
+  "creators": [
+    {
+      "user_id": "uuid",
+      "username": "creator123",
+      "total_earnings_cents": 5000,
+      "pending_payout_cents": 2500,
+      "agents_count": 3,
+      "total_sales": 42
+    }
+  ],
+  "total": 87,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+## Deployment Monitoring
+
+### Get Deployment Stats
+
+```
+GET /api/admin/deployments/stats
+```
+
+Returns deployment statistics by provider.
+
+**Query Parameters**:
+- `days`: Period to analyze (default: 30)
+
+**Response**:
+```json
+{
+  "total_deployments": 234,
+  "successful_deployments": 210,
+  "failed_deployments": 24,
+  "by_provider": {
+    "vercel": {
+      "total": 120,
+      "successful": 115,
+      "failed": 5,
+      "success_rate": 95.8
+    },
+    "netlify": {
+      "total": 80,
+      "successful": 72,
+      "failed": 8,
+      "success_rate": 90.0
+    },
+    "cloudflare": {
+      "total": 34,
+      "successful": 23,
+      "failed": 11,
+      "success_rate": 67.6
+    }
+  },
+  "daily_deployments": [
+    {"date": "2025-01-01T00:00:00Z", "count": 12},
+    {"date": "2025-01-02T00:00:00Z", "count": 15}
+  ],
+  "period_days": 30
+}
+```
+
+### Get Deployments List
+
+```
+GET /api/admin/deployments
+```
+
+Returns paginated list of all deployments.
+
+**Query Parameters**:
+- `page`: Page number (default: 1)
+- `page_size`: Results per page (default: 50)
+- `provider`: Filter by provider (vercel/netlify/cloudflare)
+- `status`: Filter by status (success/failed/pending)
+
+**Response**:
+```json
+{
+  "deployments": [
+    {
+      "id": "uuid",
+      "project_id": "uuid",
+      "project_name": "My App",
+      "owner_username": "johndoe",
+      "provider": "vercel",
+      "status": "success",
+      "deployment_url": "https://my-app.vercel.app",
+      "created_at": "2025-01-09T10:00:00Z"
+    }
+  ],
+  "total": 234,
+  "page": 1,
+  "page_size": 50
+}
+```
 
 ## Security
 

@@ -1569,3 +1569,51 @@ class EmailVerificationCode(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ============================================================================
+# Admin Panel Models
+# ============================================================================
+
+
+class HealthCheck(Base):
+    """
+    Health check results for system monitoring.
+    Stores periodic health check results for all platform services.
+    """
+
+    __tablename__ = "health_checks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    service_name = Column(String(50), nullable=False, index=True)
+    status = Column(String(20), nullable=False)  # up, down, degraded
+    response_time_ms = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    extra_data = Column(JSON, default={})  # Additional check details
+    checked_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (Index("idx_health_checks_service_time", "service_name", "checked_at"),)
+
+
+class AdminAction(Base):
+    """
+    Admin actions audit log.
+    Records all administrative actions for compliance and debugging.
+    """
+
+    __tablename__ = "admin_actions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    admin_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    action_type = Column(String(100), nullable=False, index=True)
+    target_type = Column(String(50), nullable=False)  # user, project, agent, etc.
+    target_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    reason = Column(Text, nullable=True)
+    extra_data = Column(JSON, default={})  # Additional action details
+    ip_address = Column(String(45), nullable=True)  # IPv4 or IPv6
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (Index("idx_admin_actions_target", "target_type", "target_id"),)

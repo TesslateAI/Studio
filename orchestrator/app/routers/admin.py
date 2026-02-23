@@ -1,32 +1,52 @@
 """
 Admin API endpoints for platform metrics and management.
+Includes:
+- Platform metrics (users, projects, sessions, tokens, marketplace)
+- User management (search, view, suspend, delete, credits)
+- System health monitoring
+- Agent management
 """
 
+import asyncio
+import csv
+import io
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, distinct, func, select
+from sqlalchemy import and_, asc, cast, desc, distinct, func, or_, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..config import get_settings
 from ..database import get_db
 from ..models import (
+    AdminAction,
+    AgentCommandLog,
     Chat,
+    Container,
+    CreditPurchase,
+    Deployment,
+    HealthCheck,
     MarketplaceAgent,
     MarketplaceBase,
     Message,
     Project,
     ProjectAgent,
+    ProjectFile,
+    ShellSession,
+    UsageLog,
     User,
     UserPurchasedAgent,
     UserPurchasedBase,
 )
 from ..services.litellm_service import litellm_service
-from ..users import current_superuser
+from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -433,8 +453,8 @@ async def get_marketplace_metrics(
         # ===== AGENTS METRICS =====
         # Total agents (official + published community agents)
         total_agents_query = select(func.count(MarketplaceAgent.id)).where(
-            MarketplaceAgent.is_active,
-            (MarketplaceAgent.forked_by_user_id is None) | (MarketplaceAgent.is_published),
+            MarketplaceAgent.is_active == True,
+            (MarketplaceAgent.forked_by_user_id.is_(None)) | (MarketplaceAgent.is_published == True),
         )
         total_agents = await db.scalar(total_agents_query)
 
@@ -1141,3 +1161,2572 @@ async def get_available_models(
         models_str = settings.litellm_default_models
         models = [m.strip() for m in models_str.split(",") if m.strip()]
         return {"models": models if models else ["qwen-3-235b-a22b-thinking-2507"]}
+
+
+# ============================================================================
+# User Management
+# ============================================================================
+
+
+async def log_admin_action(
+    db: AsyncSession,
+    admin: User,
+    action_type: str,
+    target_type: str,
+    target_id: UUID,
+    reason: str | None = None,
+    extra_data: dict | None = None,
+    request: Request | None = None
+):
+    """Log an admin action to the audit log."""
+    try:
+        action = AdminAction(
+            admin_id=admin.id,
+            action_type=action_type,
+            target_type=target_type,
+            target_id=target_id,
+            reason=reason,
+            extra_data=extra_data or {},
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None
+        )
+        db.add(action)
+        await db.commit()
+    except Exception as e:
+        logger.error(f"Failed to log admin action: {e}")
+
+
+@router.get("/users")
+async def list_users(
+    search: str | None = None,
+    tier: str | None = None,
+    status: str | None = None,  # active, suspended, deleted
+    verified: bool | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    last_active_after: datetime | None = None,
+    last_active_before: datetime | None = None,
+    has_projects: bool | None = None,
+    is_creator: bool | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """
+    List users with search, filters, and pagination.
+    """
+    try:
+        # Correlated subqueries for project_count and creator_agent_count
+        # These are computed in the DB, eliminating N+1 queries
+        project_count_subq = (
+            select(func.count(Project.id))
+            .where(Project.owner_id == User.id)
+            .correlate(User)
+            .scalar_subquery()
+            .label("project_count")
+        )
+
+        creator_count_subq = (
+            select(func.count(MarketplaceAgent.id))
+            .where(
+                or_(
+                    MarketplaceAgent.created_by_user_id == User.id,
+                    MarketplaceAgent.forked_by_user_id == User.id,
+                )
+            )
+            .correlate(User)
+            .scalar_subquery()
+            .label("creator_agent_count")
+        )
+
+        # Base query with computed columns
+        query = select(User, project_count_subq, creator_count_subq)
+        count_query = select(func.count()).select_from(User)
+
+        # Apply filters
+        filters = []
+
+        # Search by email, username, or name
+        if search:
+            search_pattern = f"%{search}%"
+            filters.append(
+                or_(
+                    User.email.ilike(search_pattern),
+                    User.username.ilike(search_pattern),
+                    User.name.ilike(search_pattern)
+                )
+            )
+
+        # Subscription tier filter
+        if tier:
+            filters.append(User.subscription_tier == tier)
+
+        # Account status filter
+        if status:
+            if status == "active":
+                filters.append(and_(User.is_suspended == False, User.is_deleted == False, User.is_active == True))
+            elif status == "suspended":
+                filters.append(User.is_suspended == True)
+            elif status == "deleted":
+                filters.append(User.is_deleted == True)
+            elif status == "inactive":
+                filters.append(User.is_active == False)
+
+        # Email verification filter
+        if verified is not None:
+            filters.append(User.is_verified == verified)
+
+        # Date range filters
+        if created_after:
+            filters.append(User.created_at >= created_after)
+        if created_before:
+            filters.append(User.created_at <= created_before)
+        if last_active_after:
+            filters.append(User.last_active_at >= last_active_after)
+        if last_active_before:
+            filters.append(User.last_active_at <= last_active_before)
+
+        # has_projects / is_creator filters applied BEFORE pagination
+        # Use EXISTS subqueries so they work as WHERE clauses on the User row
+        if has_projects is not None:
+            project_exists = (
+                select(Project.id)
+                .where(Project.owner_id == User.id)
+                .correlate(User)
+                .exists()
+            )
+            if has_projects:
+                filters.append(project_exists)
+            else:
+                filters.append(~project_exists)
+
+        if is_creator is not None:
+            creator_exists = (
+                select(MarketplaceAgent.id)
+                .where(
+                    or_(
+                        MarketplaceAgent.created_by_user_id == User.id,
+                        MarketplaceAgent.forked_by_user_id == User.id,
+                    )
+                )
+                .correlate(User)
+                .exists()
+            )
+            if is_creator:
+                filters.append(creator_exists)
+            else:
+                filters.append(~creator_exists)
+
+        # Apply all filters
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        # Get total count
+        total = await db.scalar(count_query)
+
+        # Apply sorting
+        sort_column = getattr(User, sort_by, User.created_at)
+        if sort_order == "desc":
+            query = query.order_by(desc(sort_column))
+        else:
+            query = query.order_by(asc(sort_column))
+
+        # Apply pagination
+        offset = (page - 1) * page_size
+        query = query.offset(offset).limit(page_size)
+
+        # Execute query - single round-trip, no N+1
+        result = await db.execute(query)
+        rows = result.all()
+
+        # Format response
+        users_data = []
+        for user, project_count, creator_agent_count in rows:
+            users_data.append({
+                "id": str(user.id),
+                "email": user.email,
+                "username": user.username,
+                "name": user.name,
+                "avatar_url": user.avatar_url,
+                "subscription_tier": user.subscription_tier,
+                "is_active": user.is_active,
+                "is_suspended": user.is_suspended,
+                "is_deleted": user.is_deleted,
+                "is_verified": user.is_verified,
+                "is_superuser": user.is_superuser,
+                "total_credits": user.total_credits,
+                "bundled_credits": user.bundled_credits,
+                "purchased_credits": user.purchased_credits,
+                "total_spend": user.total_spend,
+                "project_count": project_count or 0,
+                "is_creator": (creator_agent_count or 0) > 0,
+                "last_active_at": user.last_active_at.isoformat() if user.last_active_at else None,
+                "created_at": user.created_at.isoformat() if user.created_at else None
+            })
+
+        return {
+            "users": users_data,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": (total + page_size - 1) // page_size if total else 0
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list users")
+
+
+@router.get("/users/export")
+async def export_users(
+    search: str | None = None,
+    tier: str | None = None,
+    status: str | None = None,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """Export users to CSV."""
+    try:
+        # Build query (similar to list_users but without pagination)
+        query = select(User)
+        filters = []
+
+        if search:
+            search_pattern = f"%{search}%"
+            filters.append(
+                or_(
+                    User.email.ilike(search_pattern),
+                    User.username.ilike(search_pattern),
+                    User.name.ilike(search_pattern)
+                )
+            )
+        if tier:
+            filters.append(User.subscription_tier == tier)
+        if status == "active":
+            filters.append(and_(User.is_suspended == False, User.is_deleted == False))
+        elif status == "suspended":
+            filters.append(User.is_suspended == True)
+        elif status == "deleted":
+            filters.append(User.is_deleted == True)
+
+        if filters:
+            query = query.where(and_(*filters))
+
+        result = await db.execute(query.order_by(User.created_at.desc()))
+        users = result.scalars().all()
+
+        # Create CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "ID", "Email", "Username", "Name", "Tier", "Status",
+            "Total Credits", "Total Spend", "Created At", "Last Active"
+        ])
+
+        for user in users:
+            status_str = "active"
+            if user.is_deleted:
+                status_str = "deleted"
+            elif user.is_suspended:
+                status_str = "suspended"
+            elif not user.is_active:
+                status_str = "inactive"
+
+            writer.writerow([
+                str(user.id),
+                user.email,
+                user.username,
+                user.name,
+                user.subscription_tier,
+                status_str,
+                user.total_credits,
+                user.total_spend / 100 if user.total_spend else 0,
+                user.created_at.isoformat() if user.created_at else "",
+                user.last_active_at.isoformat() if user.last_active_at else ""
+            ])
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=users_export.csv"}
+        )
+
+    except Exception as e:
+        logger.error(f"Error exporting users: {e}")
+        raise HTTPException(status_code=500, detail="Failed to export users")
+
+
+@router.get("/users/{user_id}")
+async def get_user_detail(
+    user_id: str,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get detailed information about a specific user."""
+    try:
+        result = await db.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Get project count
+        project_count = await db.scalar(
+            select(func.count(Project.id)).where(Project.owner_id == user.id)
+        )
+
+        # Get deployed projects count
+        deployed_count = await db.scalar(
+            select(func.count(Project.id)).where(
+                and_(Project.owner_id == user.id, Project.is_deployed == True)
+            )
+        )
+
+        # Get total usage from UsageLog
+        usage_query = select(
+            func.sum(UsageLog.tokens_input).label("total_input"),
+            func.sum(UsageLog.tokens_output).label("total_output"),
+            func.sum(UsageLog.cost_total).label("total_cost")
+        ).where(UsageLog.user_id == user.id)
+        usage_result = await db.execute(usage_query)
+        usage = usage_result.one()
+
+        # Get recent activity
+        recent_projects = await db.execute(
+            select(Project.name, Project.created_at)
+            .where(Project.owner_id == user.id)
+            .order_by(Project.created_at.desc())
+            .limit(5)
+        )
+
+        return {
+            "id": str(user.id),
+            "email": user.email,
+            "username": user.username,
+            "name": user.name,
+            "slug": user.slug,
+            "avatar_url": user.avatar_url,
+            "bio": user.bio,
+            "twitter_handle": user.twitter_handle,
+            "github_username": user.github_username,
+            "website_url": user.website_url,
+            "subscription_tier": user.subscription_tier,
+            "stripe_customer_id": user.stripe_customer_id,
+            "stripe_subscription_id": user.stripe_subscription_id,
+            "is_active": user.is_active,
+            "is_suspended": user.is_suspended,
+            "suspended_at": user.suspended_at.isoformat() if user.suspended_at else None,
+            "suspended_reason": user.suspended_reason,
+            "is_deleted": user.is_deleted,
+            "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
+            "deleted_reason": user.deleted_reason,
+            "is_verified": user.is_verified,
+            "is_superuser": user.is_superuser,
+            "bundled_credits": user.bundled_credits,
+            "purchased_credits": user.purchased_credits,
+            "total_credits": user.total_credits,
+            "credits_reset_date": user.credits_reset_date.isoformat() if user.credits_reset_date else None,
+            "total_spend": user.total_spend,
+            "referral_code": user.referral_code,
+            "referred_by": user.referred_by,
+            "project_count": project_count,
+            "deployed_projects_count": deployed_count,
+            "usage_stats": {
+                "total_tokens_input": usage.total_input or 0,
+                "total_tokens_output": usage.total_output or 0,
+                "total_cost_cents": usage.total_cost or 0
+            },
+            "recent_projects": [
+                {"name": p.name, "created_at": p.created_at.isoformat()}
+                for p in recent_projects
+            ],
+            "last_active_at": user.last_active_at.isoformat() if user.last_active_at else None,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user details")
+
+
+@router.get("/users/{user_id}/projects")
+async def get_user_projects(
+    user_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get projects owned by a specific user."""
+    try:
+        # Verify user exists
+        user = await db.scalar(select(User).where(User.id == user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Get total count
+        total = await db.scalar(
+            select(func.count(Project.id)).where(Project.owner_id == user_id)
+        )
+
+        # Get projects with pagination
+        offset = (page - 1) * page_size
+        result = await db.execute(
+            select(Project)
+            .where(Project.owner_id == user_id)
+            .order_by(Project.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        projects = result.scalars().all()
+
+        return {
+            "projects": [
+                {
+                    "id": str(p.id),
+                    "name": p.name,
+                    "slug": p.slug,
+                    "is_deployed": p.is_deployed,
+                    "environment_status": p.environment_status,
+                    "has_git_repo": p.has_git_repo,
+                    "created_at": p.created_at.isoformat() if p.created_at else None,
+                    "last_activity": p.last_activity.isoformat() if p.last_activity else None
+                }
+                for p in projects
+            ],
+            "total": total,
+            "page": page,
+            "pages": (total + page_size - 1) // page_size if total else 0
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting projects for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user projects")
+
+
+@router.get("/users/{user_id}/billing")
+async def get_user_billing(
+    user_id: str,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get billing information for a specific user."""
+    try:
+        user = await db.scalar(select(User).where(User.id == user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Get credit purchases
+        purchases_result = await db.execute(
+            select(CreditPurchase)
+            .where(CreditPurchase.user_id == user_id)
+            .order_by(CreditPurchase.created_at.desc())
+            .limit(10)
+        )
+        purchases = purchases_result.scalars().all()
+
+        # Get recent usage logs
+        usage_result = await db.execute(
+            select(UsageLog)
+            .where(UsageLog.user_id == user_id)
+            .order_by(UsageLog.created_at.desc())
+            .limit(20)
+        )
+        usage_logs = usage_result.scalars().all()
+
+        # Calculate monthly spend
+        month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly_spend = await db.scalar(
+            select(func.sum(UsageLog.cost_total))
+            .where(and_(
+                UsageLog.user_id == user_id,
+                UsageLog.created_at >= month_start
+            ))
+        ) or 0
+
+        return {
+            "subscription": {
+                "tier": user.subscription_tier,
+                "stripe_customer_id": user.stripe_customer_id,
+                "stripe_subscription_id": user.stripe_subscription_id
+            },
+            "credits": {
+                "bundled": user.bundled_credits,
+                "purchased": user.purchased_credits,
+                "total": user.total_credits,
+                "reset_date": user.credits_reset_date.isoformat() if user.credits_reset_date else None
+            },
+            "spend": {
+                "total_lifetime_cents": user.total_spend,
+                "monthly_cents": monthly_spend
+            },
+            "purchases": [
+                {
+                    "id": str(p.id),
+                    "amount_cents": p.amount_cents,
+                    "credits_amount": p.credits_amount,
+                    "status": p.status,
+                    "created_at": p.created_at.isoformat() if p.created_at else None
+                }
+                for p in purchases
+            ],
+            "recent_usage": [
+                {
+                    "model": u.model,
+                    "tokens_input": u.tokens_input,
+                    "tokens_output": u.tokens_output,
+                    "cost_cents": u.cost_total,
+                    "created_at": u.created_at.isoformat() if u.created_at else None
+                }
+                for u in usage_logs
+            ]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting billing for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user billing")
+
+
+class SuspendUserRequest(BaseModel):
+    """Request body for suspending a user."""
+    reason: str = Field(..., min_length=1, max_length=1000)
+    notify_user: bool = False
+
+
+@router.post("/users/{user_id}/suspend")
+async def suspend_user(
+    user_id: str,
+    request_data: SuspendUserRequest,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Suspend a user account."""
+    try:
+        user = await db.scalar(select(User).where(User.id == user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if user.is_superuser:
+            raise HTTPException(status_code=403, detail="Cannot suspend a superuser account")
+
+        if user.is_suspended:
+            raise HTTPException(status_code=400, detail="User is already suspended")
+
+        # Suspend the user
+        user.is_suspended = True
+        user.suspended_at = datetime.utcnow()
+        user.suspended_reason = request_data.reason
+        user.suspended_by_id = admin.id
+        user.is_active = False  # Also deactivate the account
+
+        await db.commit()
+
+        # Log admin action
+        await log_admin_action(
+            db, admin, "user.suspend", "user", UUID(user_id),
+            reason=request_data.reason,
+            extra_data={"notify_user": request_data.notify_user},
+            request=request
+        )
+
+        logger.info(f"Admin {admin.username} suspended user {user.username}")
+
+        # TODO: Send email notification if notify_user is True
+
+        return {
+            "success": True,
+            "message": f"User {user.username} has been suspended"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error suspending user {user_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to suspend user")
+
+
+@router.post("/users/{user_id}/unsuspend")
+async def unsuspend_user(
+    user_id: str,
+    request: Request,
+    reason: str | None = None,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Remove suspension from a user account."""
+    try:
+        user = await db.scalar(select(User).where(User.id == user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if not user.is_suspended:
+            raise HTTPException(status_code=400, detail="User is not suspended")
+
+        # Unsuspend the user
+        user.is_suspended = False
+        user.suspended_at = None
+        user.suspended_reason = None
+        user.suspended_by_id = None
+        user.is_active = True
+
+        await db.commit()
+
+        # Log admin action
+        await log_admin_action(
+            db, admin, "user.unsuspend", "user", UUID(user_id),
+            reason=reason,
+            request=request
+        )
+
+        logger.info(f"Admin {admin.username} unsuspended user {user.username}")
+
+        return {
+            "success": True,
+            "message": f"User {user.username} has been unsuspended"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unsuspending user {user_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to unsuspend user")
+
+
+class DeleteUserRequest(BaseModel):
+    """Request body for deleting a user."""
+    confirmation_email: str
+    reason: str = Field(..., min_length=1, max_length=1000)
+    notify_user: bool = False
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    request_data: DeleteUserRequest,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Soft delete a user account."""
+    try:
+        user = await db.scalar(select(User).where(User.id == user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if user.is_superuser:
+            raise HTTPException(status_code=403, detail="Cannot delete a superuser account")
+
+        # Verify confirmation email matches
+        if request_data.confirmation_email.lower() != user.email.lower():
+            raise HTTPException(status_code=400, detail="Confirmation email does not match")
+
+        if user.is_deleted:
+            raise HTTPException(status_code=400, detail="User is already deleted")
+
+        # Soft delete the user
+        user.is_deleted = True
+        user.deleted_at = datetime.utcnow()
+        user.deleted_reason = request_data.reason
+        user.deleted_by_id = admin.id
+        user.is_active = False
+        user.scheduled_hard_delete_at = datetime.utcnow() + timedelta(days=30)
+
+        await db.commit()
+
+        # Log admin action
+        await log_admin_action(
+            db, admin, "user.delete", "user", UUID(user_id),
+            reason=request_data.reason,
+            extra_data={"notify_user": request_data.notify_user},
+            request=request
+        )
+
+        logger.info(f"Admin {admin.username} soft-deleted user {user.username}")
+
+        # TODO: Send email notification if notify_user is True
+
+        return {
+            "success": True,
+            "message": f"User {user.username} has been deleted. Data will be permanently removed after 30 days."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete user")
+
+
+class AdjustCreditsRequest(BaseModel):
+    """Request body for adjusting user credits."""
+    amount: int = Field(..., description="Positive to add, negative to remove")
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/users/{user_id}/credits/adjust")
+async def adjust_user_credits(
+    user_id: str,
+    request_data: AdjustCreditsRequest,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Adjust a user's credit balance."""
+    try:
+        user = await db.scalar(select(User).where(User.id == user_id))
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        old_balance = user.purchased_credits
+
+        # Adjust purchased_credits (not bundled, as those reset monthly)
+        new_balance = user.purchased_credits + request_data.amount
+        if new_balance < 0:
+            raise HTTPException(status_code=400, detail="Cannot reduce credits below zero")
+
+        user.purchased_credits = new_balance
+
+        await db.commit()
+
+        # Log admin action
+        await log_admin_action(
+            db, admin, "user.credits_adjusted", "user", UUID(user_id),
+            reason=request_data.reason,
+            extra_data={
+                "old_balance": old_balance,
+                "adjustment": request_data.amount,
+                "new_balance": new_balance
+            },
+            request=request
+        )
+
+        logger.info(f"Admin {admin.username} adjusted credits for {user.username}: {request_data.amount}")
+
+        return {
+            "success": True,
+            "old_balance": old_balance,
+            "adjustment": request_data.amount,
+            "new_balance": new_balance,
+            "message": f"Credits adjusted by {request_data.amount}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adjusting credits for user {user_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to adjust credits")
+
+
+# ============================================================================
+# System Health Monitoring
+# ============================================================================
+
+
+async def check_service_health(service_name: str, check_func) -> dict[str, Any]:
+    """Check health of a single service."""
+    start_time = datetime.utcnow()
+    try:
+        await asyncio.wait_for(check_func(), timeout=10.0)
+        response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        return {
+            "service": service_name,
+            "status": "up",
+            "response_time_ms": int(response_time),
+            "error": None
+        }
+    except asyncio.TimeoutError:
+        return {
+            "service": service_name,
+            "status": "down",
+            "response_time_ms": 10000,
+            "error": "Timeout after 10 seconds"
+        }
+    except Exception as e:
+        response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        return {
+            "service": service_name,
+            "status": "down",
+            "response_time_ms": int(response_time),
+            "error": str(e)
+        }
+
+
+@router.get("/health")
+async def get_system_health(
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get current health status of all platform services."""
+    try:
+        services = []
+
+        # Check Database
+        async def check_db():
+            await db.execute(select(func.now()))
+
+        db_health = await check_service_health("database", check_db)
+        services.append(db_health)
+
+        # Check LiteLLM
+        async def check_litellm():
+            await litellm_service.get_available_models()
+
+        litellm_health = await check_service_health("litellm", check_litellm)
+        services.append(litellm_health)
+
+        # Check Kubernetes (if in k8s mode)
+        settings = get_settings()
+        if settings.deployment_mode == "kubernetes":
+            try:
+                from ..services.orchestration.kubernetes.client import get_k8s_client as get_kubernetes_client
+                k8s_client = get_kubernetes_client()
+
+                async def check_k8s():
+                    # Simple API check
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, lambda: k8s_client.core_v1.list_namespace(limit=1)
+                    )
+
+                k8s_health = await check_service_health("kubernetes", check_k8s)
+                services.append(k8s_health)
+            except Exception as e:
+                services.append({
+                    "service": "kubernetes",
+                    "status": "down",
+                    "response_time_ms": 0,
+                    "error": str(e)
+                })
+
+        # Determine overall status
+        down_services = [s for s in services if s["status"] == "down"]
+        degraded_services = [s for s in services if s.get("response_time_ms", 0) > 5000]
+
+        if down_services:
+            overall_status = "outage"
+        elif degraded_services:
+            overall_status = "degraded"
+        else:
+            overall_status = "operational"
+
+        # Store health check results
+        for service in services:
+            health_record = HealthCheck(
+                service_name=service["service"],
+                status=service["status"],
+                response_time_ms=service.get("response_time_ms"),
+                error_message=service.get("error")
+            )
+            db.add(health_record)
+
+        await db.commit()
+
+        # Get recent incidents (health checks that failed in last 24 hours)
+        day_ago = datetime.utcnow() - timedelta(hours=24)
+        incidents_query = select(HealthCheck).where(
+            and_(
+                HealthCheck.status != "up",
+                HealthCheck.checked_at >= day_ago
+            )
+        ).order_by(HealthCheck.checked_at.desc()).limit(10)
+
+        incidents_result = await db.execute(incidents_query)
+        incidents = incidents_result.scalars().all()
+
+        return {
+            "overall_status": overall_status,
+            "services": services,
+            "incidents": [
+                {
+                    "service": i.service_name,
+                    "status": i.status,
+                    "error": i.error_message,
+                    "time": i.checked_at.isoformat()
+                }
+                for i in incidents
+            ],
+            "checked_at": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking system health: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check system health")
+
+
+@router.get("/health/{service}")
+async def get_service_health_history(
+    service: str,
+    period: str = "24h",  # 1h, 24h, 7d
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get health check history for a specific service."""
+    try:
+        # Parse period
+        if period == "1h":
+            start_time = datetime.utcnow() - timedelta(hours=1)
+        elif period == "7d":
+            start_time = datetime.utcnow() - timedelta(days=7)
+        else:
+            start_time = datetime.utcnow() - timedelta(hours=24)
+
+        # Get health history
+        result = await db.execute(
+            select(HealthCheck)
+            .where(and_(
+                HealthCheck.service_name == service,
+                HealthCheck.checked_at >= start_time
+            ))
+            .order_by(HealthCheck.checked_at.desc())
+        )
+        checks = result.scalars().all()
+
+        if not checks:
+            return {
+                "service": service,
+                "status": "unknown",
+                "uptime_percent": 0,
+                "avg_response_time_ms": 0,
+                "history": []
+            }
+
+        # Calculate statistics
+        up_checks = [c for c in checks if c.status == "up"]
+        uptime_percent = (len(up_checks) / len(checks)) * 100 if checks else 0
+
+        response_times = [c.response_time_ms for c in checks if c.response_time_ms]
+        avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+
+        # Current status is the most recent check
+        current_status = checks[0].status if checks else "unknown"
+
+        return {
+            "service": service,
+            "status": current_status,
+            "uptime_percent": round(uptime_percent, 2),
+            "avg_response_time_ms": int(avg_response_time),
+            "checks_count": len(checks),
+            "history": [
+                {
+                    "status": c.status,
+                    "response_time_ms": c.response_time_ms,
+                    "error": c.error_message,
+                    "checked_at": c.checked_at.isoformat()
+                }
+                for c in checks[:100]  # Limit to 100 entries
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting health history for {service}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get service health history")
+
+
+@router.get("/k8s/namespaces")
+async def list_kubernetes_namespaces(
+    search: str | None = None,
+    status: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """List all Kubernetes namespaces for user projects."""
+    settings = get_settings()
+    if settings.deployment_mode != "kubernetes":
+        return {
+            "namespaces": [],
+            "total": 0,
+            "message": "Kubernetes mode not enabled"
+        }
+
+    try:
+        from ..services.orchestration.kubernetes.client import get_k8s_client as get_kubernetes_client
+        k8s_client = get_kubernetes_client()
+
+        # Get all namespaces with proj- prefix
+        all_namespaces = k8s_client.core_v1.list_namespace(
+            label_selector="app.kubernetes.io/managed-by=tesslate"
+        )
+
+        namespaces_data = []
+        for ns in all_namespaces.items:
+            ns_name = ns.metadata.name
+            if not ns_name.startswith("proj-"):
+                continue
+
+            # Apply search filter
+            if search and search.lower() not in ns_name.lower():
+                continue
+
+            # Get project info from database
+            project_id = ns_name.replace("proj-", "")
+            project = await db.scalar(
+                select(Project).where(cast(Project.id, String) == project_id)
+            )
+
+            owner = None
+            if project:
+                owner = await db.scalar(select(User).where(User.id == project.owner_id))
+
+            # Get pods in namespace
+            try:
+                pods = k8s_client.core_v1.list_namespaced_pod(ns_name)
+                running_pods = len([p for p in pods.items if p.status.phase == "Running"])
+                total_pods = len(pods.items)
+            except Exception:
+                running_pods = 0
+                total_pods = 0
+
+            # Get PVCs
+            try:
+                pvcs = k8s_client.core_v1.list_namespaced_persistent_volume_claim(ns_name)
+                total_storage = sum(
+                    int(pvc.spec.resources.requests.get("storage", "0").replace("Gi", ""))
+                    for pvc in pvcs.items
+                    if pvc.spec.resources.requests.get("storage")
+                )
+            except Exception:
+                total_storage = 0
+
+            ns_status = ns.status.phase if ns.status else "Unknown"
+            if status and status.lower() != ns_status.lower():
+                continue
+
+            namespaces_data.append({
+                "namespace": ns_name,
+                "project_id": project_id,
+                "project_name": project.name if project else "Unknown",
+                "owner_username": owner.username if owner else "Unknown",
+                "owner_email": owner.email if owner else None,
+                "status": ns_status,
+                "pods": f"{running_pods}/{total_pods}",
+                "storage_gb": total_storage,
+                "created_at": ns.metadata.creation_timestamp.isoformat() if ns.metadata.creation_timestamp else None
+            })
+
+        # Pagination
+        total = len(namespaces_data)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated = namespaces_data[start:end]
+
+        return {
+            "namespaces": paginated,
+            "total": total,
+            "page": page,
+            "pages": (total + page_size - 1) // page_size if total else 0
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing k8s namespaces: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list Kubernetes namespaces")
+
+
+@router.get("/k8s/namespaces/{namespace}")
+async def get_namespace_details(
+    namespace: str,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get detailed information about a Kubernetes namespace."""
+    settings = get_settings()
+    if settings.deployment_mode != "kubernetes":
+        raise HTTPException(status_code=400, detail="Kubernetes mode not enabled")
+
+    try:
+        from ..services.orchestration.kubernetes.client import get_k8s_client as get_kubernetes_client
+        k8s_client = get_kubernetes_client()
+
+        # Get namespace
+        try:
+            ns = k8s_client.core_v1.read_namespace(namespace)
+        except Exception:
+            raise HTTPException(status_code=404, detail="Namespace not found")
+
+        # Get project info
+        project_id = namespace.replace("proj-", "")
+        project = await db.scalar(
+            select(Project).where(cast(Project.id, String) == project_id)
+        )
+        owner = None
+        if project:
+            owner = await db.scalar(select(User).where(User.id == project.owner_id))
+
+        # Get pods
+        pods = k8s_client.core_v1.list_namespaced_pod(namespace)
+        pods_data = []
+        for pod in pods.items:
+            pods_data.append({
+                "name": pod.metadata.name,
+                "status": pod.status.phase,
+                "ready": all(c.ready for c in pod.status.container_statuses or []),
+                "restarts": sum(c.restart_count for c in pod.status.container_statuses or []),
+                "created_at": pod.metadata.creation_timestamp.isoformat() if pod.metadata.creation_timestamp else None
+            })
+
+        # Get PVCs
+        pvcs = k8s_client.core_v1.list_namespaced_persistent_volume_claim(namespace)
+        pvcs_data = [
+            {
+                "name": pvc.metadata.name,
+                "status": pvc.status.phase,
+                "storage": pvc.spec.resources.requests.get("storage", "Unknown"),
+                "storage_class": pvc.spec.storage_class_name
+            }
+            for pvc in pvcs.items
+        ]
+
+        # Get ingresses
+        ingresses = k8s_client.networking_v1.list_namespaced_ingress(namespace)
+        ingresses_data = []
+        for ing in ingresses.items:
+            for rule in ing.spec.rules or []:
+                ingresses_data.append({
+                    "host": rule.host,
+                    "tls": bool(ing.spec.tls)
+                })
+
+        return {
+            "namespace": namespace,
+            "status": ns.status.phase,
+            "project": {
+                "id": project_id,
+                "name": project.name if project else None,
+                "slug": project.slug if project else None
+            },
+            "owner": {
+                "id": str(owner.id) if owner else None,
+                "username": owner.username if owner else None,
+                "email": owner.email if owner else None
+            },
+            "pods": pods_data,
+            "pvcs": pvcs_data,
+            "ingresses": ingresses_data,
+            "created_at": ns.metadata.creation_timestamp.isoformat() if ns.metadata.creation_timestamp else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting namespace {namespace} details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get namespace details")
+
+
+@router.get("/k8s/namespaces/{namespace}/logs/{pod}")
+async def get_pod_logs(
+    namespace: str,
+    pod: str,
+    container: str | None = None,
+    tail_lines: int = Query(100, ge=1, le=1000),
+    admin: User = Depends(current_superuser)
+) -> dict[str, Any]:
+    """Get logs from a pod in a namespace."""
+    settings = get_settings()
+    if settings.deployment_mode != "kubernetes":
+        raise HTTPException(status_code=400, detail="Kubernetes mode not enabled")
+
+    try:
+        from ..services.orchestration.kubernetes.client import get_k8s_client as get_kubernetes_client
+        k8s_client = get_kubernetes_client()
+
+        logs = k8s_client.core_v1.read_namespaced_pod_log(
+            name=pod,
+            namespace=namespace,
+            container=container,
+            tail_lines=tail_lines
+        )
+
+        return {
+            "namespace": namespace,
+            "pod": pod,
+            "container": container,
+            "logs": logs
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting logs for {namespace}/{pod}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get pod logs")
+
+
+@router.post("/k8s/namespaces/{namespace}/pods/{pod}/restart")
+async def restart_pod(
+    namespace: str,
+    pod: str,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Restart a pod by deleting it (Kubernetes will recreate it)."""
+    settings = get_settings()
+    if settings.deployment_mode != "kubernetes":
+        raise HTTPException(status_code=400, detail="Kubernetes mode not enabled")
+
+    try:
+        from ..services.orchestration.kubernetes.client import get_k8s_client as get_kubernetes_client
+        k8s_client = get_kubernetes_client()
+
+        # Delete pod (controller will recreate it)
+        k8s_client.core_v1.delete_namespaced_pod(name=pod, namespace=namespace)
+
+        # Log admin action
+        project_id = namespace.replace("proj-", "")
+        try:
+            await log_admin_action(
+                db, admin, "k8s.pod.restart", "pod", UUID(project_id),
+                extra_data={"namespace": namespace, "pod": pod},
+                request=request
+            )
+        except Exception:
+            pass  # Don't fail if logging fails
+
+        logger.info(f"Admin {admin.username} restarted pod {pod} in {namespace}")
+
+        return {
+            "success": True,
+            "message": f"Pod {pod} restart initiated"
+        }
+
+    except Exception as e:
+        logger.error(f"Error restarting pod {namespace}/{pod}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to restart pod")
+
+
+@router.delete("/k8s/namespaces/{namespace}")
+async def delete_namespace(
+    namespace: str,
+    reason: str,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Delete a Kubernetes namespace (cascades to all resources)."""
+    settings = get_settings()
+    if settings.deployment_mode != "kubernetes":
+        raise HTTPException(status_code=400, detail="Kubernetes mode not enabled")
+
+    try:
+        from ..services.orchestration.kubernetes.client import get_k8s_client as get_kubernetes_client
+        k8s_client = get_kubernetes_client()
+
+        # Safety check - don't delete system namespaces
+        if not namespace.startswith("proj-"):
+            raise HTTPException(status_code=400, detail="Can only delete project namespaces")
+
+        # Delete the namespace
+        k8s_client.core_v1.delete_namespace(name=namespace)
+
+        # Log admin action
+        project_id = namespace.replace("proj-", "")
+        try:
+            await log_admin_action(
+                db, admin, "k8s.namespace.delete", "namespace", UUID(project_id),
+                reason=reason,
+                extra_data={"namespace": namespace},
+                request=request
+            )
+        except Exception:
+            pass
+
+        logger.info(f"Admin {admin.username} deleted namespace {namespace}")
+
+        return {
+            "success": True,
+            "message": f"Namespace {namespace} deletion initiated"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting namespace {namespace}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete namespace")
+
+
+# ============================================================================
+# Enhanced Token Analytics
+# ============================================================================
+
+
+@router.get("/analytics/tokens")
+async def get_enhanced_token_analytics(
+    period: str = "30d",  # 1h, 24h, 7d, 30d, 90d
+    group_by: str | None = None,  # model, user, agent, tier
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get enhanced token usage analytics with multiple breakdowns."""
+    try:
+        # Parse period
+        if period == "1h":
+            start_time = datetime.utcnow() - timedelta(hours=1)
+        elif period == "24h":
+            start_time = datetime.utcnow() - timedelta(hours=24)
+        elif period == "7d":
+            start_time = datetime.utcnow() - timedelta(days=7)
+        elif period == "90d":
+            start_time = datetime.utcnow() - timedelta(days=90)
+        else:
+            start_time = datetime.utcnow() - timedelta(days=30)
+
+        # Get summary metrics
+        summary_query = select(
+            func.sum(UsageLog.tokens_input).label("tokens_in"),
+            func.sum(UsageLog.tokens_output).label("tokens_out"),
+            func.sum(UsageLog.cost_total).label("cost_total"),
+            func.count(distinct(UsageLog.user_id)).label("active_users")
+        ).where(UsageLog.created_at >= start_time)
+
+        summary_result = await db.execute(summary_query)
+        summary = summary_result.one()
+
+        tokens_in = summary.tokens_in or 0
+        tokens_out = summary.tokens_out or 0
+        cost_total = summary.cost_total or 0
+        active_users = summary.active_users or 0
+
+        # Breakdown by model
+        by_model_query = select(
+            UsageLog.model,
+            func.sum(UsageLog.tokens_input).label("tokens_in"),
+            func.sum(UsageLog.tokens_output).label("tokens_out"),
+            func.sum(UsageLog.cost_total).label("cost"),
+            func.count().label("requests")
+        ).where(UsageLog.created_at >= start_time).group_by(UsageLog.model)
+
+        by_model_result = await db.execute(by_model_query)
+        by_model = [
+            {
+                "model": r.model,
+                "tokens_in": r.tokens_in or 0,
+                "tokens_out": r.tokens_out or 0,
+                "cost_cents": r.cost or 0,
+                "requests": r.requests
+            }
+            for r in by_model_result
+        ]
+
+        # Breakdown by user (top 20)
+        by_user_query = select(
+            UsageLog.user_id,
+            func.sum(UsageLog.tokens_input).label("tokens_in"),
+            func.sum(UsageLog.tokens_output).label("tokens_out"),
+            func.sum(UsageLog.cost_total).label("cost")
+        ).where(UsageLog.created_at >= start_time).group_by(UsageLog.user_id).order_by(
+            desc(func.sum(UsageLog.cost_total))
+        ).limit(20)
+
+        by_user_result = await db.execute(by_user_query)
+        by_user_raw = by_user_result.all()
+
+        by_user = []
+        for r in by_user_raw:
+            user = await db.scalar(select(User).where(User.id == r.user_id))
+            by_user.append({
+                "user_id": str(r.user_id),
+                "username": user.username if user else "Unknown",
+                "email": user.email if user else None,
+                "tokens_in": r.tokens_in or 0,
+                "tokens_out": r.tokens_out or 0,
+                "cost_cents": r.cost or 0
+            })
+
+        # Breakdown by subscription tier
+        by_tier_query = """
+            SELECT u.subscription_tier as tier,
+                   SUM(ul.tokens_input) as tokens_in,
+                   SUM(ul.tokens_output) as tokens_out,
+                   SUM(ul.cost_total) as cost,
+                   COUNT(DISTINCT ul.user_id) as users
+            FROM usage_logs ul
+            JOIN users u ON ul.user_id = u.id
+            WHERE ul.created_at >= :start_time
+            GROUP BY u.subscription_tier
+        """
+        # Using raw SQL for the join query
+        from sqlalchemy import text
+        by_tier_result = await db.execute(text(by_tier_query), {"start_time": start_time})
+        by_tier = [
+            {
+                "tier": r.tier,
+                "tokens_in": r.tokens_in or 0,
+                "tokens_out": r.tokens_out or 0,
+                "cost_cents": r.cost or 0,
+                "users": r.users
+            }
+            for r in by_tier_result
+        ]
+
+        # Daily timeline - use text() to avoid parameterization issues with date_trunc
+        from sqlalchemy import text, literal_column
+        date_trunc_expr = func.date_trunc(literal_column("'day'"), UsageLog.created_at)
+        timeline_query = select(
+            date_trunc_expr.label("date"),
+            func.sum(UsageLog.tokens_input).label("tokens_in"),
+            func.sum(UsageLog.tokens_output).label("tokens_out"),
+            func.sum(UsageLog.cost_total).label("cost")
+        ).where(UsageLog.created_at >= start_time).group_by(
+            date_trunc_expr
+        ).order_by(date_trunc_expr)
+
+        timeline_result = await db.execute(timeline_query)
+        timeline = [
+            {
+                "date": r.date.isoformat() if r.date else None,
+                "tokens_in": r.tokens_in or 0,
+                "tokens_out": r.tokens_out or 0,
+                "cost_cents": r.cost or 0
+            }
+            for r in timeline_result
+        ]
+
+        # Calculate projected monthly cost
+        days_in_period = {
+            "1h": 1/24,
+            "24h": 1,
+            "7d": 7,
+            "30d": 30,
+            "90d": 90
+        }.get(period, 30)
+
+        daily_avg_cost = cost_total / days_in_period if days_in_period > 0 else 0
+        projected_monthly = daily_avg_cost * 30
+
+        return {
+            "summary": {
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "tokens_total": tokens_in + tokens_out,
+                "cost_cents": cost_total,
+                "cost_dollars": cost_total / 100,
+                "active_users": active_users,
+                "projected_monthly_cents": int(projected_monthly),
+                "projected_monthly_dollars": projected_monthly / 100
+            },
+            "by_model": by_model,
+            "by_user": by_user,
+            "by_tier": by_tier,
+            "timeline": timeline,
+            "period": period
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting token analytics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get token analytics")
+
+
+@router.get("/analytics/tokens/anomalies")
+async def get_usage_anomalies(
+    period: str = "24h",
+    threshold: float = 3.0,  # Standard deviations
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Detect anomalous usage patterns."""
+    try:
+        # Parse period
+        if period == "7d":
+            start_time = datetime.utcnow() - timedelta(days=7)
+        elif period == "30d":
+            start_time = datetime.utcnow() - timedelta(days=30)
+        else:
+            start_time = datetime.utcnow() - timedelta(hours=24)
+
+        # Get user usage statistics
+        user_stats_query = select(
+            UsageLog.user_id,
+            func.sum(UsageLog.cost_total).label("total_cost"),
+            func.count().label("request_count")
+        ).where(UsageLog.created_at >= start_time).group_by(UsageLog.user_id)
+
+        user_stats_result = await db.execute(user_stats_query)
+        user_stats = user_stats_result.all()
+
+        if not user_stats:
+            return {"anomalies": [], "threshold": threshold}
+
+        # Calculate mean and std for cost
+        costs = [u.total_cost or 0 for u in user_stats]
+        mean_cost = sum(costs) / len(costs) if costs else 0
+        variance = sum((c - mean_cost) ** 2 for c in costs) / len(costs) if costs else 0
+        std_cost = variance ** 0.5
+
+        # Find anomalies
+        anomalies = []
+        for u in user_stats:
+            cost = u.total_cost or 0
+            if std_cost > 0 and (cost - mean_cost) / std_cost > threshold:
+                user = await db.scalar(select(User).where(User.id == u.user_id))
+                anomalies.append({
+                    "user_id": str(u.user_id),
+                    "username": user.username if user else "Unknown",
+                    "email": user.email if user else None,
+                    "cost_cents": cost,
+                    "request_count": u.request_count,
+                    "deviation": round((cost - mean_cost) / std_cost, 2) if std_cost > 0 else 0,
+                    "severity": "high" if (cost - mean_cost) / std_cost > threshold * 2 else "medium"
+                })
+
+        # Sort by deviation
+        anomalies.sort(key=lambda x: x["deviation"], reverse=True)
+
+        return {
+            "anomalies": anomalies[:20],  # Top 20
+            "threshold": threshold,
+            "mean_cost_cents": int(mean_cost),
+            "std_cost_cents": int(std_cost),
+            "period": period
+        }
+
+    except Exception as e:
+        logger.error(f"Error detecting anomalies: {e}")
+        raise HTTPException(status_code=500, detail="Failed to detect anomalies")
+
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    search: str | None = None,
+    action_type: str | None = None,
+    admin_id: str | None = None,
+    target_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get admin action audit logs."""
+    try:
+        query = select(AdminAction)
+        count_query = select(func.count(AdminAction.id))
+
+        filters = []
+
+        if action_type:
+            filters.append(AdminAction.action_type == action_type)
+        if admin_id:
+            filters.append(AdminAction.admin_id == admin_id)
+        if target_type:
+            filters.append(AdminAction.target_type == target_type)
+        if date_from:
+            filters.append(AdminAction.created_at >= date_from)
+        if date_to:
+            filters.append(AdminAction.created_at <= date_to)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = await db.scalar(count_query)
+
+        # Pagination
+        offset = (page - 1) * page_size
+        query = query.order_by(AdminAction.created_at.desc()).offset(offset).limit(page_size)
+
+        result = await db.execute(query)
+        logs = result.scalars().all()
+
+        # Format response
+        logs_data = []
+        for log in logs:
+            admin_user = await db.scalar(select(User).where(User.id == log.admin_id)) if log.admin_id else None
+            logs_data.append({
+                "id": str(log.id),
+                "admin_id": str(log.admin_id) if log.admin_id else None,
+                "admin_username": admin_user.username if admin_user else None,
+                "action_type": log.action_type,
+                "target_type": log.target_type,
+                "target_id": str(log.target_id),
+                "reason": log.reason,
+                "extra_data": log.extra_data,
+                "ip_address": log.ip_address,
+                "created_at": log.created_at.isoformat() if log.created_at else None
+            })
+
+        return {
+            "logs": logs_data,
+            "total": total,
+            "page": page,
+            "pages": (total + page_size - 1) // page_size if total else 0
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting audit logs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get audit logs")
+
+
+# ============================================================================
+# Project Administration
+# ============================================================================
+
+
+@router.get("/projects")
+async def list_admin_projects(
+    search: str | None = None,
+    owner_id: str | None = None,
+    status: str | None = None,  # active, hibernated
+    deployment_status: str | None = None,  # development, deployed
+    has_containers: bool | None = None,
+    has_git: bool | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """List all projects with admin filters."""
+    try:
+        query = select(Project).options(selectinload(Project.owner))
+        count_query = select(func.count(Project.id))
+
+        filters = []
+
+        # Search by name or slug
+        if search:
+            search_pattern = f"%{search}%"
+            filters.append(
+                or_(
+                    Project.name.ilike(search_pattern),
+                    Project.slug.ilike(search_pattern)
+                )
+            )
+
+        if owner_id:
+            filters.append(Project.owner_id == owner_id)
+
+        if status:
+            if status == "active":
+                filters.append(Project.environment_status == "active")
+            elif status == "hibernated":
+                filters.append(Project.environment_status == "hibernated")
+
+        if deployment_status:
+            if deployment_status == "deployed":
+                filters.append(Project.is_deployed == True)
+            elif deployment_status == "development":
+                filters.append(Project.is_deployed == False)
+
+        if has_git is not None:
+            filters.append(Project.has_git_repo == has_git)
+
+        if created_after:
+            filters.append(Project.created_at >= created_after)
+        if created_before:
+            filters.append(Project.created_at <= created_before)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = await db.scalar(count_query)
+
+        # Apply sorting
+        sort_column = getattr(Project, sort_by, Project.created_at)
+        if sort_order == "desc":
+            query = query.order_by(desc(sort_column))
+        else:
+            query = query.order_by(asc(sort_column))
+
+        # Pagination
+        offset = (page - 1) * page_size
+        query = query.offset(offset).limit(page_size)
+
+        result = await db.execute(query)
+        projects = result.scalars().all()
+
+        # Format response
+        projects_data = []
+        for p in projects:
+            # Count containers
+            container_count = await db.scalar(
+                select(func.count()).where(Project.id == p.id).select_from(
+                    select(Project).where(Project.id == p.id)
+                )
+            )
+
+            # Get deployment count
+            deployment_count = await db.scalar(
+                select(func.count(Deployment.id)).where(Deployment.project_id == p.id)
+            )
+
+            projects_data.append({
+                "id": str(p.id),
+                "name": p.name,
+                "slug": p.slug,
+                "description": p.description,
+                "owner_id": str(p.owner_id),
+                "owner_username": p.owner.username if p.owner else None,
+                "owner_email": p.owner.email if p.owner else None,
+                "environment_status": p.environment_status,
+                "is_deployed": p.is_deployed,
+                "deploy_type": p.deploy_type,
+                "has_git_repo": p.has_git_repo,
+                "deployment_count": deployment_count or 0,
+                "last_activity": p.last_activity.isoformat() if p.last_activity else None,
+                "hibernated_at": p.hibernated_at.isoformat() if p.hibernated_at else None,
+                "created_at": p.created_at.isoformat() if p.created_at else None
+            })
+
+        # Filter by has_containers after getting data
+        if has_containers is not None:
+            # Get container counts for all projects
+            for proj_data in projects_data:
+                count = await db.scalar(
+                    select(func.count()).select_from(
+                        select(Project).where(Project.id == proj_data["id"])
+                    )
+                )
+                proj_data["_has_containers"] = count > 0
+
+            if has_containers:
+                projects_data = [p for p in projects_data if p.get("_has_containers", False)]
+            else:
+                projects_data = [p for p in projects_data if not p.get("_has_containers", False)]
+
+            # Clean up temp field
+            for p in projects_data:
+                p.pop("_has_containers", None)
+
+        return {
+            "projects": projects_data,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": (total + page_size - 1) // page_size if total else 0
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing projects: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list projects")
+
+
+@router.get("/projects/{project_id}")
+async def get_admin_project_detail(
+    project_id: str,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get detailed information about a specific project."""
+    try:
+        result = await db.execute(
+            select(Project)
+            .options(
+                selectinload(Project.owner),
+                selectinload(Project.containers),
+                selectinload(Project.deployments)
+            )
+            .where(Project.id == project_id)
+        )
+        project = result.scalar_one_or_none()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Get file count
+        from ..models import ProjectFile
+        file_count = await db.scalar(
+            select(func.count(ProjectFile.id)).where(ProjectFile.project_id == project.id)
+        )
+
+        # Get recent deployments
+        recent_deployments = sorted(
+            project.deployments,
+            key=lambda d: d.created_at or datetime.min,
+            reverse=True
+        )[:5]
+
+        return {
+            "id": str(project.id),
+            "name": project.name,
+            "slug": project.slug,
+            "description": project.description,
+            "owner": {
+                "id": str(project.owner.id) if project.owner else None,
+                "username": project.owner.username if project.owner else None,
+                "email": project.owner.email if project.owner else None
+            },
+            "environment_status": project.environment_status,
+            "is_deployed": project.is_deployed,
+            "deploy_type": project.deploy_type,
+            "deployed_at": project.deployed_at.isoformat() if project.deployed_at else None,
+            "has_git_repo": project.has_git_repo,
+            "git_remote_url": project.git_remote_url,
+            "network_name": project.network_name,
+            "volume_name": project.volume_name,
+            "file_count": file_count or 0,
+            "containers": [
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "container_type": c.container_type,
+                    "status": c.status,
+                    "port": c.port
+                }
+                for c in project.containers
+            ],
+            "recent_deployments": [
+                {
+                    "id": str(d.id),
+                    "provider": d.provider,
+                    "status": d.status,
+                    "deployment_url": d.deployment_url,
+                    "created_at": d.created_at.isoformat() if d.created_at else None
+                }
+                for d in recent_deployments
+            ],
+            "last_activity": project.last_activity.isoformat() if project.last_activity else None,
+            "hibernated_at": project.hibernated_at.isoformat() if project.hibernated_at else None,
+            "created_at": project.created_at.isoformat() if project.created_at else None,
+            "updated_at": project.updated_at.isoformat() if project.updated_at else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get project details")
+
+
+class HibernateProjectRequest(BaseModel):
+    """Request body for hibernating a project."""
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/projects/{project_id}/hibernate")
+async def force_hibernate_project(
+    project_id: str,
+    request_data: HibernateProjectRequest,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Force hibernate a project."""
+    try:
+        project = await db.scalar(select(Project).where(Project.id == project_id))
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if project.environment_status == "hibernated":
+            raise HTTPException(status_code=400, detail="Project is already hibernated")
+
+        # Update project status
+        project.environment_status = "hibernated"
+        project.hibernated_at = datetime.utcnow()
+
+        await db.commit()
+
+        # Log admin action
+        await log_admin_action(
+            db, admin, "project.hibernate", "project", UUID(project_id),
+            reason=request_data.reason,
+            request=request
+        )
+
+        logger.info(f"Admin {admin.username} force-hibernated project {project.name}")
+
+        return {
+            "success": True,
+            "message": f"Project {project.name} has been hibernated"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error hibernating project {project_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to hibernate project")
+
+
+class TransferProjectRequest(BaseModel):
+    """Request body for transferring project ownership."""
+    new_owner_id: str
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/projects/{project_id}/transfer")
+async def transfer_project_ownership(
+    project_id: str,
+    request_data: TransferProjectRequest,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Transfer project ownership to another user."""
+    try:
+        project = await db.scalar(select(Project).where(Project.id == project_id))
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Verify new owner exists
+        new_owner = await db.scalar(select(User).where(User.id == request_data.new_owner_id))
+        if not new_owner:
+            raise HTTPException(status_code=404, detail="New owner not found")
+
+        old_owner_id = project.owner_id
+
+        # Transfer ownership
+        project.owner_id = UUID(request_data.new_owner_id)
+
+        await db.commit()
+
+        # Log admin action
+        await log_admin_action(
+            db, admin, "project.transfer", "project", UUID(project_id),
+            reason=request_data.reason,
+            extra_data={
+                "old_owner_id": str(old_owner_id),
+                "new_owner_id": request_data.new_owner_id
+            },
+            request=request
+        )
+
+        logger.info(f"Admin {admin.username} transferred project {project.name} to {new_owner.username}")
+
+        return {
+            "success": True,
+            "message": f"Project {project.name} transferred to {new_owner.username}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error transferring project {project_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to transfer project")
+
+
+class DeleteProjectRequest(BaseModel):
+    """Request body for deleting a project."""
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+@router.delete("/projects/{project_id}")
+async def force_delete_project(
+    project_id: str,
+    request_data: DeleteProjectRequest,
+    request: Request,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Force delete a project (hard delete)."""
+    try:
+        project = await db.scalar(select(Project).where(Project.id == project_id))
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        project_name = project.name
+
+        # Delete the project (cascades to related records)
+        await db.delete(project)
+        await db.commit()
+
+        # Log admin action
+        await log_admin_action(
+            db, admin, "project.delete", "project", UUID(project_id),
+            reason=request_data.reason,
+            extra_data={"project_name": project_name},
+            request=request
+        )
+
+        logger.info(f"Admin {admin.username} deleted project {project_name}")
+
+        return {
+            "success": True,
+            "message": f"Project {project_name} has been deleted"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting project {project_id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete project")
+
+
+# ============================================================================
+# Billing Administration
+# ============================================================================
+
+
+@router.get("/billing/overview")
+async def get_billing_overview(
+    period: str = "30d",  # 7d, 30d, 90d
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get billing overview with revenue metrics."""
+    try:
+        # Parse period
+        if period == "7d":
+            start_time = datetime.utcnow() - timedelta(days=7)
+            days = 7
+        elif period == "90d":
+            start_time = datetime.utcnow() - timedelta(days=90)
+            days = 90
+        else:
+            start_time = datetime.utcnow() - timedelta(days=30)
+            days = 30
+
+        # Get subscription revenue by tier
+        tier_counts = {}
+        tier_revenue = {}
+        tier_prices = {"free": 0, "basic": 900, "pro": 2900, "ultra": 9900}  # cents/month
+
+        tier_query = select(
+            User.subscription_tier,
+            func.count(User.id).label("count")
+        ).where(User.is_deleted == False).group_by(User.subscription_tier)
+
+        tier_result = await db.execute(tier_query)
+        for r in tier_result:
+            tier_counts[r.subscription_tier or "free"] = r.count
+            tier_revenue[r.subscription_tier or "free"] = r.count * tier_prices.get(r.subscription_tier or "free", 0)
+
+        subscription_mrr = sum(tier_revenue.values())
+
+        # Get credit purchase revenue in period
+        credit_revenue_query = select(
+            func.sum(CreditPurchase.amount_cents)
+        ).where(
+            and_(
+                CreditPurchase.created_at >= start_time,
+                CreditPurchase.status == "completed"
+            )
+        )
+        credit_revenue = await db.scalar(credit_revenue_query) or 0
+
+        # Get total credit purchases
+        total_credit_purchases = await db.scalar(
+            select(func.count(CreditPurchase.id)).where(
+                and_(
+                    CreditPurchase.created_at >= start_time,
+                    CreditPurchase.status == "completed"
+                )
+            )
+        ) or 0
+
+        # Get marketplace revenue (agent purchases)
+        marketplace_revenue_query = select(
+            func.sum(MarketplaceAgent.price)
+        ).join(
+            UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id
+        ).where(UserPurchasedAgent.purchase_date >= start_time)
+
+        marketplace_revenue = await db.scalar(marketplace_revenue_query) or 0
+
+        # Daily revenue timeline
+        daily_revenue = []
+        for i in range(days):
+            day = datetime.utcnow() - timedelta(days=i)
+            day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+
+            day_credits = await db.scalar(
+                select(func.sum(CreditPurchase.amount_cents)).where(
+                    and_(
+                        CreditPurchase.created_at >= day_start,
+                        CreditPurchase.created_at < day_end,
+                        CreditPurchase.status == "completed"
+                    )
+                )
+            ) or 0
+
+            daily_revenue.append({
+                "date": day_start.isoformat(),
+                "credits": day_credits,
+                "total": day_credits  # Add marketplace when available
+            })
+
+        daily_revenue.reverse()
+
+        total_revenue = subscription_mrr + credit_revenue + marketplace_revenue
+
+        return {
+            "summary": {
+                "subscription_mrr_cents": subscription_mrr,
+                "credit_revenue_cents": credit_revenue,
+                "marketplace_revenue_cents": marketplace_revenue,
+                "total_revenue_cents": total_revenue,
+                "total_revenue_dollars": total_revenue / 100
+            },
+            "subscriptions": {
+                "by_tier": tier_counts,
+                "revenue_by_tier": tier_revenue,
+                "total_subscribers": sum(v for k, v in tier_counts.items() if k != "free")
+            },
+            "credits": {
+                "total_purchases": total_credit_purchases,
+                "revenue_cents": credit_revenue
+            },
+            "marketplace": {
+                "revenue_cents": marketplace_revenue
+            },
+            "timeline": daily_revenue,
+            "period": period
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting billing overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get billing overview")
+
+
+@router.get("/billing/credit-purchases")
+async def list_credit_purchases(
+    user_id: str | None = None,
+    status: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """List credit purchases with filters."""
+    try:
+        query = select(CreditPurchase)
+        count_query = select(func.count(CreditPurchase.id))
+
+        filters = []
+
+        if user_id:
+            filters.append(CreditPurchase.user_id == user_id)
+        if status:
+            filters.append(CreditPurchase.status == status)
+        if date_from:
+            filters.append(CreditPurchase.created_at >= date_from)
+        if date_to:
+            filters.append(CreditPurchase.created_at <= date_to)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = await db.scalar(count_query)
+
+        # Pagination
+        offset = (page - 1) * page_size
+        query = query.order_by(CreditPurchase.created_at.desc()).offset(offset).limit(page_size)
+
+        result = await db.execute(query)
+        purchases = result.scalars().all()
+
+        purchases_data = []
+        for p in purchases:
+            user = await db.scalar(select(User).where(User.id == p.user_id)) if p.user_id else None
+            purchases_data.append({
+                "id": str(p.id),
+                "user_id": str(p.user_id) if p.user_id else None,
+                "user_email": user.email if user else None,
+                "user_username": user.username if user else None,
+                "amount_cents": p.amount_cents,
+                "credits_amount": p.credits_amount,
+                "status": p.status,
+                "stripe_payment_intent": p.stripe_payment_intent,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "completed_at": p.completed_at.isoformat() if p.completed_at else None
+            })
+
+        return {
+            "purchases": purchases_data,
+            "total": total,
+            "page": page,
+            "pages": (total + page_size - 1) // page_size if total else 0
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing credit purchases: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list credit purchases")
+
+
+@router.get("/billing/creator-payouts")
+async def list_creator_payouts(
+    creator_id: str | None = None,
+    status: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """List creator payout information."""
+    try:
+        # Get all users with creator accounts
+        query = select(User).where(User.creator_stripe_account_id != None)
+
+        if creator_id:
+            query = query.where(User.id == creator_id)
+
+        result = await db.execute(query.order_by(User.created_at.desc()))
+        creators = result.scalars().all()
+
+        creators_data = []
+        for creator in creators:
+            # Calculate total earnings from agent sales
+            earnings_query = select(
+                func.sum(MarketplaceAgent.price)
+            ).join(
+                UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id
+            ).where(
+                or_(
+                    MarketplaceAgent.created_by_user_id == creator.id,
+                    MarketplaceAgent.forked_by_user_id == creator.id
+                )
+            )
+            total_earnings = await db.scalar(earnings_query) or 0
+
+            # Count agents
+            agent_count = await db.scalar(
+                select(func.count(MarketplaceAgent.id)).where(
+                    or_(
+                        MarketplaceAgent.created_by_user_id == creator.id,
+                        MarketplaceAgent.forked_by_user_id == creator.id
+                    )
+                )
+            ) or 0
+
+            creators_data.append({
+                "id": str(creator.id),
+                "username": creator.username,
+                "email": creator.email,
+                "stripe_account_id": creator.creator_stripe_account_id,
+                "agent_count": agent_count,
+                "total_earnings_cents": total_earnings,
+                "created_at": creator.created_at.isoformat() if creator.created_at else None
+            })
+
+        return {
+            "creators": creators_data,
+            "total": len(creators_data),
+            "page": page,
+            "pages": 1
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing creator payouts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list creator payouts")
+
+
+# ============================================================================
+# Deployment Monitoring
+# ============================================================================
+
+
+@router.get("/deployments")
+async def list_admin_deployments(
+    provider: str | None = None,
+    status: str | None = None,
+    user_id: str | None = None,
+    project_id: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """List all deployments with filters."""
+    try:
+        query = select(Deployment)
+        count_query = select(func.count(Deployment.id))
+
+        filters = []
+
+        if provider:
+            filters.append(Deployment.provider == provider)
+        if status:
+            filters.append(Deployment.status == status)
+        if user_id:
+            filters.append(Deployment.user_id == user_id)
+        if project_id:
+            filters.append(Deployment.project_id == project_id)
+        if date_from:
+            filters.append(Deployment.created_at >= date_from)
+        if date_to:
+            filters.append(Deployment.created_at <= date_to)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = await db.scalar(count_query)
+
+        # Pagination
+        offset = (page - 1) * page_size
+        query = query.order_by(Deployment.created_at.desc()).offset(offset).limit(page_size)
+
+        result = await db.execute(query)
+        deployments = result.scalars().all()
+
+        deployments_data = []
+        for d in deployments:
+            user = await db.scalar(select(User).where(User.id == d.user_id)) if d.user_id else None
+            project = await db.scalar(select(Project).where(Project.id == d.project_id)) if d.project_id else None
+
+            deployments_data.append({
+                "id": str(d.id),
+                "project_id": str(d.project_id),
+                "project_name": project.name if project else None,
+                "user_id": str(d.user_id),
+                "user_username": user.username if user else None,
+                "provider": d.provider,
+                "deployment_id": d.deployment_id,
+                "deployment_url": d.deployment_url,
+                "version": d.version,
+                "status": d.status,
+                "error": d.error,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "completed_at": d.completed_at.isoformat() if d.completed_at else None
+            })
+
+        return {
+            "deployments": deployments_data,
+            "total": total,
+            "page": page,
+            "pages": (total + page_size - 1) // page_size if total else 0
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing deployments: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list deployments")
+
+
+@router.get("/deployments/stats")
+async def get_deployment_stats(
+    period: str = "30d",
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get deployment statistics."""
+    try:
+        # Parse period
+        if period == "7d":
+            start_time = datetime.utcnow() - timedelta(days=7)
+        elif period == "90d":
+            start_time = datetime.utcnow() - timedelta(days=90)
+        else:
+            start_time = datetime.utcnow() - timedelta(days=30)
+
+        # Get counts by provider
+        by_provider_query = select(
+            Deployment.provider,
+            func.count(Deployment.id).label("total"),
+            func.count(Deployment.id).filter(Deployment.status == "success").label("success"),
+            func.count(Deployment.id).filter(Deployment.status == "failed").label("failed")
+        ).where(Deployment.created_at >= start_time).group_by(Deployment.provider)
+
+        by_provider_result = await db.execute(by_provider_query)
+        by_provider = [
+            {
+                "provider": r.provider,
+                "total": r.total,
+                "success": r.success,
+                "failed": r.failed,
+                "success_rate": round((r.success / r.total * 100) if r.total > 0 else 0, 1)
+            }
+            for r in by_provider_result
+        ]
+
+        # Get counts by status
+        by_status_query = select(
+            Deployment.status,
+            func.count(Deployment.id).label("count")
+        ).where(Deployment.created_at >= start_time).group_by(Deployment.status)
+
+        by_status_result = await db.execute(by_status_query)
+        by_status = {r.status: r.count for r in by_status_result}
+
+        # Get total deployments
+        total = await db.scalar(
+            select(func.count(Deployment.id)).where(Deployment.created_at >= start_time)
+        ) or 0
+
+        success = by_status.get("success", 0)
+        failed = by_status.get("failed", 0)
+        overall_success_rate = round((success / total * 100) if total > 0 else 0, 1)
+
+        # Daily deployment counts
+        days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 30)
+        daily_deployments = []
+        for i in range(days):
+            day = datetime.utcnow() - timedelta(days=i)
+            day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+
+            day_count = await db.scalar(
+                select(func.count(Deployment.id)).where(
+                    and_(
+                        Deployment.created_at >= day_start,
+                        Deployment.created_at < day_end
+                    )
+                )
+            ) or 0
+
+            day_success = await db.scalar(
+                select(func.count(Deployment.id)).where(
+                    and_(
+                        Deployment.created_at >= day_start,
+                        Deployment.created_at < day_end,
+                        Deployment.status == "success"
+                    )
+                )
+            ) or 0
+
+            daily_deployments.append({
+                "date": day_start.isoformat(),
+                "total": day_count,
+                "success": day_success
+            })
+
+        daily_deployments.reverse()
+
+        return {
+            "summary": {
+                "total_deployments": total,
+                "successful": success,
+                "failed": failed,
+                "pending": by_status.get("pending", 0) + by_status.get("building", 0),
+                "success_rate": overall_success_rate
+            },
+            "by_provider": by_provider,
+            "by_status": by_status,
+            "timeline": daily_deployments,
+            "period": period
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting deployment stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get deployment stats")
+
+
+@router.get("/deployments/{deployment_id}")
+async def get_admin_deployment_detail(
+    deployment_id: str,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get detailed information about a specific deployment."""
+    try:
+        result = await db.execute(
+            select(Deployment).where(Deployment.id == deployment_id)
+        )
+        deployment = result.scalar_one_or_none()
+
+        if not deployment:
+            raise HTTPException(status_code=404, detail="Deployment not found")
+
+        user = await db.scalar(select(User).where(User.id == deployment.user_id)) if deployment.user_id else None
+        project = await db.scalar(select(Project).where(Project.id == deployment.project_id)) if deployment.project_id else None
+
+        return {
+            "id": str(deployment.id),
+            "project": {
+                "id": str(deployment.project_id),
+                "name": project.name if project else None,
+                "slug": project.slug if project else None
+            },
+            "user": {
+                "id": str(deployment.user_id),
+                "username": user.username if user else None,
+                "email": user.email if user else None
+            },
+            "provider": deployment.provider,
+            "deployment_id": deployment.deployment_id,
+            "deployment_url": deployment.deployment_url,
+            "version": deployment.version,
+            "status": deployment.status,
+            "error": deployment.error,
+            "logs": deployment.logs,
+            "metadata": deployment.deployment_metadata,
+            "created_at": deployment.created_at.isoformat() if deployment.created_at else None,
+            "updated_at": deployment.updated_at.isoformat() if deployment.updated_at else None,
+            "completed_at": deployment.completed_at.isoformat() if deployment.completed_at else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting deployment {deployment_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get deployment details")
+
+
+@router.get("/audit-logs/export")
+async def export_audit_logs(
+    action_type: str | None = None,
+    target_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    admin: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db)
+):
+    """Export audit logs to CSV."""
+    try:
+        query = select(AdminAction)
+        filters = []
+
+        if action_type:
+            filters.append(AdminAction.action_type == action_type)
+        if target_type:
+            filters.append(AdminAction.target_type == target_type)
+        if date_from:
+            filters.append(AdminAction.created_at >= date_from)
+        if date_to:
+            filters.append(AdminAction.created_at <= date_to)
+
+        if filters:
+            query = query.where(and_(*filters))
+
+        result = await db.execute(query.order_by(AdminAction.created_at.desc()))
+        logs = result.scalars().all()
+
+        # Create CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "ID", "Admin ID", "Action Type", "Target Type", "Target ID",
+            "Reason", "IP Address", "Created At"
+        ])
+
+        for log in logs:
+            writer.writerow([
+                str(log.id),
+                str(log.admin_id) if log.admin_id else "",
+                log.action_type,
+                log.target_type,
+                str(log.target_id),
+                log.reason or "",
+                log.ip_address or "",
+                log.created_at.isoformat() if log.created_at else ""
+            ])
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=audit_logs_export.csv"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting audit logs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to export audit logs")
