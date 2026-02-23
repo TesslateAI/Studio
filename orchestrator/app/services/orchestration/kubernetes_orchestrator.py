@@ -95,13 +95,18 @@ class KubernetesOrchestrator(BaseOrchestrator):
         return DeploymentMode.KUBERNETES
 
     def _sanitize_name(self, name: str) -> str:
-        """Sanitize a name for Kubernetes (DNS-1123 compliant)."""
+        """Sanitize a name for Kubernetes (DNS-1123 compliant).
+
+        Truncates to 59 chars to leave room for 4-char prefixes like
+        'dev-' or 'svc-' that helpers.py adds to build resource names
+        (K8s resource names must be <= 63 chars).
+        """
         safe_name = name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
         safe_name = "".join(c for c in safe_name if c.isalnum() or c == "-")
         while "--" in safe_name:
             safe_name = safe_name.replace("--", "-")
         safe_name = safe_name.strip("-")
-        return safe_name[:63]
+        return safe_name[:59]
 
     def _get_namespace(self, project_id: str) -> str:
         """Get namespace for a project."""
@@ -452,8 +457,29 @@ fi
                 timeout=60,  # Just git clone, should be fast
             )
 
-            logger.info(f"[K8S] ✅ Files initialized for {container_directory}")
             logger.debug(f"[K8S] Init output: {result[:500]}...")
+
+            # Verify files actually landed on the PVC — _exec_in_pod doesn't
+            # propagate exit codes, so the clone script can fail silently.
+            verify_result = await asyncio.to_thread(
+                self.k8s_client._exec_in_pod,
+                pod_name,
+                namespace,
+                "file-manager",
+                ["/bin/sh", "-c", f"ls -1A '{target_dir}' 2>/dev/null | wc -l"],
+                10,
+            )
+            file_count = int(verify_result.strip()) if verify_result.strip().isdigit() else 0
+            if file_count < 3:
+                logger.error(
+                    f"[K8S] ❌ Clone appeared to succeed but {target_dir} has {file_count} files. "
+                    f"Clone output: {result[:300]}"
+                )
+                raise RuntimeError(
+                    f"Git clone failed for {container_directory}: directory has {file_count} files after clone"
+                )
+
+            logger.info(f"[K8S] ✅ Files initialized for {container_directory} ({file_count} files)")
             return True
 
         except Exception as e:
@@ -756,32 +782,70 @@ fi
                     await send_progress("files_restored", "Project files restored successfully", 40)
 
             # CRITICAL: Initialize container files BEFORE starting
-            # Skip if project was restored from snapshot (files already exist)
-            # Also skip if this is a git-imported container (base_id=None) — files
-            # were cloned directly to the PVC during project import.
+            # For hibernated projects and git-imported containers, files should
+            # already exist on the PVC. However, we always verify files are
+            # present — if the snapshot was empty (project hibernated before
+            # files were populated) or files are missing, fall through to
+            # git clone to ensure the container can start.
+            skip_reason = None
             if is_hibernated:
-                logger.info("[K8S] Skipping git clone - project restored from snapshot")
+                skip_reason = "project restored from snapshot"
             elif container.base_id is None:
-                logger.info(
-                    "[K8S] Skipping git clone - git-imported container (files already on PVC)"
-                )
-            else:
+                skip_reason = "git-imported container (files already on PVC)"
+
+            needs_clone = True
+            if skip_reason:
+                logger.info(f"[K8S] Checking files after restore ({skip_reason})")
+                # Verify files actually exist on PVC before skipping clone
+                try:
+                    pod_name = await self.k8s_client.get_file_manager_pod(namespace)
+                    if pod_name:
+                        check_result = await asyncio.to_thread(
+                            self.k8s_client._exec_in_pod,
+                            pod_name,
+                            namespace,
+                            "file-manager",
+                            ["/bin/sh", "-c", f"ls -1A /app/{container_directory} 2>/dev/null | wc -l"],
+                            10,
+                        )
+                        file_count = int(check_result.strip()) if check_result.strip().isdigit() else 0
+                        if file_count >= 3:
+                            logger.info(
+                                f"[K8S] Skipping git clone - {skip_reason} "
+                                f"({file_count} files found in /app/{container_directory})"
+                            )
+                            needs_clone = False
+                        else:
+                            logger.warning(
+                                f"[K8S] Expected files from {skip_reason} but "
+                                f"/app/{container_directory} has {file_count} files — will clone"
+                            )
+                except Exception as e:
+                    logger.warning(f"[K8S] Could not verify files after restore: {e} — will clone")
+
+            if needs_clone:
                 # This clones from git or sets up the project directory
                 git_url = None
                 if container.base and hasattr(container.base, "git_repo_url"):
                     git_url = container.base.git_repo_url
 
-                await send_progress("initializing_files", "Setting up project files...", 50)
-                logger.info(
-                    f"[K8S] Initializing files for container {container_directory} (git_url={git_url})"
-                )
-                await self.initialize_container_files(
-                    project_id=project.id,
-                    user_id=user_id,
-                    container_id=container.id,
-                    container_directory=container_directory,
-                    git_url=git_url,
-                )
+                if git_url:
+                    await send_progress("initializing_files", "Setting up project files...", 50)
+                    logger.info(
+                        f"[K8S] Initializing files for container {container_directory} (git_url={git_url})"
+                    )
+                    await self.initialize_container_files(
+                        project_id=project.id,
+                        user_id=user_id,
+                        container_id=container.id,
+                        container_directory=container_directory,
+                        git_url=git_url,
+                    )
+                elif not skip_reason:
+                    logger.warning(
+                        f"[K8S] No git_url and no skip_reason for {container_directory} — "
+                        "container may not have files"
+                    )
 
             # Get base config for port and startup command
             # Read TESSLATE.md directly from the file-manager pod

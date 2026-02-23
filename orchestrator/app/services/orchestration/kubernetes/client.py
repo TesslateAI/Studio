@@ -65,6 +65,53 @@ class KubernetesClient:
     # NAMESPACE MANAGEMENT
     # =========================================================================
 
+    async def _wait_for_namespace_active(self, namespace: str, max_wait: int = 60) -> None:
+        """
+        Wait for a namespace to be active (not Terminating).
+
+        If the namespace is Terminating, waits for it to be fully deleted,
+        then recreates it. This is a defense-in-depth helper called when K8s
+        rejects resource creation with 403 "namespace is being terminated".
+
+        Args:
+            namespace: Namespace name
+            max_wait: Maximum seconds to wait
+        """
+        wait_interval = 2
+        for attempt in range(max_wait // wait_interval):
+            try:
+                ns = await asyncio.to_thread(self.core_v1.read_namespace, name=namespace)
+                if ns.status and ns.status.phase == "Terminating":
+                    logger.info(
+                        f"[K8S] Namespace {namespace} still terminating, waiting... "
+                        f"(attempt {attempt + 1})"
+                    )
+                    await asyncio.sleep(wait_interval)
+                    continue
+                # Namespace exists and is Active
+                return
+            except ApiException as e:
+                if e.status == 404:
+                    # Namespace fully deleted — caller will need to recreate it
+                    return
+                raise
+        raise RuntimeError(
+            f"Namespace {namespace} stuck in Terminating state after {max_wait}s"
+        )
+
+    @staticmethod
+    def _is_namespace_terminating_error(e: ApiException) -> bool:
+        """Check if an ApiException is a 403 due to namespace being terminated."""
+        if e.status != 403:
+            return False
+        try:
+            import json
+            body = json.loads(e.body) if isinstance(e.body, str) else e.body
+            causes = body.get("details", {}).get("causes", [])
+            return any(c.get("reason") == "NamespaceTerminating" for c in causes)
+        except Exception:
+            return "being terminated" in str(e.body)
+
     async def create_namespace_if_not_exists(
         self, namespace: str, project_id: str, user_id: UUID
     ) -> None:
@@ -121,16 +168,27 @@ class KubernetesClient:
 
     async def namespace_exists(self, namespace: str) -> bool:
         """
-        Check if a Kubernetes namespace exists.
+        Check if a Kubernetes namespace exists and is usable.
+
+        Returns False for namespaces in "Terminating" state, since K8s rejects
+        new resource creation in terminating namespaces (403 Forbidden).
+        Callers that get False will call ensure_project_environment() →
+        create_namespace_if_not_exists(), which waits for termination to
+        complete before recreating.
 
         Args:
             namespace: Namespace name to check
 
         Returns:
-            True if namespace exists, False otherwise
+            True if namespace exists and is Active, False otherwise
         """
         try:
-            await asyncio.to_thread(self.core_v1.read_namespace, name=namespace)
+            ns = await asyncio.to_thread(self.core_v1.read_namespace, name=namespace)
+            if ns.status and ns.status.phase == "Terminating":
+                logger.info(
+                    f"[K8S] Namespace {namespace} exists but is Terminating — treating as non-existent"
+                )
+                return False
             return True
         except ApiException as e:
             if e.status == 404:
@@ -292,7 +350,8 @@ class KubernetesClient:
             while "--" in safe_container:
                 safe_container = safe_container.replace("--", "-")
             safe_container = safe_container.strip("-")
-            max_container_len = 63 - 22
+            # 63 max - 22 prefix (dev- + 8 + - + 8 + -) - 4 suffix (-svc/-ing)
+            max_container_len = 63 - 22 - 4
             safe_container = safe_container[:max_container_len]
             base_name = f"dev-{user_short}-{project_short}-{safe_container}"
         else:
@@ -339,6 +398,16 @@ class KubernetesClient:
                     body=deployment,
                 )
                 logger.info(f"[K8S] ✅ Updated deployment: {deployment_name}")
+            elif self._is_namespace_terminating_error(e):
+                logger.warning(
+                    f"[K8S] Namespace {namespace} is terminating during deployment creation, waiting..."
+                )
+                await self._wait_for_namespace_active(namespace)
+                # Retry once after namespace is active
+                await asyncio.to_thread(
+                    self.apps_v1.create_namespaced_deployment, namespace=namespace, body=deployment
+                )
+                logger.info(f"[K8S] ✅ Created deployment (after namespace wait): {deployment_name}")
             else:
                 raise
 
@@ -404,6 +473,15 @@ class KubernetesClient:
                     body=service,
                 )
                 logger.info(f"[K8S] ✅ Updated service: {service_name}")
+            elif self._is_namespace_terminating_error(e):
+                logger.warning(
+                    f"[K8S] Namespace {namespace} is terminating during service creation, waiting..."
+                )
+                await self._wait_for_namespace_active(namespace)
+                await asyncio.to_thread(
+                    self.core_v1.create_namespaced_service, namespace=namespace, body=service
+                )
+                logger.info(f"[K8S] ✅ Created service (after namespace wait): {service_name}")
             else:
                 raise
 
@@ -440,6 +518,15 @@ class KubernetesClient:
                     body=ingress,
                 )
                 logger.info(f"[K8S] ✅ Updated ingress: {ingress_name}")
+            elif self._is_namespace_terminating_error(e):
+                logger.warning(
+                    f"[K8S] Namespace {namespace} is terminating during ingress creation, waiting..."
+                )
+                await self._wait_for_namespace_active(namespace)
+                await asyncio.to_thread(
+                    self.networking_v1.create_namespaced_ingress, namespace=namespace, body=ingress
+                )
+                logger.info(f"[K8S] ✅ Created ingress (after namespace wait): {ingress_name}")
             else:
                 raise
 
@@ -471,6 +558,17 @@ class KubernetesClient:
         except ApiException as e:
             if e.status == 409:
                 logger.info(f"[K8S] PVC {pvc_name} already exists, skipping")
+            elif self._is_namespace_terminating_error(e):
+                logger.warning(
+                    f"[K8S] Namespace {namespace} is terminating during PVC creation, waiting..."
+                )
+                await self._wait_for_namespace_active(namespace)
+                await asyncio.to_thread(
+                    self.core_v1.create_namespaced_persistent_volume_claim,
+                    namespace=namespace,
+                    body=pvc,
+                )
+                logger.info(f"[K8S] ✅ Created PVC (after namespace wait): {pvc_name}")
             else:
                 raise
 

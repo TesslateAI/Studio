@@ -19,6 +19,17 @@ from kubernetes import client
 
 logger = logging.getLogger(__name__)
 
+# Kubernetes DNS-1123 name limit
+_K8S_NAME_MAX = 63
+
+
+def _k8s_name(prefix: str, directory: str) -> str:
+    """Build a K8s resource name like 'dev-{directory}', truncated to 63 chars."""
+    name = f"{prefix}{directory}"
+    if len(name) > _K8S_NAME_MAX:
+        name = name[:_K8S_NAME_MAX].rstrip("-")
+    return name
+
 
 # =============================================================================
 # Labels and Affinity
@@ -271,7 +282,7 @@ def create_container_deployment(
     Returns:
         V1Deployment manifest
     """
-    deployment_name = f"dev-{container_directory}"
+    deployment_name = _k8s_name("dev-", container_directory)
 
     labels = get_standard_labels(
         project_id=str(project_id),
@@ -408,7 +419,7 @@ def create_service_manifest(
     Returns:
         V1Service manifest
     """
-    service_name = f"dev-{container_directory}"
+    service_name = _k8s_name("dev-", container_directory)
 
     return client.V1Service(
         metadata=client.V1ObjectMeta(
@@ -456,10 +467,10 @@ def create_ingress_manifest(
     Returns:
         V1Ingress manifest
     """
-    ingress_name = f"dev-{container_directory}"
+    ingress_name = _k8s_name("dev-", container_directory)
     # Single subdomain level for wildcard cert compatibility (*.domain)
     host = f"{project_slug}-{container_directory}.{domain}"
-    service_name = f"dev-{container_directory}"
+    service_name = _k8s_name("dev-", container_directory)
 
     # Build ingress spec
     ingress_spec = client.V1IngressSpec(
@@ -673,7 +684,10 @@ rm -rf "$TARGET_DIR"/* "$TARGET_DIR"/.[!.]* 2>/dev/null || true
 TEMP_CLONE="/tmp/git-clone-$$"
 rm -rf "$TEMP_CLONE"
 echo "[CLONE] Running git clone..."
-git clone --depth 1 --branch {branch} --single-branch {git_url} "$TEMP_CLONE"
+# Skip LFS smudge during clone - large LFS objects (e.g., pre-baked node_modules
+# binaries) are not needed because npm install runs at container start anyway.
+# This also prevents clone failures when the repo's LFS budget is exceeded.
+GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --branch {branch} --single-branch {git_url} "$TEMP_CLONE"
 
 # Verify clone succeeded
 if [ ! -f "$TEMP_CLONE/package.json" ] && [ ! -f "$TEMP_CLONE/requirements.txt" ] && [ ! -f "$TEMP_CLONE/go.mod" ]; then
@@ -683,13 +697,6 @@ if [ ! -f "$TEMP_CLONE/package.json" ] && [ ! -f "$TEMP_CLONE/requirements.txt" 
 fi
 
 echo "[CLONE] Clone successful"
-
-# Pull Git LFS files if .gitattributes exists (pre-baked node_modules may use LFS for large binaries)
-if [ -f "$TEMP_CLONE/.gitattributes" ] && command -v git-lfs >/dev/null 2>&1; then
-    echo "[CLONE] Pulling Git LFS files..."
-    cd "$TEMP_CLONE" && git lfs pull 2>&1 || echo "[CLONE] Warning: git lfs pull failed (files may be pointers)"
-    cd /
-fi
 
 echo "[CLONE] Copying files..."
 
@@ -783,7 +790,7 @@ def create_service_container_deployment(
     Returns:
         V1Deployment manifest
     """
-    deployment_name = f"svc-{container_directory}"
+    deployment_name = _k8s_name("svc-", container_directory)
 
     labels = get_standard_labels(
         project_id=str(project_id),
@@ -792,7 +799,7 @@ def create_service_container_deployment(
         container_id=str(container_id),
         container_directory=container_directory,
     )
-    labels["app"] = f"svc-{container_directory}"
+    labels["app"] = _k8s_name("svc-", container_directory)
 
     selector_labels = {"tesslate.io/container-id": str(container_id)}
 
@@ -804,7 +811,7 @@ def create_service_container_deployment(
     # Currently all services define a single volume, but this handles multiple.
     volume_mounts = []
     volume_specs = []
-    pvc_name = f"svc-{container_directory}-data"
+    pvc_name = _k8s_name("svc-", f"{container_directory}-data")
 
     for idx, vol_path in enumerate(volumes):
         vol_name = "service-data" if idx == 0 else f"service-data-{idx}"
@@ -913,7 +920,7 @@ def create_service_pvc_manifest(
     Returns:
         V1PersistentVolumeClaim manifest
     """
-    pvc_name = f"svc-{container_directory}-data"
+    pvc_name = _k8s_name("svc-", f"{container_directory}-data")
 
     return client.V1PersistentVolumeClaim(
         metadata=client.V1ObjectMeta(

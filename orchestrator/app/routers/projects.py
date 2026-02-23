@@ -737,12 +737,14 @@ async def _setup_archive_base_project(
         except Exception as e:
             logger.warning(f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000")
 
+    base_display = re.sub(r"[^a-z0-9]+", "-", base_repo.name.lower()).strip("-")
+
     container = Container(
         project_id=db_project.id,
         base_id=base_repo.id,
-        name=base_repo.slug.lower(),
+        name=base_display,
         directory=".",
-        container_name=f"{db_project.slug}-{base_repo.slug.lower()}",
+        container_name=f"{db_project.slug}-{base_display}",
         internal_port=internal_port,
         container_type="base",
         status="stopped",
@@ -1054,12 +1056,17 @@ async def _setup_base_project(
                     f"[CREATE] Could not parse TESSLATE.md: {e}, using default port 3000"
                 )
 
+        # Use the base's display name (not slug) for the container name.
+        # User-submitted base slugs can include UUID+timestamp for uniqueness,
+        # but the container name should be human-readable and short.
+        base_display = re.sub(r"[^a-z0-9]+", "-", base_repo.name.lower()).strip("-")
+
         container = Container(
             project_id=db_project.id,
             base_id=base_repo.id,
-            name=base_repo.slug.lower(),  # e.g., "nextjs", "vite", "fastapi"
+            name=base_display,
             directory=".",  # Root directory for single-container projects
-            container_name=f"{db_project.slug}-{base_repo.slug.lower()}",
+            container_name=f"{db_project.slug}-{base_display}",
             internal_port=internal_port,
             container_type="base",
             status="stopped",
@@ -1069,7 +1076,7 @@ async def _setup_base_project(
         db.add(container)
         await db.commit()
         await db.refresh(container)
-        logger.info(f"[CREATE] Created container {container.id} for base {base_repo.slug}")
+        logger.info(f"[CREATE] Created container {container.id} for base {base_repo.name}")
 
         # Return container_id for navigation
         return str(container.id)
@@ -4046,7 +4053,9 @@ async def add_container_to_project(
                         status_code=404, detail=f"Base not found: {container_data.base_id}"
                     )
 
-                base_name = base.slug
+                # Use display name (not slug) — user-submitted base slugs
+                # include UUID+timestamp for uniqueness, which is too long for K8s names
+                base_name = re.sub(r"[^a-z0-9]+", "-", base.name.lower()).strip("-")
                 git_repo_url = base.git_repo_url
                 resolved_base_id = base.id  # Use the actual UUID from the database
 
