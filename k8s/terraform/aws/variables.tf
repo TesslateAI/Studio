@@ -273,6 +273,55 @@ variable "stripe_webhook_secret" {
   default     = ""
 }
 
+variable "stripe_publishable_key" {
+  description = "Stripe publishable key"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_connect_client_id" {
+  description = "Stripe Connect client ID for marketplace payouts"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "stripe_basic_price_id" {
+  description = "Stripe price ID for Basic tier (monthly)"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_pro_price_id" {
+  description = "Stripe price ID for Pro tier (monthly)"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_ultra_price_id" {
+  description = "Stripe price ID for Ultra tier (monthly)"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_basic_annual_price_id" {
+  description = "Stripe price ID for Basic tier (annual)"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_pro_annual_price_id" {
+  description = "Stripe price ID for Pro tier (annual)"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_ultra_annual_price_id" {
+  description = "Stripe price ID for Ultra tier (annual)"
+  type        = string
+  default     = ""
+}
+
 # -----------------------------------------------------------------------------
 # Deployment Provider OAuth (Vercel, Netlify)
 # -----------------------------------------------------------------------------

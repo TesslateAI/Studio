@@ -357,7 +357,7 @@ async def get_marketplace_agents(
         default="featured", regex="^(featured|popular|newest|name|rating|price_asc|price_desc)$"
     ),
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=12, ge=1, le=50),
+    limit: int = Query(default=12, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
@@ -2377,7 +2377,7 @@ async def get_marketplace_bases(
         default="featured", regex="^(featured|popular|newest|name|rating|price_asc|price_desc)$"
     ),
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=12, ge=1, le=50),
+    limit: int = Query(default=12, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):

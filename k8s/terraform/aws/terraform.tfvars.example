@@ -122,8 +122,16 @@ github_client_secret = ""
 # -----------------------------------------------------------------------------
 # Stripe Configuration (Optional)
 # -----------------------------------------------------------------------------
-stripe_secret_key     = ""
-stripe_webhook_secret = ""
+stripe_secret_key            = ""
+stripe_publishable_key       = ""
+stripe_webhook_secret        = ""
+stripe_connect_client_id     = ""
+stripe_basic_price_id        = ""
+stripe_pro_price_id          = ""
+stripe_ultra_price_id        = ""
+stripe_basic_annual_price_id = ""
+stripe_pro_annual_price_id   = ""
+stripe_ultra_annual_price_id = ""
 
 # -----------------------------------------------------------------------------
 # Feature Flags

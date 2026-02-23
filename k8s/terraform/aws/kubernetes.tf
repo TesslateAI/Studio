@@ -138,8 +138,16 @@ resource "kubernetes_secret" "app_secrets" {
     GITHUB_OAUTH_ENABLED       = tostring(var.github_oauth_enabled)
 
     # Stripe
-    STRIPE_SECRET_KEY    = var.stripe_secret_key
-    STRIPE_WEBHOOK_SECRET = var.stripe_webhook_secret
+    STRIPE_SECRET_KEY             = var.stripe_secret_key
+    STRIPE_PUBLISHABLE_KEY        = var.stripe_publishable_key
+    STRIPE_WEBHOOK_SECRET         = var.stripe_webhook_secret
+    STRIPE_CONNECT_CLIENT_ID      = var.stripe_connect_client_id
+    STRIPE_BASIC_PRICE_ID         = var.stripe_basic_price_id
+    STRIPE_PRO_PRICE_ID           = var.stripe_pro_price_id
+    STRIPE_ULTRA_PRICE_ID         = var.stripe_ultra_price_id
+    STRIPE_BASIC_ANNUAL_PRICE_ID  = var.stripe_basic_annual_price_id
+    STRIPE_PRO_ANNUAL_PRICE_ID    = var.stripe_pro_annual_price_id
+    STRIPE_ULTRA_ANNUAL_PRICE_ID  = var.stripe_ultra_annual_price_id
 
     # Deployment Providers - Vercel
     VERCEL_CLIENT_ID          = var.vercel_client_id
