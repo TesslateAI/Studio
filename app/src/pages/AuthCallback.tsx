@@ -25,7 +25,28 @@ export default function AuthCallback() {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
     const error = searchParams.get('error');
-    const errorDescription = searchParams.get('error_description');
+    const errorDescription = searchParams.get('error_description') || searchParams.get('detail');
+
+    // Check for pre-processed redirect from backend (repo-connect flow)
+    // When the login callback handles a repo-connect OAuth, it redirects here
+    // with success=true&username=xxx instead of code+state
+    const success = searchParams.get('success');
+    const username = searchParams.get('username');
+
+    if (success === 'true' && username) {
+      setStatus('success');
+      setMessage(`Successfully connected as @${username}`);
+      toast.success(`Connected GitHub account: @${username}`);
+
+      // Get the return URL from session storage (if set)
+      const returnTo = sessionStorage.getItem('github_oauth_return');
+      sessionStorage.removeItem('github_oauth_return');
+
+      setTimeout(() => {
+        navigate(returnTo || '/dashboard');
+      }, 2000);
+      return;
+    }
 
     // Check for GitHub errors
     if (error) {

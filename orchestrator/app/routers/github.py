@@ -3,7 +3,7 @@ GitHub integration router for OAuth authentication and repository management.
 """
 
 import logging
-from datetime import datetime
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,16 +16,16 @@ from ..schemas import CreateGitHubRepoRequest, GitHubCredentialResponse
 from ..services.credential_manager import get_credential_manager
 from ..services.github_client import GitHubClient
 from ..services.github_oauth import get_github_oauth_service
+from ..services.oauth_state import (
+    REPO_CONNECT_AUDIENCE,
+    decode_oauth_state,
+    generate_oauth_state,
+)
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/github", tags=["github"])
-
-
-# Store OAuth states temporarily (in production, use Redis or database)
-# Key: state, Value: {"user_id": int, "timestamp": datetime}
-oauth_states = {}
 
 
 @router.get("/oauth/authorize")
@@ -41,23 +41,13 @@ async def github_oauth_authorize(
     try:
         oauth_service = get_github_oauth_service()
 
-        # Generate state for CSRF protection
-        state = oauth_service.generate_state()
-
-        # Store state with user info (expires in 10 minutes)
-        oauth_states[state] = {
-            "user_id": current_user.id,
-            "timestamp": datetime.utcnow(),
-            "scope": scope,
-        }
-
-        # Clean up old states (older than 10 minutes)
-        cutoff = datetime.utcnow()
-        expired_states = [
-            s for s, data in oauth_states.items() if (cutoff - data["timestamp"]).seconds > 600
-        ]
-        for s in expired_states:
-            del oauth_states[s]
+        # Generate signed JWT state token (stateless, survives restarts)
+        state = generate_oauth_state(
+            user_id=str(current_user.id),
+            flow="github",
+            audience=REPO_CONNECT_AUDIENCE,
+            extra={"scope": scope},
+        )
 
         # Generate authorization URL
         auth_url = oauth_service.get_authorization_url(state, scope)
@@ -87,19 +77,16 @@ async def github_oauth_callback(
     It exchanges the authorization code for an access token and stores it.
     """
     try:
-        # Validate state
-        if state not in oauth_states:
-            logger.error(f"[GITHUB] Invalid OAuth state: {state}")
+        # Validate JWT state token
+        state_payload = decode_oauth_state(state, REPO_CONNECT_AUDIENCE)
+        if not state_payload:
+            logger.error("[GITHUB] Invalid or expired OAuth state")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired OAuth state. Please try connecting again.",
             )
 
-        state_data = oauth_states[state]
-        user_id = state_data["user_id"]
-
-        # Clean up used state
-        del oauth_states[state]
+        user_id = UUID(state_payload["sub"])
 
         # Exchange code for token
         oauth_service = get_github_oauth_service()

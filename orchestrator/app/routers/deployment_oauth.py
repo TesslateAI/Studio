@@ -6,7 +6,6 @@ This module provides OAuth 2.0 authentication endpoints for deployment providers
 """
 
 import logging
-import secrets
 from uuid import UUID
 
 import httpx
@@ -21,38 +20,16 @@ from ..models import DeploymentCredential, User
 from ..services.deployment_encryption import (
     get_deployment_encryption_service,
 )
+from ..services.oauth_state import (
+    DEPLOYMENT_OAUTH_AUDIENCE,
+    decode_oauth_state,
+    generate_oauth_state,
+)
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/deployment-oauth", tags=["deployment-oauth"])
-
-# In-memory store for OAuth state tokens (in production, use Redis or database)
-# Maps state token -> user_id
-_oauth_states = {}
-
-
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
-
-def generate_state_token(user_id: UUID) -> str:
-    """Generate a secure random state token for CSRF protection."""
-    state = secrets.token_urlsafe(32)
-    _oauth_states[state] = str(user_id)
-    logger.debug(f"Generated OAuth state token for user {user_id}")
-    return state
-
-
-def verify_state_token(state: str) -> str | None:
-    """Verify and consume a state token, returning the user_id if valid."""
-    user_id = _oauth_states.pop(state, None)
-    if user_id:
-        logger.debug(f"Verified OAuth state token for user {user_id}")
-    else:
-        logger.warning(f"Invalid or expired OAuth state token: {state}")
-    return user_id
 
 
 # ============================================================================
@@ -90,12 +67,16 @@ async def vercel_authorize(
             detail="Vercel OAuth is not configured on this server",
         )
 
-    # Generate state token for CSRF protection
-    state = generate_state_token(current_user.id)
-
-    # Add project_id to state if provided (encode it)
+    # Generate signed JWT state token (stateless, survives restarts)
+    extra = {}
     if project_id:
-        state = f"{state}:{project_id}"
+        extra["project_id"] = str(project_id)
+    state = generate_oauth_state(
+        user_id=str(current_user.id),
+        flow="vercel",
+        audience=DEPLOYMENT_OAUTH_AUDIENCE,
+        extra=extra,
+    )
 
     # Build Vercel OAuth URL
     oauth_url = (
@@ -148,22 +129,22 @@ async def vercel_callback(
         user_id = None
 
         if state:
-            # Standard OAuth flow with state token
-            # Parse state (may contain project_id)
-            if ":" in state:
-                state, project_id_str = state.split(":", 1)
+            # Standard OAuth flow with JWT state token
+            state_payload = decode_oauth_state(state, DEPLOYMENT_OAUTH_AUDIENCE)
+            if not state_payload:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired state token",
+                )
+            user_id = UUID(state_payload["sub"])
+            # Extract project_id from JWT extra data
+            extra_data = state_payload.get("data", {})
+            project_id_str = extra_data.get("project_id")
+            if project_id_str:
                 try:
                     project_id = UUID(project_id_str)
                 except ValueError:
                     logger.warning(f"Invalid project_id in state: {project_id_str}")
-
-            # Verify state token
-            user_id_str = verify_state_token(state)
-            if not user_id_str:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired state token"
-                )
-            user_id = UUID(user_id_str)
         elif current_user:
             # Marketplace installation flow - user is already authenticated
             user_id = current_user.id
@@ -313,12 +294,16 @@ async def netlify_authorize(
             detail="Netlify OAuth is not configured on this server",
         )
 
-    # Generate state token for CSRF protection
-    state = generate_state_token(current_user.id)
-
-    # Add project_id to state if provided
+    # Generate signed JWT state token (stateless, survives restarts)
+    extra = {}
     if project_id:
-        state = f"{state}:{project_id}"
+        extra["project_id"] = str(project_id)
+    state = generate_oauth_state(
+        user_id=str(current_user.id),
+        flow="netlify",
+        audience=DEPLOYMENT_OAUTH_AUDIENCE,
+        extra=extra,
+    )
 
     # Build Netlify OAuth URL
     oauth_url = (
@@ -356,23 +341,25 @@ async def netlify_callback(
     settings = get_settings()
 
     try:
-        # Parse state (may contain project_id)
+        # Validate JWT state token
+        state_payload = decode_oauth_state(state, DEPLOYMENT_OAUTH_AUDIENCE)
+        if not state_payload:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired state token",
+            )
+
+        user_id = UUID(state_payload["sub"])
+
+        # Extract project_id from JWT extra data
         project_id = None
-        if ":" in state:
-            state, project_id_str = state.split(":", 1)
+        extra_data = state_payload.get("data", {})
+        project_id_str = extra_data.get("project_id")
+        if project_id_str:
             try:
                 project_id = UUID(project_id_str)
             except ValueError:
                 logger.warning(f"Invalid project_id in state: {project_id_str}")
-
-        # Verify state token
-        user_id_str = verify_state_token(state)
-        if not user_id_str:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired state token"
-            )
-
-        user_id = UUID(user_id_str)
 
         # Exchange code for access token
         async with httpx.AsyncClient() as client:

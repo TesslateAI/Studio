@@ -600,15 +600,31 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
 
             try:
                 decode_jwt(state, settings.secret_key, [STATE_TOKEN_AUDIENCE])
-            except jose_jwt.DecodeError:
+            except (jose_jwt.DecodeError, jose_jwt.ExpiredSignatureError,
+                    jose_jwt.InvalidAudienceError) as login_err:
+                # Login JWT decode failed — check if this is a repo-connect flow
+                from .services.oauth_state import (
+                    REPO_CONNECT_AUDIENCE,
+                    decode_oauth_state,
+                )
+
+                repo_state = decode_oauth_state(state, REPO_CONNECT_AUDIENCE)
+                if repo_state is not None:
+                    # This is a project-level GitHub connect, not a login
+                    return await _handle_repo_connect_callback(
+                        access_token=token["access_token"],
+                        state_payload=repo_state,
+                    )
+
+                # Neither login nor repo-connect — raise original error
+                if isinstance(login_err, jose_jwt.ExpiredSignatureError):
+                    raise HTTPException(
+                        status_code=http_status.HTTP_400_BAD_REQUEST,
+                        detail="STATE_TOKEN_EXPIRED",
+                    ) from None
                 raise HTTPException(
                     status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="INVALID_STATE_TOKEN",
-                ) from None
-            except jose_jwt.ExpiredSignatureError:
-                raise HTTPException(
-                    status_code=http_status.HTTP_400_BAD_REQUEST,
-                    detail="STATE_TOKEN_EXPIRED",
                 ) from None
 
             # Create or get user via OAuth callback
@@ -657,6 +673,124 @@ def create_oauth_callback_endpoint(provider_name: str, oauth_client, oauth_redir
             return RedirectResponse(url=error_url, status_code=303)
 
     return oauth_callback_handler
+
+
+async def _handle_repo_connect_callback(
+    access_token: str,
+    state_payload: dict,
+) -> RedirectResponse:
+    """
+    Handle OAuth callback for project-level repo-connect flow.
+
+    Called when the login callback detects a repo-connect JWT state token
+    instead of a login JWT. Stores the GitHub credentials and redirects
+    to the frontend with success/error params.
+    """
+    import httpx
+
+    from .database import AsyncSessionLocal
+    from .models import GitHubCredential
+    from .services.credential_manager import get_credential_manager
+    from .services.git_providers import GitProviderType, get_git_provider_credential_service
+
+    user_id_str = state_payload["sub"]
+    frontend_redirect_base = f"{settings.get_app_base_url}/auth/github/callback"
+
+    try:
+        from uuid import UUID
+
+        user_id = UUID(user_id_str)
+
+        # Fetch user info from GitHub
+        async with httpx.AsyncClient() as client:
+            user_resp = await client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github.v3+json",
+                },
+            )
+            user_resp.raise_for_status()
+            user_info = user_resp.json()
+
+        github_username = user_info.get("login", "")
+        github_email = user_info.get("email")
+
+        # Try to get email from emails endpoint if not in profile
+        if not github_email:
+            try:
+                async with httpx.AsyncClient() as client:
+                    emails_resp = await client.get(
+                        "https://api.github.com/user/emails",
+                        headers={
+                            "Authorization": f"Bearer {access_token}",
+                            "Accept": "application/vnd.github.v3+json",
+                        },
+                    )
+                    if emails_resp.status_code == 200:
+                        emails = emails_resp.json()
+                        primary = next((e["email"] for e in emails if e.get("primary")), None)
+                        github_email = primary or (emails[0]["email"] if emails else None)
+            except Exception as e:
+                logger.warning(f"Could not fetch GitHub emails for repo connect: {e}")
+
+        github_user_id = str(user_info.get("id", ""))
+        scope = state_payload.get("data", {}).get("scope", "repo user:email")
+
+        # Store credentials in both tables
+        async with AsyncSessionLocal() as db:
+            # 1) GitHubCredential table (legacy, used by github.py router)
+            credential_manager = get_credential_manager()
+            await credential_manager.store_oauth_token(
+                db=db,
+                user_id=user_id,
+                access_token=access_token,
+                refresh_token=None,
+                expires_at=None,
+                github_username=github_username,
+                github_email=github_email,
+                github_user_id=github_user_id,
+            )
+
+            # Update scope on the credential
+            from sqlalchemy import select
+
+            result = await db.execute(
+                select(GitHubCredential).where(GitHubCredential.user_id == user_id)
+            )
+            credential = result.scalar_one_or_none()
+            if credential:
+                credential.scope = scope
+                await db.commit()
+
+            # 2) GitProviderCredential table (unified, used by git_providers.py router)
+            credential_service = get_git_provider_credential_service()
+            await credential_service.store_credential(
+                db=db,
+                user_id=user_id,
+                provider=GitProviderType.GITHUB,
+                access_token=access_token,
+                refresh_token=None,
+                expires_at=None,
+                provider_username=github_username,
+                provider_email=github_email,
+                provider_user_id=github_user_id,
+                scope=scope,
+            )
+
+        logger.info(f"Repo-connect OAuth successful for user {user_id}: @{github_username}")
+
+        # Redirect to frontend callback with success params
+        redirect_url = f"{frontend_redirect_base}?success=true&username={github_username}"
+        return RedirectResponse(url=redirect_url, status_code=303)
+
+    except Exception as e:
+        logger.error(f"Repo-connect OAuth callback failed: {e}", exc_info=True)
+        from urllib.parse import quote
+
+        safe_detail = quote(str(e)[:100], safe="")
+        redirect_url = f"{frontend_redirect_base}?error=oauth_failed&detail={safe_detail}"
+        return RedirectResponse(url=redirect_url, status_code=303)
 
 
 # Register OAuth callback endpoints for each provider
