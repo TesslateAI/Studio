@@ -277,9 +277,11 @@ export function AgentSelector({
 
   const handleConfigClick = (e: React.MouseEvent, agent: ChatAgent) => {
     e.stopPropagation();
-    // Select the agent first so model changes apply to it
-    onSelectAgent(agent);
-    setConfigAgent(agent);
+    // Use currentAgent if clicking config for the already-active agent,
+    // since it has the updated selectedModel
+    const agentWithModel = agent.id === currentAgent.id ? currentAgent : agent;
+    onSelectAgent(agentWithModel);
+    setConfigAgent(agentWithModel);
   };
 
   const handleModelSelect = (model: string) => {
