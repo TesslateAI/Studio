@@ -388,6 +388,7 @@ export function ChatInput({
               agents={agents}
               currentAgent={currentAgent}
               onSelectAgent={onSelectAgent}
+              onModelChange={onModelChange}
               compact={isCompact}
             />
           </div>
